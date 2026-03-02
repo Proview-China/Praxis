@@ -16,6 +16,12 @@ if(APPLE)
     set(CMAKE_MACOSX_RPATH ON)
 endif()
 
+# ── libcurl ──────────────────────────────────────────────────────────────────
+if(WIN32)
+    set(CURL_USE_STATIC_LIBS ON)
+endif()
+find_package(CURL REQUIRED)
+
 # ── Shared library target ────────────────────────────────────────────────────
 file(GLOB_RECURSE AGENT_CORE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/cpp/*.cpp")
 add_library(agent_core SHARED ${AGENT_CORE_SOURCES})
@@ -24,9 +30,14 @@ target_include_directories(agent_core
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/header>
         $<INSTALL_INTERFACE:include>
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/third-party/openai-sdk/include/openai
+        ${CMAKE_CURRENT_SOURCE_DIR}/third-party/nlohmann
 )
 
 target_compile_definitions(agent_core PRIVATE AGENT_CORE_EXPORTS)
+
+target_link_libraries(agent_core PRIVATE CURL::libcurl)
 
 # ── Install rules ────────────────────────────────────────────────────────────
 include(GNUInstallDirs)

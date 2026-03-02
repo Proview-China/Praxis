@@ -40,6 +40,16 @@ cmake --build .
 2. `core/cpp/` — 实现函数
 3. `core/bindings/node/agent_core_napi.cpp` — 编写 N-API 包装并注册到 `props` 数组
 
+## Dependencies
+
+第三方依赖统一放在 `core/third-party/`：
+
+- `openai-sdk/` — [olrea/openai-cpp](https://github.com/olrea/openai-cpp)（git submodule），内部自带 nlohmann/json 副本
+- `nlohmann/json.hpp` — 项目自身使用的 nlohmann/json 单头文件，与 openai-sdk 内置的互相独立
+- **libcurl** — 网络请求库（SSE、WebSocket、流式传输），通过 CMake `find_package(CURL)` 引入。macOS/Linux 使用系统动态库，Windows 静态链接
+
+项目代码用 `#include "json.hpp"`，openai-sdk 用它自己的副本，互不干扰。
+
 ## Code Rules
 
 - 禁止使用 `#include <bits/stdc++.h>`，必须显式 include 所需的标准库头文件
