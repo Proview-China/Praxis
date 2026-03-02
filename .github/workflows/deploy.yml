@@ -22,6 +22,10 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
+          proxy_host: ${{ secrets.JUMP_HOST }}
+          proxy_username: ${{ secrets.JUMP_USER }}
+          proxy_key: ${{ secrets.JUMP_SSH_KEY }}
+          proxy_port: ${{ secrets.JUMP_PORT || 22 }}
           script_stop: true
           command_timeout: 30m
           script: |
