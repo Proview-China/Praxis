@@ -1,0 +1,40 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "clang-release",
+      "displayName": "Clang Release",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/clang-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++"
+      }
+    },
+    {
+      "name": "clang-release-node",
+      "displayName": "Clang Release + Node Addon",
+      "inherits": "clang-release",
+      "binaryDir": "${sourceDir}/build/clang-release-node",
+      "cacheVariables": {
+        "BUILD_NODE_ADDON": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "build-clang-release",
+      "configurePreset": "clang-release"
+    },
+    {
+      "name": "build-clang-release-node",
+      "configurePreset": "clang-release-node"
+    }
+  ]
+}

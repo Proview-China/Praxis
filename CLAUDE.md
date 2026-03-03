@@ -5,18 +5,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build
 
 Core 使用 CMake 构建，最低要求 3.25，编译器需支持 C++23。
+本仓库默认使用 **clang/clang++**（通过 `CMakePresets.json` 固定）。
 
 ```bash
 cd better-agent/core
-mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
-cmake --build .
+cmake --preset clang-release
+cmake --build --preset build-clang-release
 ```
 
 构建 N-API addon（需要 cmake-js 和 Node headers）：
 ```bash
-cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_NODE_ADDON=ON
-cmake --build .
+cmake --preset clang-release-node
+cmake --build --preset build-clang-release-node
 ```
 
 ## Architecture
