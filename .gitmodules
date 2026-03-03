@@ -1,3 +1,6 @@
 [submodule "better-agent/core/third-party/openai-sdk"]
 	path = better-agent/core/third-party/openai-sdk
 	url = https://github.com/olrea/openai-cpp.git
+[submodule "better-agent/core/third-party/cpp-ai-sdk"]
+	path = better-agent/core/third-party/cpp-ai-sdk
+	url = https://github.com/yuemingruoan/cpp-ai-sdk.git
