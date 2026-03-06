@@ -552,16 +552,25 @@ bool string_list_contains(const std::vector<std::string> &values, const std::str
     return false;
 }
 
-const ToolRegistration *lookup_registered_tool(const std::string &tool_name) {
-    if (!g_tools.contains(tool_name)) {
-        fail_function_call(json{
-            {"error_code", "E_TOOL_NOT_FOUND"},
-            {"message", "tool is not registered"},
-            {"detail", json{{"tool", tool_name}}}
-        }, "failed", tool_name);
+const ToolRegistration *find_registered_tool(const std::string &tool_name) {
+    if (tool_name.empty() || !g_tools.contains(tool_name)) {
         return nullptr;
     }
     return &g_tools.at(tool_name);
+}
+
+const ToolRegistration *lookup_registered_tool(const std::string &tool_name) {
+    const ToolRegistration *tool = find_registered_tool(tool_name);
+    if (tool != nullptr) {
+        return tool;
+    }
+
+    fail_function_call(json{
+        {"error_code", "E_TOOL_NOT_FOUND"},
+        {"message", "tool is not registered"},
+        {"detail", json{{"tool", tool_name}}}
+    }, "failed", tool_name);
+    return nullptr;
 }
 
 bool validate_tool_call_request(
@@ -716,11 +725,11 @@ void load_registered_tool_metadata(
     *tool_constraints_out = json::object();
 
     std::lock_guard<std::mutex> lk(g_tools_mu);
-    if (!tool_name.empty() && g_tools.contains(tool_name)) {
-        const ToolRegistration &tool = g_tools.at(tool_name);
-        *tool_description_out = tool.spec.description;
-        *tool_parameters_out = tool.spec.parameters;
-        *tool_constraints_out = tool.spec.constraints;
+    const ToolRegistration *tool = find_registered_tool(tool_name);
+    if (tool != nullptr) {
+        *tool_description_out = tool->spec.description;
+        *tool_parameters_out = tool->spec.parameters;
+        *tool_constraints_out = tool->spec.constraints;
     }
 }
 
