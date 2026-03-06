@@ -33,6 +33,30 @@ bool is_custom_tool(const nlohmann::json &tool_constraints, const nlohmann::json
     return policy.is_object() && policy.value("tool_type", "") == "custom";
 }
 
+#if defined(BETTER_AGENT_HAVE_CPP_AI_SDK)
+const char *sdk_error_code(ai_sdk::ErrorCategory category) {
+    switch (category) {
+        case ai_sdk::ErrorCategory::Network:
+            return "E_SDK_NETWORK";
+        case ai_sdk::ErrorCategory::Api:
+            return "E_SDK_API";
+        case ai_sdk::ErrorCategory::Parse:
+            return "E_SDK_PARSE";
+        case ai_sdk::ErrorCategory::Unknown:
+        default:
+            return "E_SDK_UNKNOWN";
+    }
+}
+
+nlohmann::json sdk_error_to_json(const ai_sdk::SDKError &error) {
+    return nlohmann::json{
+        {"error_code", sdk_error_code(error.category)},
+        {"message", error.message},
+        {"status_code", error.status_code}
+    };
+}
+#endif
+
 } // namespace
 
 namespace better_agent {
@@ -142,13 +166,12 @@ nlohmann::json build_openai_bundle(
                 {"Content-Type", "application/json"},
                 {"Authorization", "Bearer " + api_key}
             };
-            const auto response = client.post(url, request_json.dump(), headers);
-            out["response"] = nlohmann::json::parse(response);
-        } catch (const ai_sdk::SDKException &e) {
-            out["error"] = nlohmann::json{
-                {"error_code", "E_SDK_HTTP"},
-                {"message", e.what()}
-            };
+            auto response = client.post(url, request_json.dump(), headers);
+            if (!response) {
+                out["error"] = sdk_error_to_json(response.error());
+                return out;
+            }
+            out["response"] = nlohmann::json::parse(response.value());
         } catch (const std::exception &e) {
             out["error"] = nlohmann::json{
                 {"error_code", "E_SDK_UNKNOWN"},
@@ -246,13 +269,12 @@ nlohmann::json build_claude_bundle(
                 {"x-api-key", api_key},
                 {"anthropic-version", policy.value("anthropic_version", std::string("2023-06-01"))}
             };
-            const auto response = client.post(url, request_json.dump(), headers);
-            out["response"] = nlohmann::json::parse(response);
-        } catch (const ai_sdk::SDKException &e) {
-            out["error"] = nlohmann::json{
-                {"error_code", "E_SDK_HTTP"},
-                {"message", e.what()}
-            };
+            auto response = client.post(url, request_json.dump(), headers);
+            if (!response) {
+                out["error"] = sdk_error_to_json(response.error());
+                return out;
+            }
+            out["response"] = nlohmann::json::parse(response.value());
         } catch (const std::exception &e) {
             out["error"] = nlohmann::json{
                 {"error_code", "E_SDK_UNKNOWN"},
