@@ -19,6 +19,14 @@ int main() {
     expect(codex_item.at("source") == "codex_cli", "codex runtime source mismatch");
     expect(codex_item.at("status") == "success", "codex runtime status mismatch");
 
+    auto claude_control = parse_json(agent_core_normalize_runtime_event(
+        R"({"type":"control_request","session_id":"sess-1","request":{"subtype":"can_use_tool","tool_use_id":"toolu-1","tool_name":"Bash","input":{"command":"pwd"},"decision_reason":"needs approval"}})"
+    ));
+    expect_runtime_record_contract(claude_control);
+    expect(claude_control.at("source") == "claude_code", "claude runtime source mismatch");
+    expect(claude_control.at("status") == "blocked", "claude control request should block");
+    expect(claude_control.at("handoff") == "await_permission", "claude control request handoff mismatch");
+
     auto invalid_json = parse_json(agent_core_normalize_runtime_event("{"));
     expect_runtime_record_contract(invalid_json);
     expect(invalid_json.at("status") == "failed", "invalid json should fail");
