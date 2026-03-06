@@ -28,8 +28,13 @@ struct ToolSpec {
     json constraints;
 };
 
+enum class ExecutorKind {
+    Mock,
+};
+
 struct ToolRegistration {
     ToolSpec spec;
+    ExecutorKind executor_kind = ExecutorKind::Mock;
     json mock_result;
 };
 
@@ -47,6 +52,23 @@ struct PolicyView {
     std::vector<std::string> allow_tools;
     std::vector<std::string> deny_tools;
     std::string idempotency_key;
+};
+
+struct ToolExecutionRequest {
+    std::string tool_name;
+    std::string provider_kind;
+    std::string intent;
+    std::string provider_call_id;
+    json args = json::object();
+    json policy = json::object();
+};
+
+struct ToolExecutionResult {
+    std::string status = "success";
+    json result = json::object();
+    json error = nullptr;
+    json evidence = json::array();
+    std::string handoff = "continue";
 };
 
 struct ExecutionRecord {
