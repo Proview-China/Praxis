@@ -875,10 +875,6 @@ RuntimeEventRecord base_runtime_record(const json &raw) {
     };
 }
 
-json base_record(const json &raw) {
-    return serialize_runtime_event_record(base_runtime_record(raw));
-}
-
 RuntimeEventRecord normalize_codex(const json &raw) {
     RuntimeEventRecord out = base_runtime_record(raw);
     const std::string event_type = get_string_or(raw, "type", "unknown");
@@ -1066,15 +1062,15 @@ RuntimeEventRecord normalize_unknown(const json &raw) {
     return out;
 }
 
-json normalize_runtime_event(const json &raw) {
+RuntimeEventRecord normalize_runtime_event(const json &raw) {
     const std::string type = get_string_or(raw, "type", "unknown");
     if (type.rfind("thread.", 0) == 0 || type.rfind("turn.", 0) == 0 || type.rfind("item.", 0) == 0 || type == "error") {
-        return serialize_runtime_event_record(normalize_codex(raw));
+        return normalize_codex(raw);
     }
     if (raw.contains("session_id") || type == "control_request" || type == "result" || type == "assistant" || type == "stream_event" || type == "system") {
-        return serialize_runtime_event_record(normalize_claude(raw));
+        return normalize_claude(raw);
     }
-    return serialize_runtime_event_record(normalize_unknown(raw));
+    return normalize_unknown(raw);
 }
 
 } // namespace
@@ -1350,31 +1346,31 @@ const char *agent_core_normalize_runtime_event(const char *raw_event_json) {
 
     if (raw_event_json == nullptr) {
         g_last_error = "raw_event_json is null";
-        json out = base_record(json::object());
-        out["execution_id"] = next_id("invalid");
-        out["status"] = "failed";
-        out["error"] = json{{"code", "invalid_input"}, {"message", g_last_error}};
-        out["handoff"] = "manual_takeover";
-        g_last_output = out.dump();
+        RuntimeEventRecord out = base_runtime_record(json::object());
+        out.execution_id = next_id("invalid");
+        out.status = "failed";
+        out.error = json{{"code", "invalid_input"}, {"message", g_last_error}};
+        out.handoff = "manual_takeover";
+        g_last_output = serialize_runtime_event_record(out).dump();
         return g_last_output.c_str();
     }
 
     try {
         const json raw = json::parse(raw_event_json);
-        json out = normalize_runtime_event(raw);
-        g_last_output = out.dump();
+        RuntimeEventRecord out = normalize_runtime_event(raw);
+        g_last_output = serialize_runtime_event_record(out).dump();
         return g_last_output.c_str();
     } catch (const std::exception &e) {
         g_last_error = e.what();
-        json out = base_record(json{{"raw_text", raw_event_json}});
-        out["execution_id"] = next_id("parse-error");
-        out["status"] = "failed";
-        out["error"] = json{
+        RuntimeEventRecord out = base_runtime_record(json{{"raw_text", raw_event_json}});
+        out.execution_id = next_id("parse-error");
+        out.status = "failed";
+        out.error = json{
             {"code", "invalid_json"},
             {"message", g_last_error}
         };
-        out["handoff"] = "manual_takeover";
-        g_last_output = out.dump();
+        out.handoff = "manual_takeover";
+        g_last_output = serialize_runtime_event_record(out).dump();
         return g_last_output.c_str();
     }
 }
