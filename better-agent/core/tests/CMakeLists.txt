@@ -24,6 +24,10 @@ add_agent_core_test(
     ${AGENT_CORE_TEST_ROOT}/unit/runtime/execution_error_regressions_test.cpp
 )
 add_agent_core_test(
+    agent_core_unit_runtime_function_call_normalization
+    ${AGENT_CORE_TEST_ROOT}/unit/runtime/function_call_normalization_test.cpp
+)
+add_agent_core_test(
     agent_core_unit_runtime_normalization_contract
     ${AGENT_CORE_TEST_ROOT}/unit/runtime/runtime_normalization_contract_test.cpp
 )
