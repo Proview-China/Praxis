@@ -124,6 +124,17 @@ PolicyView build_policy_view(const json &policy) {
     };
 }
 
+json serialize_normalized_call(const NormalizedCall &call) {
+    return json{
+        {"provider_kind", call.provider_kind},
+        {"tool_name", call.tool_name},
+        {"intent", call.intent},
+        {"input_raw", call.input_raw},
+        {"input_normalized", call.input_normalized},
+        {"provider_call_id", call.provider_call_id}
+    };
+}
+
 json serialize_execution_record(const ExecutionRecord &record) {
     return json{
         {"execution_id", record.execution_id},
@@ -364,7 +375,9 @@ bool parse_model_output_json(const char *model_output_json, json *raw_out) {
     }
 }
 
-json normalize_function_call_payload(const json &raw) {
+bool normalize_function_call_payload(const json &raw, NormalizedCall *call_out, json *err_out) {
+    *err_out = nullptr;
+
     // OpenAI Responses function_call
     if (raw.is_object() && get_string_or(raw, "type") == "function_call") {
         json args = json::object();
@@ -372,61 +385,66 @@ json normalize_function_call_payload(const json &raw) {
             if (raw.at("arguments").is_string()) {
                 args = json::parse(raw.at("arguments").get<std::string>(), nullptr, false);
                 if (args.is_discarded()) {
-                    return json{
+                    *err_out = json{
                         {"error_code", "E_PARSE"},
                         {"message", "function_call.arguments is not valid JSON"}
                     };
+                    return false;
                 }
             } else if (raw.at("arguments").is_object()) {
                 args = raw.at("arguments");
             }
         }
 
-        return json{
-            {"provider_kind", "openai"},
-            {"tool_name", get_string_or(raw, "name")},
-            {"intent", get_string_or(raw, "intent", "function_call")},
-            {"input_raw", raw},
-            {"input_normalized", args},
-            {"provider_call_id", get_string_or(raw, "call_id")}
+        *call_out = NormalizedCall{
+            .provider_kind = "openai",
+            .tool_name = get_string_or(raw, "name"),
+            .intent = get_string_or(raw, "intent", "function_call"),
+            .provider_call_id = get_string_or(raw, "call_id"),
+            .input_raw = raw,
+            .input_normalized = args
         };
+        return true;
     }
 
     // Anthropic tool_use
     if (raw.is_object() && get_string_or(raw, "type") == "tool_use") {
-        return json{
-            {"provider_kind", "claude"},
-            {"tool_name", get_string_or(raw, "name")},
-            {"intent", get_string_or(raw, "intent", "tool_use")},
-            {"input_raw", raw},
-            {"input_normalized", raw.value("input", json::object())},
-            {"provider_call_id", get_string_or(raw, "id")}
+        *call_out = NormalizedCall{
+            .provider_kind = "claude",
+            .tool_name = get_string_or(raw, "name"),
+            .intent = get_string_or(raw, "intent", "tool_use"),
+            .provider_call_id = get_string_or(raw, "id"),
+            .input_raw = raw,
+            .input_normalized = raw.value("input", json::object())
         };
+        return true;
     }
 
     // Generic custom call
     if (raw.is_object() && raw.contains("tool")) {
-        return json{
-            {"provider_kind", "custom"},
-            {"tool_name", get_string_or(raw, "tool")},
-            {"intent", get_string_or(raw, "intent", "custom_tool")},
-            {"input_raw", raw},
-            {"input_normalized", raw.value("arguments", json::object())},
-            {"provider_call_id", get_string_or(raw, "call_id")}
+        *call_out = NormalizedCall{
+            .provider_kind = "custom",
+            .tool_name = get_string_or(raw, "tool"),
+            .intent = get_string_or(raw, "intent", "custom_tool"),
+            .provider_call_id = get_string_or(raw, "call_id"),
+            .input_raw = raw,
+            .input_normalized = raw.value("arguments", json::object())
         };
+        return true;
     }
 
-    return json{
+    *err_out = json{
         {"error_code", "E_PARSE"},
         {"message", "unsupported function/custom tool payload"}
     };
+    return false;
 }
 
 bool prepare_function_call_request(
     const char *model_output_json,
     const char *policy_json,
-    json *policy_out,
-    json *normalized_out
+    PolicyView *policy_out,
+    NormalizedCall *normalized_out
 ) {
     json raw;
     if (!parse_model_output_json(model_output_json, &raw)) {
@@ -434,18 +452,18 @@ bool prepare_function_call_request(
     }
 
     json policy_err;
-    *policy_out = parse_policy_json(policy_json, &policy_err);
+    const json policy_json_obj = parse_policy_json(policy_json, &policy_err);
     if (!policy_err.is_null()) {
         return fail_function_call(policy_err);
     }
+    *policy_out = build_policy_view(policy_json_obj);
 
-    *normalized_out = normalize_function_call_payload(raw);
-    if (normalized_out->contains("error_code")) {
-        return fail_function_call(*normalized_out);
+    json normalize_err;
+    if (!normalize_function_call_payload(raw, normalized_out, &normalize_err)) {
+        return fail_function_call(normalize_err);
     }
 
-    const std::string tool_name = normalized_out->value("tool_name", "");
-    if (tool_name.empty()) {
+    if (normalized_out->tool_name.empty()) {
         return fail_function_call(json{
             {"error_code", "E_PARSE"},
             {"message", "normalized tool_name is empty"}
@@ -1092,14 +1110,14 @@ const char *agent_core_execute_function_call(const char *model_output_json, cons
     }
 
     try {
-        json policy;
-        json normalized;
+        PolicyView policy;
+        NormalizedCall normalized;
         if (!prepare_function_call_request(model_output_json, policy_json, &policy, &normalized)) {
             return g_last_output.c_str();
         }
 
         std::lock_guard<std::mutex> lk(g_tools_mu);
-        execute_prepared_function_call_locked(policy, normalized);
+        execute_prepared_function_call_locked(policy.raw_json, serialize_normalized_call(normalized));
         return g_last_output.c_str();
     } catch (const std::exception &e) {
         fail_function_call(json{
