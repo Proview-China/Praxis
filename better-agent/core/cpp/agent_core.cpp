@@ -47,7 +47,7 @@ struct ExecutionRecord {
 
 std::mutex g_tools_mu;
 std::unordered_map<std::string, ToolDefinition> g_tools;
-std::unordered_map<std::string, json> g_executions;
+std::unordered_map<std::string, ExecutionRecord> g_executions;
 std::unordered_map<std::string, std::string> g_idempotency_to_execution;
 std::unordered_map<std::string, std::string> g_idempotency_signature;
 
@@ -502,7 +502,7 @@ bool handle_idempotency_replay_locked(
 
     const std::string exec_id = g_idempotency_to_execution.at(*idempotency_key_out);
     if (g_executions.contains(exec_id)) {
-        json replay = g_executions.at(exec_id);
+        json replay = serialize_execution_record(g_executions.at(exec_id));
         replay["handoff"] = "idempotency-hit: reuse previous execution";
         g_last_output = replay.dump();
         return true;
@@ -511,48 +511,48 @@ bool handle_idempotency_replay_locked(
     return false;
 }
 
-json build_execution_record(
+ExecutionRecord build_execution_record(
     const json &normalized,
     const json &policy,
     const json &args,
     const json &result
 ) {
     const std::string provider_kind = normalized.value("provider_kind", "custom");
-    return json{
-        {"execution_id", next_id("exec")},
-        {"tool_kind", "function"},
-        {"provider_kind", provider_kind},
-        {"intent", normalized.value("intent", "function_call")},
-        {"provider_call_id", normalized.value("provider_call_id", "")},
-        {"input_raw", normalized.value("input_raw", json::object())},
-        {"input_normalized", args},
-        {"policy_snapshot", policy},
-        {"status", "success"},
-        {"evidence", json::array({
+    return ExecutionRecord{
+        .execution_id = next_id("exec"),
+        .tool_kind = "function",
+        .provider_kind = provider_kind,
+        .intent = normalized.value("intent", "function_call"),
+        .provider_call_id = normalized.value("provider_call_id", ""),
+        .input_raw = normalized.value("input_raw", json::object()),
+        .input_normalized = args,
+        .policy_snapshot = policy,
+        .status = "success",
+        .evidence = json::array({
             json{{"kind", "runtime_event"}, {"value", "tool_executed"}},
             json{{"kind", "provider_kind"}, {"value", provider_kind}},
             json{{"kind", "provider_call_id"}, {"value", normalized.value("provider_call_id", "")}},
             json{{"kind", "timestamp"}, {"value", now_iso8601_utc()}}
-        })},
-        {"error", nullptr},
-        {"handoff", "continue"},
-        {"timestamp", now_iso8601_utc()},
-        {"result", result}
+        }),
+        .error = nullptr,
+        .handoff = "continue",
+        .timestamp = now_iso8601_utc(),
+        .result = result
     };
 }
 
 void store_execution_record_locked(
-    const json &record,
+    const ExecutionRecord &record,
     const std::string &idempotency_key,
     const std::string &idempotency_signature
 ) {
-    const std::string execution_id = record.at("execution_id").get<std::string>();
+    const std::string execution_id = record.execution_id;
     g_executions[execution_id] = record;
     if (!idempotency_key.empty()) {
         g_idempotency_to_execution[idempotency_key] = execution_id;
         g_idempotency_signature[idempotency_key] = idempotency_signature;
     }
-    g_last_output = record.dump();
+    g_last_output = serialize_execution_record(record).dump();
 }
 
 bool execute_prepared_function_call_locked(const json &policy, const json &normalized) {
@@ -576,7 +576,7 @@ bool execute_prepared_function_call_locked(const json &policy, const json &norma
     const json result = (tool->mock_result.is_object() && !tool->mock_result.empty())
         ? tool->mock_result
         : json{{"ok", true}, {"echo", args}};
-    json record = build_execution_record(normalized, policy, args, result);
+    ExecutionRecord record = build_execution_record(normalized, policy, args, result);
     store_execution_record_locked(record, idem, idem_signature);
     return true;
 }
@@ -1105,7 +1105,7 @@ const char *agent_core_get_execution(const char *execution_id) {
         return g_last_output.c_str();
     }
 
-    g_last_output = g_executions.at(id).dump();
+    g_last_output = serialize_execution_record(g_executions.at(id)).dump();
     return g_last_output.c_str();
 }
 
@@ -1136,7 +1136,7 @@ const char *agent_core_build_openai_function_call_output(
         return g_last_output.c_str();
     }
 
-    const json &record = g_executions.at(id);
+    const json record = serialize_execution_record(g_executions.at(id));
     const std::string call_id = (call_id_override == nullptr) ? "" : std::string(call_id_override);
     g_last_output = build_openai_function_call_output_payload(record, call_id).dump();
     return g_last_output.c_str();
@@ -1169,7 +1169,7 @@ const char *agent_core_build_claude_tool_result(
         return g_last_output.c_str();
     }
 
-    const json &record = g_executions.at(id);
+    const json record = serialize_execution_record(g_executions.at(id));
     const std::string tool_use_id = (tool_use_id_override == nullptr) ? "" : std::string(tool_use_id_override);
     g_last_output = build_claude_tool_result_payload(record, tool_use_id).dump();
     return g_last_output.c_str();
