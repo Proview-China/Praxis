@@ -631,6 +631,16 @@ json resolve_mock_result(const ToolRegistration &tool, const json &args) {
     return json{{"ok", true}, {"echo", args}};
 }
 
+ToolExecutionResult execute_mock_tool(const ToolRegistration &tool, const ToolExecutionRequest &request) {
+    return ToolExecutionResult{
+        .status = "success",
+        .result = resolve_mock_result(tool, request.args),
+        .error = nullptr,
+        .evidence = json::array(),
+        .handoff = "continue"
+    };
+}
+
 std::string build_idempotency_signature(const NormalizedCall &call) {
     return call.provider_kind + "|" + call.tool_name + "|" + call.input_normalized.dump();
 }
