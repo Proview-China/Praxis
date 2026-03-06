@@ -602,6 +602,13 @@ bool validate_tool_call_request(
     return true;
 }
 
+json resolve_mock_result(const ToolRegistration &tool, const json &args) {
+    if (tool.mock_result.is_object() && !tool.mock_result.empty()) {
+        return tool.mock_result;
+    }
+    return json{{"ok", true}, {"echo", args}};
+}
+
 std::string build_idempotency_signature(const NormalizedCall &call) {
     return call.provider_kind + "|" + call.tool_name + "|" + call.input_normalized.dump();
 }
@@ -698,9 +705,7 @@ bool execute_prepared_function_call_locked(const PolicyView &policy, const Norma
         return true;
     }
 
-    const json result = (tool->mock_result.is_object() && !tool->mock_result.empty())
-        ? tool->mock_result
-        : json{{"ok", true}, {"echo", call.input_normalized}};
+    const json result = resolve_mock_result(*tool, call.input_normalized);
     ExecutionRecord record = build_execution_record(call, policy, result);
     store_execution_record_locked(record, idem, idem_signature);
     return true;
