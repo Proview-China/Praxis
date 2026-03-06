@@ -857,98 +857,102 @@ json build_claude_tool_result_payload(const ExecutionRecord &record, const std::
     };
 }
 
-json base_record(const json &raw) {
-    return json{
-        {"execution_id", ""},
-        {"source", "unknown"},
-        {"event_type", "unknown"},
-        {"tool_kind", "function"},
-        {"intent", nullptr},
-        {"input_raw", raw},
-        {"input_normalized", json::object()},
-        {"policy_snapshot", json::object()},
-        {"status", "partial"},
-        {"evidence", json::array()},
-        {"error", nullptr},
-        {"handoff", "continue_observing"},
-        {"timestamp", now_iso8601_utc()}
+RuntimeEventRecord base_runtime_record(const json &raw) {
+    return RuntimeEventRecord{
+        .execution_id = "",
+        .source = "unknown",
+        .event_type = "unknown",
+        .tool_kind = "function",
+        .intent = nullptr,
+        .input_raw = raw,
+        .input_normalized = json::object(),
+        .policy_snapshot = json::object(),
+        .status = "partial",
+        .evidence = json::array(),
+        .error = nullptr,
+        .handoff = "continue_observing",
+        .timestamp = now_iso8601_utc()
     };
 }
 
-json normalize_codex(const json &raw) {
-    json out = base_record(raw);
+json base_record(const json &raw) {
+    return serialize_runtime_event_record(base_runtime_record(raw));
+}
+
+RuntimeEventRecord normalize_codex(const json &raw) {
+    RuntimeEventRecord out = base_runtime_record(raw);
     const std::string event_type = get_string_or(raw, "type", "unknown");
 
-    out["source"] = "codex_cli";
-    out["event_type"] = event_type;
-    out["execution_id"] = next_id("codex");
+    out.source = "codex_cli";
+    out.event_type = event_type;
+    out.execution_id = next_id("codex");
 
     if (event_type == "turn.started") {
-        out["status"] = "running";
-        out["intent"] = "turn_start";
+        out.status = "running";
+        out.intent = "turn_start";
     } else if (event_type == "turn.completed") {
-        out["status"] = "success";
-        out["intent"] = "turn_complete";
+        out.status = "success";
+        out.intent = "turn_complete";
         if (raw.contains("usage")) {
-            out["evidence"].push_back(json{{"usage", raw.at("usage")}});
+            out.evidence.push_back(json{{"usage", raw.at("usage")}});
         }
     } else if (event_type == "turn.failed") {
-        out["status"] = "failed";
-        out["intent"] = "turn_failed";
+        out.status = "failed";
+        out.intent = "turn_failed";
         if (raw.contains("error")) {
-            out["error"] = raw.at("error");
+            out.error = raw.at("error");
         }
     } else if (event_type == "error") {
-        out["status"] = "failed";
-        out["intent"] = "stream_error";
-        out["error"] = raw;
+        out.status = "failed";
+        out.intent = "stream_error";
+        out.error = raw;
     } else if (event_type == "item.started" || event_type == "item.updated" || event_type == "item.completed") {
         const json item = raw.value("item", json::object());
         const std::string item_id = get_string_or(item, "id", next_id("item"));
         const std::string item_type = get_string_or(item, "type", "unknown");
 
-        out["execution_id"] = item_id;
-        out["tool_kind"] = codex_tool_kind(item_type);
-        out["intent"] = item_type;
-        out["input_raw"] = item;
-        out["status"] = get_status_from_codex_item(event_type, item);
+        out.execution_id = item_id;
+        out.tool_kind = codex_tool_kind(item_type);
+        out.intent = item_type;
+        out.input_raw = item;
+        out.status = get_status_from_codex_item(event_type, item);
 
         if (item_type == "command_execution") {
-            out["input_normalized"] = json{{"command", item.value("command", "")}};
-            out["evidence"].push_back(json{
+            out.input_normalized = json{{"command", item.value("command", "")}};
+            out.evidence.push_back(json{
                 {"aggregated_output", item.value("aggregated_output", "")},
                 {"exit_code", get_json_or(item, "exit_code", nullptr)}
             });
         } else if (item_type == "mcp_tool_call") {
-            out["input_normalized"] = json{
+            out.input_normalized = json{
                 {"server", item.value("server", "")},
                 {"tool", item.value("tool", "")},
                 {"arguments", item.value("arguments", json::object())}
             };
             if (item.contains("result")) {
-                out["evidence"].push_back(json{{"result", item.at("result")}});
+                out.evidence.push_back(json{{"result", item.at("result")}});
             }
             if (item.contains("error") && !item.at("error").is_null()) {
-                out["error"] = item.at("error");
+                out.error = item.at("error");
             }
         } else if (item_type == "web_search") {
-            out["input_normalized"] = json{
+            out.input_normalized = json{
                 {"query", item.value("query", "")},
                 {"action", item.value("action", "")}
             };
         } else if (item_type == "file_change") {
-            out["input_normalized"] = json{{"changes", item.value("changes", json::array())}};
-            out["evidence"].push_back(json{{"changes", item.value("changes", json::array())}});
+            out.input_normalized = json{{"changes", item.value("changes", json::array())}};
+            out.evidence.push_back(json{{"changes", item.value("changes", json::array())}});
         } else {
-            out["input_normalized"] = item;
+            out.input_normalized = item;
         }
     } else if (event_type == "thread.started") {
-        out["status"] = "success";
-        out["intent"] = "thread_start";
-        out["execution_id"] = raw.value("thread_id", next_id("thread"));
+        out.status = "success";
+        out.intent = "thread_start";
+        out.execution_id = raw.value("thread_id", next_id("thread"));
     }
 
-    out["handoff"] = default_handoff(out.value("status", "partial"));
+    out.handoff = default_handoff(out.status);
     return out;
 }
 
@@ -1065,7 +1069,7 @@ json normalize_unknown(const json &raw) {
 json normalize_runtime_event(const json &raw) {
     const std::string type = get_string_or(raw, "type", "unknown");
     if (type.rfind("thread.", 0) == 0 || type.rfind("turn.", 0) == 0 || type.rfind("item.", 0) == 0 || type == "error") {
-        return normalize_codex(raw);
+        return serialize_runtime_event_record(normalize_codex(raw));
     }
     if (raw.contains("session_id") || type == "control_request" || type == "result" || type == "assistant" || type == "stream_event" || type == "system") {
         return normalize_claude(raw);
