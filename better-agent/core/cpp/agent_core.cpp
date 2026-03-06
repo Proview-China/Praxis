@@ -956,113 +956,113 @@ RuntimeEventRecord normalize_codex(const json &raw) {
     return out;
 }
 
-json normalize_claude(const json &raw) {
-    json out = base_record(raw);
+RuntimeEventRecord normalize_claude(const json &raw) {
+    RuntimeEventRecord out = base_runtime_record(raw);
     const std::string event_type = get_string_or(raw, "type", "unknown");
 
-    out["source"] = "claude_code";
-    out["event_type"] = event_type;
-    out["execution_id"] = get_string_or(raw, "uuid", next_id("claude"));
+    out.source = "claude_code";
+    out.event_type = event_type;
+    out.execution_id = get_string_or(raw, "uuid", next_id("claude"));
 
     if (raw.contains("session_id")) {
-        out["policy_snapshot"]["session_id"] = raw.at("session_id");
+        out.policy_snapshot["session_id"] = raw.at("session_id");
     }
 
     if (event_type == "control_request") {
         const json request = raw.value("request", json::object());
         const std::string subtype = get_string_or(request, "subtype", "unknown");
-        out["event_type"] = "control_request." + subtype;
-        out["execution_id"] = request.value("tool_use_id", next_id("claude-tool"));
-        out["status"] = "blocked";
-        out["intent"] = subtype;
-        out["input_raw"] = request;
+        out.event_type = "control_request." + subtype;
+        out.execution_id = request.value("tool_use_id", next_id("claude-tool"));
+        out.status = "blocked";
+        out.intent = subtype;
+        out.input_raw = request;
 
         if (subtype == "can_use_tool") {
             const std::string tool_name = request.value("tool_name", "");
-            out["tool_kind"] = claude_tool_kind(tool_name);
-            out["input_normalized"] = json{
+            out.tool_kind = claude_tool_kind(tool_name);
+            out.input_normalized = json{
                 {"tool_name", tool_name},
                 {"input", request.value("input", json::object())}
             };
             if (request.contains("decision_reason")) {
-                out["evidence"].push_back(json{{"decision_reason", request.at("decision_reason")}});
+                out.evidence.push_back(json{{"decision_reason", request.at("decision_reason")}});
             }
             if (request.contains("blocked_path")) {
-                out["evidence"].push_back(json{{"blocked_path", request.at("blocked_path")}});
+                out.evidence.push_back(json{{"blocked_path", request.at("blocked_path")}});
             }
-            out["handoff"] = "await_permission";
+            out.handoff = "await_permission";
             return out;
         }
 
-        out["input_normalized"] = request;
-        out["handoff"] = "continue_observing";
+        out.input_normalized = request;
+        out.handoff = "continue_observing";
         return out;
     }
 
     if (event_type == "result") {
         const std::string subtype = get_string_or(raw, "subtype", "unknown");
-        out["event_type"] = "result." + subtype;
-        out["intent"] = "turn_result";
-        out["tool_kind"] = "function";
-        out["status"] = (subtype == "success") ? "success" : "failed";
-        out["input_normalized"] = json{
+        out.event_type = "result." + subtype;
+        out.intent = "turn_result";
+        out.tool_kind = "function";
+        out.status = (subtype == "success") ? "success" : "failed";
+        out.input_normalized = json{
             {"stop_reason", get_json_or(raw, "stop_reason", nullptr)},
             {"num_turns", raw.value("num_turns", 0)},
             {"usage", raw.value("usage", json::object())}
         };
-        out["evidence"].push_back(json{
+        out.evidence.push_back(json{
             {"duration_ms", raw.value("duration_ms", 0)},
             {"duration_api_ms", raw.value("duration_api_ms", 0)},
             {"total_cost_usd", raw.value("total_cost_usd", 0.0)}
         });
 
         if (subtype != "success") {
-            out["error"] = json{
+            out.error = json{
                 {"subtype", subtype},
                 {"errors", raw.value("errors", json::array())}
             };
         }
     } else if (event_type == "assistant") {
-        out["status"] = "success";
-        out["intent"] = "assistant_message";
-        out["input_normalized"] = json{{"message", raw.value("message", json::object())}};
+        out.status = "success";
+        out.intent = "assistant_message";
+        out.input_normalized = json{{"message", raw.value("message", json::object())}};
     } else if (event_type == "stream_event") {
-        out["status"] = "running";
-        out["intent"] = "partial_stream";
-        out["input_normalized"] = json{{"event", raw.value("event", json::object())}};
+        out.status = "running";
+        out.intent = "partial_stream";
+        out.input_normalized = json{{"event", raw.value("event", json::object())}};
     } else if (event_type == "system") {
         const std::string subtype = get_string_or(raw, "subtype", "unknown");
-        out["event_type"] = "system." + subtype;
-        out["intent"] = subtype;
-        out["tool_kind"] = (subtype.rfind("hook_", 0) == 0) ? "hooks" : "function";
-        out["status"] = "running";
-        out["input_normalized"] = raw;
+        out.event_type = "system." + subtype;
+        out.intent = subtype;
+        out.tool_kind = (subtype.rfind("hook_", 0) == 0) ? "hooks" : "function";
+        out.status = "running";
+        out.input_normalized = raw;
 
         if (subtype == "hook_response") {
             const std::string outcome = get_string_or(raw, "outcome", "success");
             if (outcome == "error" || outcome == "cancelled") {
-                out["status"] = "failed";
-                out["error"] = json{{"outcome", outcome}};
+                out.status = "failed";
+                out.error = json{{"outcome", outcome}};
             } else {
-                out["status"] = "success";
+                out.status = "success";
             }
         }
     } else {
-        out["intent"] = event_type;
-        out["status"] = "partial";
-        out["input_normalized"] = raw;
+        out.intent = event_type;
+        out.status = "partial";
+        out.input_normalized = raw;
     }
 
-    out["handoff"] = default_handoff(out.value("status", "partial"));
+    out.handoff = default_handoff(out.status);
     return out;
 }
 
-json normalize_unknown(const json &raw) {
-    json out = base_record(raw);
-    out["execution_id"] = next_id("unknown");
-    out["status"] = "partial";
-    out["intent"] = "unknown_event";
-    out["handoff"] = "manual_classification";
+RuntimeEventRecord normalize_unknown(const json &raw) {
+    RuntimeEventRecord out = base_runtime_record(raw);
+    out.execution_id = next_id("unknown");
+    out.status = "partial";
+    out.intent = "unknown_event";
+    out.handoff = "manual_classification";
     return out;
 }
 
@@ -1072,9 +1072,9 @@ json normalize_runtime_event(const json &raw) {
         return serialize_runtime_event_record(normalize_codex(raw));
     }
     if (raw.contains("session_id") || type == "control_request" || type == "result" || type == "assistant" || type == "stream_event" || type == "system") {
-        return normalize_claude(raw);
+        return serialize_runtime_event_record(normalize_claude(raw));
     }
-    return normalize_unknown(raw);
+    return serialize_runtime_event_record(normalize_unknown(raw));
 }
 
 } // namespace
