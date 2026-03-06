@@ -9,6 +9,7 @@
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "nlohmann/json.hpp"
 
@@ -26,6 +27,22 @@ struct ToolDefinition {
     json parameters;
     json constraints;
     json mock_result;
+};
+
+struct NormalizedCall {
+    std::string provider_kind = "custom";
+    std::string tool_name;
+    std::string intent;
+    std::string provider_call_id;
+    json input_raw = json::object();
+    json input_normalized = json::object();
+};
+
+struct PolicyView {
+    json raw_json = json::object();
+    std::vector<std::string> allow_tools;
+    std::vector<std::string> deny_tools;
+    std::string idempotency_key;
 };
 
 struct ExecutionRecord {
@@ -83,6 +100,28 @@ json get_json_or(const json &obj, const char *key, const json &fallback = json()
         return fallback;
     }
     return obj.at(key);
+}
+
+std::vector<std::string> json_string_array_to_vector(const json &value) {
+    std::vector<std::string> out;
+    if (!value.is_array()) {
+        return out;
+    }
+    for (const auto &entry : value) {
+        if (entry.is_string()) {
+            out.push_back(entry.get<std::string>());
+        }
+    }
+    return out;
+}
+
+PolicyView build_policy_view(const json &policy) {
+    return PolicyView{
+        .raw_json = policy,
+        .allow_tools = json_string_array_to_vector(policy.value("allow_tools", json::array())),
+        .deny_tools = json_string_array_to_vector(policy.value("deny_tools", json::array())),
+        .idempotency_key = policy.value("idempotency_key", "")
+    };
 }
 
 json serialize_execution_record(const ExecutionRecord &record) {
