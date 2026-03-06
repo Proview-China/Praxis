@@ -30,11 +30,14 @@ struct ToolSpec {
 
 enum class ExecutorKind {
     Mock,
+    Builtin,
+    Native,
 };
 
 struct ToolRegistration {
     ToolSpec spec;
     ExecutorKind executor_kind = ExecutorKind::Mock;
+    std::string executor_target;
     json mock_result;
 };
 
@@ -443,13 +446,56 @@ bool parse_tool_registration_json(const char *tool_definition_json, ToolRegistra
         return false;
     }
 
+    const json constraints = raw.value("constraints", json::object());
+    ExecutorKind executor_kind = ExecutorKind::Mock;
+    std::string executor_target;
+
+    if (constraints.is_object() && constraints.contains("executor_kind")) {
+        if (!constraints.at("executor_kind").is_string()) {
+            g_last_error = json{
+                {"error_code", "E_TOOL_DEF"},
+                {"message", "constraints.executor_kind must be a string"}
+            }.dump();
+            return false;
+        }
+
+        const std::string executor_kind_raw = constraints.at("executor_kind").get<std::string>();
+        if (executor_kind_raw == "mock") {
+            executor_kind = ExecutorKind::Mock;
+        } else if (executor_kind_raw == "builtin") {
+            executor_kind = ExecutorKind::Builtin;
+        } else if (executor_kind_raw == "native") {
+            executor_kind = ExecutorKind::Native;
+        } else {
+            g_last_error = json{
+                {"error_code", "E_TOOL_DEF"},
+                {"message", "unsupported executor_kind"},
+                {"detail", json{{"executor_kind", executor_kind_raw}}}
+            }.dump();
+            return false;
+        }
+    }
+
+    if (constraints.is_object() && constraints.contains("executor_target")) {
+        if (!constraints.at("executor_target").is_string()) {
+            g_last_error = json{
+                {"error_code", "E_TOOL_DEF"},
+                {"message", "constraints.executor_target must be a string"}
+            }.dump();
+            return false;
+        }
+        executor_target = constraints.at("executor_target").get<std::string>();
+    }
+
     *tool_out = ToolRegistration{
         .spec = ToolSpec{
             .name = name,
             .description = get_string_or(raw, "description"),
             .parameters = raw.value("parameters", json::object()),
-            .constraints = raw.value("constraints", json::object()),
+            .constraints = constraints,
         },
+        .executor_kind = executor_kind,
+        .executor_target = executor_target,
         .mock_result = raw.value("mock_result", json::object()),
     };
     return true;
