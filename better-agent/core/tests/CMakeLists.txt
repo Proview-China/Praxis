@@ -31,6 +31,10 @@ add_agent_core_test(
     agent_core_unit_provider_payload
     ${AGENT_CORE_TEST_ROOT}/unit/provider/provider_payload_builders_test.cpp
 )
+add_agent_core_test(
+    agent_core_unit_provider_roundtrip
+    ${AGENT_CORE_TEST_ROOT}/unit/provider/execution_record_roundtrip_test.cpp
+)
 
 if(AGENT_CORE_USE_CPP_AI_SDK)
     add_agent_core_test(
