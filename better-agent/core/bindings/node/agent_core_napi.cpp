@@ -174,6 +174,52 @@ static napi_value BuildClaudeToolResult(napi_env env, napi_callback_info info) {
     return make_string(env, out);
 }
 
+/* ── agent_core.memoryConfigure(configJson?) → string ────────────────────── */
+static napi_value MemoryConfigure(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1];
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    const std::string config = (argc > 0) ? get_string_arg(env, argv[0]) : "";
+    const char *out = agent_core_memory_configure(config.empty() ? nullptr : config.c_str());
+    return make_string(env, out);
+}
+
+/* ── agent_core.memoryIngest(inputJson) → string ─────────────────────────── */
+static napi_value MemoryIngest(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1];
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    const std::string input = (argc > 0) ? get_string_arg(env, argv[0]) : "";
+    const char *out = agent_core_memory_ingest(input.empty() ? nullptr : input.c_str());
+    return make_string(env, out);
+}
+
+/* ── agent_core.memoryQuery(queryJson) → string ──────────────────────────── */
+static napi_value MemoryQuery(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1];
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    const std::string query = (argc > 0) ? get_string_arg(env, argv[0]) : "";
+    const char *out = agent_core_memory_query(query.empty() ? nullptr : query.c_str());
+    return make_string(env, out);
+}
+
+/* ── agent_core.memoryGet(memoryId) → string ─────────────────────────────── */
+static napi_value MemoryGet(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1];
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    const std::string memory_id = (argc > 0) ? get_string_arg(env, argv[0]) : "";
+    const char *out = agent_core_memory_get(memory_id.empty() ? nullptr : memory_id.c_str());
+    return make_string(env, out);
+}
+
+/* ── agent_core.memoryReset() → string ───────────────────────────────────── */
+static napi_value MemoryReset(napi_env env, napi_callback_info /*info*/) {
+    const char *out = agent_core_memory_reset();
+    return make_string(env, out);
+}
+
 /* ── Module registration ─────────────────────────────────────────────────── */
 static napi_value ModuleInit(napi_env env, napi_value exports) {
     napi_property_descriptor props[] = {
@@ -188,6 +234,11 @@ static napi_value ModuleInit(napi_env env, napi_value exports) {
         {"executeClaudeToolUse", nullptr, ExecuteClaudeToolUse, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"buildOpenAIFunctionCallOutput", nullptr, BuildOpenAIFunctionCallOutput, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"buildClaudeToolResult", nullptr, BuildClaudeToolResult, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"memoryConfigure", nullptr, MemoryConfigure, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"memoryIngest", nullptr, MemoryIngest, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"memoryQuery", nullptr, MemoryQuery, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"memoryGet", nullptr, MemoryGet, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"memoryReset", nullptr, MemoryReset, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"lastError", nullptr, LastError, nullptr, nullptr, nullptr, napi_default, nullptr},
     };
     napi_define_properties(env, exports, sizeof(props) / sizeof(props[0]), props);
