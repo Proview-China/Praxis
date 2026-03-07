@@ -14,6 +14,7 @@ const required = [
   "memoryQuery",
   "memoryGet",
   "memoryReset",
+  "interruptExecution",
 ];
 
 for (const key of required) {
