@@ -146,6 +146,51 @@ std::string first_command_token(const std::string &command) {
     return token;
 }
 
+std::string detect_unsafe_shell_syntax(const std::string &command) {
+    bool in_single = false;
+    bool in_double = false;
+    bool escaped = false;
+
+    for (std::size_t index = 0; index < command.size(); ++index) {
+        const char ch = command[index];
+
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        if (ch == '\\' && !in_single) {
+            escaped = true;
+            continue;
+        }
+        if (ch == '\'' && !in_double) {
+            in_single = !in_single;
+            continue;
+        }
+        if (ch == '"' && !in_single) {
+            in_double = !in_double;
+            continue;
+        }
+        if (ch == '\n' || ch == '\r') {
+            return "newline";
+        }
+        if (!in_single && ch == '`') {
+            return "`";
+        }
+        if (!in_single && ch == '$' && index + 1 < command.size() && command[index + 1] == '(') {
+            return "$(";
+        }
+        if (!in_single && !in_double &&
+            (ch == ';' || ch == '&' || ch == '|' || ch == '<' || ch == '>')) {
+            return std::string(1, ch);
+        }
+    }
+
+    if (in_single || in_double || escaped) {
+        return "unterminated_quote_or_escape";
+    }
+    return "";
+}
+
 bool string_allowed_by_policy(const json &policy_list, const std::string &value) {
     if (!policy_list.is_array() || policy_list.empty()) {
         return true;
@@ -520,6 +565,17 @@ ToolExecutionResult execute_builtin_shell_posix(const ToolRegistration &tool, co
             "shell command is required",
             json::object(),
             executor_target
+        );
+    }
+    const std::string unsafe_syntax = detect_unsafe_shell_syntax(command);
+    if (!unsafe_syntax.empty()) {
+        return make_executor_error(
+            "blocked",
+            "E_SHELL_UNSAFE_SYNTAX",
+            "shell command contains unsafe control syntax",
+            json{{"token", unsafe_syntax}},
+            executor_target,
+            "retry_or_manual_takeover"
         );
     }
 

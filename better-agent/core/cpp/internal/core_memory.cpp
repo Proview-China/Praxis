@@ -289,24 +289,11 @@ MemoryEntry build_memory_entry_from_input(const json &input_json, json *err_out)
     if (input_type == "execution_record") {
         json record = input_json.value("record", json::object());
         if (!record.is_object() || record.empty()) {
-            const std::string execution_id = get_string_or(input_json, "execution_id");
-            if (execution_id.empty()) {
-                *err_out = make_error_json(
-                    "E_MEMORY_INPUT",
-                    "execution_record input requires record or execution_id"
-                );
-                return MemoryEntry{};
-            }
-            std::lock_guard<std::mutex> exec_lk(g_tools_mu);
-            if (!g_executions.contains(execution_id)) {
-                *err_out = make_error_json(
-                    "E_NOT_FOUND",
-                    "execution record not found",
-                    json{{"execution_id", execution_id}}
-                );
-                return MemoryEntry{};
-            }
-            record = serialize_execution_record(g_executions.at(execution_id));
+            *err_out = make_error_json(
+                "E_MEMORY_INPUT",
+                "execution_record input requires a populated record payload"
+            );
+            return MemoryEntry{};
         }
 
         entry.topic = get_string_or(input_json, "topic", infer_topic_from_execution_record(record));

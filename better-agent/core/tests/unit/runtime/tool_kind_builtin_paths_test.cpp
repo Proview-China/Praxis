@@ -177,6 +177,10 @@ int main() {
         std::string(R"({"tool":"shell_echo","arguments":{"command":"printf 'blocked'","cwd":")") + cwd + R"("}})";
     const std::string shell_denied_policy_json =
         std::string(R"({"allow_tools":["shell_echo"],"allowed_commands":["echo"],"allowed_cwds":)") + allow_cwds_json + "}";
+    const std::string shell_quoted_semicolon_json =
+        std::string(R"({"tool":"shell_echo","arguments":{"command":"printf 'semi;colon'","cwd":")") + cwd + R"("}})";
+    const std::string shell_chained_json =
+        std::string(R"({"tool":"shell_echo","arguments":{"command":"printf 'ok'; printf 'pwned'","cwd":")") + cwd + R"("}})";
     const std::string code_call_json =
         std::string(R"({"tool":"run_code","arguments":{"source":"printf 'hello-code'","runtime":"sh","cwd":")") + cwd + R"("}})";
     const std::string code_policy_json =
@@ -206,6 +210,13 @@ int main() {
     ));
     expect(shell_wrapper.at("execution").at("tool_kind") == "shell", "provider wrapper should preserve shell tool_kind");
 
+    auto shell_quoted_semicolon = parse_json(agent_core_execute_function_call(
+        shell_quoted_semicolon_json.c_str(),
+        shell_policy_json.c_str()
+    ));
+    expect(shell_quoted_semicolon.at("status") == "success", "semicolon inside quotes should stay allowed");
+    expect(shell_quoted_semicolon.at("result").at("stdout") == "semi;colon", "quoted semicolon output mismatch");
+
     auto shell_unsupported = parse_json(agent_core_execute_function_call(
         R"({"tool":"shell_echo","arguments":{"command":"printf 'x'","cwd":"."}})",
         R"({"allow_tools":["shell_echo"],"allowed_commands":["printf"],"allowed_cwds":["."],"platform_override":"windows"})"
@@ -219,6 +230,13 @@ int main() {
     ));
     expect(shell_denied.at("status") == "blocked", "shell policy deny should block");
     expect(shell_denied.at("error").at("error_code") == "E_POLICY_DENY", "shell policy deny error mismatch");
+
+    auto shell_chained = parse_json(agent_core_execute_function_call(
+        shell_chained_json.c_str(),
+        shell_policy_json.c_str()
+    ));
+    expect(shell_chained.at("status") == "blocked", "shell command chaining should be blocked");
+    expect(shell_chained.at("error").at("error_code") == "E_SHELL_UNSAFE_SYNTAX", "shell unsafe syntax error mismatch");
 
     auto code_record = parse_json(agent_core_execute_function_call(
         code_call_json.c_str(),

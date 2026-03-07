@@ -45,31 +45,58 @@ const char *fail_memory_api(const json &err) {
     return core_internal::g_last_output.c_str();
 }
 
+bool enrich_execution_record_input(json *input, json *err_out) {
+    if (!input->is_object()) {
+        *err_out = core_internal::make_error_json(
+            "E_MEMORY_INPUT",
+            "memory_input_json must be a JSON object"
+        );
+        return false;
+    }
+    if (core_internal::get_string_or(*input, "input_type") != "execution_record") {
+        return true;
+    }
+    if (input->contains("record") && (*input).at("record").is_object() && !(*input).at("record").empty()) {
+        return true;
+    }
+
+    const std::string execution_id = core_internal::get_string_or(*input, "execution_id");
+    if (execution_id.empty()) {
+        return true;
+    }
+
+    std::lock_guard<std::mutex> lk(core_internal::g_tools_mu);
+    if (!core_internal::g_executions.contains(execution_id)) {
+        *err_out = core_internal::make_error_json(
+            "E_NOT_FOUND",
+            "execution record not found",
+            json{{"execution_id", execution_id}}
+        );
+        return false;
+    }
+    (*input)["record"] = core_internal::serialize_execution_record(core_internal::g_executions.at(execution_id));
+    return true;
+}
+
 } // namespace
 
 int agent_core_init(void) {
-    std::lock_guard<std::mutex> lk(core_internal::g_tools_mu);
+    std::scoped_lock lk(core_internal::g_tools_mu, core_internal::g_memory_mu);
     core_internal::g_tools.clear();
     core_internal::g_executions.clear();
     core_internal::g_idempotency_to_execution.clear();
     core_internal::g_idempotency_signature.clear();
-    {
-        std::lock_guard<std::mutex> memory_lk(core_internal::g_memory_mu);
-        core_internal::reset_memory_state_locked();
-    }
+    core_internal::reset_memory_state_locked();
     return 0;
 }
 
 void agent_core_shutdown(void) {
-    std::lock_guard<std::mutex> lk(core_internal::g_tools_mu);
+    std::scoped_lock lk(core_internal::g_tools_mu, core_internal::g_memory_mu);
     core_internal::g_tools.clear();
     core_internal::g_executions.clear();
     core_internal::g_idempotency_to_execution.clear();
     core_internal::g_idempotency_signature.clear();
-    {
-        std::lock_guard<std::mutex> memory_lk(core_internal::g_memory_mu);
-        core_internal::reset_memory_state_locked();
-    }
+    core_internal::reset_memory_state_locked();
 }
 
 const char *agent_core_version(void) {
@@ -383,6 +410,9 @@ const char *agent_core_memory_ingest(const char *memory_input_json) {
     json input;
     json parse_err;
     if (!parse_json_object_arg(memory_input_json, "memory_input_json", &input, &parse_err)) {
+        return fail_memory_api(parse_err);
+    }
+    if (!enrich_execution_record_input(&input, &parse_err)) {
         return fail_memory_api(parse_err);
     }
 
