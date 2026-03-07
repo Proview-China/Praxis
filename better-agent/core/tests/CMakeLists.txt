@@ -44,6 +44,14 @@ add_agent_core_test(
     ${AGENT_CORE_TEST_ROOT}/unit/runtime/tool_executor_regressions_test.cpp
 )
 add_agent_core_test(
+    agent_core_unit_runtime_tool_kind_builtins
+    ${AGENT_CORE_TEST_ROOT}/unit/runtime/tool_kind_builtin_paths_test.cpp
+)
+add_agent_core_test(
+    agent_core_unit_runtime_hook_lifecycle
+    ${AGENT_CORE_TEST_ROOT}/unit/runtime/hook_lifecycle_test.cpp
+)
+add_agent_core_test(
     agent_core_unit_provider_payload
     ${AGENT_CORE_TEST_ROOT}/unit/provider/provider_payload_builders_test.cpp
 )
