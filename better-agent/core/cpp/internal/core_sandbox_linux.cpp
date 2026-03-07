@@ -6,6 +6,8 @@
     #include <cerrno>
     #include <cstring>
     #include <fcntl.h>
+    #include <cstdlib>
+    #include <sys/stat.h>
     #include <signal.h>
     #include <sys/prctl.h>
     #include <sys/syscall.h>
@@ -14,6 +16,9 @@
     #include <sched.h>
     #if __has_include(<linux/landlock.h>)
         #include <linux/landlock.h>
+    #endif
+    #if __has_include(<linux/seccomp.h>)
+        #include <linux/seccomp.h>
     #endif
 #endif
 
@@ -103,17 +108,27 @@ json probe_network_namespace_capability() {
 json probe_cgroup_v2_capability() {
     const fs::path controllers("/sys/fs/cgroup/cgroup.controllers");
     if (fs::exists(controllers)) {
-        return capability_status("available", "", json{{"path", controllers.string()}});
+        const fs::path root("/sys/fs/cgroup");
+        const bool writable = access(root.c_str(), W_OK) == 0;
+        return capability_status(
+            "available",
+            writable ? "" : "cgroup v2 root is not writable for current user",
+            json{
+                {"path", controllers.string()},
+                {"root", root.string()},
+                {"writable", writable}
+            }
+        );
     }
     return capability_status("unavailable", "cgroup v2 controllers file not found");
 }
 
 json probe_seccomp_capability() {
-#if defined(PR_GET_SECCOMP)
+#if defined(PR_GET_SECCOMP) && defined(PR_SET_SECCOMP)
     errno = 0;
     const int mode = prctl(PR_GET_SECCOMP, 0, 0, 0, 0);
     if (mode >= 0) {
-        return capability_status("available", "", json{{"current_mode", mode}});
+        return capability_status("available", "", json{{"current_mode", mode}, {"filter_mode", true}});
     }
     if (errno == EINVAL) {
         return capability_status("unavailable", "seccomp is not supported by current kernel");
@@ -148,11 +163,17 @@ json build_linux_capability_snapshot() {
         {"supported_policy", json{
             {"linux_filesystem_isolation", json::array({"off", "best_effort", "required"})},
             {"linux_network_isolation", json::array({"off", "best_effort", "required"})},
+            {"linux_cgroup_mode", json::array({"off", "best_effort", "required"})},
+            {"linux_seccomp_mode", json::array({"off", "best_effort", "required"})},
+            {"linux_seccomp_profile", json::array({"baseline"})},
             {"readonly_paths", true},
             {"writable_paths", true},
             {"network_access", true},
             {"cpu_limit", true},
-            {"memory_limit", true}
+            {"memory_limit", true},
+            {"cgroup_memory_max", true},
+            {"cgroup_cpu_max", true},
+            {"cgroup_pids_max", true}
         }}
     };
 }

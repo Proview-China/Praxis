@@ -15,6 +15,17 @@
     #include <sys/resource.h>
     #include <sys/wait.h>
     #include <unistd.h>
+#if defined(__linux__)
+    #if __has_include(<linux/seccomp.h>)
+        #include <linux/seccomp.h>
+    #endif
+    #if __has_include(<linux/filter.h>)
+        #include <linux/filter.h>
+    #endif
+    #if __has_include(<linux/audit.h>)
+        #include <linux/audit.h>
+    #endif
+#endif
 #endif
 
 namespace better_agent::core_internal {
@@ -64,6 +75,28 @@ std::string read_text_file(const fs::path &file_path) {
     std::ostringstream buffer;
     buffer << in.rdbuf();
     return buffer.str();
+}
+
+std::string json_scalar_to_string(const json &value) {
+    if (value.is_string()) {
+        return value.get<std::string>();
+    }
+    if (value.is_number_integer()) {
+        return std::to_string(value.get<long long>());
+    }
+    if (value.is_number_unsigned()) {
+        return std::to_string(value.get<unsigned long long>());
+    }
+    if (value.is_number_float()) {
+        return std::to_string(value.get<double>());
+    }
+    if (value.is_boolean()) {
+        return value.get<bool>() ? "true" : "false";
+    }
+    if (value.is_null()) {
+        return "";
+    }
+    return value.dump();
 }
 
 void append_evidence(json *target, const json &items) {
@@ -347,6 +380,42 @@ json capability_detail(const json &snapshot, const char *name) {
     return capabilities.at(name);
 }
 
+std::string linux_profile_mode(const json &policy, const char *key) {
+    const std::string mode = get_string_or(policy, key, "off");
+    if (mode == "off" || mode == "best_effort" || mode == "required") {
+        return mode;
+    }
+    return "off";
+}
+
+json make_linux_profile_component(const std::string &mode, const json &detail = json::object()) {
+    json out{
+        {"mode", mode},
+        {"status", mode == "off" ? "off" : "requested"}
+    };
+    if (!detail.is_null() && !(detail.is_object() && detail.empty())) {
+        out["detail"] = detail;
+    }
+    return out;
+}
+
+std::string linux_component_state(const json &component) {
+    return get_string_or(component, "status", "off");
+}
+
+std::string safe_execution_component_id(const std::string &execution_id) {
+    std::string out;
+    out.reserve(execution_id.size());
+    for (const char ch : execution_id) {
+        if (std::isalnum(static_cast<unsigned char>(ch)) != 0 || ch == '-' || ch == '_') {
+            out.push_back(ch);
+        } else {
+            out.push_back('-');
+        }
+    }
+    return out.empty() ? "sandbox" : out;
+}
+
 json build_linux_sandbox_profile(
     const ToolExecutionRequest &request,
     const fs::path &cwd,
@@ -372,6 +441,9 @@ json build_linux_sandbox_profile(
 
     const std::string fs_mode = sandbox_mode_value(request.policy, "linux_filesystem_isolation");
     const std::string net_mode = sandbox_mode_value(request.policy, "linux_network_isolation");
+    const std::string cgroup_mode = linux_profile_mode(request.policy, "linux_cgroup_mode");
+    const std::string seccomp_mode = linux_profile_mode(request.policy, "linux_seccomp_mode");
+    const std::string seccomp_profile = get_string_or(request.policy, "linux_seccomp_profile", "baseline");
     const json readonly_paths = merge_path_arrays(default_linux_readonly_paths(), request.policy.value("readonly_paths", json::array()));
     const json writable_paths = merge_path_arrays(default_linux_writable_paths(cwd, temp_dir), request.policy.value("writable_paths", json::array()));
 
@@ -379,18 +451,20 @@ json build_linux_sandbox_profile(
         {"requested", json{
             {"filesystem_isolation", fs_mode},
             {"network_isolation", net_mode},
+            {"cgroup_mode", cgroup_mode},
+            {"seccomp_mode", seccomp_mode},
+            {"seccomp_profile", seccomp_profile},
             {"readonly_paths", readonly_paths},
-            {"writable_paths", writable_paths}
+            {"writable_paths", writable_paths},
+            {"cgroup_memory_max", request.policy.value("cgroup_memory_max", json(nullptr))},
+            {"cgroup_cpu_max", request.policy.value("cgroup_cpu_max", json(nullptr))},
+            {"cgroup_pids_max", request.policy.value("cgroup_pids_max", json(nullptr))}
         }},
         {"capabilities", probe_snapshot.value("capabilities", json::object())},
-        {"filesystem_isolation", json{
-            {"mode", fs_mode},
-            {"status", fs_mode == "off" ? "off" : "not_enabled"}
-        }},
-        {"network_isolation", json{
-            {"mode", net_mode},
-            {"status", net_mode == "off" ? "off" : "not_enabled"}
-        }}
+        {"filesystem_isolation", make_linux_profile_component(fs_mode)},
+        {"network_isolation", make_linux_profile_component(net_mode)},
+        {"cgroup_enforcement", make_linux_profile_component(cgroup_mode)},
+        {"seccomp", make_linux_profile_component(seccomp_mode, json{{"profile", seccomp_profile}})}
     };
 
     const bool actual_linux =
@@ -416,6 +490,7 @@ json build_linux_sandbox_profile(
             }
         } else {
             linux["filesystem_isolation"]["status"] = "enabled";
+            linux["filesystem_isolation"]["provider"] = "landlock";
         }
     }
 
@@ -435,6 +510,47 @@ json build_linux_sandbox_profile(
             }
         } else {
             linux["network_isolation"]["status"] = "enabled";
+            linux["network_isolation"]["provider"] = "network_namespace";
+        }
+    }
+
+    if (cgroup_mode != "off") {
+        if (!actual_linux || !capability_available(probe_snapshot, "cgroup_v2")) {
+            linux["cgroup_enforcement"]["status"] = "unsupported";
+            linux["cgroup_enforcement"]["detail"] = capability_detail(probe_snapshot, "cgroup_v2");
+            if (cgroup_mode == "required") {
+                if (err_out != nullptr) {
+                    *err_out = make_error_json(
+                        "E_SANDBOX_CGROUP_UNSUPPORTED",
+                        "linux cgroup v2 enforcement is not available",
+                        linux["cgroup_enforcement"]["detail"]
+                    );
+                }
+                return json::object();
+            }
+        } else {
+            linux["cgroup_enforcement"]["status"] = "enabled";
+            linux["cgroup_enforcement"]["provider"] = "cgroup_v2";
+        }
+    }
+
+    if (seccomp_mode != "off") {
+        if (!actual_linux || !capability_available(probe_snapshot, "seccomp")) {
+            linux["seccomp"]["status"] = "unsupported";
+            linux["seccomp"]["detail"] = capability_detail(probe_snapshot, "seccomp");
+            if (seccomp_mode == "required") {
+                if (err_out != nullptr) {
+                    *err_out = make_error_json(
+                        "E_SANDBOX_SECCOMP_UNSUPPORTED",
+                        "linux seccomp is not available",
+                        linux["seccomp"]["detail"]
+                    );
+                }
+                return json::object();
+            }
+        } else {
+            linux["seccomp"]["status"] = "enabled";
+            linux["seccomp"]["provider"] = "seccomp";
         }
     }
 
@@ -562,6 +678,162 @@ bool apply_network_namespace_in_child() {
 #if defined(CLONE_NEWNET)
     return unshare(CLONE_NEWNET) == 0;
 #else
+    return false;
+#endif
+}
+
+bool write_text_file(const fs::path &path, const std::string &content) {
+    std::ofstream out(path);
+    if (!out.is_open()) {
+        return false;
+    }
+    out << content;
+    return out.good();
+}
+
+bool setup_cgroup_v2_for_child(
+    const ToolExecutionRequest &request,
+    json *linux_profile,
+    pid_t pid,
+    fs::path *cgroup_dir_out
+) {
+    *cgroup_dir_out = fs::path();
+    if (linux_component_state(linux_profile->at("cgroup_enforcement")) != "enabled") {
+        return true;
+    }
+
+    const json capability = capability_detail(*linux_profile, "cgroup_v2");
+    const std::string root_path = capability.value("detail", json::object()).value("root", std::string("/sys/fs/cgroup"));
+    const fs::path root(root_path);
+    if (!fs::exists(root) || access(root.c_str(), W_OK) != 0) {
+        (*linux_profile)["cgroup_enforcement"]["status"] = "fallback";
+        (*linux_profile)["cgroup_enforcement"]["runtime_reason"] = "cgroup v2 root is not writable";
+        return request.policy.value("linux_cgroup_mode", std::string("off")) != "required";
+    }
+
+    const fs::path cgroup_dir = root / ("better-agent-" + safe_execution_component_id(request.execution_id));
+    std::error_code error;
+    fs::create_directory(cgroup_dir, error);
+    if (error && !fs::exists(cgroup_dir)) {
+        (*linux_profile)["cgroup_enforcement"]["status"] = "fallback";
+        (*linux_profile)["cgroup_enforcement"]["runtime_reason"] = error.message();
+        return request.policy.value("linux_cgroup_mode", std::string("off")) != "required";
+    }
+
+    bool ok = true;
+    if (request.policy.contains("cgroup_memory_max") && !request.policy.at("cgroup_memory_max").is_null()) {
+        ok = ok && write_text_file((cgroup_dir / "memory.max"), json_scalar_to_string(request.policy.at("cgroup_memory_max")));
+    }
+    if (request.policy.contains("cgroup_cpu_max") && !request.policy.at("cgroup_cpu_max").is_null()) {
+        ok = ok && write_text_file((cgroup_dir / "cpu.max"), json_scalar_to_string(request.policy.at("cgroup_cpu_max")));
+    }
+    if (request.policy.contains("cgroup_pids_max") && !request.policy.at("cgroup_pids_max").is_null()) {
+        ok = ok && write_text_file((cgroup_dir / "pids.max"), json_scalar_to_string(request.policy.at("cgroup_pids_max")));
+    }
+    ok = ok && write_text_file((cgroup_dir / "cgroup.procs"), std::to_string(pid));
+
+    if (!ok) {
+        (*linux_profile)["cgroup_enforcement"]["status"] = "fallback";
+        (*linux_profile)["cgroup_enforcement"]["runtime_reason"] = "failed to configure cgroup v2";
+        std::error_code remove_error;
+        fs::remove_all(cgroup_dir, remove_error);
+        return request.policy.value("linux_cgroup_mode", std::string("off")) != "required";
+    }
+
+    (*linux_profile)["cgroup_enforcement"]["status"] = "enabled";
+    (*linux_profile)["cgroup_enforcement"]["runtime_path"] = cgroup_dir.string();
+    *cgroup_dir_out = cgroup_dir;
+    return true;
+}
+
+void cleanup_cgroup_v2_path(const fs::path &cgroup_dir) {
+    if (cgroup_dir.empty()) {
+        return;
+    }
+    std::error_code error;
+    fs::remove_all(cgroup_dir, error);
+}
+
+bool seccomp_profile_supported(const std::string &profile_name) {
+    return profile_name == "baseline";
+}
+
+bool apply_seccomp_profile_in_child(const json &linux_profile) {
+#if defined(PR_SET_SECCOMP) && defined(SECCOMP_MODE_FILTER) && defined(SECCOMP_RET_ALLOW) && defined(SECCOMP_RET_ERRNO)
+    const json seccomp = linux_profile.value("seccomp", json::object());
+    const std::string profile_name = seccomp.value("detail", json::object()).value("profile", std::string("baseline"));
+    if (!seccomp_profile_supported(profile_name)) {
+        return false;
+    }
+    if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) {
+        return false;
+    }
+
+    constexpr unsigned int deny_errno = static_cast<unsigned int>(EPERM);
+    std::vector<sock_filter> filter = {
+        BPF_STMT(BPF_LD | BPF_W | BPF_ABS, static_cast<unsigned int>(offsetof(struct seccomp_data, nr))),
+    };
+    auto append_deny = [&filter](int syscall_nr) {
+        filter.push_back(BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, static_cast<unsigned int>(syscall_nr), 0, 1));
+        filter.push_back(BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | deny_errno));
+    };
+#if defined(__NR_socket)
+    append_deny(__NR_socket);
+#endif
+#if defined(__NR_socketpair)
+    append_deny(__NR_socketpair);
+#endif
+#if defined(__NR_connect)
+    append_deny(__NR_connect);
+#endif
+#if defined(__NR_accept)
+    append_deny(__NR_accept);
+#endif
+#if defined(__NR_accept4)
+    append_deny(__NR_accept4);
+#endif
+#if defined(__NR_bind)
+    append_deny(__NR_bind);
+#endif
+#if defined(__NR_listen)
+    append_deny(__NR_listen);
+#endif
+#if defined(__NR_mount)
+    append_deny(__NR_mount);
+#endif
+#if defined(__NR_umount2)
+    append_deny(__NR_umount2);
+#endif
+#if defined(__NR_ptrace)
+    append_deny(__NR_ptrace);
+#endif
+#if defined(__NR_bpf)
+    append_deny(__NR_bpf);
+#endif
+#if defined(__NR_clone3)
+    append_deny(__NR_clone3);
+#endif
+#if defined(__NR_userfaultfd)
+    append_deny(__NR_userfaultfd);
+#endif
+#if defined(__NR_keyctl)
+    append_deny(__NR_keyctl);
+#endif
+#if defined(__NR_add_key)
+    append_deny(__NR_add_key);
+#endif
+#if defined(__NR_request_key)
+    append_deny(__NR_request_key);
+#endif
+    filter.push_back(BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW));
+
+    struct sock_fprog prog {
+        .len = static_cast<unsigned short>(filter.size()),
+        .filter = filter.data()
+    };
+    return prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog) == 0;
+#else
+    (void)linux_profile;
     return false;
 #endif
 }
@@ -725,12 +997,18 @@ ToolExecutionResult run_process_in_temp_dir(
     result["sandbox"] = json{
         {"timeout_ms", request.policy.value("timeout_ms", 0)},
         {"network_access", request.policy.value("network_access", false)},
-        {"cpu_limit", request.policy.value("cpu_limit", nullptr)},
-        {"memory_limit", request.policy.value("memory_limit", nullptr)},
+        {"cpu_limit", request.policy.value("cpu_limit", json(nullptr))},
+        {"memory_limit", request.policy.value("memory_limit", json(nullptr))},
         {"unsupported_limits", json::array()},
         {"interrupted", false},
         {"timed_out", false},
         {"linux", linux_profile}
+    };
+    result["sandbox"]["linux"]["resource_limits"] = json{
+        {"cpu", json{{"status", !request.policy.value("cpu_limit", json(nullptr)).is_null() ? "baseline" : "off"}, {"value", request.policy.value("cpu_limit", json(nullptr))}}},
+        {"memory", json{{"status", !request.policy.value("memory_limit", json(nullptr)).is_null() ? "baseline" : "off"}, {"value", request.policy.value("memory_limit", json(nullptr))}}},
+        {"cgroup", linux_profile.value("cgroup_enforcement", json::object())},
+        {"seccomp", linux_profile.value("seccomp", json::object())}
     };
 
     if (!request.policy.value("cpu_limit", json(nullptr)).is_null()) {
@@ -761,7 +1039,8 @@ ToolExecutionResult run_process_in_temp_dir(
 #else
     int stdout_pipe[2] = {-1, -1};
     int stderr_pipe[2] = {-1, -1};
-    if (pipe(stdout_pipe) != 0 || pipe(stderr_pipe) != 0) {
+    int control_pipe[2] = {-1, -1};
+    if (pipe(stdout_pipe) != 0 || pipe(stderr_pipe) != 0 || pipe(control_pipe) != 0) {
         return make_executor_error(
             "failed",
             "E_SANDBOX_PIPE",
@@ -777,6 +1056,8 @@ ToolExecutionResult run_process_in_temp_dir(
         close(stdout_pipe[1]);
         close(stderr_pipe[0]);
         close(stderr_pipe[1]);
+        close(control_pipe[0]);
+        close(control_pipe[1]);
         return make_executor_error(
             "failed",
             "E_SANDBOX_FORK",
@@ -794,16 +1075,26 @@ ToolExecutionResult run_process_in_temp_dir(
         close(stdout_pipe[1]);
         close(stderr_pipe[0]);
         close(stderr_pipe[1]);
+        close(control_pipe[1]);
+        char control_byte = '\0';
+        if (read(control_pipe[0], &control_byte, 1) <= 0 || control_byte != '1') {
+            _exit(123);
+        }
+        close(control_pipe[0]);
         (void)chdir(cwd.c_str());
         apply_posix_resource_limits_in_child(request);
 #if defined(__linux__)
         const std::string fs_status = get_string_or(linux_profile.at("filesystem_isolation"), "status");
         const std::string net_status = get_string_or(linux_profile.at("network_isolation"), "status");
+        const std::string seccomp_status = get_string_or(linux_profile.at("seccomp"), "status");
         if (fs_status == "enabled" && !apply_landlock_profile_in_child(linux_profile)) {
             _exit(126);
         }
         if (net_status == "enabled" && !apply_network_namespace_in_child()) {
             _exit(125);
+        }
+        if (seccomp_status == "enabled" && !apply_seccomp_profile_in_child(linux_profile)) {
+            _exit(124);
         }
 #endif
         execl("/bin/sh", "sh", "-c", runner_command.c_str(), static_cast<char *>(nullptr));
@@ -812,6 +1103,7 @@ ToolExecutionResult run_process_in_temp_dir(
 
     close(stdout_pipe[1]);
     close(stderr_pipe[1]);
+    close(control_pipe[0]);
     set_nonblocking_fd(stdout_pipe[0]);
     set_nonblocking_fd(stderr_pipe[0]);
 
@@ -826,6 +1118,32 @@ ToolExecutionResult run_process_in_temp_dir(
             .interrupt_requested = false
         };
     }
+
+    fs::path cgroup_dir;
+#if defined(__linux__)
+    const bool cgroup_ok = setup_cgroup_v2_for_child(request, &result["sandbox"]["linux"], pid, &cgroup_dir);
+    if (!cgroup_ok) {
+        close(control_pipe[1]);
+        killpg(pid, SIGKILL);
+        (void)waitpid(pid, nullptr, 0);
+        {
+            std::lock_guard<std::mutex> lk(g_running_mu);
+            g_running_executions.erase(request.execution_id);
+        }
+        return make_execution_result(
+            "blocked",
+            result,
+            make_error_json(
+                "E_SANDBOX_CGROUP_UNSUPPORTED",
+                "linux cgroup enforcement could not be enabled"
+            ),
+            evidence,
+            "retry_or_manual_takeover"
+        );
+    }
+#endif
+    write(control_pipe[1], "1", 1);
+    close(control_pipe[1]);
 
     std::string stdout_buffer;
     std::string stderr_buffer;
@@ -905,6 +1223,9 @@ ToolExecutionResult run_process_in_temp_dir(
         std::lock_guard<std::mutex> lk(g_running_mu);
         g_running_executions.erase(request.execution_id);
     }
+#if defined(__linux__)
+    cleanup_cgroup_v2_path(cgroup_dir);
+#endif
 
     std::ofstream stdout_out(stdout_path);
     stdout_out << stdout_buffer;
@@ -945,14 +1266,18 @@ ToolExecutionResult run_process_in_temp_dir(
 
     std::string status = "success";
     json error = nullptr;
-    if (exit_code == 126 && get_string_or(linux_profile.at("filesystem_isolation"), "status") == "enabled") {
+    if (exit_code == 126 && get_string_or(result["sandbox"]["linux"].at("filesystem_isolation"), "status") == "enabled") {
         status = "failed";
         result["sandbox"]["linux"]["filesystem_isolation"]["runtime_status"] = "setup_failed";
         error = make_error_json("E_SANDBOX_FILESYSTEM_SETUP", "linux filesystem isolation setup failed");
-    } else if (exit_code == 125 && get_string_or(linux_profile.at("network_isolation"), "status") == "enabled") {
+    } else if (exit_code == 125 && get_string_or(result["sandbox"]["linux"].at("network_isolation"), "status") == "enabled") {
         status = "failed";
         result["sandbox"]["linux"]["network_isolation"]["runtime_status"] = "setup_failed";
         error = make_error_json("E_SANDBOX_NETWORK_SETUP", "linux network isolation setup failed");
+    } else if (exit_code == 124 && get_string_or(result["sandbox"]["linux"].at("seccomp"), "status") == "enabled") {
+        status = "failed";
+        result["sandbox"]["linux"]["seccomp"]["runtime_status"] = "setup_failed";
+        error = make_error_json("E_SANDBOX_SECCOMP_SETUP", "linux seccomp profile setup failed");
     } else if (interrupted) {
         status = "interrupted";
         error = make_error_json("E_SANDBOX_INTERRUPTED", "sandbox execution was interrupted", json{{"execution_id", request.execution_id}});
@@ -969,8 +1294,10 @@ ToolExecutionResult run_process_in_temp_dir(
     if (linux_profile.is_object()) {
         evidence.push_back(json{
             {"kind", "linux_sandbox"},
-            {"filesystem_isolation", linux_profile.value("filesystem_isolation", json::object())},
-            {"network_isolation", linux_profile.value("network_isolation", json::object())}
+            {"filesystem_isolation", result["sandbox"]["linux"].value("filesystem_isolation", json::object())},
+            {"network_isolation", result["sandbox"]["linux"].value("network_isolation", json::object())},
+            {"cgroup_enforcement", result["sandbox"]["linux"].value("cgroup_enforcement", json::object())},
+            {"seccomp", result["sandbox"]["linux"].value("seccomp", json::object())}
         });
     }
 

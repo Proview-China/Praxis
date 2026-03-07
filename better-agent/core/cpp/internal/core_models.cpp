@@ -45,8 +45,8 @@ PolicyView build_policy_view(const json &policy) {
         .max_stderr_bytes = policy.value("max_stderr_bytes", static_cast<std::size_t>(0)),
         .max_artifacts = policy.value("max_artifacts", static_cast<std::size_t>(0)),
         .require_network = policy.value("requires_network", false),
-        .cpu_limit = policy.value("cpu_limit", nullptr),
-        .memory_limit = policy.value("memory_limit", nullptr)
+        .cpu_limit = policy.value("cpu_limit", json(nullptr)),
+        .memory_limit = policy.value("memory_limit", json(nullptr))
     };
 }
 
