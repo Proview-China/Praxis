@@ -167,11 +167,14 @@ extern thread_local std::string g_last_output;
 extern std::mutex g_tools_mu;
 extern std::mutex g_memory_mu;
 extern std::mutex g_running_mu;
+extern std::mutex g_sandbox_mu;
 extern std::unordered_map<std::string, ToolRegistration> g_tools;
 extern std::unordered_map<std::string, ExecutionRecord> g_executions;
 extern std::unordered_map<std::string, std::string> g_idempotency_to_execution;
 extern std::unordered_map<std::string, std::string> g_idempotency_signature;
 extern std::unordered_map<std::string, RunningExecution> g_running_executions;
+extern json g_sandbox_capability_cache;
+extern bool g_sandbox_capability_cache_valid;
 extern MemoryConfig g_memory_config;
 extern std::unordered_map<std::string, MemoryEntry> g_memory_entries;
 extern std::vector<std::string> g_memory_order;
@@ -286,6 +289,7 @@ json make_error_json(
     const std::string &message,
     const json &detail = nullptr
 );
+json get_sandbox_capabilities_locked(const json &request_json, json *err_out);
 
 void reset_memory_state_locked();
 json serialize_memory_config(const MemoryConfig &config);

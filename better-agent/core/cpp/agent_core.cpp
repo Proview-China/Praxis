@@ -86,6 +86,11 @@ int agent_core_init(void) {
     core_internal::g_executions.clear();
     core_internal::g_idempotency_to_execution.clear();
     core_internal::g_idempotency_signature.clear();
+    {
+        std::lock_guard<std::mutex> sandbox_lk(core_internal::g_sandbox_mu);
+        core_internal::g_sandbox_capability_cache = json::object();
+        core_internal::g_sandbox_capability_cache_valid = false;
+    }
     core_internal::reset_memory_state_locked();
     return 0;
 }
@@ -96,6 +101,11 @@ void agent_core_shutdown(void) {
     core_internal::g_executions.clear();
     core_internal::g_idempotency_to_execution.clear();
     core_internal::g_idempotency_signature.clear();
+    {
+        std::lock_guard<std::mutex> sandbox_lk(core_internal::g_sandbox_mu);
+        core_internal::g_sandbox_capability_cache = json::object();
+        core_internal::g_sandbox_capability_cache_valid = false;
+    }
     core_internal::reset_memory_state_locked();
 }
 
@@ -286,6 +296,26 @@ const char *agent_core_interrupt_execution(const char *execution_id) {
 
     json err;
     const json out = core_internal::interrupt_execution(execution_id, &err);
+    if (!err.is_null()) {
+        return fail_memory_api(err);
+    }
+    core_internal::g_last_output = out.dump();
+    return core_internal::g_last_output.c_str();
+}
+
+const char *agent_core_sandbox_probe(const char *request_json) {
+    core_internal::g_last_error.clear();
+    core_internal::g_last_output.clear();
+
+    json request;
+    json parse_err;
+    if (!parse_json_object_arg(request_json, "request_json", &request, &parse_err)) {
+        return fail_memory_api(parse_err);
+    }
+
+    std::lock_guard<std::mutex> lk(core_internal::g_sandbox_mu);
+    json err;
+    const json out = core_internal::get_sandbox_capabilities_locked(request, &err);
     if (!err.is_null()) {
         return fail_memory_api(err);
     }

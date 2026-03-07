@@ -249,6 +249,324 @@ bool cwd_allowed_by_policy(const json &policy, const fs::path &cwd) {
     return false;
 }
 
+std::string sandbox_mode_value(const json &policy, const char *key) {
+    const std::string mode = get_string_or(policy, key, "off");
+    if (mode == "off" || mode == "best_effort" || mode == "required") {
+        return mode;
+    }
+    return "off";
+}
+
+json dedupe_string_array(const json &value) {
+    json out = json::array();
+    if (!value.is_array()) {
+        return out;
+    }
+    for (const auto &entry : value) {
+        if (!entry.is_string()) {
+            continue;
+        }
+        bool exists = false;
+        for (const auto &existing : out) {
+            if (existing == entry) {
+                exists = true;
+                break;
+            }
+        }
+        if (!exists) {
+            out.push_back(entry);
+        }
+    }
+    return out;
+}
+
+json default_linux_readonly_paths() {
+    json paths = json::array({
+        "/bin",
+        "/usr",
+        "/lib",
+        "/lib64",
+        "/etc"
+    });
+    return dedupe_string_array(paths);
+}
+
+json default_linux_writable_paths(const fs::path &cwd, const fs::path &temp_dir) {
+    json paths = json::array({
+        normalize_path_for_policy(cwd).string(),
+        normalize_path_for_policy(temp_dir).string()
+    });
+    return dedupe_string_array(paths);
+}
+
+json merge_path_arrays(const json &base, const json &extra) {
+    json out = dedupe_string_array(base);
+    if (extra.is_array()) {
+        for (const auto &entry : extra) {
+            if (!entry.is_string()) {
+                continue;
+            }
+            bool exists = false;
+            for (const auto &existing : out) {
+                if (existing == entry) {
+                    exists = true;
+                    break;
+                }
+            }
+            if (!exists) {
+                out.push_back(entry);
+            }
+        }
+    }
+    return out;
+}
+
+std::string capability_state(const json &snapshot, const char *name) {
+    if (!snapshot.is_object() || !snapshot.contains("capabilities")) {
+        return "unsupported";
+    }
+    const json capabilities = snapshot.at("capabilities");
+    if (!capabilities.is_object() || !capabilities.contains(name) || !capabilities.at(name).is_object()) {
+        return "unsupported";
+    }
+    return get_string_or(capabilities.at(name), "status", "unsupported");
+}
+
+bool capability_available(const json &snapshot, const char *name) {
+    return capability_state(snapshot, name) == "available";
+}
+
+json capability_detail(const json &snapshot, const char *name) {
+    if (!snapshot.is_object() || !snapshot.contains("capabilities")) {
+        return json::object();
+    }
+    const json capabilities = snapshot.at("capabilities");
+    if (!capabilities.is_object() || !capabilities.contains(name) || !capabilities.at(name).is_object()) {
+        return json::object();
+    }
+    return capabilities.at(name);
+}
+
+json build_linux_sandbox_profile(
+    const ToolExecutionRequest &request,
+    const fs::path &cwd,
+    const fs::path &temp_dir,
+    json *err_out
+) {
+    if (err_out != nullptr) {
+        *err_out = nullptr;
+    }
+
+    json probe_snapshot;
+    {
+        std::lock_guard<std::mutex> lk(g_sandbox_mu);
+        json probe_err;
+        probe_snapshot = get_sandbox_capabilities_locked(json::object(), &probe_err);
+        if (!probe_err.is_null()) {
+            if (err_out != nullptr) {
+                *err_out = probe_err;
+            }
+            return json::object();
+        }
+    }
+
+    const std::string fs_mode = sandbox_mode_value(request.policy, "linux_filesystem_isolation");
+    const std::string net_mode = sandbox_mode_value(request.policy, "linux_network_isolation");
+    const json readonly_paths = merge_path_arrays(default_linux_readonly_paths(), request.policy.value("readonly_paths", json::array()));
+    const json writable_paths = merge_path_arrays(default_linux_writable_paths(cwd, temp_dir), request.policy.value("writable_paths", json::array()));
+
+    json linux = json{
+        {"requested", json{
+            {"filesystem_isolation", fs_mode},
+            {"network_isolation", net_mode},
+            {"readonly_paths", readonly_paths},
+            {"writable_paths", writable_paths}
+        }},
+        {"capabilities", probe_snapshot.value("capabilities", json::object())},
+        {"filesystem_isolation", json{
+            {"mode", fs_mode},
+            {"status", fs_mode == "off" ? "off" : "not_enabled"}
+        }},
+        {"network_isolation", json{
+            {"mode", net_mode},
+            {"status", net_mode == "off" ? "off" : "not_enabled"}
+        }}
+    };
+
+    const bool actual_linux =
+#if defined(__linux__)
+        true;
+#else
+        false;
+#endif
+
+    if (fs_mode != "off") {
+        if (!actual_linux || !capability_available(probe_snapshot, "landlock")) {
+            linux["filesystem_isolation"]["status"] = "unsupported";
+            linux["filesystem_isolation"]["detail"] = capability_detail(probe_snapshot, "landlock");
+            if (fs_mode == "required") {
+                if (err_out != nullptr) {
+                    *err_out = make_error_json(
+                        "E_SANDBOX_FILESYSTEM_UNSUPPORTED",
+                        "linux filesystem isolation is not available",
+                        linux["filesystem_isolation"]["detail"]
+                    );
+                }
+                return json::object();
+            }
+        } else {
+            linux["filesystem_isolation"]["status"] = "enabled";
+        }
+    }
+
+    if (net_mode != "off") {
+        if (!actual_linux || !capability_available(probe_snapshot, "network_namespace")) {
+            linux["network_isolation"]["status"] = "unsupported";
+            linux["network_isolation"]["detail"] = capability_detail(probe_snapshot, "network_namespace");
+            if (net_mode == "required") {
+                if (err_out != nullptr) {
+                    *err_out = make_error_json(
+                        "E_SANDBOX_NETWORK_UNSUPPORTED",
+                        "linux network isolation is not available",
+                        linux["network_isolation"]["detail"]
+                    );
+                }
+                return json::object();
+            }
+        } else {
+            linux["network_isolation"]["status"] = "enabled";
+        }
+    }
+
+    return linux;
+}
+
+#if defined(__linux__)
+std::uint64_t landlock_readonly_access_mask() {
+    std::uint64_t mask = 0;
+#if defined(LANDLOCK_ACCESS_FS_EXECUTE)
+    mask |= LANDLOCK_ACCESS_FS_EXECUTE;
+#endif
+#if defined(LANDLOCK_ACCESS_FS_READ_FILE)
+    mask |= LANDLOCK_ACCESS_FS_READ_FILE;
+#endif
+#if defined(LANDLOCK_ACCESS_FS_READ_DIR)
+    mask |= LANDLOCK_ACCESS_FS_READ_DIR;
+#endif
+    return mask;
+}
+
+std::uint64_t landlock_writable_access_mask() {
+    std::uint64_t mask = landlock_readonly_access_mask();
+#if defined(LANDLOCK_ACCESS_FS_WRITE_FILE)
+    mask |= LANDLOCK_ACCESS_FS_WRITE_FILE;
+#endif
+#if defined(LANDLOCK_ACCESS_FS_REMOVE_DIR)
+    mask |= LANDLOCK_ACCESS_FS_REMOVE_DIR;
+#endif
+#if defined(LANDLOCK_ACCESS_FS_REMOVE_FILE)
+    mask |= LANDLOCK_ACCESS_FS_REMOVE_FILE;
+#endif
+#if defined(LANDLOCK_ACCESS_FS_MAKE_CHAR)
+    mask |= LANDLOCK_ACCESS_FS_MAKE_CHAR;
+#endif
+#if defined(LANDLOCK_ACCESS_FS_MAKE_DIR)
+    mask |= LANDLOCK_ACCESS_FS_MAKE_DIR;
+#endif
+#if defined(LANDLOCK_ACCESS_FS_MAKE_REG)
+    mask |= LANDLOCK_ACCESS_FS_MAKE_REG;
+#endif
+#if defined(LANDLOCK_ACCESS_FS_MAKE_SOCK)
+    mask |= LANDLOCK_ACCESS_FS_MAKE_SOCK;
+#endif
+#if defined(LANDLOCK_ACCESS_FS_MAKE_FIFO)
+    mask |= LANDLOCK_ACCESS_FS_MAKE_FIFO;
+#endif
+#if defined(LANDLOCK_ACCESS_FS_MAKE_BLOCK)
+    mask |= LANDLOCK_ACCESS_FS_MAKE_BLOCK;
+#endif
+#if defined(LANDLOCK_ACCESS_FS_MAKE_SYM)
+    mask |= LANDLOCK_ACCESS_FS_MAKE_SYM;
+#endif
+#if defined(LANDLOCK_ACCESS_FS_REFER)
+    mask |= LANDLOCK_ACCESS_FS_REFER;
+#endif
+#if defined(LANDLOCK_ACCESS_FS_TRUNCATE)
+    mask |= LANDLOCK_ACCESS_FS_TRUNCATE;
+#endif
+    return mask;
+}
+
+bool add_landlock_rule(int ruleset_fd, const fs::path &path, std::uint64_t access_mask) {
+#if defined(__NR_landlock_add_rule) && defined(LANDLOCK_RULE_PATH_BENEATH)
+    const int path_fd = open(path.c_str(), O_PATH | O_CLOEXEC);
+    if (path_fd < 0) {
+        return false;
+    }
+    struct landlock_path_beneath_attr rule {
+        .allowed_access = access_mask,
+        .parent_fd = path_fd
+    };
+    const long result = syscall(__NR_landlock_add_rule, ruleset_fd, LANDLOCK_RULE_PATH_BENEATH, &rule, 0);
+    close(path_fd);
+    return result == 0;
+#else
+    (void)ruleset_fd;
+    (void)path;
+    (void)access_mask;
+    return false;
+#endif
+}
+
+bool apply_landlock_profile_in_child(const json &linux_profile) {
+#if defined(__NR_landlock_create_ruleset) && defined(__NR_landlock_restrict_self)
+    struct landlock_ruleset_attr ruleset_attr {
+        .handled_access_fs = landlock_writable_access_mask()
+    };
+    const int ruleset_fd = static_cast<int>(
+        syscall(__NR_landlock_create_ruleset, &ruleset_attr, sizeof(ruleset_attr), 0)
+    );
+    if (ruleset_fd < 0) {
+        return false;
+    }
+
+    const json readonly_paths = linux_profile.at("requested").value("readonly_paths", json::array());
+    const json writable_paths = linux_profile.at("requested").value("writable_paths", json::array());
+    for (const auto &entry : readonly_paths) {
+        if (!entry.is_string() || !add_landlock_rule(ruleset_fd, fs::path(entry.get<std::string>()), landlock_readonly_access_mask())) {
+            close(ruleset_fd);
+            return false;
+        }
+    }
+    for (const auto &entry : writable_paths) {
+        if (!entry.is_string() || !add_landlock_rule(ruleset_fd, fs::path(entry.get<std::string>()), landlock_writable_access_mask())) {
+            close(ruleset_fd);
+            return false;
+        }
+    }
+
+    if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) {
+        close(ruleset_fd);
+        return false;
+    }
+    const long restrict_result = syscall(__NR_landlock_restrict_self, ruleset_fd, 0);
+    close(ruleset_fd);
+    return restrict_result == 0;
+#else
+    (void)linux_profile;
+    return false;
+#endif
+}
+
+bool apply_network_namespace_in_child() {
+#if defined(CLONE_NEWNET)
+    return unshare(CLONE_NEWNET) == 0;
+#else
+    return false;
+#endif
+}
+#endif
+
 bool is_known_network_command(const std::string &command_token) {
     return command_token == "curl" ||
         command_token == "wget" ||
@@ -383,6 +701,25 @@ ToolExecutionResult run_process_in_temp_dir(
         json{{"kind", "execution_id"}, {"value", request.execution_id}}
     });
 
+    json linux_err;
+    const json linux_profile = build_linux_sandbox_profile(request, cwd, temp_dir, &linux_err);
+    if (!linux_err.is_null()) {
+        return make_execution_result(
+            "blocked",
+            json{
+                {"cwd", cwd.string()},
+                {"sandbox", json{
+                    {"timeout_ms", request.policy.value("timeout_ms", 0)},
+                    {"network_access", request.policy.value("network_access", false)},
+                    {"linux", json{{"status", "blocked"}}}
+                }}
+            },
+            linux_err,
+            evidence,
+            "retry_or_manual_takeover"
+        );
+    }
+
     json result = result_metadata;
     result["cwd"] = cwd.string();
     result["sandbox"] = json{
@@ -392,7 +729,8 @@ ToolExecutionResult run_process_in_temp_dir(
         {"memory_limit", request.policy.value("memory_limit", nullptr)},
         {"unsupported_limits", json::array()},
         {"interrupted", false},
-        {"timed_out", false}
+        {"timed_out", false},
+        {"linux", linux_profile}
     };
 
     if (!request.policy.value("cpu_limit", json(nullptr)).is_null()) {
@@ -458,6 +796,16 @@ ToolExecutionResult run_process_in_temp_dir(
         close(stderr_pipe[1]);
         (void)chdir(cwd.c_str());
         apply_posix_resource_limits_in_child(request);
+#if defined(__linux__)
+        const std::string fs_status = get_string_or(linux_profile.at("filesystem_isolation"), "status");
+        const std::string net_status = get_string_or(linux_profile.at("network_isolation"), "status");
+        if (fs_status == "enabled" && !apply_landlock_profile_in_child(linux_profile)) {
+            _exit(126);
+        }
+        if (net_status == "enabled" && !apply_network_namespace_in_child()) {
+            _exit(125);
+        }
+#endif
         execl("/bin/sh", "sh", "-c", runner_command.c_str(), static_cast<char *>(nullptr));
         _exit(127);
     }
@@ -597,7 +945,15 @@ ToolExecutionResult run_process_in_temp_dir(
 
     std::string status = "success";
     json error = nullptr;
-    if (interrupted) {
+    if (exit_code == 126 && get_string_or(linux_profile.at("filesystem_isolation"), "status") == "enabled") {
+        status = "failed";
+        result["sandbox"]["linux"]["filesystem_isolation"]["runtime_status"] = "setup_failed";
+        error = make_error_json("E_SANDBOX_FILESYSTEM_SETUP", "linux filesystem isolation setup failed");
+    } else if (exit_code == 125 && get_string_or(linux_profile.at("network_isolation"), "status") == "enabled") {
+        status = "failed";
+        result["sandbox"]["linux"]["network_isolation"]["runtime_status"] = "setup_failed";
+        error = make_error_json("E_SANDBOX_NETWORK_SETUP", "linux network isolation setup failed");
+    } else if (interrupted) {
         status = "interrupted";
         error = make_error_json("E_SANDBOX_INTERRUPTED", "sandbox execution was interrupted", json{{"execution_id", request.execution_id}});
         evidence.push_back(json{{"kind", "interrupt"}, {"status", "requested"}});
@@ -608,6 +964,14 @@ ToolExecutionResult run_process_in_temp_dir(
     } else if (exit_code != 0) {
         status = "failed";
         error = make_error_json("E_EXECUTION_FAILED", "executor returned non-zero exit code", json{{"exit_code", exit_code}});
+    }
+
+    if (linux_profile.is_object()) {
+        evidence.push_back(json{
+            {"kind", "linux_sandbox"},
+            {"filesystem_isolation", linux_profile.value("filesystem_isolation", json::object())},
+            {"network_isolation", linux_profile.value("network_isolation", json::object())}
+        });
     }
 
     return make_execution_result(status, result, error, evidence, default_handoff(status));
