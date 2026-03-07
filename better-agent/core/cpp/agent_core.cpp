@@ -7,6 +7,44 @@ namespace {
 using json = nlohmann::json;
 namespace core_internal = better_agent::core_internal;
 
+bool parse_json_object_arg(const char *json_text, const char *field_name, json *out, json *err_out) {
+    *out = json::object();
+    *err_out = nullptr;
+
+    if (json_text == nullptr) {
+        return true;
+    }
+
+    try {
+        const json parsed = json::parse(json_text);
+        if (!parsed.is_object()) {
+            *err_out = core_internal::make_error_json(
+                "E_PARSE",
+                std::string(field_name) + " must be a JSON object"
+            );
+            return false;
+        }
+        *out = parsed;
+        return true;
+    } catch (const std::exception &e) {
+        *err_out = core_internal::make_error_json(
+            "E_PARSE",
+            std::string("invalid ") + field_name,
+            e.what()
+        );
+        return false;
+    }
+}
+
+const char *fail_memory_api(const json &err) {
+    core_internal::g_last_error = err.dump();
+    core_internal::g_last_output = json{
+        {"status", "failed"},
+        {"error", err}
+    }.dump();
+    return core_internal::g_last_output.c_str();
+}
+
 } // namespace
 
 int agent_core_init(void) {
@@ -15,6 +53,10 @@ int agent_core_init(void) {
     core_internal::g_executions.clear();
     core_internal::g_idempotency_to_execution.clear();
     core_internal::g_idempotency_signature.clear();
+    {
+        std::lock_guard<std::mutex> memory_lk(core_internal::g_memory_mu);
+        core_internal::reset_memory_state_locked();
+    }
     return 0;
 }
 
@@ -24,10 +66,14 @@ void agent_core_shutdown(void) {
     core_internal::g_executions.clear();
     core_internal::g_idempotency_to_execution.clear();
     core_internal::g_idempotency_signature.clear();
+    {
+        std::lock_guard<std::mutex> memory_lk(core_internal::g_memory_mu);
+        core_internal::reset_memory_state_locked();
+    }
 }
 
 const char *agent_core_version(void) {
-    return "0.2.0";
+    return "0.3.0";
 }
 
 int agent_core_register_tool(const char *tool_definition_json) {
@@ -301,4 +347,113 @@ const char *agent_core_normalize_runtime_event(const char *raw_event_json) {
 
 const char *agent_core_last_error(void) {
     return core_internal::g_last_error.c_str();
+}
+
+const char *agent_core_memory_configure(const char *config_json) {
+    core_internal::g_last_error.clear();
+    core_internal::g_last_output.clear();
+
+    json config;
+    json parse_err;
+    if (!parse_json_object_arg(config_json, "config_json", &config, &parse_err)) {
+        return fail_memory_api(parse_err);
+    }
+
+    std::lock_guard<std::mutex> lk(core_internal::g_memory_mu);
+    json err;
+    const json out = core_internal::configure_memory_locked(config, &err);
+    if (!err.is_null()) {
+        return fail_memory_api(err);
+    }
+    core_internal::g_last_output = out.dump();
+    return core_internal::g_last_output.c_str();
+}
+
+const char *agent_core_memory_ingest(const char *memory_input_json) {
+    core_internal::g_last_error.clear();
+    core_internal::g_last_output.clear();
+
+    if (memory_input_json == nullptr) {
+        return fail_memory_api(core_internal::make_error_json(
+            "E_INPUT",
+            "memory_input_json is null"
+        ));
+    }
+
+    json input;
+    json parse_err;
+    if (!parse_json_object_arg(memory_input_json, "memory_input_json", &input, &parse_err)) {
+        return fail_memory_api(parse_err);
+    }
+
+    std::lock_guard<std::mutex> lk(core_internal::g_memory_mu);
+    json err;
+    const json out = core_internal::ingest_memory_locked(input, &err);
+    if (!err.is_null()) {
+        return fail_memory_api(err);
+    }
+    core_internal::g_last_output = out.dump();
+    return core_internal::g_last_output.c_str();
+}
+
+const char *agent_core_memory_query(const char *query_json) {
+    core_internal::g_last_error.clear();
+    core_internal::g_last_output.clear();
+
+    if (query_json == nullptr) {
+        return fail_memory_api(core_internal::make_error_json(
+            "E_INPUT",
+            "query_json is null"
+        ));
+    }
+
+    json query;
+    json parse_err;
+    if (!parse_json_object_arg(query_json, "query_json", &query, &parse_err)) {
+        return fail_memory_api(parse_err);
+    }
+
+    std::lock_guard<std::mutex> lk(core_internal::g_memory_mu);
+    json err;
+    const json out = core_internal::query_memory_locked(query, &err);
+    if (!err.is_null()) {
+        return fail_memory_api(err);
+    }
+    core_internal::g_last_output = out.dump();
+    return core_internal::g_last_output.c_str();
+}
+
+const char *agent_core_memory_get(const char *memory_id) {
+    core_internal::g_last_error.clear();
+    core_internal::g_last_output.clear();
+
+    if (memory_id == nullptr) {
+        return fail_memory_api(core_internal::make_error_json(
+            "E_INPUT",
+            "memory_id is null"
+        ));
+    }
+
+    std::lock_guard<std::mutex> lk(core_internal::g_memory_mu);
+    json err;
+    const json out = core_internal::get_memory_locked(memory_id, &err);
+    if (!err.is_null()) {
+        return fail_memory_api(err);
+    }
+    core_internal::g_last_output = out.dump();
+    return core_internal::g_last_output.c_str();
+}
+
+const char *agent_core_memory_reset(void) {
+    core_internal::g_last_error.clear();
+    core_internal::g_last_output.clear();
+
+    std::lock_guard<std::mutex> lk(core_internal::g_memory_mu);
+    json err;
+    const json out = core_internal::reset_memory_store_locked(&err);
+    if (!err.is_null()) {
+        return fail_memory_api(err);
+    }
+    core_internal::g_last_output = out.dump();
+    return core_internal::g_last_output.c_str();
 }

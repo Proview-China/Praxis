@@ -2,6 +2,7 @@
 #define BETTER_AGENT_CORE_INTERNAL_HPP
 
 #include <atomic>
+#include <cstddef>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -104,14 +105,55 @@ struct RuntimeEventRecord {
     std::string timestamp;
 };
 
+struct MemoryConfig {
+    std::string store_path;
+    std::size_t max_injection_entries = 5;
+    std::size_t max_injection_chars = 2000;
+};
+
+struct MemoryEntry {
+    std::string memory_id;
+    std::string topic;
+    std::string kind = "conclusion";
+    std::string layer = "task";
+    json scope = json::object();
+    std::string summary;
+    json evidence = json::array();
+    double confidence = 0.5;
+    std::string created_at;
+    std::string updated_at;
+    std::string expires_at;
+    std::string status = "active";
+    std::vector<std::string> supersedes;
+    std::vector<std::string> conflicts_with;
+    json source = json::object();
+};
+
+struct MemoryQuery {
+    std::string intent;
+    std::string topic;
+    std::vector<std::string> layers;
+    json scope = json::object();
+    bool include_expired = false;
+    bool include_conflicted = false;
+    bool include_superseded = false;
+    std::size_t max_entries = 0;
+    std::size_t max_chars = 0;
+};
+
 extern std::atomic<unsigned long long> g_seq;
 extern thread_local std::string g_last_error;
 extern thread_local std::string g_last_output;
 extern std::mutex g_tools_mu;
+extern std::mutex g_memory_mu;
 extern std::unordered_map<std::string, ToolRegistration> g_tools;
 extern std::unordered_map<std::string, ExecutionRecord> g_executions;
 extern std::unordered_map<std::string, std::string> g_idempotency_to_execution;
 extern std::unordered_map<std::string, std::string> g_idempotency_signature;
+extern MemoryConfig g_memory_config;
+extern std::unordered_map<std::string, MemoryEntry> g_memory_entries;
+extern std::vector<std::string> g_memory_order;
+extern bool g_memory_loaded;
 
 std::string now_iso8601_utc();
 std::string next_id(const std::string &prefix);
@@ -213,6 +255,25 @@ RuntimeEventRecord normalize_codex(const json &raw);
 RuntimeEventRecord normalize_claude(const json &raw);
 RuntimeEventRecord normalize_unknown(const json &raw);
 RuntimeEventRecord normalize_runtime_event(const json &raw);
+
+json make_error_json(
+    const std::string &error_code,
+    const std::string &message,
+    const json &detail = nullptr
+);
+
+void reset_memory_state_locked();
+json serialize_memory_config(const MemoryConfig &config);
+json serialize_memory_entry(const MemoryEntry &entry);
+MemoryEntry deserialize_memory_entry(const json &obj);
+json serialize_memory_store_snapshot_locked();
+bool ensure_memory_store_loaded_locked(json *err_out);
+bool persist_memory_store_locked(json *err_out);
+json configure_memory_locked(const json &config_json, json *err_out);
+json ingest_memory_locked(const json &input_json, json *err_out);
+json query_memory_locked(const json &query_json, json *err_out);
+json get_memory_locked(const std::string &memory_id, json *err_out);
+json reset_memory_store_locked(json *err_out);
 
 } // namespace better_agent::core_internal
 

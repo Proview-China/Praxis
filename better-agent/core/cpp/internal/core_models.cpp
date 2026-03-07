@@ -180,6 +180,21 @@ std::string default_handoff(const std::string &status) {
     return "continue";
 }
 
+json make_error_json(
+    const std::string &error_code,
+    const std::string &message,
+    const json &detail
+) {
+    json err{
+        {"error_code", error_code},
+        {"message", message}
+    };
+    if (!detail.is_null()) {
+        err["detail"] = detail;
+    }
+    return err;
+}
+
 bool is_supported_tool_kind(const std::string &tool_kind) {
     return tool_kind == "function" ||
         tool_kind == "web" ||

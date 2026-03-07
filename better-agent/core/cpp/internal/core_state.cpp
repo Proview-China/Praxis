@@ -11,10 +11,15 @@ std::atomic<unsigned long long> g_seq{1};
 thread_local std::string g_last_error;
 thread_local std::string g_last_output;
 std::mutex g_tools_mu;
+std::mutex g_memory_mu;
 std::unordered_map<std::string, ToolRegistration> g_tools;
 std::unordered_map<std::string, ExecutionRecord> g_executions;
 std::unordered_map<std::string, std::string> g_idempotency_to_execution;
 std::unordered_map<std::string, std::string> g_idempotency_signature;
+MemoryConfig g_memory_config;
+std::unordered_map<std::string, MemoryEntry> g_memory_entries;
+std::vector<std::string> g_memory_order;
+bool g_memory_loaded = false;
 
 std::string now_iso8601_utc() {
     const auto now = std::chrono::system_clock::now();
