@@ -90,42 +90,6 @@ static napi_value RegisterTool(napi_env env, napi_callback_info info) {
     return result;
 }
 
-/* ── agent_core.executeFunctionCall(modelJson, policyJson?) → string ─────── */
-static napi_value ExecuteFunctionCall(napi_env env, napi_callback_info info) {
-    size_t argc = 2;
-    napi_value argv[2];
-    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
-
-    const std::string model = (argc > 0) ? get_string_arg(env, argv[0]) : "";
-    const std::string policy = (argc > 1) ? get_string_arg(env, argv[1]) : "";
-
-    const char *out = agent_core_execute_function_call(
-        model.empty() ? nullptr : model.c_str(),
-        policy.empty() ? nullptr : policy.c_str()
-    );
-    return make_string(env, out);
-}
-
-/* ── agent_core.getExecution(executionId) → string ───────────────────────── */
-static napi_value GetExecution(napi_env env, napi_callback_info info) {
-    size_t argc = 1;
-    napi_value argv[1];
-    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
-    const std::string id = (argc > 0) ? get_string_arg(env, argv[0]) : "";
-    const char *out = agent_core_get_execution(id.empty() ? nullptr : id.c_str());
-    return make_string(env, out);
-}
-
-/* ── agent_core.interruptExecution(executionId) → string ─────────────────── */
-static napi_value InterruptExecution(napi_env env, napi_callback_info info) {
-    size_t argc = 1;
-    napi_value argv[1];
-    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
-    const std::string id = (argc > 0) ? get_string_arg(env, argv[0]) : "";
-    const char *out = agent_core_interrupt_execution(id.empty() ? nullptr : id.c_str());
-    return make_string(env, out);
-}
-
 /* ── agent_core.sandboxProbe(requestJson?) → string ──────────────────────── */
 static napi_value SandboxProbe(napi_env env, napi_callback_info info) {
     size_t argc = 1;
@@ -133,64 +97,6 @@ static napi_value SandboxProbe(napi_env env, napi_callback_info info) {
     napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
     const std::string request = (argc > 0) ? get_string_arg(env, argv[0]) : "";
     const char *out = agent_core_sandbox_probe(request.empty() ? nullptr : request.c_str());
-    return make_string(env, out);
-}
-
-/* ── agent_core.executeOpenAIFunctionCall(modelJson, policyJson?) → string ─ */
-static napi_value ExecuteOpenAIFunctionCall(napi_env env, napi_callback_info info) {
-    size_t argc = 2;
-    napi_value argv[2];
-    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
-
-    const std::string model = (argc > 0) ? get_string_arg(env, argv[0]) : "";
-    const std::string policy = (argc > 1) ? get_string_arg(env, argv[1]) : "";
-    const char *out = agent_core_execute_openai_function_call(
-        model.empty() ? nullptr : model.c_str(),
-        policy.empty() ? nullptr : policy.c_str()
-    );
-    return make_string(env, out);
-}
-
-/* ── agent_core.executeClaudeToolUse(modelJson, policyJson?) → string ────── */
-static napi_value ExecuteClaudeToolUse(napi_env env, napi_callback_info info) {
-    size_t argc = 2;
-    napi_value argv[2];
-    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
-
-    const std::string model = (argc > 0) ? get_string_arg(env, argv[0]) : "";
-    const std::string policy = (argc > 1) ? get_string_arg(env, argv[1]) : "";
-    const char *out = agent_core_execute_claude_tool_use(
-        model.empty() ? nullptr : model.c_str(),
-        policy.empty() ? nullptr : policy.c_str()
-    );
-    return make_string(env, out);
-}
-
-/* ── agent_core.buildOpenAIFunctionCallOutput(execId, callId?) → string ──── */
-static napi_value BuildOpenAIFunctionCallOutput(napi_env env, napi_callback_info info) {
-    size_t argc = 2;
-    napi_value argv[2];
-    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
-    const std::string exec_id = (argc > 0) ? get_string_arg(env, argv[0]) : "";
-    const std::string call_id = (argc > 1) ? get_string_arg(env, argv[1]) : "";
-    const char *out = agent_core_build_openai_function_call_output(
-        exec_id.empty() ? nullptr : exec_id.c_str(),
-        call_id.empty() ? nullptr : call_id.c_str()
-    );
-    return make_string(env, out);
-}
-
-/* ── agent_core.buildClaudeToolResult(execId, toolUseId?) → string ───────── */
-static napi_value BuildClaudeToolResult(napi_env env, napi_callback_info info) {
-    size_t argc = 2;
-    napi_value argv[2];
-    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
-    const std::string exec_id = (argc > 0) ? get_string_arg(env, argv[0]) : "";
-    const std::string tool_use_id = (argc > 1) ? get_string_arg(env, argv[1]) : "";
-    const char *out = agent_core_build_claude_tool_result(
-        exec_id.empty() ? nullptr : exec_id.c_str(),
-        tool_use_id.empty() ? nullptr : tool_use_id.c_str()
-    );
     return make_string(env, out);
 }
 
@@ -302,14 +208,7 @@ static napi_value ModuleInit(napi_env env, napi_value exports) {
         {"version",  nullptr, Version,  nullptr, nullptr, nullptr, napi_default, nullptr},
         {"normalizeRuntimeEvent", nullptr, NormalizeRuntimeEvent, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"registerTool", nullptr, RegisterTool, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"executeFunctionCall", nullptr, ExecuteFunctionCall, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"getExecution", nullptr, GetExecution, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"interruptExecution", nullptr, InterruptExecution, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"sandboxProbe", nullptr, SandboxProbe, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"executeOpenAIFunctionCall", nullptr, ExecuteOpenAIFunctionCall, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"executeClaudeToolUse", nullptr, ExecuteClaudeToolUse, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"buildOpenAIFunctionCallOutput", nullptr, BuildOpenAIFunctionCallOutput, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"buildClaudeToolResult", nullptr, BuildClaudeToolResult, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"memoryConfigure", nullptr, MemoryConfigure, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"memoryIngest", nullptr, MemoryIngest, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"memoryQuery", nullptr, MemoryQuery, nullptr, nullptr, nullptr, napi_default, nullptr},

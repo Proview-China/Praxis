@@ -54,12 +54,30 @@
 - 已新增 GPT 基础能力预设构造，可由上层直接获取包含 4+4 能力的基础工具集合与运行时能力说明。
 - 已新增 `after_tool_use` hook payload 构造与 skills section 渲染输出，供上层中间件直接消费。
 - OpenAI function call output payload 的构造也已下沉到 Rust，GPT 路径进一步脱离旧 C++ 主实现。
-- provider wrapper 所需的 OpenAI/Claude payload 构造已继续下沉到 Rust，C++ 进一步收缩为外观层与桥接层。
-- 本阶段仍保留 C++ 作为统一中间件/外观层，Rust 负责 GPT 系列 infra 内核。
+- 与 GPT/Codex 路线直接相关的 payload / wrapper 构造已继续下沉到 Rust，C++ 进一步收缩为外观层与桥接层；Claude 后续单独规划，不作为本阶段 Rust 内核目标。
+- `core_provider.cpp` 中旧的 provider payload/helper 实现已退场，相关逻辑转由 Rust + bridge 承接。
+- `tool registration` 解析也已切到 Rust，`core_registry.cpp` 中最重的 GPT 路径解析逻辑开始退场。
+- `function/custom/tool_use` payload 归一化也已切到 Rust-first，C++ 侧继续退化为外观层和数据映射层。
+- 参数 schema 校验与 allow/deny 策略校验也已切到 Rust-first，`core_registry.cpp` 的 GPT 校验路径继续收缩。
+- `build_tool_execution_request` 与 `build_execution_record` 也已切到 Rust-first，旧 C++ 请求/记录组装路径已退场。
+- mock result 解析与 mock tool 执行结果构造也已切到 Rust-first，旧 C++ 简单执行路径已退场。
+- 旧的 `tool kind/schema/policy` 辅助函数已从 `core_models.cpp` 清理，GPT 路线对应能力改由 Rust-first 实现承接。
+- `PolicyView` 构造也已切到 Rust-first，`core_models.cpp` 进一步收缩为序列化/反序列化与基础错误模型层。
+- executor target 解析与 builtin/native executor 错误结果构造也已切到 Rust-first，旧 C++ 执行链外围逻辑已退场。
+- `runtime normalization` 主路径已切到 Rust-first，`agent_core_normalize_runtime_event` 现在优先使用 Rust 产物。
+- 旧 `core_runtime.cpp` 已退场，runtime normalization 的 C++ 实现不再作为主路径保留。
+- `model_output_json` 解析也已切到 Rust-first，`core_models.cpp` 的 GPT 路线解析职责进一步收缩。
+- 旧的 GPT/Codex runtime status/tool-kind 辅助函数已从 `core_models.cpp` 清理，相关语义由 Rust-first runtime normalization 承接。
+- `prepare_function_call_request` 已切到 Rust-first，相关旧桥接辅助也已清理。
+- 本阶段仍保留 C++ 作为统一中间件/外观层，Rust 负责 GPT 系列、尤其 Codex 系列模型的 infra 内核；Claude 路线后续单列。
+- 为避免继续越界到“替上层写 agent”，旧 C++ hook lifecycle 与 idempotency replay 主链已从当前 GPT 执行主路径退场。
+- 为避免继续越界到“替上层写 agent”，旧的 `agent_core_execute_*`、execution record 读取/中断、provider wrapper 公开执行接口已从当前公开 surface 退场。
+- 当前公开保留重点是：八相能力工具定义、请求构造、runtime normalization、hook payload、skills 渲染，以及必要的 C ABI / Node facade。
+- `core_execution.cpp` 已从当前主构建链退场，仓库主线不再保留那套项目内执行编排实现。
 
 `Function Calling / Custom Tools`
 - 输入：工具清单（名称、描述、参数 schema、调用约束）。
-- 执行：模型给出调用意图；运行时做参数校验、权限校验、幂等控制后执行。
+- 执行：模型给出调用意图；运行时做参数校验、权限校验后执行。
 - 输出：返回工具结果 + 执行证据；失败时返回可诊断错误而非模糊文本。
 - 设计重点：模型只“决策与组参”，执行权必须在 infra。
 
@@ -117,6 +135,7 @@
 - 扩展四类（shell/hooks/skills/mcp）至少完成一条可复现接入路径验证。
 - 每类至少有一个可重复通过的最小用例。
 - 任一执行失败都能给出可定位的证据与错误码。
+- 当前阶段验收聚焦 infra 原语与 facade，不再把“项目内执行编排主链”当作 M0 必选产物。
 
 ### 6) Connectors and App Gateways (Boundary Brief)
 

@@ -14,7 +14,6 @@ const required = [
   "memoryQuery",
   "memoryGet",
   "memoryReset",
-  "interruptExecution",
   "sandboxProbe",
   "buildGptResponsesRequest",
   "buildGptToolset",

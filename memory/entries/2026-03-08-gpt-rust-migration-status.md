@@ -41,8 +41,9 @@
 
 当前策略：
 
-- Rust 负责 GPT infra 内核
+- Rust 负责 GPT infra 内核，尤其面向 Codex 系列模型
 - C++ 只负责桥接、封装、统一 JSON/C ABI 暴露
+- Claude 路线后续单独规划，不纳入本阶段 Rust 内核边界
 
 ### 4. 已验证能力
 
@@ -71,11 +72,25 @@
 - `agent_core_render_skills_section`
 - `agent_core_rust_runtime_version`
 
-Rust 已接管的 GPT/OpenAI provider 相关内容新增包括：
+Rust 已接管的 GPT/Codex 路线相关内容新增包括：
 
 - OpenAI execution context → request payload 构造
 - OpenAI `function_call_output` payload 构造
-- provider wrapper 所需的 OpenAI/Claude payload 构造
+- 与 GPT/Codex 路线直接相关的 payload / wrapper 构造
+- 原 `core_provider.cpp` 中旧 helper/payload 实现已删除
+- `tool registration` 解析已切换为 Rust-first，旧 `core_registry.cpp` 解析逻辑已开始退场
+- `function/custom/tool_use` payload 归一化已切换为 Rust-first
+- 参数 schema 校验与 allow/deny 策略校验已切换为 Rust-first
+- `build_tool_execution_request` 与 `build_execution_record` 已切换为 Rust-first
+- mock result 解析与 mock tool 执行结果构造已切换为 Rust-first
+- `core_models.cpp` 中旧的 GPT 路线 `tool kind/schema/policy` 辅助函数已清理
+- `PolicyView` 构造已切换为 Rust-first
+- executor target 解析与 builtin/native executor 错误结果构造已切换为 Rust-first
+- `agent_core_normalize_runtime_event` 已切换为 Rust-first
+- 旧 `core_runtime.cpp` 已删除
+- `model_output_json` 解析已切换为 Rust-first
+- 旧的 GPT/Codex runtime status/tool-kind 辅助函数已从 `core_models.cpp` 清理
+- `prepare_function_call_request` 已切换为 Rust-first
 
 Node binding 已同步暴露：
 
@@ -85,6 +100,16 @@ Node binding 已同步暴露：
 - `buildAfterToolUseHookPayload`
 - `renderSkillsSection`
 - `rustRuntimeVersion`
+
+本轮额外清理结论：
+
+- 旧 C++ hook lifecycle 执行链已删除
+- 旧 C++ idempotency replay/conflict 主链已删除
+- Rust 侧对应的 idempotency module / FFI 已删除
+- 旧的 `agent_core_execute_*`、execution record 读取/中断、provider wrapper 公开执行接口已从当前公开 surface 退场
+- Node addon 也已同步移除对应公开方法
+- 当前保留的公开接口聚焦于八相能力定义/构造与最小 facade，不再继续把项目往“替上层写 agent 主链”方向推
+- `core_execution.cpp` 已从当前主构建链退场，历史执行编排实现已整体丢入 git 历史
 
 ### 6. `gmn` 上游八项能力全量测试（2026-03-08）
 
@@ -128,7 +153,7 @@ Node binding 已同步暴露：
 
 后续迁移遵循以下原则：
 
-1. GPT 系列 infra 内核以 Rust 为唯一真相来源
+1. GPT 系列、尤其 Codex 系列模型的 infra 内核以 Rust 为唯一真相来源
 2. C++ 保留为官方中间件/外观层，不直接承担 GPT 内核主实现
 3. 旧 C++ 重叠实现逐步丢入 git 历史，不长期双轨维护
 4. 迁移过程中必须持续做项目内测试与上游联调
@@ -137,7 +162,7 @@ Node binding 已同步暴露：
 
 优先继续处理：
 
-1. 清理旧 C++ 中 GPT `function/web/shell` 重叠路径
-2. 将 `Code Execution` 迁入 Rust 运行时
-3. 将 `Computer Use` 按 Codex 风格运行时能力迁入 Rust
+1. 将 `Code Execution` 迁入 Rust 运行时
+2. 将 `Computer Use` 按 Codex 风格运行时能力迁入 Rust
+3. 将 `Hooks / Skills / MCP` 从定义层继续推进到 Rust 执行 primitive 层
 4. 继续同步更新 `docs/ability/01-basic-implementation.md`

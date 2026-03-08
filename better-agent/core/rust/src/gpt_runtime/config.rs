@@ -2,10 +2,12 @@ use serde::Deserialize;
 use serde_json::Value;
 
 #[derive(Debug, Deserialize, Clone, Copy)]
-#[serde(rename_all = "snake_case")]
 pub enum AbilityPreset {
+    #[serde(rename = "core4", alias = "core_4")]
     Core4,
+    #[serde(rename = "ext4", alias = "ext_4")]
     Ext4,
+    #[serde(rename = "all8", alias = "all_8")]
     All8,
 }
 

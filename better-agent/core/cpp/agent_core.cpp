@@ -1,5 +1,4 @@
 #include "agent_core.h"
-#include "tool_call_sdk_bridge.hpp"
 #include "internal/agent_core_internal.hpp"
 #include "internal/core_rust_bridge.hpp"
 
@@ -85,8 +84,6 @@ int agent_core_init(void) {
     std::scoped_lock lk(core_internal::g_tools_mu, core_internal::g_memory_mu);
     core_internal::g_tools.clear();
     core_internal::g_executions.clear();
-    core_internal::g_idempotency_to_execution.clear();
-    core_internal::g_idempotency_signature.clear();
     {
         std::lock_guard<std::mutex> sandbox_lk(core_internal::g_sandbox_mu);
         core_internal::g_sandbox_capability_cache = json::object();
@@ -100,8 +97,6 @@ void agent_core_shutdown(void) {
     std::scoped_lock lk(core_internal::g_tools_mu, core_internal::g_memory_mu);
     core_internal::g_tools.clear();
     core_internal::g_executions.clear();
-    core_internal::g_idempotency_to_execution.clear();
-    core_internal::g_idempotency_signature.clear();
     {
         std::lock_guard<std::mutex> sandbox_lk(core_internal::g_sandbox_mu);
         core_internal::g_sandbox_capability_cache = json::object();
@@ -140,203 +135,6 @@ int agent_core_register_tool(const char *tool_definition_json) {
     }
 }
 
-const char *agent_core_execute_function_call(const char *model_output_json, const char *policy_json) {
-    core_internal::g_last_error.clear();
-    core_internal::g_last_output.clear();
-
-    if (model_output_json == nullptr) {
-        core_internal::g_last_output = json{
-            {"status", "failed"},
-            {"error", json{{"error_code", "E_INPUT"}, {"message", "model_output_json is null"}}}
-        }.dump();
-        return core_internal::g_last_output.c_str();
-    }
-
-    try {
-        core_internal::PolicyView policy;
-        core_internal::NormalizedCall normalized;
-        if (!core_internal::prepare_function_call_request(model_output_json, policy_json, &policy, &normalized)) {
-            return core_internal::g_last_output.c_str();
-        }
-
-        core_internal::execute_prepared_function_call_locked(policy, normalized);
-        return core_internal::g_last_output.c_str();
-    } catch (const std::exception &e) {
-        core_internal::fail_function_call(json{
-            {"error_code", "E_PARSE"},
-            {"message", "invalid model_output_json"},
-            {"detail", e.what()}
-        });
-        return core_internal::g_last_output.c_str();
-    }
-}
-
-const char *agent_core_execute_openai_function_call(const char *openai_function_call_json, const char *policy_json) {
-    const char *record_str = agent_core_execute_function_call(openai_function_call_json, policy_json);
-    try {
-        const json record_json = json::parse(record_str == nullptr ? "{}" : record_str);
-        const json policy = core_internal::parse_optional_object_json(policy_json);
-        const std::string tool_name = core_internal::extract_tool_name_from_record(record_json);
-        std::string tool_description;
-        json tool_parameters = json::object();
-        json tool_constraints = json::object();
-        core_internal::load_registered_tool_metadata(
-            tool_name,
-            &tool_description,
-            &tool_parameters,
-            &tool_constraints
-        );
-
-        json bridge_err;
-        const json bridge = core_internal::build_openai_bridge_outputs_via_rust(
-            json{
-                {"record", record_json},
-                {"tool_description", tool_description},
-                {"tool_parameters", tool_parameters},
-                {"tool_constraints", tool_constraints},
-                {"policy", policy}
-            },
-            &bridge_err
-        );
-        if (!bridge_err.is_null()) {
-            return fail_memory_api(bridge_err);
-        }
-
-        const json sdk_bundle = better_agent::sdk_bridge::build_openai_bundle_from_request(
-            bridge.at("request"),
-            policy
-        );
-
-        json wrapper_err;
-        json out = core_internal::build_provider_execution_wrapper_via_rust(
-            json{
-                {"record", record_json},
-                {"provider_payload", bridge.at("provider_payload")},
-                {"sdk_bundle", sdk_bundle}
-            },
-            &wrapper_err
-        );
-        if (!wrapper_err.is_null()) {
-            return fail_memory_api(wrapper_err);
-        }
-        core_internal::g_last_output = out.dump();
-        return core_internal::g_last_output.c_str();
-    } catch (...) {
-        return record_str;
-    }
-}
-
-const char *agent_core_execute_claude_tool_use(const char *claude_tool_use_json, const char *policy_json) {
-    const char *record_str = agent_core_execute_function_call(claude_tool_use_json, policy_json);
-    try {
-        const json record_json = json::parse(record_str == nullptr ? "{}" : record_str);
-        const core_internal::ExecutionRecord record = core_internal::deserialize_execution_record(record_json);
-        const json policy = core_internal::parse_optional_object_json(policy_json);
-        const std::string tool_name = core_internal::extract_tool_name_from_record(record);
-
-        std::string tool_description;
-        json tool_parameters = json::object();
-        json tool_constraints = json::object();
-        core_internal::load_registered_tool_metadata(
-            tool_name,
-            &tool_description,
-            &tool_parameters,
-            &tool_constraints
-        );
-
-        const json sdk_bundle = better_agent::sdk_bridge::build_claude_bundle(
-            tool_name,
-            tool_description,
-            tool_parameters,
-            tool_constraints,
-            record.input_normalized,
-            policy,
-            core_internal::extract_provider_call_id(record)
-        );
-
-        json payload_err;
-        const json provider_payload = core_internal::build_claude_tool_result_payload_via_rust(
-            json{
-                {"record", record_json},
-                {"tool_use_id_override", ""}
-            },
-            &payload_err
-        );
-        if (!payload_err.is_null()) {
-            return fail_memory_api(payload_err);
-        }
-        json wrapper_err;
-        json out = core_internal::build_provider_execution_wrapper_via_rust(
-            json{
-                {"record", record_json},
-                {"provider_payload", provider_payload},
-                {"sdk_bundle", sdk_bundle}
-            },
-            &wrapper_err
-        );
-        if (!wrapper_err.is_null()) {
-            return fail_memory_api(wrapper_err);
-        }
-        core_internal::g_last_output = out.dump();
-        return core_internal::g_last_output.c_str();
-    } catch (...) {
-        return record_str;
-    }
-}
-
-const char *agent_core_get_execution(const char *execution_id) {
-    core_internal::g_last_error.clear();
-    core_internal::g_last_output.clear();
-    if (execution_id == nullptr) {
-        const json err{
-            {"error_code", "E_INPUT"},
-            {"message", "execution_id is null"}
-        };
-        core_internal::g_last_error = err.dump();
-        core_internal::g_last_output = json{{"status", "failed"}, {"error", err}}.dump();
-        return core_internal::g_last_output.c_str();
-    }
-
-    std::lock_guard<std::mutex> lk(core_internal::g_tools_mu);
-    const std::string id = execution_id;
-    if (!core_internal::g_executions.contains(id)) {
-        const json err{
-            {"error_code", "E_NOT_FOUND"},
-            {"message", "execution not found"},
-            {"detail", json{{"execution_id", id}}}
-        };
-        core_internal::g_last_error = err.dump();
-        core_internal::g_last_output = json{{"status", "failed"}, {"error", err}}.dump();
-        return core_internal::g_last_output.c_str();
-    }
-
-    core_internal::g_last_output = core_internal::serialize_execution_record(core_internal::g_executions.at(id)).dump();
-    return core_internal::g_last_output.c_str();
-}
-
-const char *agent_core_interrupt_execution(const char *execution_id) {
-    core_internal::g_last_error.clear();
-    core_internal::g_last_output.clear();
-
-    if (execution_id == nullptr) {
-        const json err{
-            {"error_code", "E_INPUT"},
-            {"message", "execution_id is null"}
-        };
-        core_internal::g_last_error = err.dump();
-        core_internal::g_last_output = json{{"status", "failed"}, {"error", err}}.dump();
-        return core_internal::g_last_output.c_str();
-    }
-
-    json err;
-    const json out = core_internal::interrupt_execution(execution_id, &err);
-    if (!err.is_null()) {
-        return fail_memory_api(err);
-    }
-    core_internal::g_last_output = out.dump();
-    return core_internal::g_last_output.c_str();
-}
-
 const char *agent_core_sandbox_probe(const char *request_json) {
     core_internal::g_last_error.clear();
     core_internal::g_last_output.clear();
@@ -357,117 +155,72 @@ const char *agent_core_sandbox_probe(const char *request_json) {
     return core_internal::g_last_output.c_str();
 }
 
-const char *agent_core_build_openai_function_call_output(
-    const char *execution_id,
-    const char *call_id_override
-) {
-    core_internal::g_last_error.clear();
-    core_internal::g_last_output.clear();
-
-    if (execution_id == nullptr) {
-        const json err{{"error_code", "E_INPUT"}, {"message", "execution_id is null"}};
-        core_internal::g_last_error = err.dump();
-        core_internal::g_last_output = json{{"status", "failed"}, {"error", err}}.dump();
-        return core_internal::g_last_output.c_str();
-    }
-
-    std::lock_guard<std::mutex> lk(core_internal::g_tools_mu);
-    const std::string id = execution_id;
-    if (!core_internal::g_executions.contains(id)) {
-        const json err{
-            {"error_code", "E_NOT_FOUND"},
-            {"message", "execution not found"},
-            {"detail", json{{"execution_id", id}}}
-        };
-        core_internal::g_last_error = err.dump();
-        core_internal::g_last_output = json{{"status", "failed"}, {"error", err}}.dump();
-        return core_internal::g_last_output.c_str();
-    }
-
-    const core_internal::ExecutionRecord &record = core_internal::g_executions.at(id);
-    const std::string call_id = (call_id_override == nullptr) ? "" : std::string(call_id_override);
-    json err;
-    core_internal::g_last_output = core_internal::build_openai_function_call_output_payload_via_rust(
-        json{
-            {"record", core_internal::serialize_execution_record(record)},
-            {"call_id_override", call_id}
-        },
-        &err
-    ).dump();
-    return core_internal::g_last_output.c_str();
-}
-
-const char *agent_core_build_claude_tool_result(
-    const char *execution_id,
-    const char *tool_use_id_override
-) {
-    core_internal::g_last_error.clear();
-    core_internal::g_last_output.clear();
-
-    if (execution_id == nullptr) {
-        const json err{{"error_code", "E_INPUT"}, {"message", "execution_id is null"}};
-        core_internal::g_last_error = err.dump();
-        core_internal::g_last_output = json{{"status", "failed"}, {"error", err}}.dump();
-        return core_internal::g_last_output.c_str();
-    }
-
-    std::lock_guard<std::mutex> lk(core_internal::g_tools_mu);
-    const std::string id = execution_id;
-    if (!core_internal::g_executions.contains(id)) {
-        const json err{
-            {"error_code", "E_NOT_FOUND"},
-            {"message", "execution not found"},
-            {"detail", json{{"execution_id", id}}}
-        };
-        core_internal::g_last_error = err.dump();
-        core_internal::g_last_output = json{{"status", "failed"}, {"error", err}}.dump();
-        return core_internal::g_last_output.c_str();
-    }
-
-    const core_internal::ExecutionRecord &record = core_internal::g_executions.at(id);
-    const std::string tool_use_id = (tool_use_id_override == nullptr) ? "" : std::string(tool_use_id_override);
-    json err;
-    core_internal::g_last_output = core_internal::build_claude_tool_result_payload_via_rust(
-        json{
-            {"record", core_internal::serialize_execution_record(record)},
-            {"tool_use_id_override", tool_use_id}
-        },
-        &err
-    ).dump();
-    return core_internal::g_last_output.c_str();
-}
-
 const char *agent_core_normalize_runtime_event(const char *raw_event_json) {
     core_internal::g_last_error.clear();
     core_internal::g_last_output.clear();
 
     if (raw_event_json == nullptr) {
         core_internal::g_last_error = "raw_event_json is null";
-        core_internal::RuntimeEventRecord out = core_internal::base_runtime_record(json::object());
-        out.execution_id = core_internal::next_id("invalid");
-        out.status = "failed";
-        out.error = json{{"code", "invalid_input"}, {"message", core_internal::g_last_error}};
-        out.handoff = "manual_takeover";
-        core_internal::g_last_output = core_internal::serialize_runtime_event_record(out).dump();
+        core_internal::g_last_output = json{
+            {"execution_id", core_internal::next_id("invalid")},
+            {"source", "unknown"},
+            {"event_type", "unknown"},
+            {"tool_kind", "function"},
+            {"intent", nullptr},
+            {"input_raw", json::object()},
+            {"input_normalized", json::object()},
+            {"policy_snapshot", json::object()},
+            {"status", "failed"},
+            {"evidence", json::array()},
+            {"error", json{{"code", "invalid_input"}, {"message", core_internal::g_last_error}}},
+            {"handoff", "manual_takeover"},
+            {"timestamp", core_internal::now_iso8601_utc()}
+        }.dump();
         return core_internal::g_last_output.c_str();
     }
 
     try {
         const json raw = json::parse(raw_event_json);
-        core_internal::RuntimeEventRecord out = core_internal::normalize_runtime_event(raw);
-        core_internal::g_last_output = core_internal::serialize_runtime_event_record(out).dump();
+        json err;
+        const json out = core_internal::normalize_runtime_event_via_rust(raw, &err);
+        if (!err.is_null()) {
+            core_internal::g_last_error = err.dump();
+            core_internal::g_last_output = json{
+                {"execution_id", core_internal::next_id("runtime")},
+                {"source", "unknown"},
+                {"event_type", "error"},
+                {"tool_kind", "function"},
+                {"intent", "parse_failure"},
+                {"input_raw", json::object()},
+                {"input_normalized", json::object()},
+                {"policy_snapshot", json::object()},
+                {"status", "failed"},
+                {"evidence", json::array()},
+                {"error", err},
+                {"handoff", "manual_classification"},
+                {"timestamp", core_internal::now_iso8601_utc()}
+            }.dump();
+            return core_internal::g_last_output.c_str();
+        }
+        core_internal::g_last_output = out.dump();
         return core_internal::g_last_output.c_str();
     } catch (const std::exception &e) {
         core_internal::g_last_error = e.what();
-        core_internal::RuntimeEventRecord out = core_internal::base_runtime_record(json{{"raw_text", raw_event_json}});
-        out.execution_id = core_internal::next_id("parse-error");
-        out.status = "failed";
-        out.error = json{
-            {"code", "invalid_json"},
-            {"message", core_internal::g_last_error}
-        };
-        out.handoff = "manual_takeover";
-        core_internal::g_last_output = core_internal::serialize_runtime_event_record(out).dump();
+        core_internal::g_last_output = json{
+            {"execution_id", core_internal::next_id("parse-error")},
+            {"source", "unknown"},
+            {"event_type", "unknown"},
+            {"tool_kind", "function"},
+            {"intent", nullptr},
+            {"input_raw", json{{"raw_text", raw_event_json}}},
+            {"input_normalized", json::object()},
+            {"policy_snapshot", json::object()},
+            {"status", "failed"},
+            {"evidence", json::array()},
+            {"error", json{{"code", "invalid_json"}, {"message", core_internal::g_last_error}}},
+            {"handoff", "manual_takeover"},
+            {"timestamp", core_internal::now_iso8601_utc()}
+        }.dump();
         return core_internal::g_last_output.c_str();
     }
 }

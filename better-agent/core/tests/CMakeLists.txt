@@ -12,22 +12,6 @@ function(add_agent_core_test test_name source_path)
 endfunction()
 
 add_agent_core_test(
-    agent_core_unit_runtime_tool_registry
-    ${AGENT_CORE_TEST_ROOT}/unit/runtime/tool_registry_and_custom_calls_test.cpp
-)
-add_agent_core_test(
-    agent_core_unit_runtime_policy_idempotency
-    ${AGENT_CORE_TEST_ROOT}/unit/runtime/policy_and_idempotency_test.cpp
-)
-add_agent_core_test(
-    agent_core_unit_runtime_execution_errors
-    ${AGENT_CORE_TEST_ROOT}/unit/runtime/execution_error_regressions_test.cpp
-)
-add_agent_core_test(
-    agent_core_unit_runtime_function_call_normalization
-    ${AGENT_CORE_TEST_ROOT}/unit/runtime/function_call_normalization_test.cpp
-)
-add_agent_core_test(
     agent_core_unit_runtime_normalization_contract
     ${AGENT_CORE_TEST_ROOT}/unit/runtime/runtime_normalization_contract_test.cpp
 )
@@ -36,44 +20,8 @@ add_agent_core_test(
     ${AGENT_CORE_TEST_ROOT}/unit/runtime/runtime_normalization_scenarios_test.cpp
 )
 add_agent_core_test(
-    agent_core_unit_runtime_tool_registration_regressions
-    ${AGENT_CORE_TEST_ROOT}/unit/runtime/tool_registration_regressions_test.cpp
-)
-add_agent_core_test(
-    agent_core_unit_runtime_tool_executor_regressions
-    ${AGENT_CORE_TEST_ROOT}/unit/runtime/tool_executor_regressions_test.cpp
-)
-add_agent_core_test(
-    agent_core_unit_runtime_tool_kind_builtins
-    ${AGENT_CORE_TEST_ROOT}/unit/runtime/tool_kind_builtin_paths_test.cpp
-)
-add_agent_core_test(
-    agent_core_unit_runtime_hook_lifecycle
-    ${AGENT_CORE_TEST_ROOT}/unit/runtime/hook_lifecycle_test.cpp
-)
-add_agent_core_test(
-    agent_core_unit_runtime_sandbox_controls
-    ${AGENT_CORE_TEST_ROOT}/unit/runtime/sandbox_controls_test.cpp
-)
-add_agent_core_test(
-    agent_core_unit_runtime_sandbox_linux_probe
-    ${AGENT_CORE_TEST_ROOT}/unit/runtime/sandbox_linux_probe_test.cpp
-)
-add_agent_core_test(
     agent_core_unit_memory_store_query
     ${AGENT_CORE_TEST_ROOT}/unit/memory/memory_store_query_test.cpp
-)
-add_agent_core_test(
-    agent_core_unit_memory_execution_guard
-    ${AGENT_CORE_TEST_ROOT}/unit/memory/memory_execution_guard_test.cpp
-)
-add_agent_core_test(
-    agent_core_unit_provider_payload
-    ${AGENT_CORE_TEST_ROOT}/unit/provider/provider_payload_builders_test.cpp
-)
-add_agent_core_test(
-    agent_core_unit_provider_roundtrip
-    ${AGENT_CORE_TEST_ROOT}/unit/provider/execution_record_roundtrip_test.cpp
 )
 add_agent_core_test(
     agent_core_unit_runtime_rust_gpt_builder
@@ -100,21 +48,6 @@ add_agent_core_test(
     ${AGENT_CORE_TEST_ROOT}/unit/runtime/rust_hooks_skills_test.cpp
 )
 add_agent_core_test(
-    agent_core_unit_runtime_rust_openai_provider
-    ${AGENT_CORE_TEST_ROOT}/unit/runtime/rust_openai_provider_test.cpp
-)
-add_agent_core_test(
     agent_core_unit_runtime_rust_ability_preset
     ${AGENT_CORE_TEST_ROOT}/unit/runtime/rust_ability_preset_test.cpp
 )
-
-if(AGENT_CORE_USE_CPP_AI_SDK)
-    add_agent_core_test(
-        agent_core_integration_sdk_tool_calls
-        ${AGENT_CORE_TEST_ROOT}/integration/sdk/sdk_tool_call_methods_test.cpp
-    )
-    add_agent_core_test(
-        agent_core_integration_sdk_custom_tools
-        ${AGENT_CORE_TEST_ROOT}/integration/sdk/sdk_custom_tool_methods_test.cpp
-    )
-endif()
