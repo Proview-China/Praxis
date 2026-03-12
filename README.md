@@ -8,12 +8,19 @@
 
 - 旧实现没有被带入这条分支。
 - `dev`、`main`、`deploy` 保持原样，作为历史参考与回滚抓手。
-- 当前仓库只保留最小文档和协作约束，后续目录结构将围绕新架构逐步落地。
+- 当前仓库先以 TypeScript + Node.js 作为新的主工具链。
+- `memory/` 目录用于沉淀架构思路、约束和阶段性结论，不再把所有长期记忆都挤进 `AGENTS.md`。
+- macOS 不默认使用 Electron；Windows / Linux 未来可以再评估 Electron。
+
+## 当前基线
+
+- 根目录 Node/TypeScript 工具链已经就位。
+- 仓库级协作说明见 [AGENTS.md](/home/proview/Desktop/Praxis_series/Praxis/AGENTS.md)。
+- 项目记忆层说明见 [memory/README.md](/home/proview/Desktop/Praxis_series/Praxis/memory/README.md)。
+- 重启约束文档见 [docs/reboot-charter.md](/home/proview/Desktop/Praxis_series/Praxis/docs/reboot-charter.md)。
 
 ## 接下来先做什么
 
-1. 明确新的系统边界和模块职责。
-2. 先写可验证的架构约束，再开建目录与基础代码。
-3. 把第一批里程碑拆成可以单独验证的小步提交。
-
-更具体的重启约束见 [docs/reboot-charter.md](/home/proview/Desktop/Praxis_series/Praxis-reboot/docs/reboot-charter.md)。
+1. 继续把新的系统边界和模块职责写实。
+2. 把第一批核心接口和事件模型稳定下来。
+3. 然后再围绕最小闭环能力持续往里写代码。

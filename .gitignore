@@ -6,10 +6,18 @@ Thumbs.db
 .idea/
 .vscode/
 
+# Agent-local
+.codex/
+.github/skills/
+
 # Node / Web
 node_modules/
 dist/
 .next/
+coverage/
+.npm/
+.pnpm-store/
+*.tsbuildinfo
 
 # Rust
 target/
@@ -27,3 +35,8 @@ tmp/
 
 # Logs
 *.log
+
+# Legacy reboot leftovers kept out of the blank-slate history
+better-agent/
+codex-experiments/
+docs/docs-status-baseline.md
