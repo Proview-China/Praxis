@@ -146,6 +146,23 @@ test("normalizeWebSearchOutput extracts answer citations and sources from Gemini
   assert.equal(output.sources.length, 1);
 });
 
+test("normalizeWebSearchOutput keeps Gemini generateContent success without metadata as answer-only", () => {
+  const output = normalizeWebSearchOutput("deepmind", {
+    candidates: [
+      {
+        content: {
+          parts: [{ text: "May 22, 2024: $949.50" }]
+        },
+        finishReason: "STOP"
+      }
+    ]
+  });
+
+  assert.equal(output.answer, "May 22, 2024: $949.50");
+  assert.deepEqual(output.citations, []);
+  assert.deepEqual(output.sources, []);
+});
+
 test("toWebSearchCapabilityResult wraps normalized output into a capability result", () => {
   const result = toWebSearchCapabilityResult("openai", "gpt-5", "api", {
     output_text: "Grounded answer"

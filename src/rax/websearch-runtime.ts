@@ -22,6 +22,51 @@ import type { WebSearchOutput } from "./websearch-types.js";
 
 const execFileAsync = promisify(execFile);
 
+function extractFirstJsonArray(source: string): string {
+  const start = source.indexOf("[{");
+  if (start === -1) {
+    throw new Error("Claude Code output did not contain a JSON event array.");
+  }
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < source.length; index += 1) {
+    const char = source[index];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+      continue;
+    }
+
+    if (char === "[") {
+      depth += 1;
+      continue;
+    }
+
+    if (char === "]") {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(start, index + 1);
+      }
+    }
+  }
+
+  throw new Error("Claude Code output ended before the JSON event array closed.");
+}
+
 export interface WebSearchRuntimeLike {
   executePreparedInvocation(
     invocation: PreparedInvocation,
@@ -174,9 +219,15 @@ export class WebSearchRuntime implements WebSearchRuntimeLike {
       prompt: string;
     };
 
-    const { stdout } = await execFileAsync(
+    const shellCommand = [
       payload.command,
-      [...payload.args, payload.prompt],
+      ...payload.args.map((entry) => JSON.stringify(entry)),
+      JSON.stringify(payload.prompt)
+    ].join(" ");
+
+    const { stdout } = await execFileAsync(
+      "script",
+      ["-qec", shellCommand, "/dev/null"],
       {
         cwd: process.cwd(),
         env: {
@@ -187,7 +238,8 @@ export class WebSearchRuntime implements WebSearchRuntimeLike {
     );
 
     try {
-      return JSON.parse(stdout);
+      const normalized = stdout.replace(/\r/gu, "");
+      return JSON.parse(extractFirstJsonArray(normalized));
     } catch (error) {
       throw new Error(
         `Failed to parse Claude Code JSON output: ${error instanceof Error ? error.message : String(error)}`

@@ -283,17 +283,19 @@ async function smokeDeepMind(): Promise<SmokeRow[]> {
   }
 
   try {
-    const response = await client.interactions.create({
+    const response = await client.models.generateContent({
       model,
-      input: "What is the official documentation domain for Google Gemini? Return one short answer.",
-      tools: [{ type: "google_search" }]
+      contents: "What is the official documentation domain for Google Gemini? Return one short answer.",
+      config: {
+        tools: [{ googleSearch: {} }]
+      }
     });
     rows.push({
       provider: "deepmind",
       step: "native_search",
       ok: true,
       model,
-      summary: JSON.stringify(response.outputs?.[0] ?? null).slice(0, 160)
+      summary: response.text?.slice(0, 160) ?? "native search succeeded"
     });
   } catch (error) {
     const formatted = formatError(error);
