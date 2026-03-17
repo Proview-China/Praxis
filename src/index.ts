@@ -1,6 +1,7 @@
 import { pathToFileURL } from "node:url";
 
 export * from "./rax/index.js";
+export * from "./agent_core/index.js";
 
 export const praxisBootstrapStatus = {
   branch: "reboot/blank-slate",
