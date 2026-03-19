@@ -20,11 +20,19 @@ import {
   createProvisionArtifactBundle,
   createProvisionRequest,
   createReviewDecision,
+  createTmaBuildPlan,
+  createTmaExecutionReport,
+  createTmaRollbackHandle,
+  createTmaVerificationEvidence,
   decisionKindToReviewVote,
   isCapabilityAllowedByProfile,
   isCapabilityDeniedByProfile,
   isTerminalReviewDecision,
   reviewVoteToDecisionKind,
+  TMA_EXECUTION_LANES,
+  TMA_EXECUTION_REPORT_STATUSES,
+  TMA_VERIFICATION_EVIDENCE_KINDS,
+  TMA_VERIFICATION_EVIDENCE_STATUSES,
   toCanonicalTaPoolMode,
 } from "./index.js";
 
@@ -74,6 +82,10 @@ test("ta-pool protocol constants expose the frozen second-wave enums", () => {
     "failed",
     "superseded",
   ]);
+  assert.deepEqual(TMA_EXECUTION_LANES, ["bootstrap", "extended"]);
+  assert.deepEqual(TMA_EXECUTION_REPORT_STATUSES, ["completed", "failed", "cancelled"]);
+  assert.deepEqual(TMA_VERIFICATION_EVIDENCE_KINDS, ["smoke", "health", "test", "usage"]);
+  assert.deepEqual(TMA_VERIFICATION_EVIDENCE_STATUSES, ["passed", "failed", "skipped"]);
 });
 
 test("agent capability profile preserves baseline semantics and exposes canonical mode mapping", () => {
@@ -243,4 +255,57 @@ test("provision contracts carry activation and replay metadata for post-build re
   assert.equal(request.replayPolicy, "re_review_then_dispatch");
   assert.equal(bundle.replayPolicy, "auto_after_verify");
   assert.equal(bundle.activationSpec?.registerOrReplace, "register_or_replace");
+});
+
+test("tma contracts freeze planner, evidence, rollback, and execution report shapes", () => {
+  const plan = createTmaBuildPlan({
+    planId: "plan-1",
+    provisionId: "provision-1",
+    requestedCapabilityKey: "mcp.playwright",
+    requestedLane: "extended",
+    summary: "Install and verify playwright capability package.",
+    implementationSteps: ["install dependency", "generate binding", "run smoke"],
+    expectedArtifacts: ["tool", "binding", "verification", "usage"],
+    verificationPlan: ["smoke playwright launch"],
+    rollbackPlan: ["remove generated binding", "uninstall staged dependency"],
+    createdAt: "2026-03-19T00:00:00.000Z",
+  });
+
+  const rollbackHandle = createTmaRollbackHandle({
+    handleId: "rollback-1",
+    summary: "Rollback staged playwright install.",
+    strategy: "remove artifacts and restore previous binding",
+    createdAt: "2026-03-19T00:00:01.000Z",
+  });
+
+  const evidence = createTmaVerificationEvidence({
+    evidenceId: "evidence-1",
+    planId: plan.planId,
+    provisionId: plan.provisionId,
+    kind: "smoke",
+    status: "passed",
+    summary: "Playwright smoke launch passed.",
+    createdAt: "2026-03-19T00:00:02.000Z",
+    ref: "smoke:playwright",
+  });
+
+  const report = createTmaExecutionReport({
+    reportId: "report-1",
+    planId: plan.planId,
+    provisionId: plan.provisionId,
+    lane: "extended",
+    status: "completed",
+    summary: "Capability package built successfully.",
+    startedAt: "2026-03-19T00:00:03.000Z",
+    completedAt: "2026-03-19T00:00:04.000Z",
+    producedArtifactRefs: ["tool:playwright", "binding:playwright"],
+    verificationEvidenceIds: [evidence.evidenceId],
+    rollbackHandleId: rollbackHandle.handleId,
+  });
+
+  assert.equal(plan.requestedLane, "extended");
+  assert.equal(plan.requiresApproval, true);
+  assert.equal(rollbackHandle.strategy, "remove artifacts and restore previous binding");
+  assert.equal(evidence.status, "passed");
+  assert.equal(report.rollbackHandleId, rollbackHandle.handleId);
 });

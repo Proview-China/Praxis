@@ -34,6 +34,8 @@ test("provisioner runtime records building then ready through the default provis
   assert.equal(bundle.replayPolicy, "re_review_then_dispatch");
   assert.equal(bundle.metadata?.workerLane, "bootstrap");
   assert.equal(bundle.metadata?.workerPromptPackId, "provisioner-worker:bootstrap:v1");
+  assert.equal((bundle.metadata?.tmaPlanner as { lane?: string } | undefined)?.lane, "bootstrap");
+  assert.equal((bundle.metadata?.tmaExecutor as { report?: { status?: string } } | undefined)?.report?.status, "completed");
   assert.equal(registry.get(request.provisionId)?.bundle?.status, "ready");
   assert.deepEqual(runtime.assetIndex.listCapabilityKeysByStatus(["ready_for_review"]), ["mcp.playwright"]);
   assert.equal(

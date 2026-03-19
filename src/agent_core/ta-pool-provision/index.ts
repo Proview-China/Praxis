@@ -54,3 +54,19 @@ export {
   resolveProvisionerWorkerLane,
   validateProvisionerWorkerOutput,
 } from "./provisioner-worker-bridge.js";
+
+export type {
+  TmaPlannerOutput,
+} from "./tma-planner.js";
+export {
+  createTmaPlannerOutput,
+} from "./tma-planner.js";
+
+export type {
+  ExecuteTmaPlanInput,
+  TmaExecutorResult,
+} from "./tma-executor.js";
+export {
+  executeTmaBuildPlan,
+  executeTmaPlan,
+} from "./tma-executor.js";

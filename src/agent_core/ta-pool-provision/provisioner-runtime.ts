@@ -16,6 +16,8 @@ import {
   type ProvisionerWorkerBridge,
 } from "./provisioner-worker-bridge.js";
 import { ProvisionRegistry } from "./provision-registry.js";
+import { createTmaPlannerOutput } from "./tma-planner.js";
+import { executeTmaPlan } from "./tma-executor.js";
 
 export interface ProvisionBuildArtifacts {
   toolArtifact: ProvisionArtifactRef;
@@ -121,9 +123,26 @@ export class ProvisionerRuntime implements ProvisionerRuntimeLike {
     this.#recordBundle(buildingBundle);
 
     try {
+      const planner = createTmaPlannerOutput(request);
       const bridgeInput = createProvisionerWorkerBridgeInput(request);
       const output = await this.#workerBridge(bridgeInput);
       validateProvisionerWorkerOutput(output);
+      const completedAt = this.#clock().toISOString();
+      const executor = executeTmaPlan({
+        plan: planner.buildPlan,
+        lane: planner.lane,
+        startedAt: request.createdAt,
+        completedAt,
+        producedArtifactRefs: [
+          output.toolArtifact.ref ?? output.toolArtifact.artifactId,
+          output.bindingArtifact.ref ?? output.bindingArtifact.artifactId,
+          output.verificationArtifact.ref ?? output.verificationArtifact.artifactId,
+          output.usageArtifact.ref ?? output.usageArtifact.artifactId,
+        ],
+        verificationRefs: [
+          output.verificationArtifact.ref ?? output.verificationArtifact.artifactId,
+        ],
+      });
       const readyBundle = createProvisionArtifactBundle({
         bundleId: this.#idFactory(),
         provisionId: request.provisionId,
@@ -134,7 +153,7 @@ export class ProvisionerRuntime implements ProvisionerRuntimeLike {
         usageArtifact: output.usageArtifact,
         activationSpec: createPoolActivationSpec(output.activationPayload),
         replayPolicy: output.replayRecommendation.policy,
-        completedAt: this.#clock().toISOString(),
+        completedAt,
         metadata: {
           source: "provisioner-runtime",
           buildSummary: output.buildSummary,
@@ -142,6 +161,17 @@ export class ProvisionerRuntime implements ProvisionerRuntimeLike {
           workerLane: bridgeInput.lane,
           workerPromptPackId: bridgeInput.promptPack.promptPackId,
           replayRecommendation: output.replayRecommendation,
+          tmaPlanner: {
+            lane: planner.lane,
+            planId: planner.buildPlan.planId,
+            promptPackId: planner.promptPack.promptPackId,
+            summary: planner.buildPlan.summary,
+          },
+          tmaExecutor: {
+            report: executor.report,
+            verificationEvidence: executor.verificationEvidence,
+            rollbackHandle: executor.rollbackHandle,
+          },
           ...(output.metadata ?? {}),
         },
       });

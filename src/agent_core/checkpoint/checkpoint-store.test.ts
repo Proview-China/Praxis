@@ -53,7 +53,16 @@ test("fast checkpoint write/read returns latest in-memory checkpoint", async () 
   const store = new CheckpointStore();
   const snapshot = {
     run: createRunRecord(),
-    state: createInitialAgentState()
+    state: createInitialAgentState(),
+    poolRuntimeSnapshots: {
+      tap: {
+        humanGates: [],
+        humanGateEvents: [],
+        pendingReplays: [],
+        activationAttempts: [],
+        resumeEnvelopes: [],
+      },
+    },
   };
 
   const written = store.writeFastCheckpoint({
@@ -69,6 +78,7 @@ test("fast checkpoint write/read returns latest in-memory checkpoint", async () 
   assert.equal(written.record.tier, "fast");
   assert.equal(store.loadFastCheckpoint("cp-fast-1")?.record.journalCursor, "journal:0:1");
   assert.equal((await store.loadLatestCheckpoint("run-1"))?.record.checkpointId, "cp-fast-1");
+  assert.equal(store.loadFastCheckpoint("cp-fast-1")?.snapshot?.poolRuntimeSnapshots?.tap?.resumeEnvelopes.length, 0);
 });
 
 test("durable checkpoint write/read persists to the filesystem", async () => {
@@ -85,13 +95,23 @@ test("durable checkpoint write/read persists to the filesystem", async () => {
       journalCursor: "journal:1:2",
       snapshot: {
         run: createRunRecord({ runId: "run-2", sessionId: "session-1" }),
-        state: createInitialAgentState()
+        state: createInitialAgentState(),
+        poolRuntimeSnapshots: {
+          tap: {
+            humanGates: [],
+            humanGateEvents: [],
+            pendingReplays: [],
+            activationAttempts: [],
+            resumeEnvelopes: [],
+          },
+        },
       }
     });
 
     const loaded = await store.loadDurableCheckpoint("cp-durable-1");
     assert.equal(loaded?.record.tier, "durable");
     assert.equal(loaded?.record.journalCursor, "journal:1:2");
+    assert.equal(loaded?.snapshot?.poolRuntimeSnapshots?.tap?.humanGates.length, 0);
   } finally {
     await rm(durableDirectory, { recursive: true, force: true });
   }
@@ -145,6 +165,7 @@ test("recoverRun replays journal events after checkpoint cursor", async () => {
   assert.equal(recovery.replayedEvents.at(0)?.cursor, afterCursor);
   assert.equal(recovery.state.working.note, "after-checkpoint");
   assert.equal(recovery.run?.lastCheckpointRef, "cp-fast-2");
+  assert.equal(recovery.poolRuntimeSnapshots, undefined);
 });
 
 test("recoverRun falls back to durable checkpoint when fast checkpoint is absent", async () => {
@@ -186,4 +207,50 @@ test("recoverRun falls back to durable checkpoint when fast checkpoint is absent
   } finally {
     await rm(durableDirectory, { recursive: true, force: true });
   }
+});
+
+test("recoverRun preserves pool runtime snapshots for later TAP hydration", async () => {
+  const store = new CheckpointStore();
+  const snapshot = {
+    run: createRunRecord({ runId: "run-4", sessionId: "session-4" }),
+    state: createInitialAgentState(),
+    poolRuntimeSnapshots: {
+      tap: {
+        humanGates: [],
+        humanGateEvents: [],
+        pendingReplays: [],
+        activationAttempts: [],
+        resumeEnvelopes: [
+          {
+            envelopeId: "resume-1",
+            source: "human_gate" as const,
+            requestId: "request-1",
+            sessionId: "session-4",
+            runId: "run-4",
+            capabilityKey: "computer.use",
+            requestedTier: "B2" as const,
+            mode: "restricted" as const,
+            reason: "Resume after restart.",
+          },
+        ],
+      },
+    },
+  };
+
+  store.writeFastCheckpoint({
+    checkpointId: "cp-fast-4",
+    sessionId: "session-4",
+    runId: "run-4",
+    reason: "pause",
+    createdAt: "2026-03-19T13:00:00.000Z",
+    journalCursor: "journal:0:0",
+    snapshot,
+  });
+
+  const recovery = await store.recoverRun({
+    runId: "run-4",
+    journal: new AppendOnlyEventJournal(),
+  });
+
+  assert.equal(recovery.poolRuntimeSnapshots?.tap?.resumeEnvelopes[0]?.capabilityKey, "computer.use");
 });

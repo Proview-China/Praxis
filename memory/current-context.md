@@ -663,3 +663,68 @@
      - 真实 activation driver
      - durable human gate / replay 恢复链
      - reviewer 真实项目状态 / 记忆池 / 包装机接入
+11. 当前 `TAP` 补全设计已经冻结到新的 detailed blueprint：
+   - 新文档：
+     - `docs/ability/27-tap-runtime-completion-blueprint.md`
+   - 这轮冻结的核心共识：
+     - `activation driver` 是 control-plane 后段机械装配器，负责把 provision 产物接回 `CapabilityPool`
+     - provisioner 将继续收口成 `toolmakeragent (TMA)`，并拆成 `planner / executor` 两层
+     - reviewer 继续保持只审、只读、只投票，不执行、不造工具、不直接发 grant
+     - durable 恢复链第一版先走 checkpoint-first 路线，优先把 `human gate / replay / activation attempt` 写入 pool runtime snapshot
+     - 当前不提前抽 shared framework；先把 `TAP` 做成完整样板，之后再给 `mp/cmp` 等第二个 pool 抽 shared primitives
+   - 当前建议的实现顺序：
+     - 先做 `activation driver`
+     - 再做 `real builder / TMA`
+     - 最后做 durable `human gate / replay`
+12. 当前 `TAP` 第三阶段并行编码任务包已经完成：
+   - 新目录：
+     - `docs/ability/tap-runtime-completion-task-pack/`
+   - README 已冻结：
+     - `docs/ability/tap-runtime-completion-task-pack/README.md`
+   - 当前任务拆分为 13 份：
+     - `00-runtime-completion-protocol-freeze.md`
+     - `01-activation-driver-contract.md`
+     - `02-tma-runtime-contract.md`
+     - `03-durable-pool-runtime-snapshot.md`
+     - `04-activation-driver-runtime.md`
+     - `05-package-materializer-and-factory-resolver.md`
+     - `06-tma-planner-lane.md`
+     - `07-tma-executor-lane.md`
+     - `08-durable-human-gate.md`
+     - `09-durable-replay-and-activation-attempts.md`
+     - `10-runtime-recovery-assembly.md`
+     - `11-first-class-tooling-baseline-for-reviewer-and-tma.md`
+     - `12-end-to-end-runtime-closure-and-smoke.md`
+   - 当前推荐分波：
+     - Wave 0：`00`
+     - Wave 1：`01/02/03`
+     - Wave 2：`04/05/06/07`
+     - Wave 3：`08/09/10`
+     - Wave 4：`11/12`
+   - 当前推荐总并发：
+     - `4-6` 个真正会改共享协议的 worker
+13. 当前 `TAP` 第三阶段第一波代码已经真实落地：
+   - 当前已成立：
+     - `00` 协议冻结已进代码
+     - activation contracts / factory resolver / materializer / driver 已进代码
+     - `AgentCoreRuntime` 已新增：
+       - `registerTaActivationFactory(...)`
+       - `activateTaProvisionAsset(...)`
+       - `createTapRuntimeSnapshot()`
+       - `createPoolRuntimeSnapshots()`
+       - activation attempt 索引读取
+     - `TMA planner` helper 已落地
+     - `TMA executor` helper 已落地
+     - checkpoint `pool-runtime-checkpoint` helper 已落地
+     - `runtime-recovery` / `runtime-snapshot` helper 已落地
+   - 当前验证基线已更新为：
+     - `npm run typecheck` 通过
+     - `npm run build` 通过
+     - `npm test` 通过
+     - `npx tsx --test src/agent_core/**/*.test.ts` 通过
+     - 当前 `agent_core` 定向测试：`182 pass / 0 fail`
+     - 当前 `dist/**/*.test.js`：`170 pass / 0 fail`
+   - 当前最准确的阶段判断：
+     - `TAP` 已不只是“可用控制面”
+     - 第三阶段第一波 helper 与 activation runtime integration 已开始成立
+     - 但 durable checkpoint 写入点和更深的 `TMA -> provisioner runtime` 主链仍待继续推进

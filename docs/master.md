@@ -116,6 +116,12 @@
   - [25-tap-capability-package-template.md](/home/proview/Desktop/Praxis_series/Praxis/docs/ability/25-tap-capability-package-template.md)
 - TAP runtime 迁移与 enforcement 总纲：
   - [26-tap-runtime-migration-and-enforcement-outline.md](/home/proview/Desktop/Praxis_series/Praxis/docs/ability/26-tap-runtime-migration-and-enforcement-outline.md)
+- TAP runtime 补全蓝图：
+  - [27-tap-runtime-completion-blueprint.md](/home/proview/Desktop/Praxis_series/Praxis/docs/ability/27-tap-runtime-completion-blueprint.md)
+- TAP runtime 第三阶段第一波实现状态：
+  - [28-tap-runtime-wave0-implementation-status.md](/home/proview/Desktop/Praxis_series/Praxis/docs/ability/28-tap-runtime-wave0-implementation-status.md)
+- TAP runtime 补全并行编码任务包：
+  - [tap-runtime-completion-task-pack/README.md](/home/proview/Desktop/Praxis_series/Praxis/docs/ability/tap-runtime-completion-task-pack/README.md)
 - T/A Pool 并行编码任务包：
   - [ta-pool-task-pack/README.md](/home/proview/Desktop/Praxis_series/Praxis/docs/ability/ta-pool-task-pack/README.md)
 - TAP 第二阶段可用化任务包：

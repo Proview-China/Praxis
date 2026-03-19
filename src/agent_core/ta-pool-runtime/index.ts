@@ -1,4 +1,54 @@
 export type {
+  ActivationAdapterFactory,
+  ActivationAdapterFactoryContext,
+  ActivationFactoryResolverLike,
+} from "./activation-factory-resolver.js";
+export {
+  ActivationFactoryResolver,
+  createActivationFactoryResolver,
+} from "./activation-factory-resolver.js";
+
+export type {
+  ActivationDriverFailureResult,
+  ActivationDriverInput,
+  ActivationDriverResult,
+  ActivationDriverSuccessResult,
+} from "./activation-driver.js";
+export {
+  activateProvisionAsset,
+  runActivationDriver,
+} from "./activation-driver.js";
+
+export type {
+  ActivationMaterializedRegistration,
+  MaterializeActivationRegistrationInput,
+  MaterializeProvisionAssetActivationInput,
+  MaterializedActivationRegistration,
+  MaterializedActivationRegistrationInput,
+} from "./activation-materializer.js";
+export {
+  materializeActivationRegistration,
+  materializeCapabilityManifestFromActivation,
+  materializeProvisionAssetActivation,
+} from "./activation-materializer.js";
+
+export type {
+  CreateTaActivationAttemptRecordInput,
+  CreateTaActivationFailureInput,
+  CreateTaActivationReceiptInput,
+  TaActivationAttemptRecord,
+  TaActivationAttemptStatus,
+  TaActivationFailure,
+  TaActivationReceipt,
+} from "./activation-types.js";
+export {
+  createTaActivationAttemptRecord,
+  createTaActivationFailure,
+  createTaActivationReceipt,
+  TA_ACTIVATION_ATTEMPT_STATUSES,
+} from "./activation-types.js";
+
+export type {
   BaselineGrantedResolution,
   ControlPlaneOutcomeKind,
   ExecutionBridgeRequestPlaceholder,
@@ -68,3 +118,35 @@ export {
   TA_REPLAY_NEXT_ACTIONS,
   TA_REPLAY_STATUSES,
 } from "./replay-policy.js";
+
+export type {
+  CreateTaResumeEnvelopeInput,
+  PoolRuntimeSnapshots,
+  TapPoolRuntimeSnapshot,
+  TaResumeEnvelope,
+} from "./runtime-snapshot.js";
+export {
+  createPoolRuntimeSnapshots,
+  createTapPoolRuntimeSnapshot,
+  createTaResumeEnvelope,
+} from "./runtime-snapshot.js";
+
+export type {
+  TapRuntimeHydratedState,
+} from "./runtime-recovery.js";
+export {
+  hydratePoolRuntimeSnapshots,
+  hydrateTapRuntimeSnapshot,
+  serializePoolRuntimeSnapshots,
+  serializeTapRuntimeSnapshot,
+} from "./runtime-recovery.js";
+
+export type {
+  TapRuntimeSnapshotStateInput,
+} from "./runtime-checkpoint.js";
+export {
+  createTapRuntimeSnapshotFromState,
+  mergeTapRuntimeSnapshotIntoCheckpoint,
+  readPoolRuntimeSnapshotsFromCheckpoint,
+  readTapRuntimeSnapshotFromCheckpoint,
+} from "./runtime-checkpoint.js";

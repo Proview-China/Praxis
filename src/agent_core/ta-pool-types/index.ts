@@ -91,3 +91,28 @@ export {
   validateProvisionArtifactBundle,
   validateProvisionRequest,
 } from "./ta-pool-provision.js";
+
+export type {
+  CreateTmaBuildPlanInput,
+  CreateTmaExecutionReportInput,
+  CreateTmaRollbackHandleInput,
+  CreateTmaVerificationEvidenceInput,
+  TmaBuildPlan,
+  TmaExecutionLane,
+  TmaExecutionReport,
+  TmaExecutionReportStatus,
+  TmaRollbackHandle,
+  TmaVerificationEvidence,
+  TmaVerificationEvidenceKind,
+  TmaVerificationEvidenceStatus,
+} from "./ta-pool-tma.js";
+export {
+  createTmaBuildPlan,
+  createTmaExecutionReport,
+  createTmaRollbackHandle,
+  createTmaVerificationEvidence,
+  TMA_EXECUTION_LANES,
+  TMA_EXECUTION_REPORT_STATUSES,
+  TMA_VERIFICATION_EVIDENCE_KINDS,
+  TMA_VERIFICATION_EVIDENCE_STATUSES,
+} from "./ta-pool-tma.js";

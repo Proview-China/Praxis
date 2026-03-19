@@ -751,6 +751,9 @@ test("AgentCoreRuntime keeps restricted requests inside TAP until human approval
   assert.equal(waiting.reviewDecision?.decision, "escalated_to_human");
   assert.equal(waiting.humanGate?.status, "waiting_human_approval");
   assert.equal(runtime.listTaHumanGates().length, 1);
+  const waitingCheckpoint = await runtime.checkpointStore.loadLatestCheckpoint(created.run.runId);
+  assert.equal(waitingCheckpoint?.snapshot?.poolRuntimeSnapshots?.tap?.humanGates.length, 1);
+  assert.equal(waitingCheckpoint?.snapshot?.poolRuntimeSnapshots?.tap?.humanGateEvents.length, 1);
 
   const gate = runtime.listTaHumanGates()[0];
   assert.ok(gate);
@@ -836,6 +839,64 @@ test("AgentCoreRuntime can reject a waiting restricted human gate without throwi
   assert.equal(rejected.dispatch, undefined);
   assert.equal(runtime.getTaHumanGate(gate.gateId)?.status, "rejected");
   assert.equal(runtime.listTaHumanGateEvents(gate.gateId).length, 2);
+});
+
+test("AgentCoreRuntime can persist and recover TAP control-plane snapshot through checkpoint store", async () => {
+  const runtime = createAgentCoreRuntime({
+    taProfile: createAgentCapabilityProfile({
+      profileId: "profile.runtime.tap-checkpoint",
+      agentClass: "main-agent",
+      baselineCapabilities: ["docs.read"],
+      allowedCapabilityPatterns: ["computer.*"],
+    }),
+  });
+  const session = runtime.createSession();
+  const goal = runtime.createCompiledGoal(
+    createGoalSource({
+      goalId: "goal-runtime-tap-checkpoint",
+      sessionId: session.sessionId,
+      userInput: "Persist tap runtime snapshot after a human gate is opened.",
+    }),
+  );
+  const created = await runtime.createRun({
+    sessionId: session.sessionId,
+    goal,
+  });
+
+  const intent: CapabilityCallIntent = {
+    intentId: "intent-ta-checkpoint-1",
+    sessionId: session.sessionId,
+    runId: created.run.runId,
+    kind: "capability_call",
+    createdAt: "2026-03-19T18:00:00.000Z",
+    priority: "normal",
+    request: {
+      requestId: "request-ta-checkpoint-1",
+      intentId: "intent-ta-checkpoint-1",
+      sessionId: session.sessionId,
+      runId: created.run.runId,
+      capabilityKey: "computer.use",
+      input: {
+        task: "capture screenshot",
+      },
+      priority: "normal",
+    },
+  };
+
+  const waiting = await runtime.dispatchCapabilityIntentViaTaPool(intent, {
+    agentId: "agent-main",
+    requestedTier: "B2",
+    mode: "restricted",
+    reason: "Checkpoint should persist the waiting human gate snapshot.",
+  });
+
+  assert.equal(waiting.status, "waiting_human");
+  const stored = await runtime.writeTapDurableCheckpoint(created.run.runId, "manual");
+  assert.ok(stored);
+
+  const tapSnapshot = await runtime.recoverTapRuntimeSnapshot(created.run.runId);
+  assert.equal(tapSnapshot?.humanGates.length, 1);
+  assert.equal(tapSnapshot?.humanGates[0]?.capabilityKey, "computer.use");
 });
 
 test("AgentCoreRuntime inventory sees ready provision assets and avoids duplicate provisioning redirects", async () => {
@@ -990,61 +1051,22 @@ test("AgentCoreRuntime can replay provisioned capabilities after activation hand
   const provisionId = provisioned.provisionRequest?.provisionId;
   assert.ok(provisionId);
 
-  runtime.provisionerRuntime?.assetIndex.updateState({
-    provisionId,
-    status: "activating",
-    updatedAt: "2026-03-19T09:30:01.000Z",
-  });
+  runtime.registerTaActivationFactory("factory:computer.use", () => adapter);
+  const activation = await runtime.activateTaProvisionAsset(provisionId);
+  assert.equal(activation.status, "activated");
+  assert.equal(runtime.listTaActivationAttempts().length, 1);
+  assert.equal(activation.activation?.status, "active");
+  const activationCheckpoint = await runtime.checkpointStore.loadLatestCheckpoint(created.run.runId);
+  assert.equal(activationCheckpoint?.snapshot?.poolRuntimeSnapshots?.tap?.activationAttempts.length, 1);
 
-  const activatingIntent: CapabilityCallIntent = {
+  const replayIntent: CapabilityCallIntent = {
     ...firstIntent,
     intentId: "intent-ta-activation-replay-2",
-    createdAt: "2026-03-19T09:30:01.500Z",
+    createdAt: "2026-03-19T09:30:02.500Z",
     request: {
       ...firstIntent.request,
       requestId: "request-ta-activation-replay-2",
       intentId: "intent-ta-activation-replay-2",
-    },
-  };
-
-  const waitingForActivation = await runtime.dispatchCapabilityIntentViaTaPool(activatingIntent, {
-    agentId: "agent-main",
-    requestedTier: "B2",
-    mode: "balanced",
-    reason: "Replay should wait while activation handoff is still in progress.",
-  });
-
-  assert.equal(waitingForActivation.status, "deferred");
-  assert.equal(
-    waitingForActivation.reviewDecision?.deferredReason,
-    "Provision asset is currently in activation handoff.",
-  );
-
-  runtime.registerCapabilityAdapter({
-    capabilityId: "cap-computer-use-activation-replay",
-    capabilityKey: "computer.use",
-    kind: "tool",
-    version: "1.0.0",
-    generation: 1,
-    description: "Mounted capability after activation handoff.",
-  }, adapter);
-  runtime.provisionerRuntime?.assetIndex.updateState({
-    provisionId,
-    status: "superseded",
-    updatedAt: "2026-03-19T09:30:02.000Z",
-    metadata: {
-      activatedIntoPool: true,
-    },
-  });
-
-  const replayIntent: CapabilityCallIntent = {
-    ...firstIntent,
-    intentId: "intent-ta-activation-replay-3",
-    createdAt: "2026-03-19T09:30:02.500Z",
-    request: {
-      ...firstIntent.request,
-      requestId: "request-ta-activation-replay-3",
-      intentId: "intent-ta-activation-replay-3",
     },
   };
 

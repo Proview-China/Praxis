@@ -15,6 +15,7 @@ import type {
   PreparedCapabilityCall,
 } from "../capability-types/index.js";
 import type { CapabilityPoolOptions, CapabilityPoolStats } from "./pool-types.js";
+import type { CapabilityPoolRegistryLike } from "./pool-types.js";
 import { CapabilityPoolBackpressureMonitor } from "./pool-backpressure.js";
 import { CapabilityPoolDrainTracker } from "./pool-drain.js";
 import { CapabilityPoolHealthRegistry } from "./pool-health.js";
@@ -93,6 +94,10 @@ export class DefaultCapabilityPool implements CapabilityPool {
 
   listBindings(): readonly CapabilityBinding[] {
     return this.#registry.listBindings();
+  }
+
+  getRegistryView(): CapabilityPoolRegistryLike {
+    return this.#registry;
   }
 
   async acquire(plan: CapabilityInvocationPlan): Promise<CapabilityLease> {

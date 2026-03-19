@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 
-import { CheckpointStore } from "./checkpoint/index.js";
+import {
+  CheckpointStore,
+  createPoolRuntimeCheckpointSnapshot,
+  getTapPoolRuntimeSnapshotFromRecoveryResult,
+  type StoredCheckpoint,
+} from "./checkpoint/index.js";
 import { compileGoal } from "./goal/goal-compiler.js";
 import { normalizeGoal } from "./goal/goal-normalizer.js";
 import { createGoalSource } from "./goal/goal-source.js";
@@ -18,17 +23,30 @@ import type { JournalReadResult } from "./journal/journal-types.js";
 import { CapabilityPortBroker, type CapabilityDispatchReceipt, type CapabilityPortDefinition } from "./port/index.js";
 import { AgentRunCoordinator } from "./run/index.js";
 import { SessionManager } from "./session/index.js";
+import { projectStateFromEvents } from "./state/index.js";
 import {
+  activateProvisionAsset,
   applyTaHumanGateEvent,
+  createActivationFactoryResolver,
+  createPoolRuntimeSnapshots,
   createTaHumanGateEvent,
   createTaHumanGateStateFromReviewDecision,
   createTaPendingReplay,
   createExecutionRequest,
   createInvocationPlanFromGrant,
+  createTapPoolRuntimeSnapshot,
   TaControlPlaneGateway,
+  type ActivationAdapterFactory,
+  type ActivationDriverResult,
+  type PoolRuntimeSnapshots,
+  type TapPoolRuntimeSnapshot,
+  type TaActivationFailure,
+  type TaActivationReceipt,
+  type TaActivationAttemptRecord,
   type TaHumanGateEvent,
   type TaHumanGateState,
   type TaPendingReplay,
+  materializeProvisionAssetActivation,
 } from "./ta-pool-runtime/index.js";
 import { createReviewerRuntime, ReviewerRuntime } from "./ta-pool-review/index.js";
 import { createProvisionerRuntime, ProvisionerRuntime } from "./ta-pool-provision/index.js";
@@ -43,6 +61,7 @@ import type {
   GoalFrameCompiled,
   GoalFrameSource,
   KernelEvent,
+  CheckpointReason,
   SessionHeader,
 } from "./types/index.js";
 import type {
@@ -221,6 +240,19 @@ export interface SubmitTaHumanGateDecisionResult
   status: SubmitTaHumanGateDecisionStatus;
 }
 
+export type ActivateTaProvisionAssetStatus =
+  | ActivationDriverResult["status"]
+  | "activation_asset_not_found";
+
+export interface ActivateTaProvisionAssetResult {
+  status: ActivateTaProvisionAssetStatus;
+  asset?: ProvisionAssetRecord;
+  attempt?: TaActivationAttemptRecord;
+  receipt?: TaActivationReceipt;
+  failure?: TaActivationFailure;
+  activation?: TaCapabilityActivationHandoff;
+}
+
 interface TaHumanGateContext {
   intent: CapabilityCallIntent;
   options: DispatchCapabilityIntentViaTaPoolOptions;
@@ -281,6 +313,8 @@ export class AgentCoreRuntime {
   readonly #taHumanGateContexts = new Map<string, TaHumanGateContext>();
   readonly #taHumanGateEvents = new Map<string, TaHumanGateEvent[]>();
   readonly #taPendingReplays = new Map<string, TaPendingReplay>();
+  readonly #taActivationAttempts = new Map<string, TaActivationAttemptRecord>();
+  readonly #taActivationFactoryResolver = createActivationFactoryResolver();
 
   constructor(options: AgentCoreRuntimeOptions = {}) {
     this.journal = options.journal ?? new AppendOnlyEventJournal();
@@ -342,6 +376,10 @@ export class AgentCoreRuntime {
 
   registerCapabilityAdapter(manifest: CapabilityManifest, adapter: CapabilityAdapter) {
     return this.capabilityPool.register(manifest, adapter);
+  }
+
+  registerTaActivationFactory(ref: string, factory: ActivationAdapterFactory): void {
+    this.#taActivationFactoryResolver.register(ref, factory);
   }
 
   async dispatchCapabilityPlan(input: DispatchCapabilityPlanInput): Promise<DispatchCapabilityPlanResult> {
@@ -423,6 +461,250 @@ export class AgentCoreRuntime {
 
   listTaPendingReplays(): readonly TaPendingReplay[] {
     return [...this.#taPendingReplays.values()];
+  }
+
+  getTaActivationAttempt(attemptId: string): TaActivationAttemptRecord | undefined {
+    return this.#taActivationAttempts.get(attemptId);
+  }
+
+  listTaActivationAttempts(): readonly TaActivationAttemptRecord[] {
+    return [...this.#taActivationAttempts.values()];
+  }
+
+  createTapCheckpointSnapshot(runId: string) {
+    const run = this.runCoordinator.getRun(runId);
+    if (!run) {
+      return undefined;
+    }
+
+    return createPoolRuntimeCheckpointSnapshot({
+      run,
+      state: projectStateFromEvents(this.journal.readRunEvents(runId).map((entry) => entry.event)),
+      sessionHeader: this.sessionManager.loadSessionHeader(run.sessionId),
+      poolRuntimeSnapshots: this.createPoolRuntimeSnapshots(),
+    });
+  }
+
+  async writeTapDurableCheckpoint(
+    runId: string,
+    reason: CheckpointReason = "manual",
+  ): Promise<StoredCheckpoint | undefined> {
+    const snapshot = this.createTapCheckpointSnapshot(runId);
+    const run = this.runCoordinator.getRun(runId);
+    if (!snapshot || !run) {
+      return undefined;
+    }
+
+    const latest = this.journal.getLatestEvent(runId);
+    return this.checkpointStore.writeDurableCheckpoint({
+      checkpointId: randomUUID(),
+      sessionId: run.sessionId,
+      runId,
+      reason,
+      createdAt: new Date().toISOString(),
+      basedOnEventId: latest?.event.eventId,
+      journalCursor: latest?.cursor,
+      pendingIntentId: run.pendingIntentId,
+      snapshot,
+      metadata: {
+        source: "tap-runtime-checkpoint",
+      },
+    });
+  }
+
+  async recoverTapRuntimeSnapshot(runId: string) {
+    const recovery = await this.checkpointStore.recoverRun({
+      runId,
+      journal: this.journal,
+    });
+    return getTapPoolRuntimeSnapshotFromRecoveryResult(recovery);
+  }
+
+  createTapRuntimeSnapshot(): TapPoolRuntimeSnapshot {
+    return createTapPoolRuntimeSnapshot({
+      humanGates: [...this.listTaHumanGates()],
+      humanGateEvents: [...this.#taHumanGateEvents.values()].flat(),
+      pendingReplays: [...this.listTaPendingReplays()],
+      activationAttempts: [...this.listTaActivationAttempts()],
+      resumeEnvelopes: [],
+    });
+  }
+
+  createPoolRuntimeSnapshots(): PoolRuntimeSnapshots {
+    return createPoolRuntimeSnapshots({
+      tap: this.createTapRuntimeSnapshot(),
+    });
+  }
+
+  #writeTapControlPlaneCheckpoint(params: {
+    sessionId: string;
+    runId: string;
+    reason: "manual" | "pause";
+    metadata?: Record<string, unknown>;
+  }): void {
+    const run = this.runCoordinator.getRun(params.runId);
+    if (!run) {
+      return;
+    }
+
+    const sessionHeader = this.sessionManager.loadSessionHeader(params.sessionId);
+    if (!sessionHeader) {
+      return;
+    }
+
+    const createdAt = new Date().toISOString();
+    const latest = this.journal.getLatestEvent(params.runId);
+    const snapshot = createPoolRuntimeCheckpointSnapshot({
+      run,
+      state: projectStateFromEvents(
+        this.journal.readRunEvents(params.runId).map((entry) => entry.event),
+      ),
+      sessionHeader,
+      poolRuntimeSnapshots: this.createPoolRuntimeSnapshots(),
+    });
+    const checkpointId = randomUUID();
+
+    this.checkpointStore.writeFastCheckpoint({
+      checkpointId,
+      sessionId: params.sessionId,
+      runId: params.runId,
+      reason: params.reason,
+      createdAt,
+      basedOnEventId: latest?.event.eventId,
+      journalCursor: latest?.cursor,
+      pendingIntentId: run.pendingIntentId,
+      snapshot,
+      metadata: {
+        source: "tap-control-plane",
+        ...(params.metadata ?? {}),
+      },
+    });
+    this.sessionManager.markCheckpoint({
+      sessionId: params.sessionId,
+      checkpointId,
+      journalCursor: latest?.cursor,
+    });
+    void this.checkpointStore.writeDurableCheckpoint({
+      checkpointId,
+      sessionId: params.sessionId,
+      runId: params.runId,
+      reason: params.reason,
+      createdAt,
+      basedOnEventId: latest?.event.eventId,
+      journalCursor: latest?.cursor,
+      pendingIntentId: run.pendingIntentId,
+      snapshot,
+      metadata: {
+        source: "tap-control-plane",
+        durable: true,
+        ...(params.metadata ?? {}),
+      },
+    });
+  }
+
+  async activateTaProvisionAsset(provisionId: string): Promise<ActivateTaProvisionAssetResult> {
+    const asset = this.provisionerRuntime?.assetIndex.getCurrent(provisionId);
+    if (!asset) {
+      return {
+        status: "activation_asset_not_found",
+      };
+    }
+
+    this.provisionerRuntime?.assetIndex.updateState({
+      provisionId,
+      status: "activating",
+      updatedAt: new Date().toISOString(),
+      metadata: {
+        activationRequested: true,
+      },
+    });
+
+    const activationResult = await activateProvisionAsset({
+      asset,
+      materialized: materializeProvisionAssetActivation({ asset }),
+      poolRegistry: {
+        getActiveRegistrationsForCapability: (capabilityKey: string) => {
+          const manifests = this.capabilityPool.listCapabilities();
+          const bindings = this.capabilityPool.listBindings();
+          return manifests
+            .filter((manifest) => manifest.capabilityKey === capabilityKey)
+            .flatMap((manifest) => {
+              return bindings
+                .filter((binding) => binding.capabilityId === manifest.capabilityId && binding.state === "active")
+                .map((binding) => ({
+                  manifest,
+                  binding,
+                  adapter: undefined as unknown as CapabilityAdapter,
+                }));
+            });
+        },
+        register: (manifest: CapabilityManifest, adapter: CapabilityAdapter) => ({
+          manifest,
+          binding: this.capabilityPool.register(manifest, adapter),
+          adapter,
+        }),
+        replace: (bindingId: string, manifest: CapabilityManifest, adapter: CapabilityAdapter) => ({
+          manifest,
+          binding: this.capabilityPool.replace(bindingId, manifest, adapter),
+          adapter,
+        }),
+      },
+      factoryResolver: this.#taActivationFactoryResolver,
+    });
+
+    this.#taActivationAttempts.set(activationResult.attempt.attemptId, activationResult.attempt);
+
+    const updatedAt = activationResult.attempt.completedAt ?? activationResult.attempt.updatedAt;
+    this.provisionerRuntime?.assetIndex.updateState({
+      provisionId,
+      status: activationResult.status === "activated" ? "active" : "failed",
+      updatedAt,
+      metadata: activationResult.status === "activated"
+        ? {
+          activatedIntoPool: true,
+          activationAttemptId: activationResult.attempt.attemptId,
+          activationReceipt: activationResult.receipt,
+        }
+        : {
+          activationAttemptId: activationResult.attempt.attemptId,
+          activationFailure: activationResult.failure,
+        },
+    });
+
+    const currentAsset = this.provisionerRuntime?.assetIndex.getCurrent(provisionId) ?? activationResult.asset;
+    const relatedReplay = [...this.#taPendingReplays.values()].find((replay) => replay.provisionId === provisionId);
+    const sessionId = typeof relatedReplay?.metadata?.sessionId === "string"
+      ? relatedReplay.metadata.sessionId
+      : undefined;
+    const runId = typeof relatedReplay?.metadata?.runId === "string"
+      ? relatedReplay.metadata.runId
+      : undefined;
+    if (sessionId && runId) {
+      this.#writeTapControlPlaneCheckpoint({
+        sessionId,
+        runId,
+        reason: "manual",
+        metadata: {
+          sourceOperation: "activation",
+          provisionId,
+          activationStatus: activationResult.status,
+        },
+      });
+    }
+
+    return {
+      status: activationResult.status,
+      asset: currentAsset,
+      attempt: activationResult.attempt,
+      receipt: activationResult.status === "activated" ? activationResult.receipt : undefined,
+      failure: activationResult.status === "failed" ? activationResult.failure : undefined,
+      activation: currentAsset
+        ? this.#createActivationHandoff({
+          source: "provision_asset",
+          asset: currentAsset,
+        })
+        : undefined,
+    };
   }
 
   async submitTaHumanGateDecision(
@@ -1166,7 +1448,10 @@ export class AgentCoreRuntime {
       ? this.provisionerRuntime.assetIndex.listCapabilityKeysByStatus(["activating"])
       : [];
     const activeProvisionAssetKeys = this.provisionerRuntime
-      ? this.provisionerRuntime.assetIndex.listCapabilityKeysByStatus(["active"])
+      ? this.provisionerRuntime.assetIndex
+        .listCurrentByStatus(["active"])
+        .filter((asset) => asset.metadata?.activatedIntoPool !== true)
+        .map((asset) => asset.capabilityKey)
       : [];
 
     return {
@@ -1536,6 +1821,16 @@ export class AgentCoreRuntime {
         reviewDecisionId: params.reviewDecision.decisionId,
       },
     }));
+    this.#writeTapControlPlaneCheckpoint({
+      sessionId: params.accessRequest.sessionId,
+      runId: params.accessRequest.runId,
+      reason: "pause",
+      metadata: {
+        sourceOperation: "human-gate-open",
+        gateId,
+        requestId: params.accessRequest.requestId,
+      },
+    });
     return this.#toHumanGateHandoff(gate, "review_decision");
   }
 
@@ -1580,6 +1875,16 @@ export class AgentCoreRuntime {
       },
     });
     this.#taPendingReplays.set(replay.replayId, replay);
+    this.#writeTapControlPlaneCheckpoint({
+      sessionId: params.intent.sessionId,
+      runId: params.intent.runId,
+      reason: "manual",
+      metadata: {
+        sourceOperation: "replay-stage",
+        replayId: replay.replayId,
+        provisionId: params.provisionBundle.provisionId,
+      },
+    });
     return this.#createReplayHandoff({
       source: "provision_bundle",
       bundle: params.provisionBundle,
