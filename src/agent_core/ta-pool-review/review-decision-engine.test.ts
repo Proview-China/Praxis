@@ -41,7 +41,9 @@ test("review engine fast-path approves baseline capabilities", () => {
   });
 
   assert.equal(decision.decision, "approved");
-  assert.equal(decision.grant?.constraints?.source, "baseline-fast-path");
+  assert.equal(decision.vote, "allow");
+  assert.equal(decision.grant, undefined);
+  assert.equal(decision.grantCompilerDirective?.constraints?.source, "baseline-fast-path");
 });
 
 test("review engine denies capabilities blocked by profile", () => {
@@ -88,6 +90,44 @@ test("review engine defers when provisioning is already pending", () => {
   assert.equal(decision.decision, "deferred");
 });
 
+test("review engine defers when a ready provision asset already exists", () => {
+  const decision = evaluateReviewDecision({
+    request: createRequest({
+      requestedCapabilityKey: "mcp.playwright",
+      requestedTier: "B1",
+    }),
+    profile,
+    inventory: {
+      readyProvisionAssetKeys: ["mcp.playwright"],
+    },
+  });
+
+  assert.equal(decision.decision, "deferred");
+  assert.equal(
+    decision.deferredReason,
+    "Provision asset is ready for review/activation; replay stays pending in this wave.",
+  );
+});
+
+test("review engine defers when an active provision asset is indexed but not mounted", () => {
+  const decision = evaluateReviewDecision({
+    request: createRequest({
+      requestedCapabilityKey: "computer.use",
+      requestedTier: "B2",
+    }),
+    profile,
+    inventory: {
+      activeProvisionAssetKeys: ["computer.use"],
+    },
+  });
+
+  assert.equal(decision.decision, "deferred");
+  assert.equal(
+    decision.deferredReason,
+    "Provision asset is indexed as active but is not mounted into the capability pool yet.",
+  );
+});
+
 test("review engine escalates critical strict requests to human", () => {
   const decision = evaluateReviewDecision({
     request: createRequest({
@@ -103,4 +143,23 @@ test("review engine escalates critical strict requests to human", () => {
 
   assert.equal(decision.decision, "escalated_to_human");
   assert.equal(decision.escalationTarget, "human-review");
+});
+
+test("review engine uses compiler directives instead of inline grants for review-approved capabilities", () => {
+  const decision = evaluateReviewDecision({
+    request: createRequest({
+      requestedCapabilityKey: "mcp.playwright",
+      requestedTier: "B1",
+    }),
+    profile,
+    inventory: {
+      availableCapabilityKeys: ["mcp.playwright"],
+    },
+  });
+
+  assert.equal(decision.decision, "approved");
+  assert.equal(decision.vote, "allow");
+  assert.equal(decision.grant, undefined);
+  assert.equal(decision.grantCompilerDirective?.grantedTier, "B1");
+  assert.equal(decision.grantCompilerDirective?.constraints?.source, "review-approved");
 });

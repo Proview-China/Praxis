@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-03-16T05:14:32.322Z",
+  "generatedAt": "2026-03-19T12:33:46.615Z",
   "provider": "openai",
   "rows": [
     {
@@ -24,7 +24,7 @@
       "step": "rax_websearch",
       "ok": true,
       "model": "gpt-5.4",
-      "summary": "OpenAI’s official developer documentation is on **developers.openai.com** (with API docs also served on **platform.openai.com/docs**) according to OpenAI’s deve",
+      "summary": "OpenAI’s official developer documentation domain is **developers.openai.com**. OpenAI’s own docs page says it hosts developer documentation on **developers.open",
       "details": {
         "status": "success",
         "sources": 18,
@@ -53,10 +53,10 @@
       "step": "rax_websearch",
       "ok": true,
       "model": "gpt-5",
-      "summary": "The official primary documentation domain for OpenAI’s developer/API docs is:\n\n**`platform.openai.com`**\n\nFor example, OpenAI’s own Help Center points to the AP",
+      "summary": "The official documentation domain for OpenAI’s developer docs is:\n\n**`https://platform.openai.com/docs`**, which is part of the broader **`openai.com`** domain ",
       "details": {
         "status": "success",
-        "sources": 19,
+        "sources": 7,
         "citations": 1
       }
     }

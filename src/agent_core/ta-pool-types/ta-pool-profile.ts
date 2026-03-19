@@ -9,16 +9,52 @@ export const TA_CAPABILITY_TIERS = [
 export type TaCapabilityTier = (typeof TA_CAPABILITY_TIERS)[number];
 
 export const TA_POOL_MODES = [
+  "bapr",
+  "yolo",
+  "permissive",
+  "standard",
+  "restricted",
+] as const;
+export type CanonicalTaPoolMode = (typeof TA_POOL_MODES)[number];
+
+export const TA_POOL_LEGACY_MODES = [
   "strict",
   "balanced",
-  "yolo",
 ] as const;
-export type TaPoolMode = (typeof TA_POOL_MODES)[number];
+export type LegacyTaPoolMode = (typeof TA_POOL_LEGACY_MODES)[number];
+
+export type TaPoolMode = CanonicalTaPoolMode | LegacyTaPoolMode;
+
+export const TA_POOL_MODE_ALIASES: Record<LegacyTaPoolMode, CanonicalTaPoolMode> = {
+  strict: "standard",
+  balanced: "permissive",
+};
+
+export function isCanonicalTaPoolMode(mode: string): mode is CanonicalTaPoolMode {
+  return TA_POOL_MODES.includes(mode as CanonicalTaPoolMode);
+}
+
+export function isLegacyTaPoolMode(mode: string): mode is LegacyTaPoolMode {
+  return TA_POOL_LEGACY_MODES.includes(mode as LegacyTaPoolMode);
+}
+
+export function isTaPoolMode(mode: string): mode is TaPoolMode {
+  return isCanonicalTaPoolMode(mode) || isLegacyTaPoolMode(mode);
+}
+
+export function toCanonicalTaPoolMode(mode: TaPoolMode): CanonicalTaPoolMode {
+  if (isCanonicalTaPoolMode(mode)) {
+    return mode;
+  }
+
+  return TA_POOL_MODE_ALIASES[mode];
+}
 
 export interface AgentCapabilityProfile {
   profileId: string;
   agentClass: string;
   defaultMode: TaPoolMode;
+  canonicalDefaultMode: CanonicalTaPoolMode;
   baselineTier: TaCapabilityTier;
   baselineCapabilities?: string[];
   allowedCapabilityPatterns?: string[];
@@ -66,8 +102,12 @@ export function validateAgentCapabilityProfile(profile: AgentCapabilityProfile):
     throw new Error("Agent capability profile requires a non-empty agentClass.");
   }
 
-  if (!TA_POOL_MODES.includes(profile.defaultMode)) {
+  if (!isTaPoolMode(profile.defaultMode)) {
     throw new Error(`Unsupported ta-pool mode: ${profile.defaultMode}.`);
+  }
+
+  if (!TA_POOL_MODES.includes(profile.canonicalDefaultMode)) {
+    throw new Error(`Unsupported canonical ta-pool mode: ${profile.canonicalDefaultMode}.`);
   }
 
   if (!TA_CAPABILITY_TIERS.includes(profile.baselineTier)) {
@@ -78,10 +118,12 @@ export function validateAgentCapabilityProfile(profile: AgentCapabilityProfile):
 export function createAgentCapabilityProfile(
   input: CreateAgentCapabilityProfileInput,
 ): AgentCapabilityProfile {
+  const defaultMode = input.defaultMode ?? "balanced";
   const profile: AgentCapabilityProfile = {
     profileId: input.profileId.trim(),
     agentClass: input.agentClass.trim(),
-    defaultMode: input.defaultMode ?? "balanced",
+    defaultMode,
+    canonicalDefaultMode: toCanonicalTaPoolMode(defaultMode),
     baselineTier: input.baselineTier ?? "B0",
     baselineCapabilities: normalizeStringArray(input.baselineCapabilities),
     allowedCapabilityPatterns: normalizeStringArray(input.allowedCapabilityPatterns),

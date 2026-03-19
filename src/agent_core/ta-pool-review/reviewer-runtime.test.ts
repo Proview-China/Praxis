@@ -4,9 +4,11 @@ import test from "node:test";
 import {
   createAccessRequest,
   createAgentCapabilityProfile,
-  createCapabilityGrant,
-  createReviewDecision,
 } from "../ta-pool-types/index.js";
+import {
+  REVIEWER_WORKER_BRIDGE_LANE,
+  REVIEWER_WORKER_OUTPUT_SCHEMA_VERSION,
+} from "./reviewer-worker-bridge.js";
 import { createReviewerRuntime } from "./reviewer-runtime.js";
 
 function createProfile() {
@@ -46,7 +48,9 @@ test("reviewer runtime returns baseline-approved decisions through the fast path
   });
 
   assert.equal(decision.decision, "approved");
-  assert.equal(decision.grant?.capabilityKey, "docs.read");
+  assert.equal(decision.vote, "allow");
+  assert.equal(decision.grant, undefined);
+  assert.equal(decision.grantCompilerDirective?.grantedTier, "B0");
 });
 
 test("reviewer runtime redirects missing capabilities to provisioning", async () => {
@@ -101,25 +105,41 @@ test("reviewer runtime escalates strict critical requests to human", async () =>
   assert.equal(decision.escalationTarget, "human-review");
 });
 
-test("reviewer runtime preserves a future llm reviewer hook", async () => {
+test("reviewer runtime routes review-required requests through the bootstrap reviewer worker bridge", async () => {
   const runtime = createReviewerRuntime({
-    llmReviewerHook: async ({ request }) => {
-      return createReviewDecision({
+    llmReviewerHook: async ({ request, reviewContext, promptPack, workerEnvelope }) => {
+      assert.equal(reviewContext.projectSummary.status, "placeholder");
+      assert.equal(reviewContext.memorySummaryPlaceholder.status, "placeholder");
+      assert.equal(reviewContext.userIntentSummary.summary, "Need reviewer runtime decision.");
+      assert.equal(reviewContext.riskSummary.requestedAction, "request capability mcp.playwright");
+      assert.equal(reviewContext.riskSummary.plainLanguageRisk.riskLevel, "normal");
+      assert.deepEqual(reviewContext.inventorySnapshot.metadata?.readyProvisionAssetKeys, ["mcp.playwright"]);
+      assert.deepEqual(reviewContext.inventorySnapshot.metadata?.activeProvisionAssetKeys, ["computer.use"]);
+      assert.equal(promptPack.lane, REVIEWER_WORKER_BRIDGE_LANE);
+      assert.match(promptPack.mission, /structured vote/i);
+      assert.equal(workerEnvelope.schemaVersion, "tap-reviewer-worker-input/v1");
+      assert.equal(workerEnvelope.lane, REVIEWER_WORKER_BRIDGE_LANE);
+      assert.equal(workerEnvelope.runtimeContract.canExecute, false);
+      assert.equal(workerEnvelope.runtimeContract.canDispatchGrant, false);
+      assert.equal(workerEnvelope.runtimeContract.canWrite, false);
+      assert.equal(workerEnvelope.routed.outcome, "review_required");
+      assert.equal(workerEnvelope.request.requestId, request.requestId);
+
+      return {
+        schemaVersion: REVIEWER_WORKER_OUTPUT_SCHEMA_VERSION,
+        workerKind: "reviewer",
+        lane: REVIEWER_WORKER_BRIDGE_LANE,
         decisionId: "hook-decision-1",
-        requestId: request.requestId,
-        decision: "approved",
-        mode: request.mode,
-        reason: "llm hook override",
-        grant: createCapabilityGrant({
-          grantId: "hook-grant-1",
-          requestId: request.requestId,
-          capabilityKey: request.requestedCapabilityKey,
-          grantedTier: request.requestedTier,
-          mode: request.mode,
-          issuedAt: "2026-03-18T03:00:05.000Z",
-        }),
+        vote: "allow_with_constraints",
+        reason: "reviewer worker override",
+        reviewerId: "bootstrap-reviewer-1",
+        recommendedTier: request.requestedTier,
+        recommendedConstraints: {
+          sourceHint: "llm-hook",
+        },
+        requiredFollowups: ["record reviewer trace"],
         createdAt: "2026-03-18T03:00:05.000Z",
-      });
+      };
     },
   });
 
@@ -131,10 +151,52 @@ test("reviewer runtime preserves a future llm reviewer hook", async () => {
     profile: createProfile(),
     inventory: {
       availableCapabilityKeys: ["mcp.playwright"],
+      readyProvisionAssetKeys: ["mcp.playwright"],
+      activeProvisionAssetKeys: ["computer.use"],
     },
   });
 
   assert.equal(runtime.hasLlmReviewerHook(), true);
-  assert.equal(decision.decision, "approved");
-  assert.equal(decision.reason, "llm hook override");
+  assert.equal(decision.vote, "allow_with_constraints");
+  assert.equal(decision.reason, "reviewer worker override");
+  assert.equal(decision.grant, undefined);
+  assert.equal(decision.reviewerId, "bootstrap-reviewer-1");
+  assert.equal(decision.grantCompilerDirective?.constraints?.source, "reviewer-worker-bridge");
+  assert.equal(
+    decision.grantCompilerDirective?.constraints?.promptPackVersion,
+    "tap-reviewer-prompt-pack/v1",
+  );
+  assert.deepEqual(
+    decision.grantCompilerDirective?.constraints?.requiredFollowups,
+    ["record reviewer trace"],
+  );
+});
+
+test("reviewer runtime rejects bridge output that tries to return an inline grant", async () => {
+  const runtime = createReviewerRuntime({
+    llmReviewerHook: async ({ request }) => ({
+      schemaVersion: REVIEWER_WORKER_OUTPUT_SCHEMA_VERSION,
+      workerKind: "reviewer",
+      lane: REVIEWER_WORKER_BRIDGE_LANE,
+      vote: "allow",
+      reason: "trying to smuggle a grant",
+      grant: {
+        requestId: request.requestId,
+      },
+    }) as never,
+  });
+
+  await assert.rejects(
+    () => runtime.submit({
+      request: createRequest({
+        requestedCapabilityKey: "mcp.playwright",
+        requestedTier: "B1",
+      }),
+      profile: createProfile(),
+      inventory: {
+        availableCapabilityKeys: ["mcp.playwright"],
+      },
+    }),
+    /vote-only; forbidden field grant/i,
+  );
 });

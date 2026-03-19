@@ -8,6 +8,7 @@ import {
 } from "../ta-pool-types/index.js";
 import {
   assertReviewDecisionCompatibleWithRequest,
+  compileGrantFromReviewDecision,
   resolveExecutionReadiness,
   reviewDecisionBlocksExecution,
   reviewDecisionHasGrant,
@@ -27,30 +28,39 @@ test("review helpers detect grant-bearing decisions and execution readiness", ()
     mode: "balanced",
     createdAt: "2026-03-18T00:00:00.000Z",
   });
-  const grant = createCapabilityGrant({
-    grantId: "grant-review-1",
-    requestId: request.requestId,
-    capabilityKey: request.requestedCapabilityKey,
-    grantedTier: "B1",
-    mode: request.mode,
-    issuedAt: "2026-03-18T00:00:01.000Z",
-  });
   const decision = createReviewDecision({
     decisionId: "decision-review-1",
     requestId: request.requestId,
-    decision: "approved",
+    vote: "allow",
     mode: request.mode,
     reason: "Allowed under the current profile.",
-    grant,
+    grantCompilerDirective: {
+      grantedTier: "B1",
+      constraints: {
+        source: "review-test",
+      },
+    },
     createdAt: "2026-03-18T00:00:02.000Z",
   });
 
-  assert.equal(reviewDecisionHasGrant(decision), true);
+  assert.equal(reviewDecisionHasGrant(decision), false);
   assert.equal(reviewDecisionBlocksExecution(decision), false);
-  assert.equal(resolveExecutionReadiness(decision).ready, true);
+  assert.equal(resolveExecutionReadiness(decision).ready, false);
   assert.doesNotThrow(() => {
     assertReviewDecisionCompatibleWithRequest({ request, decision });
   });
+
+  const compiled = compileGrantFromReviewDecision({
+    compiledGrantId: "grant-review-1",
+    request,
+    reviewDecision: decision,
+    issuedAt: "2026-03-18T00:00:03.000Z",
+    compilerVersion: "tap-grant-compiler/test",
+    integrityMarker: "integrity-review-1",
+  });
+  assert.equal(compiled.grant.capabilityKey, "search.web");
+  assert.equal(compiled.grant.reviewVote, "allow");
+  assert.equal(compiled.decisionToken.decisionId, decision.decisionId);
 });
 
 test("review helpers detect provisioning and human escalation branches", () => {
@@ -99,4 +109,75 @@ test("review helpers detect provisioning and human escalation branches", () => {
 
   assert.equal(reviewDecisionRequiresHuman(escalationDecision), true);
   assert.equal(reviewDecisionBlocksExecution(escalationDecision), true);
+});
+
+test("review helpers reject widened compiler directives before grant compilation", () => {
+  const request = createAccessRequest({
+    requestId: "req-review-3",
+    sessionId: "session-3",
+    runId: "run-3",
+    agentId: "agent-main",
+    requestedCapabilityKey: "mcp.playwright",
+    requestedTier: "B1",
+    reason: "Take one screenshot.",
+    requestedScope: {
+      allowedOperations: ["screenshot"],
+    },
+    mode: "balanced",
+    createdAt: "2026-03-18T00:02:00.000Z",
+  });
+
+  const decision = createReviewDecision({
+    decisionId: "decision-review-4",
+    requestId: request.requestId,
+    vote: "allow_with_constraints",
+    mode: request.mode,
+    reason: "Trying to widen the grant should fail.",
+    grantCompilerDirective: {
+      grantedTier: "B2",
+      grantedScope: {
+        allowedOperations: ["screenshot", "click"],
+      },
+    },
+    createdAt: "2026-03-18T00:02:01.000Z",
+  });
+
+  assert.throws(() => {
+    assertReviewDecisionCompatibleWithRequest({ request, decision });
+  }, /widens tier|widens allowedOperations/);
+});
+
+test("review helpers reject forged inline grants that do not belong to the access request", () => {
+  const request = createAccessRequest({
+    requestId: "req-review-4",
+    sessionId: "session-4",
+    runId: "run-4",
+    agentId: "agent-main",
+    requestedCapabilityKey: "mcp.playwright",
+    requestedTier: "B1",
+    reason: "Need one screenshot.",
+    mode: "balanced",
+    createdAt: "2026-03-18T00:03:00.000Z",
+  });
+
+  const decision = createReviewDecision({
+    decisionId: "decision-review-5",
+    requestId: request.requestId,
+    vote: "allow",
+    mode: request.mode,
+    reason: "Trying to attach a forged grant should fail.",
+    grant: createCapabilityGrant({
+      grantId: "grant-forged-1",
+      requestId: "req-review-4-other",
+      capabilityKey: "shell.exec",
+      grantedTier: "B1",
+      mode: request.mode,
+      issuedAt: "2026-03-18T00:03:01.000Z",
+    }),
+    createdAt: "2026-03-18T00:03:01.000Z",
+  });
+
+  assert.throws(() => {
+    assertReviewDecisionCompatibleWithRequest({ request, decision });
+  }, /does not belong to access request|targets shell\.exec/i);
 });

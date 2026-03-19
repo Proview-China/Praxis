@@ -1,11 +1,20 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  createPoolActivationSpec,
   createProvisionArtifactBundle,
   type ProvisionArtifactBundle,
   type ProvisionArtifactRef,
   type ProvisionRequest,
 } from "../ta-pool-types/index.js";
+import { ProvisionAssetIndex } from "./provision-asset-index.js";
+import {
+  createDefaultProvisionerWorkerOutput,
+  createProvisionerWorkerBridgeInput,
+  defaultProvisionerWorkerBridge,
+  validateProvisionerWorkerOutput,
+  type ProvisionerWorkerBridge,
+} from "./provisioner-worker-bridge.js";
 import { ProvisionRegistry } from "./provision-registry.js";
 
 export interface ProvisionBuildArtifacts {
@@ -18,6 +27,8 @@ export interface ProvisionBuildArtifacts {
 
 export interface ProvisionerRuntimeOptions {
   registry?: ProvisionRegistry;
+  assetIndex?: ProvisionAssetIndex;
+  workerBridge?: ProvisionerWorkerBridge;
   builder?: (request: ProvisionRequest) => Promise<ProvisionBuildArtifacts>;
   clock?: () => Date;
   idFactory?: () => string;
@@ -57,16 +68,40 @@ function defaultMockBuilder(request: ProvisionRequest): Promise<ProvisionBuildAr
   });
 }
 
+function adaptLegacyBuilder(
+  builder: (request: ProvisionRequest) => Promise<ProvisionBuildArtifacts>,
+): ProvisionerWorkerBridge {
+  return async (input) => {
+    const artifacts = await builder(input.request);
+    const defaultOutput = createDefaultProvisionerWorkerOutput(input);
+    return {
+      ...defaultOutput,
+      toolArtifact: artifacts.toolArtifact,
+      bindingArtifact: artifacts.bindingArtifact,
+      verificationArtifact: artifacts.verificationArtifact,
+      usageArtifact: artifacts.usageArtifact,
+      metadata: {
+        ...(defaultOutput.metadata ?? {}),
+        ...(artifacts.metadata ?? {}),
+        bridgeImplementation: "legacy-builder-adapter",
+      },
+    };
+  };
+}
+
 export class ProvisionerRuntime implements ProvisionerRuntimeLike {
   readonly registry: ProvisionRegistry;
-  readonly #builder: (request: ProvisionRequest) => Promise<ProvisionBuildArtifacts>;
+  readonly assetIndex: ProvisionAssetIndex;
+  readonly #workerBridge: ProvisionerWorkerBridge;
   readonly #clock: () => Date;
   readonly #idFactory: () => string;
   readonly #bundleHistory = new Map<string, ProvisionArtifactBundle[]>();
 
   constructor(options: ProvisionerRuntimeOptions = {}) {
     this.registry = options.registry ?? new ProvisionRegistry();
-    this.#builder = options.builder ?? defaultMockBuilder;
+    this.assetIndex = options.assetIndex ?? new ProvisionAssetIndex();
+    this.#workerBridge = options.workerBridge
+      ?? (options.builder ? adaptLegacyBuilder(options.builder) : defaultProvisionerWorkerBridge);
     this.#clock = options.clock ?? (() => new Date());
     this.#idFactory = options.idFactory ?? randomUUID;
   }
@@ -86,19 +121,28 @@ export class ProvisionerRuntime implements ProvisionerRuntimeLike {
     this.#recordBundle(buildingBundle);
 
     try {
-      const artifacts = await this.#builder(request);
+      const bridgeInput = createProvisionerWorkerBridgeInput(request);
+      const output = await this.#workerBridge(bridgeInput);
+      validateProvisionerWorkerOutput(output);
       const readyBundle = createProvisionArtifactBundle({
         bundleId: this.#idFactory(),
         provisionId: request.provisionId,
         status: "ready",
-        toolArtifact: artifacts.toolArtifact,
-        bindingArtifact: artifacts.bindingArtifact,
-        verificationArtifact: artifacts.verificationArtifact,
-        usageArtifact: artifacts.usageArtifact,
+        toolArtifact: output.toolArtifact,
+        bindingArtifact: output.bindingArtifact,
+        verificationArtifact: output.verificationArtifact,
+        usageArtifact: output.usageArtifact,
+        activationSpec: createPoolActivationSpec(output.activationPayload),
+        replayPolicy: output.replayRecommendation.policy,
         completedAt: this.#clock().toISOString(),
         metadata: {
           source: "provisioner-runtime",
-          ...(artifacts.metadata ?? {}),
+          buildSummary: output.buildSummary,
+          workerBridge: true,
+          workerLane: bridgeInput.lane,
+          workerPromptPackId: bridgeInput.promptPack.promptPackId,
+          replayRecommendation: output.replayRecommendation,
+          ...(output.metadata ?? {}),
         },
       });
       this.#recordBundle(readyBundle);
@@ -132,6 +176,10 @@ export class ProvisionerRuntime implements ProvisionerRuntimeLike {
     history.push(bundle);
     this.#bundleHistory.set(bundle.provisionId, history);
     this.registry.attachBundle(bundle);
+    const record = this.registry.get(bundle.provisionId);
+    if (record) {
+      this.assetIndex.ingest(record);
+    }
   }
 }
 

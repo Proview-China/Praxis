@@ -1,4 +1,14 @@
-import type { ReviewDecisionKind, TaCapabilityTier, TaPoolMode } from "../ta-pool-types/index.js";
+import type {
+  ReviewDecisionKind,
+  ReviewVote,
+  TaPoolRiskLevel,
+} from "../ta-pool-types/ta-pool-review.js";
+import {
+  toCanonicalTaPoolMode,
+  type CanonicalTaPoolMode,
+  type TaCapabilityTier,
+  type TaPoolMode,
+} from "../ta-pool-types/ta-pool-profile.js";
 
 export const TA_MODE_REVIEWER_STRATEGIES = [
   "skip",
@@ -36,7 +46,7 @@ export const TA_MODE_REQUEST_PATHS = [
 export type TaModeRequestPath = (typeof TA_MODE_REQUEST_PATHS)[number];
 
 export interface TaModeTierPolicy {
-  mode: TaPoolMode;
+  mode: CanonicalTaPoolMode;
   tier: TaCapabilityTier;
   executionPath: TaModeExecutionPath;
   reviewerStrategy: TaModeReviewerStrategy;
@@ -48,7 +58,7 @@ export interface TaModeTierPolicy {
 }
 
 export interface TaModeReviewerSnapshot {
-  mode: TaPoolMode;
+  mode: CanonicalTaPoolMode;
   tier: TaCapabilityTier;
   requestPath: TaModeRequestPath;
   executionPath: TaModeExecutionPath;
@@ -70,7 +80,7 @@ export interface TaModePolicy extends TaModeReviewerSnapshot {
 }
 
 export interface ModePolicyEntry {
-  mode: TaPoolMode;
+  mode: CanonicalTaPoolMode;
   tier: TaCapabilityTier;
   decision:
     | "allow"
@@ -85,122 +95,53 @@ export interface ModePolicyEntry {
 }
 export type ModePolicyDecision = ModePolicyEntry["decision"];
 
+export interface TaModeRiskPolicy extends TaModePolicy {
+  riskLevel: TaPoolRiskLevel;
+  baselineFastPath: boolean;
+  defaultVote: ReviewVote;
+}
+
+export interface ModeRiskPolicyEntry {
+  mode: CanonicalTaPoolMode;
+  riskLevel: TaPoolRiskLevel;
+  decision: "allow" | "review" | "deny" | "human_gate";
+  baselineFastPath: boolean;
+  defaultVote: ReviewVote;
+}
+export type ModeRiskDecision = ModeRiskPolicyEntry["decision"];
+
 type ModeMatrixEntry = Omit<TaModeTierPolicy, "mode" | "tier">;
 
-const MODE_MATRIX: Record<TaPoolMode, Record<TaCapabilityTier, ModeMatrixEntry>> = {
-  strict: {
-    B0: {
-      executionPath: "baseline_fast_path",
-      reviewerStrategy: "skip",
-      reviewRequirement: "none",
-      autoApprove: true,
-      allowProvisioningRedirect: false,
-      allowEmergencyInterrupt: false,
-      defaultDecisionHint: "approved",
-    },
-    B1: {
-      executionPath: "review_path",
-      reviewerStrategy: "normal",
-      reviewRequirement: "explicit_review",
-      autoApprove: false,
-      allowProvisioningRedirect: true,
-      allowEmergencyInterrupt: false,
-      defaultDecisionHint: "deferred",
-    },
-    B2: {
-      executionPath: "review_path",
-      reviewerStrategy: "strict",
-      reviewRequirement: "strict_review",
-      autoApprove: false,
-      allowProvisioningRedirect: true,
-      allowEmergencyInterrupt: true,
-      defaultDecisionHint: "deferred",
-    },
-    B3: {
-      executionPath: "human_gate",
-      reviewerStrategy: "human_gate",
-      reviewRequirement: "human_escalation",
-      autoApprove: false,
-      allowProvisioningRedirect: false,
-      allowEmergencyInterrupt: true,
-      defaultDecisionHint: "escalated_to_human",
-    },
-  },
-  balanced: {
-    B0: {
-      executionPath: "baseline_fast_path",
-      reviewerStrategy: "skip",
-      reviewRequirement: "none",
-      autoApprove: true,
-      allowProvisioningRedirect: false,
-      allowEmergencyInterrupt: false,
-      defaultDecisionHint: "approved",
-    },
-    B1: {
-      executionPath: "review_path",
-      reviewerStrategy: "fast",
-      reviewRequirement: "explicit_review",
-      autoApprove: false,
-      allowProvisioningRedirect: true,
-      allowEmergencyInterrupt: false,
-      defaultDecisionHint: "deferred",
-    },
-    B2: {
-      executionPath: "review_path",
-      reviewerStrategy: "normal",
-      reviewRequirement: "explicit_review",
-      autoApprove: false,
-      allowProvisioningRedirect: true,
-      allowEmergencyInterrupt: true,
-      defaultDecisionHint: "deferred",
-    },
-    B3: {
-      executionPath: "guarded_execution",
-      reviewerStrategy: "interrupt_only",
-      reviewRequirement: "interruptible_execution",
-      autoApprove: false,
-      allowProvisioningRedirect: false,
-      allowEmergencyInterrupt: true,
-      defaultDecisionHint: "denied",
-    },
+const MODE_MATRIX: Record<CanonicalTaPoolMode, Record<TaCapabilityTier, ModeMatrixEntry>> = {
+  bapr: {
+    B0: { executionPath: "baseline_fast_path", reviewerStrategy: "skip", reviewRequirement: "none", autoApprove: true, allowProvisioningRedirect: true, allowEmergencyInterrupt: false, defaultDecisionHint: "approved" },
+    B1: { executionPath: "baseline_fast_path", reviewerStrategy: "skip", reviewRequirement: "none", autoApprove: true, allowProvisioningRedirect: true, allowEmergencyInterrupt: false, defaultDecisionHint: "approved" },
+    B2: { executionPath: "baseline_fast_path", reviewerStrategy: "skip", reviewRequirement: "none", autoApprove: true, allowProvisioningRedirect: true, allowEmergencyInterrupt: false, defaultDecisionHint: "approved" },
+    B3: { executionPath: "baseline_fast_path", reviewerStrategy: "skip", reviewRequirement: "none", autoApprove: true, allowProvisioningRedirect: true, allowEmergencyInterrupt: false, defaultDecisionHint: "approved" },
   },
   yolo: {
-    B0: {
-      executionPath: "baseline_fast_path",
-      reviewerStrategy: "skip",
-      reviewRequirement: "none",
-      autoApprove: true,
-      allowProvisioningRedirect: false,
-      allowEmergencyInterrupt: false,
-      defaultDecisionHint: "approved",
-    },
-    B1: {
-      executionPath: "baseline_fast_path",
-      reviewerStrategy: "interrupt_only",
-      reviewRequirement: "interruptible_execution",
-      autoApprove: true,
-      allowProvisioningRedirect: true,
-      allowEmergencyInterrupt: true,
-      defaultDecisionHint: "approved",
-    },
-    B2: {
-      executionPath: "guarded_execution",
-      reviewerStrategy: "interrupt_only",
-      reviewRequirement: "interruptible_execution",
-      autoApprove: true,
-      allowProvisioningRedirect: true,
-      allowEmergencyInterrupt: true,
-      defaultDecisionHint: "approved",
-    },
-    B3: {
-      executionPath: "guarded_execution",
-      reviewerStrategy: "interrupt_only",
-      reviewRequirement: "interruptible_execution",
-      autoApprove: false,
-      allowProvisioningRedirect: false,
-      allowEmergencyInterrupt: true,
-      defaultDecisionHint: "denied",
-    },
+    B0: { executionPath: "baseline_fast_path", reviewerStrategy: "skip", reviewRequirement: "none", autoApprove: true, allowProvisioningRedirect: false, allowEmergencyInterrupt: false, defaultDecisionHint: "approved" },
+    B1: { executionPath: "baseline_fast_path", reviewerStrategy: "interrupt_only", reviewRequirement: "interruptible_execution", autoApprove: true, allowProvisioningRedirect: true, allowEmergencyInterrupt: true, defaultDecisionHint: "approved" },
+    B2: { executionPath: "guarded_execution", reviewerStrategy: "interrupt_only", reviewRequirement: "interruptible_execution", autoApprove: true, allowProvisioningRedirect: true, allowEmergencyInterrupt: true, defaultDecisionHint: "approved" },
+    B3: { executionPath: "guarded_execution", reviewerStrategy: "interrupt_only", reviewRequirement: "interruptible_execution", autoApprove: false, allowProvisioningRedirect: false, allowEmergencyInterrupt: true, defaultDecisionHint: "denied" },
+  },
+  permissive: {
+    B0: { executionPath: "baseline_fast_path", reviewerStrategy: "skip", reviewRequirement: "none", autoApprove: true, allowProvisioningRedirect: false, allowEmergencyInterrupt: false, defaultDecisionHint: "approved" },
+    B1: { executionPath: "review_path", reviewerStrategy: "fast", reviewRequirement: "explicit_review", autoApprove: false, allowProvisioningRedirect: true, allowEmergencyInterrupt: false, defaultDecisionHint: "deferred" },
+    B2: { executionPath: "review_path", reviewerStrategy: "normal", reviewRequirement: "explicit_review", autoApprove: false, allowProvisioningRedirect: true, allowEmergencyInterrupt: true, defaultDecisionHint: "deferred" },
+    B3: { executionPath: "guarded_execution", reviewerStrategy: "strict", reviewRequirement: "strict_review", autoApprove: false, allowProvisioningRedirect: false, allowEmergencyInterrupt: true, defaultDecisionHint: "denied" },
+  },
+  standard: {
+    B0: { executionPath: "baseline_fast_path", reviewerStrategy: "skip", reviewRequirement: "none", autoApprove: true, allowProvisioningRedirect: false, allowEmergencyInterrupt: false, defaultDecisionHint: "approved" },
+    B1: { executionPath: "review_path", reviewerStrategy: "normal", reviewRequirement: "explicit_review", autoApprove: false, allowProvisioningRedirect: true, allowEmergencyInterrupt: false, defaultDecisionHint: "deferred" },
+    B2: { executionPath: "review_path", reviewerStrategy: "strict", reviewRequirement: "strict_review", autoApprove: false, allowProvisioningRedirect: true, allowEmergencyInterrupt: true, defaultDecisionHint: "deferred" },
+    B3: { executionPath: "human_gate", reviewerStrategy: "human_gate", reviewRequirement: "human_escalation", autoApprove: false, allowProvisioningRedirect: false, allowEmergencyInterrupt: true, defaultDecisionHint: "escalated_to_human" },
+  },
+  restricted: {
+    B0: { executionPath: "baseline_fast_path", reviewerStrategy: "skip", reviewRequirement: "none", autoApprove: true, allowProvisioningRedirect: false, allowEmergencyInterrupt: false, defaultDecisionHint: "approved" },
+    B1: { executionPath: "human_gate", reviewerStrategy: "human_gate", reviewRequirement: "human_escalation", autoApprove: false, allowProvisioningRedirect: true, allowEmergencyInterrupt: false, defaultDecisionHint: "escalated_to_human" },
+    B2: { executionPath: "human_gate", reviewerStrategy: "human_gate", reviewRequirement: "human_escalation", autoApprove: false, allowProvisioningRedirect: true, allowEmergencyInterrupt: true, defaultDecisionHint: "escalated_to_human" },
+    B3: { executionPath: "human_gate", reviewerStrategy: "human_gate", reviewRequirement: "human_escalation", autoApprove: false, allowProvisioningRedirect: false, allowEmergencyInterrupt: true, defaultDecisionHint: "escalated_to_human" },
   },
 };
 
@@ -208,7 +149,8 @@ export function classifyRequestPath(params: {
   mode: TaPoolMode;
   tier: TaCapabilityTier;
 }): TaModeRequestPath {
-  const policy = MODE_MATRIX[params.mode][params.tier];
+  const canonicalMode = toCanonicalTaPoolMode(params.mode);
+  const policy = MODE_MATRIX[canonicalMode][params.tier];
   switch (policy.executionPath) {
     case "baseline_fast_path":
       return "baseline";
@@ -225,10 +167,11 @@ export function getModeTierPolicy(params: {
   mode: TaPoolMode;
   tier: TaCapabilityTier;
 }): TaModeTierPolicy {
+  const canonicalMode = toCanonicalTaPoolMode(params.mode);
   return {
-    mode: params.mode,
+    mode: canonicalMode,
     tier: params.tier,
-    ...MODE_MATRIX[params.mode][params.tier],
+    ...MODE_MATRIX[canonicalMode][params.tier],
   };
 }
 
@@ -292,7 +235,7 @@ export function getModePolicyEntry(
   }
 
   return {
-    mode,
+    mode: snapshot.mode,
     tier,
     decision,
     requiresReview:
@@ -300,23 +243,69 @@ export function getModePolicyEntry(
       snapshot.reviewRequirement === "strict_review",
     allowsAutoGrant: snapshot.autoApprove,
     requiresHuman: snapshot.requiresHumanGate,
-    actsAsSafetyAirbag: snapshot.allowEmergencyInterrupt && mode === "yolo",
+    actsAsSafetyAirbag: snapshot.allowEmergencyInterrupt && snapshot.mode === "yolo",
   };
 }
 
-export function getModePolicyMatrix(): Record<TaPoolMode, Record<TaCapabilityTier, ModePolicyEntry["decision"]>> {
+export function getModeRiskPolicyEntry(
+  mode: TaPoolMode,
+  riskLevel: TaPoolRiskLevel,
+): ModeRiskPolicyEntry {
+  const canonicalMode = toCanonicalTaPoolMode(mode);
+
+  switch (canonicalMode) {
+    case "bapr":
+      return { mode: canonicalMode, riskLevel, decision: "allow", baselineFastPath: true, defaultVote: "allow" };
+    case "yolo":
+      if (riskLevel === "dangerous") {
+        return { mode: canonicalMode, riskLevel, decision: "deny", baselineFastPath: false, defaultVote: "deny" };
+      }
+      return { mode: canonicalMode, riskLevel, decision: "allow", baselineFastPath: true, defaultVote: "allow" };
+    case "permissive":
+      if (riskLevel === "normal") {
+        return { mode: canonicalMode, riskLevel, decision: "allow", baselineFastPath: true, defaultVote: "allow" };
+      }
+      if (riskLevel === "risky") {
+        return { mode: canonicalMode, riskLevel, decision: "review", baselineFastPath: false, defaultVote: "defer" };
+      }
+      return { mode: canonicalMode, riskLevel, decision: "human_gate", baselineFastPath: false, defaultVote: "escalate_to_human" };
+    case "standard":
+      if (riskLevel === "normal") {
+        return { mode: canonicalMode, riskLevel, decision: "review", baselineFastPath: true, defaultVote: "defer" };
+      }
+      if (riskLevel === "risky") {
+        return { mode: canonicalMode, riskLevel, decision: "review", baselineFastPath: false, defaultVote: "defer" };
+      }
+      return { mode: canonicalMode, riskLevel, decision: "human_gate", baselineFastPath: false, defaultVote: "escalate_to_human" };
+    case "restricted":
+      return { mode: canonicalMode, riskLevel, decision: "human_gate", baselineFastPath: riskLevel === "normal", defaultVote: "escalate_to_human" };
+  }
+}
+
+export function getModeRiskPolicy(params: {
+  mode: TaPoolMode;
+  tier: TaCapabilityTier;
+  riskLevel: TaPoolRiskLevel;
+}): TaModeRiskPolicy {
+  return {
+    ...getTaModePolicy({ mode: params.mode, tier: params.tier }),
+    ...getModeRiskPolicyEntry(params.mode, params.riskLevel),
+  };
+}
+
+export function getModePolicyMatrix(): Record<TaPoolMode, Record<TaCapabilityTier, ModePolicyDecision>> {
   return {
     strict: {
-      B0: getModePolicyEntry("strict", "B0").decision,
-      B1: getModePolicyEntry("strict", "B1").decision,
-      B2: getModePolicyEntry("strict", "B2").decision,
-      B3: getModePolicyEntry("strict", "B3").decision,
+      B0: getModePolicyEntry("standard", "B0").decision,
+      B1: getModePolicyEntry("standard", "B1").decision,
+      B2: getModePolicyEntry("standard", "B2").decision,
+      B3: getModePolicyEntry("standard", "B3").decision,
     },
     balanced: {
-      B0: getModePolicyEntry("balanced", "B0").decision,
-      B1: getModePolicyEntry("balanced", "B1").decision,
-      B2: getModePolicyEntry("balanced", "B2").decision,
-      B3: getModePolicyEntry("balanced", "B3").decision,
+      B0: getModePolicyEntry("permissive", "B0").decision,
+      B1: getModePolicyEntry("permissive", "B1").decision,
+      B2: getModePolicyEntry("permissive", "B2").decision,
+      B3: getModePolicyEntry("permissive", "B3").decision,
     },
     yolo: {
       B0: getModePolicyEntry("yolo", "B0").decision,
@@ -324,11 +313,46 @@ export function getModePolicyMatrix(): Record<TaPoolMode, Record<TaCapabilityTie
       B2: getModePolicyEntry("yolo", "B2").decision,
       B3: getModePolicyEntry("yolo", "B3").decision,
     },
+    bapr: {
+      B0: getModePolicyEntry("bapr", "B0").decision,
+      B1: getModePolicyEntry("bapr", "B1").decision,
+      B2: getModePolicyEntry("bapr", "B2").decision,
+      B3: getModePolicyEntry("bapr", "B3").decision,
+    },
+    permissive: {
+      B0: getModePolicyEntry("permissive", "B0").decision,
+      B1: getModePolicyEntry("permissive", "B1").decision,
+      B2: getModePolicyEntry("permissive", "B2").decision,
+      B3: getModePolicyEntry("permissive", "B3").decision,
+    },
+    standard: {
+      B0: getModePolicyEntry("standard", "B0").decision,
+      B1: getModePolicyEntry("standard", "B1").decision,
+      B2: getModePolicyEntry("standard", "B2").decision,
+      B3: getModePolicyEntry("standard", "B3").decision,
+    },
+    restricted: {
+      B0: getModePolicyEntry("restricted", "B0").decision,
+      B1: getModePolicyEntry("restricted", "B1").decision,
+      B2: getModePolicyEntry("restricted", "B2").decision,
+      B3: getModePolicyEntry("restricted", "B3").decision,
+    },
   };
 }
 
+export function getModeRiskPolicyMatrix(): Record<CanonicalTaPoolMode, Record<TaPoolRiskLevel, ModeRiskDecision>> {
+  const risks: TaPoolRiskLevel[] = ["normal", "risky", "dangerous"];
+  const modes: CanonicalTaPoolMode[] = ["bapr", "yolo", "permissive", "standard", "restricted"];
+  return Object.fromEntries(
+    modes.map((mode) => [
+      mode,
+      Object.fromEntries(risks.map((risk) => [risk, getModeRiskPolicyEntry(mode, risk).decision])) as Record<TaPoolRiskLevel, ModeRiskDecision>,
+    ]),
+  ) as Record<CanonicalTaPoolMode, Record<TaPoolRiskLevel, ModeRiskDecision>>;
+}
+
 export function listModePolicyMatrix(): TaModeTierPolicy[] {
-  return (Object.entries(MODE_MATRIX) as Array<[TaPoolMode, Record<TaCapabilityTier, ModeMatrixEntry>]>)
+  return (Object.entries(MODE_MATRIX) as Array<[CanonicalTaPoolMode, Record<TaCapabilityTier, ModeMatrixEntry>]>)
     .flatMap(([mode, tiers]) =>
       (Object.entries(tiers) as Array<[TaCapabilityTier, ModeMatrixEntry]>).map(([tier, policy]) => ({
         mode,
@@ -336,6 +360,13 @@ export function listModePolicyMatrix(): TaModeTierPolicy[] {
         ...policy,
       })),
     );
+}
+
+export function listModeRiskPolicyMatrix(): TaModeRiskPolicy[] {
+  const risks: TaPoolRiskLevel[] = ["normal", "risky", "dangerous"];
+  return listModePolicyMatrix().flatMap((entry) =>
+    risks.map((riskLevel) => getModeRiskPolicy({ mode: entry.mode, tier: entry.tier, riskLevel })),
+  );
 }
 
 export function shouldSkipReview(params: {

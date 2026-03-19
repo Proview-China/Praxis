@@ -8,6 +8,7 @@ export {
 
 export {
   assertReviewDecisionCompatibleWithRequest,
+  compileGrantFromReviewDecision,
   resolveExecutionReadiness,
   reviewDecisionBlocksExecution,
   reviewDecisionHasGrant,
@@ -25,6 +26,26 @@ export {
   REVIEW_ROUTING_OUTCOMES,
   routeAccessRequest,
 } from "./review-routing.js";
+
+export type {
+  CompileReviewerWorkerVoteInput,
+  CreateReviewerWorkerEnvelopeInput,
+  ReviewerRuntimeWorkerInput,
+  ReviewerWorkerDecisionPreview,
+  ReviewerWorkerInputEnvelope,
+  ReviewerWorkerPromptPack,
+  ReviewerWorkerVoteOutput,
+} from "./reviewer-worker-bridge.js";
+export {
+  compileReviewerWorkerVote,
+  createReviewerWorkerEnvelope,
+  createReviewerWorkerPromptPack,
+  parseReviewerWorkerVoteOutput,
+  REVIEWER_WORKER_BRIDGE_LANE,
+  REVIEWER_WORKER_INPUT_SCHEMA_VERSION,
+  REVIEWER_WORKER_OUTPUT_SCHEMA_VERSION,
+  REVIEWER_WORKER_PROMPT_PACK_VERSION,
+} from "./reviewer-worker-bridge.js";
 
 export type {
   ReviewerRuntimeHookInput,

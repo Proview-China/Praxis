@@ -2,7 +2,7 @@
 
 状态：上下文压缩后交接用 prompt。
 
-更新时间：2026-03-18
+更新时间：2026-03-19
 
 ## 用法
 
@@ -16,17 +16,24 @@
 
 当前唯一目标：
 
-继续推进 `T/A Pool` 与 `raw_agent_core` 的 runtime assembly 主线，不要串到别的任务。
+继续推进 `TAP` 与 `raw_agent_core` 的 activation driver、真实 builder、durable human gate / replay 恢复链，不要串到别的任务。
 
 请先接受下面这些当前事实：
 
 1. 当前阶段判断
 - `Capability Interface v1` 已成立
-- 第一个 `T/A Pool` 控制面也已成立
-- 第一个 pool 已接进 `raw_agent_core` 预留接口
-- 但完整治理和默认主路径切换都还没结束
+- `TAP` 已从“第一版控制面”推进到“可用 runtime 控制面”
+- 默认 capability_call 主路径已经切到 `TAP`
+- reviewer / provisioner bootstrap worker bridge 已接入
+- 最小 enforcement / human gate / replay skeleton 已接入
+- 但真实 activation driver、真实 builder、durable 恢复链仍未完成
 
-2. 当前相关代码层
+2. 当前仓库状态
+- 分支：`reboot/blank-slate`
+- 当前工作仍在这个分支上继续推进
+- 上一关键里程碑提交：`dd01fb5`
+
+3. 当前相关代码层
 - `src/agent_core/ta-pool-types/**`
 - `src/agent_core/ta-pool-model/**`
 - `src/agent_core/ta-pool-review/**`
@@ -34,52 +41,64 @@
 - `src/agent_core/ta-pool-safety/**`
 - `src/agent_core/ta-pool-context/**`
 - `src/agent_core/ta-pool-runtime/**`
+- `src/agent_core/capability-package/**`
 
-3. 当前 `AgentCoreRuntime` 已新增的 T/A 能力面
+4. 当前 `AgentCoreRuntime` 已具备的 TAP 能力面
 - `resolveTaCapabilityAccess(...)`
 - `dispatchTaCapabilityGrant(...)`
 - `dispatchCapabilityIntentViaTaPool(...)`
-- `taControlPlaneGateway`
+- `dispatchIntent(capability_call)` 默认先走 `TAP`
+- `submitTaHumanGateDecision(...)`
 
-4. 当前已经打通的 runtime assembly 路径
-- review -> dispatch
+5. 当前已经打通的 runtime assembly 路径
+- default capability_call -> TAP
+- review -> reviewer worker bridge -> dispatch
 - review -> provisioning
+- provisioning -> asset index -> replay handoff
+- `restricted -> waiting_human -> approve / reject`
 - safety -> interrupt
 
-5. 当前还没有完成的事
-- 还没有把所有 capability intent 默认切到 `T/A Pool` 主路径
+6. 当前还没有完成的事
 - reviewer 还没有接真实项目状态、记忆池、包装机
-- provisioner 还只是 mock builder
-- safety 还没有接完整人工审批链
+- provisioner 还没有真实 builder
+- activation 还只是 handoff skeleton，不是真实 driver
+- replay 还只是 pending skeleton，不是真正自动执行器
+- human gate / replay 还没有 durable 恢复链
 
-6. 当前阶段最重要的边界
+7. 当前阶段最重要的边界
 - `CapabilityPool` 继续做 execution plane
-- `T/A Pool` 做 control plane
-- reviewer / provisioner / safety 不应直接污染 raw kernel
-- context aperture 已留坑，但当前不要提前做完整治理 system
+- `TAP` 做 control plane
+- reviewer 只回 vote，不直接 dispatch grant
+- provisioner 只造包，不直接替主 agent 完成原任务
+- context aperture 已到 v1，但 project / memory 仍保持 placeholder
 
-7. 当前验证基线
+8. 当前验证基线
 - `npm run typecheck` 通过
+- `npm run build` 通过
 - `npx tsx --test src/agent_core/**/*.test.ts` 通过
-- 当前 `agent_core` 测试：`115 pass / 0 fail`
+- 当前 `agent_core` 定向测试：`159 pass / 0 fail`
+- `npm run smoke:websearch:live -- --provider=openai` 通过
 
-8. 先读这些文档再继续
+9. 先读这些文档再继续
 - `docs/ability/20-ta-pool-control-plane-outline.md`
 - `docs/ability/21-ta-pool-implementation-status.md`
 - `docs/ability/22-ta-pool-handoff-prompt.md`
-- `docs/ability/ta-pool-task-pack/README.md`
+- `docs/ability/23-ta-pool-stage-wrap-up.md`
+- `docs/ability/24-tap-mode-matrix-and-worker-contracts.md`
+- `docs/ability/25-tap-capability-package-template.md`
+- `docs/ability/26-tap-runtime-migration-and-enforcement-outline.md`
+- `docs/ability/tap-usable-task-pack/README.md`
 - `memory/current-context.md`
-- `memory/worklog/2026-03-18-ta-pool-first-implementation.md`
-- `memory/worklog/2026-03-18-ta-pool-runtime-assembly.md`
+- `memory/worklog/2026-03-19-tap-usable-runtime-closure.md`
 
-9. 你现在的默认工作方式
+10. 你现在的默认工作方式
 - 先回读当前代码事实
 - 再确认当前唯一目标
-- 然后继续推进 `T/A Pool` 的 runtime assembly 与治理收口
+- 然后继续推进 `TAP` 的 activation / durable human gate / durable replay 收口
 - 除非用户改目标，否则不要跳回纯设计讨论
 
 ---
 
 ## 一句话压缩版
 
-Praxis 已完成第一个 `T/A Pool` 控制面的第一版代码落地，并把它接进了 `raw_agent_core` 预留接口；当前系统已打通基础 runtime assembly，但还没有完成默认主路径切换和高层治理接入。
+Praxis 已把 `TAP` 推进成默认 capability 控制面，并接入 reviewer/provisioner bridge、最小 enforcement、human gate、replay skeleton；当前下一步重点是 activation driver 与 durable 恢复链。

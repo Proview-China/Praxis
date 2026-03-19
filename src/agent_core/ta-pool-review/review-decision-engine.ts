@@ -1,5 +1,4 @@
 import {
-  createCapabilityGrant,
   createReviewDecision,
   isCapabilityDeniedByProfile,
   type AccessRequest,
@@ -12,6 +11,9 @@ import { resolveBaselineCapability } from "../ta-pool-model/profile-baseline.js"
 export interface ReviewDecisionEngineInventory {
   availableCapabilityKeys?: string[];
   pendingProvisionKeys?: string[];
+  readyProvisionAssetKeys?: string[];
+  activatingProvisionAssetKeys?: string[];
+  activeProvisionAssetKeys?: string[];
 }
 
 export interface EvaluateReviewDecisionInput {
@@ -39,6 +41,25 @@ function hasCapability(inventory: ReviewDecisionEngineInventory | undefined, cap
 
 function isPendingProvision(inventory: ReviewDecisionEngineInventory | undefined, capabilityKey: string): boolean {
   return normalizeStringArray(inventory?.pendingProvisionKeys).includes(capabilityKey);
+}
+
+function getProvisionAssetState(
+  inventory: ReviewDecisionEngineInventory | undefined,
+  capabilityKey: string,
+): "ready_for_review" | "activating" | "active" | undefined {
+  if (normalizeStringArray(inventory?.readyProvisionAssetKeys).includes(capabilityKey)) {
+    return "ready_for_review";
+  }
+
+  if (normalizeStringArray(inventory?.activatingProvisionAssetKeys).includes(capabilityKey)) {
+    return "activating";
+  }
+
+  if (normalizeStringArray(inventory?.activeProvisionAssetKeys).includes(capabilityKey)) {
+    return "active";
+  }
+
+  return undefined;
 }
 
 export function evaluateReviewDecision(input: EvaluateReviewDecisionInput): ReviewDecision {
@@ -76,22 +97,17 @@ export function evaluateReviewDecision(input: EvaluateReviewDecisionInput): Revi
     return createReviewDecision({
       decisionId,
       requestId: request.requestId,
-      decision: "approved",
+      vote: "allow",
       reviewerId,
       mode: request.mode,
       reason: `Capability ${request.requestedCapabilityKey} is in the baseline set.`,
-      grant: createCapabilityGrant({
-        grantId: `${request.requestId}:grant`,
-        requestId: request.requestId,
-        capabilityKey: request.requestedCapabilityKey,
+      grantCompilerDirective: {
         grantedTier: request.requestedTier,
         grantedScope: request.requestedScope,
-        mode: request.mode,
-        issuedAt: createdAt,
         constraints: {
           source: "baseline-fast-path",
         },
-      }),
+      },
       createdAt,
     });
   }
@@ -105,6 +121,25 @@ export function evaluateReviewDecision(input: EvaluateReviewDecisionInput): Revi
       mode: request.mode,
       reason: `Capability ${request.requestedCapabilityKey} is already provisioning.`,
       deferredReason: "Awaiting provision artifact bundle completion.",
+      createdAt,
+    });
+  }
+
+  const provisionAssetState = getProvisionAssetState(inventory, request.requestedCapabilityKey);
+  if (provisionAssetState) {
+    const deferredReason = provisionAssetState === "ready_for_review"
+      ? "Provision asset is ready for review/activation; replay stays pending in this wave."
+      : provisionAssetState === "activating"
+        ? "Provision asset is currently in activation handoff."
+        : "Provision asset is indexed as active but is not mounted into the capability pool yet.";
+    return createReviewDecision({
+      decisionId,
+      requestId: request.requestId,
+      decision: "deferred",
+      reviewerId,
+      mode: request.mode,
+      reason: `Capability ${request.requestedCapabilityKey} already has a ${provisionAssetState} provision asset.`,
+      deferredReason,
       createdAt,
     });
   }
@@ -139,23 +174,18 @@ export function evaluateReviewDecision(input: EvaluateReviewDecisionInput): Revi
   return createReviewDecision({
     decisionId,
     requestId: request.requestId,
-    decision: "approved",
+    vote: "allow",
     reviewerId,
     mode: request.mode,
     reason: `Capability ${request.requestedCapabilityKey} is available and allowed under ${request.mode} mode.`,
-    grant: createCapabilityGrant({
-      grantId: `${request.requestId}:grant`,
-      requestId: request.requestId,
-      capabilityKey: request.requestedCapabilityKey,
+    grantCompilerDirective: {
       grantedTier: request.requestedTier,
       grantedScope: request.requestedScope,
-      mode: request.mode,
-      issuedAt: createdAt,
       constraints: {
         source: policy.allowsAutoGrant ? "mode-auto-grant" : "review-approved",
         modeDecision: policy.decision,
       },
-    }),
+    },
     createdAt,
   });
 }

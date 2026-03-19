@@ -116,10 +116,13 @@ export function routeAccessRequest(params: RouteAccessRequestOptions): ReviewRou
     const decision = createReviewDecision({
       decisionId: idFactory(),
       requestId: request.requestId,
-      decision: "approved",
+      vote: "allow",
       mode: request.mode,
       reason: `Capability ${request.requestedCapabilityKey} is baseline-allowed for profile ${profile.profileId}.`,
-      grant,
+      grantCompilerDirective: {
+        grantedTier: request.requestedTier,
+        grantedScope: request.requestedScope,
+      },
       createdAt,
     });
     return {

@@ -8,10 +8,14 @@ import type {
   CapabilityResultEnvelope,
   PreparedCapabilityCall,
 } from "../capability-types/index.js";
+import { createDecisionToken } from "../ta-pool-types/index.js";
+import { TA_ENFORCEMENT_METADATA_KEY } from "../ta-pool-runtime/enforcement-guard.js";
 import { DefaultCapabilityPool } from "./pool-dispatch.js";
 
-function createPlan(priority: CapabilityInvocationPlan["priority"] = "normal"): CapabilityInvocationPlan {
-  return {
+function createPlan(
+  input: CapabilityInvocationPlan["priority"] | Partial<CapabilityInvocationPlan> = "normal",
+): CapabilityInvocationPlan {
+  const base: CapabilityInvocationPlan = {
     planId: "plan_001",
     intentId: "intent_001",
     sessionId: "session_001",
@@ -21,7 +25,27 @@ function createPlan(priority: CapabilityInvocationPlan["priority"] = "normal"): 
     input: {
       query: "life meaning",
     },
-    priority,
+    priority: "normal",
+  };
+
+  if (typeof input === "string") {
+    return {
+      ...base,
+      priority: input,
+    };
+  }
+
+  return {
+    ...base,
+    ...input,
+    input: {
+      ...base.input,
+      ...(input.input ?? {}),
+    },
+    metadata: {
+      ...(base.metadata ?? {}),
+      ...(input.metadata ?? {}),
+    },
   };
 }
 
@@ -112,4 +136,128 @@ test("DefaultCapabilityPool queued dispatch drains asynchronously", async () => 
 
   assert.equal(handle.state, "queued");
   assert.equal(result.status, "success");
+});
+
+test("DefaultCapabilityPool prepare rejects malformed T/A enforcement metadata", async () => {
+  const pool = new DefaultCapabilityPool();
+  pool.register({
+    capabilityId: "cap_search_ground",
+    capabilityKey: "search.ground",
+    kind: "tool",
+    version: "1.0.0",
+    generation: 1,
+    description: "Grounded search capability.",
+  }, createAdapter());
+
+  const plan = createPlan({
+    metadata: {
+      bridge: "ta-pool",
+      [TA_ENFORCEMENT_METADATA_KEY]: {
+        requestId: "different-request",
+        executionRequestId: "another-exec-request",
+        capabilityKey: "search.ground",
+        grantId: "grant-1",
+        grantTier: "B1",
+        mode: "balanced",
+        tokenRequired: false,
+      },
+    },
+  });
+
+  const lease = await pool.acquire(plan);
+  await assert.rejects(() => pool.prepare(lease, plan), /does not match invocation plan/);
+});
+
+test("DefaultCapabilityPool dispatch rejects T/A prepared calls that lose the required DecisionToken", async () => {
+  const pool = new DefaultCapabilityPool();
+  pool.register({
+    capabilityId: "cap_search_ground",
+    capabilityKey: "search.ground",
+    kind: "tool",
+    version: "1.0.0",
+    generation: 1,
+    description: "Grounded search capability.",
+  }, createAdapter());
+
+  const decisionToken = createDecisionToken({
+    requestId: "access-ta-1",
+    decisionId: "decision-ta-1",
+    compiledGrantId: "grant-ta-1",
+    mode: "balanced",
+    issuedAt: "2026-03-18T00:00:00.000Z",
+    signatureOrIntegrityMarker: "tap-grant-compiler/v1:decision-ta-1:plan-ta-1",
+  });
+  const plan = createPlan({
+    planId: "plan-ta-1",
+    metadata: {
+      bridge: "ta-pool",
+      [TA_ENFORCEMENT_METADATA_KEY]: {
+        requestId: "access-ta-1",
+        executionRequestId: "plan-ta-1",
+        capabilityKey: "search.ground",
+        grantId: "grant-ta-1",
+        grantTier: "B1",
+        mode: "balanced",
+        tokenRequired: true,
+        decisionToken,
+      },
+    },
+  });
+
+  const lease = await pool.acquire(plan);
+  const prepared = await pool.prepare(lease, plan);
+  const tamperedPrepared: PreparedCapabilityCall = {
+    ...prepared,
+    metadata: {
+      ...(prepared.metadata ?? {}),
+      [TA_ENFORCEMENT_METADATA_KEY]: {
+        ...((prepared.metadata?.[TA_ENFORCEMENT_METADATA_KEY] as Record<string, unknown>) ?? {}),
+        decisionToken: undefined,
+      },
+    },
+  };
+
+  await assert.rejects(() => pool.dispatch(tamperedPrepared), /requires a compiled DecisionToken/);
+});
+
+test("DefaultCapabilityPool prepare rejects forged DecisionTokens that point at another compiled grant", async () => {
+  const pool = new DefaultCapabilityPool();
+  pool.register({
+    capabilityId: "cap_search_ground",
+    capabilityKey: "search.ground",
+    kind: "tool",
+    version: "1.0.0",
+    generation: 1,
+    description: "Grounded search capability.",
+  }, createAdapter());
+
+  const plan = createPlan({
+    planId: "plan-ta-forged-1",
+    metadata: {
+      bridge: "ta-pool",
+      [TA_ENFORCEMENT_METADATA_KEY]: {
+        requestId: "access-ta-forged-1",
+        executionRequestId: "plan-ta-forged-1",
+        capabilityKey: "search.ground",
+        grantId: "grant-ta-forged-expected",
+        grantTier: "B1",
+        mode: "balanced",
+        tokenRequired: true,
+        decisionToken: createDecisionToken({
+          requestId: "access-ta-forged-1",
+          decisionId: "decision-ta-forged-1",
+          compiledGrantId: "grant-ta-forged-other",
+          mode: "balanced",
+          issuedAt: "2026-03-18T00:00:00.000Z",
+          signatureOrIntegrityMarker: "tap-grant-compiler/v1:decision-ta-forged-1:plan-ta-forged-1",
+        }),
+      },
+    },
+  });
+
+  const lease = await pool.acquire(plan);
+  await assert.rejects(
+    () => pool.prepare(lease, plan),
+    /DecisionToken grant grant-ta-forged-other does not match enforcement grant grant-ta-forged-expected/i,
+  );
 });

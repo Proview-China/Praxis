@@ -22,6 +22,11 @@ import { CapabilityPoolResultCache } from "./pool-idempotency.js";
 import { CapabilityPoolLifecycle } from "./pool-lifecycle.js";
 import { CapabilityPoolQueue } from "./pool-queue.js";
 import { CapabilityPoolRegistry } from "./pool-registry.js";
+import {
+  TA_ENFORCEMENT_METADATA_KEY,
+  validateTaPlanEnforcement,
+  validateTaPreparedEnforcement,
+} from "../ta-pool-runtime/enforcement-guard.js";
 
 const PRIORITY_ORDER: Record<CapabilityInvocationPlan["priority"], number> = {
   critical: 0,
@@ -129,6 +134,7 @@ export class DefaultCapabilityPool implements CapabilityPool {
       );
     }
 
+    validateTaPlanEnforcement(plan, this.#clock);
     const prepared = await registration.adapter.prepare(plan, lease);
     return {
       ...prepared,
@@ -137,11 +143,16 @@ export class DefaultCapabilityPool implements CapabilityPool {
         planId: plan.planId,
         idempotencyKey: plan.idempotencyKey,
         priority: plan.priority,
+        bridge: plan.metadata?.bridge,
+        ...(plan.metadata?.[TA_ENFORCEMENT_METADATA_KEY] === undefined
+          ? {}
+          : { [TA_ENFORCEMENT_METADATA_KEY]: plan.metadata[TA_ENFORCEMENT_METADATA_KEY] }),
       },
     };
   }
 
   async dispatch(prepared: PreparedCapabilityCall): Promise<CapabilityExecutionHandle> {
+    validateTaPreparedEnforcement(prepared, this.#clock);
     const registration = this.#registry.getRegistrationByBindingId(prepared.bindingId);
     if (!registration) {
       throw new RaxRoutingError(

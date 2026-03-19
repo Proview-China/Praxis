@@ -642,3 +642,24 @@
      - `T/A Pool` 已经不是孤立模块集合
      - 第一个 pool 已经接进 `raw_agent_core` 预留接口
      - 但还没有把它改成所有 capability intent 的默认主路径
+10. 当前 `TAP` 已进入“可用 runtime 控制面”阶段：
+   - 当前已成立：
+     - default `capability_call -> TAP`
+     - reviewer bootstrap worker bridge
+     - provisioner bootstrap worker bridge
+     - capability package template SDK
+     - 最小 enforcement token / execution guard
+     - `restricted -> waiting_human -> approve / reject`
+     - replay skeleton / activation handoff skeleton
+   - 当前验证基线已更新为：
+     - `npm run typecheck` 通过
+     - `npm run build` 通过
+     - `npx tsx --test src/agent_core/**/*.test.ts` 通过
+     - 当前 `agent_core` 定向测试：`159 pass / 0 fail`
+     - `npm run smoke:websearch:live -- --provider=openai` 通过
+     - `gmn + gpt-5.4` 的 `native_plain / native_search / rax_websearch` 都是 `ok`
+   - 当前仍未完成：
+     - 真实 builder
+     - 真实 activation driver
+     - durable human gate / replay 恢复链
+     - reviewer 真实项目状态 / 记忆池 / 包装机接入

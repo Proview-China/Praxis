@@ -7,6 +7,7 @@ import type { ReviewContextApertureSnapshot } from "../ta-pool-context/context-a
 import {
   createReviewContextApertureSnapshot,
 } from "../ta-pool-context/context-aperture.js";
+import { formatPlainLanguageRisk } from "../ta-pool-context/plain-language-risk.js";
 import type { ReviewRoutingResult } from "./review-routing.js";
 import { routeAccessRequest } from "./review-routing.js";
 import type {
@@ -14,6 +15,12 @@ import type {
   ReviewDecisionEngineInventory,
 } from "./review-decision-engine.js";
 import { evaluateReviewDecision } from "./review-decision-engine.js";
+import {
+  compileReviewerWorkerVote,
+  createReviewerWorkerEnvelope,
+  createReviewerWorkerPromptPack,
+  type ReviewerWorkerVoteOutput,
+} from "./reviewer-worker-bridge.js";
 
 export interface ReviewerRuntimeSubmitInput {
   request: AccessRequest;
@@ -29,14 +36,37 @@ export interface ReviewerRuntimeHookInput {
   reviewContext: ReviewContextApertureSnapshot;
   routed: ReviewRoutingResult;
   fallback: EvaluateReviewDecisionInput;
+  promptPack: ReturnType<typeof createReviewerWorkerPromptPack>;
+  workerEnvelope: ReturnType<typeof createReviewerWorkerEnvelope>;
 }
 
 export type ReviewerRuntimeLlmHook = (
   input: ReviewerRuntimeHookInput,
-) => Promise<ReviewDecision | undefined>;
+) => Promise<ReviewerWorkerVoteOutput | undefined>;
 
 export interface ReviewerRuntimeOptions {
   llmReviewerHook?: ReviewerRuntimeLlmHook;
+}
+
+function normalizeStringArray(values?: string[]): string[] {
+  if (!values) {
+    return [];
+  }
+
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+function inventoryTracksCapabilityLifecycle(
+  inventory: ReviewDecisionEngineInventory | undefined,
+  capabilityKey: string,
+): boolean {
+  return [
+    ...(inventory?.availableCapabilityKeys ?? []),
+    ...(inventory?.pendingProvisionKeys ?? []),
+    ...(inventory?.readyProvisionAssetKeys ?? []),
+    ...(inventory?.activatingProvisionAssetKeys ?? []),
+    ...(inventory?.activeProvisionAssetKeys ?? []),
+  ].includes(capabilityKey);
 }
 
 export class ReviewerRuntime {
@@ -51,13 +81,56 @@ export class ReviewerRuntime {
   }
 
   async submit(input: ReviewerRuntimeSubmitInput): Promise<ReviewDecision> {
+    const requestedAction = input.request.requestedAction
+      ?? `request capability ${input.request.requestedCapabilityKey}`;
+    const plainLanguageRisk = input.request.plainLanguageRisk
+      ?? formatPlainLanguageRisk({
+        requestedAction,
+        capabilityKey: input.request.requestedCapabilityKey,
+        riskLevel: input.request.riskLevel ?? "normal",
+      });
     const reviewContext = input.reviewContext ?? createReviewContextApertureSnapshot({
-      projectSummary: "ta-pool-reviewer-runtime",
-      runSummary: `${input.request.sessionId}/${input.request.runId}`,
+      projectSummary: {
+        summary: "Project summary is still placeholder-only in Wave 1 reviewer runtime.",
+        status: "placeholder",
+        source: "reviewer-runtime-default",
+      },
+      runSummary: {
+        summary: `${input.request.sessionId}/${input.request.runId}`,
+        status: "ready",
+        source: "reviewer-runtime-default",
+      },
       profileSnapshot: input.profile,
-      capabilityInventorySnapshot: {
-        totalCapabilities: input.inventory?.availableCapabilityKeys?.length ?? 0,
+      inventorySnapshot: {
+        totalCapabilities: normalizeStringArray([
+          ...(input.inventory?.availableCapabilityKeys ?? []),
+          ...(input.inventory?.readyProvisionAssetKeys ?? []),
+          ...(input.inventory?.activatingProvisionAssetKeys ?? []),
+          ...(input.inventory?.activeProvisionAssetKeys ?? []),
+        ]).length,
         availableCapabilityKeys: input.inventory?.availableCapabilityKeys ?? [],
+        pendingProvisionKeys: input.inventory?.pendingProvisionKeys,
+        metadata: {
+          readyProvisionAssetKeys: input.inventory?.readyProvisionAssetKeys ?? [],
+          activatingProvisionAssetKeys: input.inventory?.activatingProvisionAssetKeys ?? [],
+          activeProvisionAssetKeys: input.inventory?.activeProvisionAssetKeys ?? [],
+        },
+      },
+      memorySummaryPlaceholder: {
+        summary: "Memory summary is still placeholder-only in Wave 1 reviewer runtime.",
+        status: "placeholder",
+        source: "reviewer-runtime-default",
+      },
+      userIntentSummary: {
+        summary: input.request.reason,
+        status: "ready",
+        source: "access-request",
+      },
+      riskSummary: {
+        riskLevel: input.request.riskLevel ?? plainLanguageRisk.riskLevel,
+        requestedAction,
+        plainLanguageRisk,
+        source: input.request.plainLanguageRisk ? "request" : "generated",
       },
       modeSnapshot: input.request.mode,
       metadata: {
@@ -68,7 +141,10 @@ export class ReviewerRuntime {
     const routed = routeAccessRequest({
       profile: input.profile,
       request: input.request,
-      capabilityAvailable: input.inventory?.availableCapabilityKeys?.includes(input.request.requestedCapabilityKey),
+      capabilityAvailable: inventoryTracksCapabilityLifecycle(
+        input.inventory,
+        input.request.requestedCapabilityKey,
+      ),
     });
 
     if (routed.outcome !== "review_required") {
@@ -82,6 +158,14 @@ export class ReviewerRuntime {
     };
 
     if (this.#llmReviewerHook) {
+      const promptPack = createReviewerWorkerPromptPack();
+      const workerEnvelope = createReviewerWorkerEnvelope({
+        request: input.request,
+        profile: input.profile,
+        inventory: input.inventory,
+        reviewContext,
+        routed,
+      });
       const hookDecision = await this.#llmReviewerHook({
         request: input.request,
         profile: input.profile,
@@ -89,9 +173,15 @@ export class ReviewerRuntime {
         reviewContext,
         routed,
         fallback,
+        promptPack,
+        workerEnvelope,
       });
       if (hookDecision) {
-        return hookDecision;
+        return compileReviewerWorkerVote({
+          request: input.request,
+          promptPack,
+          output: hookDecision,
+        });
       }
     }
 

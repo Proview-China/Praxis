@@ -1,5 +1,9 @@
 import type { CapabilityInvocationPlan } from "../capability-types/index.js";
-import type { CapabilityGrant } from "../ta-pool-types/index.js";
+import type { CapabilityGrant, DecisionToken } from "../ta-pool-types/index.js";
+import {
+  TA_ENFORCEMENT_METADATA_KEY,
+  createTaExecutionEnforcement,
+} from "./enforcement-guard.js";
 
 export interface TaPoolExecutionRequest {
   requestId: string;
@@ -19,6 +23,15 @@ export type GrantExecutionRequest = TaPoolExecutionRequest;
 export interface GrantToInvocationPlanInput {
   grant: CapabilityGrant;
   request: TaPoolExecutionRequest;
+  decisionToken?: DecisionToken;
+}
+
+function assertGrantCanLowerRequest(input: GrantToInvocationPlanInput): void {
+  if (input.request.capabilityKey !== input.grant.capabilityKey) {
+    throw new Error(
+      `Execution request ${input.request.requestId} targets ${input.request.capabilityKey}, but grant ${input.grant.grantId} only allows ${input.grant.capabilityKey}.`,
+    );
+  }
 }
 
 function deriveOperation(capabilityKey: string): string {
@@ -56,7 +69,14 @@ export function canGrantExecuteRequest(
 export function createInvocationPlanFromGrant(
   input: GrantToInvocationPlanInput,
 ): CapabilityInvocationPlan {
+  assertGrantCanLowerRequest(input);
   const request = createExecutionRequest(input.request);
+  const taEnforcement = createTaExecutionEnforcement({
+    executionRequestId: request.requestId,
+    capabilityKey: request.capabilityKey,
+    grant: input.grant,
+    decisionToken: input.decisionToken,
+  });
   return {
     planId: request.requestId,
     intentId: request.intentId,
@@ -69,13 +89,17 @@ export function createInvocationPlanFromGrant(
     idempotencyKey: `${input.grant.grantId}:${request.requestId}`,
     priority: request.priority,
     metadata: {
+      ...(input.grant.metadata ?? {}),
+      ...(request.metadata ?? {}),
+      bridge: "ta-pool",
       grantId: input.grant.grantId,
       grantTier: input.grant.grantedTier,
       grantMode: input.grant.mode,
       grantedScope: input.grant.grantedScope,
       constraints: input.grant.constraints,
-      ...(input.grant.metadata ?? {}),
-      ...(request.metadata ?? {}),
+      requestId: request.requestId,
+      accessRequestId: input.grant.requestId,
+      [TA_ENFORCEMENT_METADATA_KEY]: taEnforcement,
     },
   };
 }

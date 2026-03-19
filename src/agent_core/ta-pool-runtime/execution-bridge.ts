@@ -3,10 +3,16 @@ import type { IntentPriority } from "../types/index.js";
 import type {
   AccessRequest,
   CapabilityGrant,
+  DecisionToken,
 } from "../ta-pool-types/index.js";
+import {
+  TA_ENFORCEMENT_METADATA_KEY,
+  createTaExecutionEnforcement,
+} from "./enforcement-guard.js";
 
 export interface TaExecutionBridgeInput {
   grant: CapabilityGrant;
+  decisionToken?: DecisionToken;
   request: Pick<AccessRequest, "sessionId" | "runId" | "requestedCapabilityKey">;
   planId: string;
   intentId: string;
@@ -52,6 +58,12 @@ export function createTaExecutionBridgeRequest(input: TaExecutionBridgeInput): T
 export function lowerGrantToCapabilityPlan(input: TaExecutionBridgeInput): CapabilityInvocationPlan {
   const capabilityKey = input.grant.capabilityKey || input.request.requestedCapabilityKey;
   const derivedOperation = capabilityKey.split(".").slice(1).join(".");
+  const taEnforcement = createTaExecutionEnforcement({
+    executionRequestId: input.planId,
+    capabilityKey,
+    grant: input.grant,
+    decisionToken: input.decisionToken,
+  });
   return {
     planId: input.planId,
     intentId: input.intentId,
@@ -72,10 +84,16 @@ export function lowerGrantToCapabilityPlan(input: TaExecutionBridgeInput): Capab
     priority: input.priority ?? "normal",
     traceContext: input.traceContext,
     metadata: {
+      ...(input.metadata ?? {}),
       bridge: "ta-pool",
       requestId: input.planId,
+      accessRequestId: input.grant.requestId,
       grantId: input.grant.grantId,
-      ...(input.metadata ?? {}),
+      grantTier: input.grant.grantedTier,
+      grantMode: input.grant.mode,
+      grantedScope: input.grant.grantedScope,
+      constraints: input.grant.constraints,
+      [TA_ENFORCEMENT_METADATA_KEY]: taEnforcement,
     },
   };
 }

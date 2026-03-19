@@ -3,7 +3,9 @@ import test from "node:test";
 
 import {
   createCapabilityGrant,
+  createDecisionToken,
 } from "../ta-pool-types/index.js";
+import { TA_ENFORCEMENT_METADATA_KEY } from "./enforcement-guard.js";
 import {
   createTaExecutionBridgeRequest,
   lowerGrantToCapabilityPlan,
@@ -49,10 +51,20 @@ test("execution bridge can lower a grant into a capability invocation plan", () 
     grantedTier: "B1",
     mode: "balanced",
     issuedAt: "2026-03-18T00:00:00.000Z",
+    decisionTokenId: "grant-2",
+  });
+  const decisionToken = createDecisionToken({
+    requestId: "req-2",
+    decisionId: "decision-2",
+    compiledGrantId: "grant-2",
+    mode: "balanced",
+    issuedAt: "2026-03-18T00:00:00.000Z",
+    signatureOrIntegrityMarker: "tap-grant-compiler/v1:decision-2:req-2",
   });
 
   const plan = lowerGrantToCapabilityPlan({
     grant,
+    decisionToken,
     request: {
       sessionId: "session-2",
       runId: "run-2",
@@ -69,5 +81,9 @@ test("execution bridge can lower a grant into a capability invocation plan", () 
   assert.equal(plan.capabilityKey, "search.web");
   assert.equal(plan.priority, "high");
   assert.equal(plan.metadata?.bridge, "ta-pool");
+  assert.equal(
+    (plan.metadata?.[TA_ENFORCEMENT_METADATA_KEY] as { decisionToken?: { compiledGrantId?: string } })?.decisionToken?.compiledGrantId,
+    "grant-2",
+  );
   assert.equal(typeof plan.input.taGrant, "object");
 });

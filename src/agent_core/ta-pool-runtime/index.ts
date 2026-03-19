@@ -37,3 +37,34 @@ export {
   createTaExecutionBridgeRequest,
   lowerGrantToCapabilityPlan,
 } from "./execution-bridge.js";
+
+export type {
+  CreateTaHumanGateEventInput,
+  CreateTaHumanGateStateInput,
+  TaHumanGateEvent,
+  TaHumanGateEventType,
+  TaHumanGateState,
+  TaHumanGateStatus,
+} from "./human-gate.js";
+export {
+  applyTaHumanGateEvent,
+  createTaHumanGateEvent,
+  createTaHumanGateState,
+  createTaHumanGateStateFromReviewDecision,
+  TA_HUMAN_GATE_EVENT_TYPES,
+  TA_HUMAN_GATE_STATUSES,
+} from "./human-gate.js";
+
+export type {
+  CreateTaPendingReplayInput,
+  TaPendingReplay,
+  TaReplayNextAction,
+  TaReplayStatus,
+} from "./replay-policy.js";
+export {
+  createTaPendingReplay,
+  describeReplayPolicy,
+  replayPolicyToNextAction,
+  TA_REPLAY_NEXT_ACTIONS,
+  TA_REPLAY_STATUSES,
+} from "./replay-policy.js";

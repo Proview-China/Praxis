@@ -7,6 +7,7 @@ import {
   type AccessRequestScope,
   type AgentCapabilityProfile,
   type CapabilityGrant,
+  type DecisionToken,
   type ReviewDecision,
   type ReviewDecisionKind,
   type TaCapabilityTier,
@@ -17,6 +18,10 @@ import type {
   ReviewRoutingResult,
   RouteAccessRequestOptions,
 } from "../ta-pool-review/review-routing.js";
+import {
+  assertReviewDecisionCompatibleWithRequest,
+  compileGrantFromReviewDecision,
+} from "../ta-pool-review/index.js";
 import { routeAccessRequest } from "../ta-pool-review/review-routing.js";
 
 export interface ResolveCapabilityAccessInput {
@@ -62,6 +67,7 @@ export interface ReviewDecisionConsumedResult {
   status: ReviewDecisionKind;
   request: AccessRequest;
   grant?: CapabilityGrant;
+  decisionToken?: DecisionToken;
   executionRequest?: ExecutionBridgeRequestPlaceholder;
   reviewDecision: ReviewDecision;
 }
@@ -165,17 +171,26 @@ export class TaControlPlaneGateway {
       throw new Error(`Access request ${reviewDecision.requestId} was not found.`);
     }
 
+    assertReviewDecisionCompatibleWithRequest({
+      request,
+      decision: reviewDecision,
+    });
     this.#decisions.set(reviewDecision.decisionId, reviewDecision);
     if (reviewDecision.decision === "approved" || reviewDecision.decision === "partially_approved") {
-      const grant = reviewDecision.grant;
-      if (!grant) {
-        throw new Error(`Review decision ${reviewDecision.decisionId} is missing a grant.`);
-      }
+      const compiled = compileGrantFromReviewDecision({
+        compiledGrantId: this.#idFactory(),
+        request,
+        reviewDecision,
+        issuedAt: this.#clock().toISOString(),
+        compilerVersion: "tap-grant-compiler/v1",
+        integrityMarker: `tap-grant-compiler/v1:${reviewDecision.decisionId}:${request.requestId}`,
+      });
       return {
         status: reviewDecision.decision,
         request,
-        grant,
-        executionRequest: this.lowerGrantToExecutionRequest(grant),
+        grant: compiled.grant,
+        decisionToken: compiled.decisionToken,
+        executionRequest: this.lowerGrantToExecutionRequest(compiled.grant),
         reviewDecision,
       };
     }
@@ -196,7 +211,18 @@ export class TaControlPlaneGateway {
       mode: grant.mode,
       scope: grant.grantedScope,
       constraints: grant.constraints,
-      metadata: grant.metadata,
+      metadata: grant.metadata
+        ? {
+            ...grant.metadata,
+            sourceDecisionId: grant.sourceDecisionId,
+            decisionTokenId: grant.decisionTokenId,
+            integrityMarker: grant.integrityMarker,
+          }
+        : {
+            sourceDecisionId: grant.sourceDecisionId,
+            decisionTokenId: grant.decisionTokenId,
+            integrityMarker: grant.integrityMarker,
+          },
     };
   }
 

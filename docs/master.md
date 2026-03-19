@@ -108,7 +108,17 @@
   - [21-ta-pool-implementation-status.md](/home/proview/Desktop/Praxis_series/Praxis/docs/ability/21-ta-pool-implementation-status.md)
 - T/A Pool 上下文压缩交接：
   - [22-ta-pool-handoff-prompt.md](/home/proview/Desktop/Praxis_series/Praxis/docs/ability/22-ta-pool-handoff-prompt.md)
+- T/A Pool 阶段性收尾：
+  - [23-ta-pool-stage-wrap-up.md](/home/proview/Desktop/Praxis_series/Praxis/docs/ability/23-ta-pool-stage-wrap-up.md)
+- TAP 模式矩阵与 worker 协议冻结稿：
+  - [24-tap-mode-matrix-and-worker-contracts.md](/home/proview/Desktop/Praxis_series/Praxis/docs/ability/24-tap-mode-matrix-and-worker-contracts.md)
+- TAP capability package 模板冻结稿：
+  - [25-tap-capability-package-template.md](/home/proview/Desktop/Praxis_series/Praxis/docs/ability/25-tap-capability-package-template.md)
+- TAP runtime 迁移与 enforcement 总纲：
+  - [26-tap-runtime-migration-and-enforcement-outline.md](/home/proview/Desktop/Praxis_series/Praxis/docs/ability/26-tap-runtime-migration-and-enforcement-outline.md)
 - T/A Pool 并行编码任务包：
   - [ta-pool-task-pack/README.md](/home/proview/Desktop/Praxis_series/Praxis/docs/ability/ta-pool-task-pack/README.md)
+- TAP 第二阶段可用化任务包：
+  - [tap-usable-task-pack/README.md](/home/proview/Desktop/Praxis_series/Praxis/docs/ability/tap-usable-task-pack/README.md)
 - Agent Core 并行编码任务包：
   - [agent-core-runtime-kernel-task-pack/README.md](/home/proview/Desktop/Praxis_series/Praxis/docs/ability/agent-core-runtime-kernel-task-pack/README.md)

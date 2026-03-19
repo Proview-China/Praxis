@@ -39,6 +39,8 @@ test("routeAccessRequest baseline-approves allowed baseline capability", () => {
 
   assert.equal(routed.outcome, "baseline_approved");
   assert.equal(routed.decision.decision, "approved");
+  assert.equal(routed.decision.grant, undefined);
+  assert.equal(routed.decision.grantCompilerDirective?.grantedTier, "B0");
   assert.equal(routed.grant?.capabilityKey, "docs.read");
 });
 
