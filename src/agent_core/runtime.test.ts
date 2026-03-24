@@ -1526,3 +1526,214 @@ test("AgentCoreRuntime can serve the first CMP passive historical reply", () => 
   assert.ok(historical.contextPackage);
   assert.equal(historical.contextPackage?.packageKind, "historical_reply");
 });
+
+test("AgentCoreRuntime second wave promotes submit_to_parent deltas through cmp-git governance", () => {
+  const runtime = createAgentCoreRuntime();
+  const parentLineage = createAgentLineage({
+    agentId: "parent",
+    depth: 0,
+    projectId: "cmp-project-governance",
+    branchFamily: createCmpBranchFamily({
+      workBranch: "work/parent",
+      cmpBranch: "cmp/parent",
+      mpBranch: "mp/parent",
+      tapBranch: "tap/parent",
+    }),
+    childAgentIds: ["child"],
+  });
+  const childLineage = createAgentLineage({
+    agentId: "child",
+    parentAgentId: "parent",
+    depth: 1,
+    projectId: "cmp-project-governance",
+    branchFamily: createCmpBranchFamily({
+      workBranch: "work/child",
+      cmpBranch: "cmp/child",
+      mpBranch: "mp/child",
+      tapBranch: "tap/child",
+    }),
+  });
+
+  runtime.ingestRuntimeContext({
+    agentId: "parent",
+    sessionId: "session-parent",
+    runId: "run-parent",
+    lineage: parentLineage,
+    taskSummary: "seed parent lineage",
+    materials: [{ kind: "state_marker", ref: "payload:parent-seed" }],
+    requiresActiveSync: false,
+  });
+  const ingested = runtime.ingestRuntimeContext({
+    agentId: "child",
+    sessionId: "session-child",
+    runId: "run-child",
+    lineage: childLineage,
+    taskSummary: "child reports upward",
+    materials: [{ kind: "assistant_output", ref: "payload:child-report" }],
+  });
+  const committed = runtime.commitContextDelta({
+    agentId: "child",
+    sessionId: "session-child",
+    runId: "run-child",
+    eventIds: ingested.acceptedEventIds,
+    changeSummary: "Submit child context upward.",
+    syncIntent: "submit_to_parent",
+  });
+
+  assert.ok(committed.snapshotCandidateId);
+  assert.equal(runtime.listCmpGitPullRequests().length, 1);
+  assert.equal(runtime.listCmpGitPromotions().length, 1);
+  const checked = runtime.resolveCheckedSnapshot({
+    agentId: "child",
+    projectId: "cmp-project-governance",
+  });
+  assert.equal(checked.found, true);
+  const projection = runtime.getCmpDbProjectionRecord(`projection:${checked.snapshot!.snapshotId}`);
+  assert.equal(projection?.state, "promoted_by_parent");
+});
+
+test("AgentCoreRuntime second wave syncs DB package and delivery records during dispatch", () => {
+  const runtime = createAgentCoreRuntime();
+  const parentLineage = createAgentLineage({
+    agentId: "main",
+    depth: 0,
+    projectId: "cmp-project-delivery",
+    branchFamily: createCmpBranchFamily({
+      workBranch: "work/main",
+      cmpBranch: "cmp/main",
+      mpBranch: "mp/main",
+      tapBranch: "tap/main",
+    }),
+    childAgentIds: ["child-a"],
+  });
+  runtime.ingestRuntimeContext({
+    agentId: "main",
+    sessionId: "session-delivery",
+    runId: "run-delivery",
+    lineage: parentLineage,
+    taskSummary: "prepare delivery path",
+    materials: [{ kind: "user_input", ref: "payload:delivery-user" }],
+  });
+  const committed = runtime.commitContextDelta({
+    agentId: "main",
+    sessionId: "session-delivery",
+    runId: "run-delivery",
+    eventIds: runtime.readCmpEvents("main").map((event) => event.eventId),
+    changeSummary: "Prepare materialized package.",
+    syncIntent: "dispatch_to_children",
+  });
+  const checked = runtime.getCmpCheckedSnapshot(committed.metadata?.checkedSnapshotId as string);
+  const materialized = runtime.materializeContextPackage({
+    agentId: "main",
+    snapshotId: checked!.snapshotId,
+    targetAgentId: "child-a",
+    packageKind: "child_seed",
+  });
+  const dispatched = runtime.dispatchContextPackage({
+    agentId: "main",
+    packageId: materialized.contextPackage.packageId,
+    sourceAgentId: "main",
+    targetAgentId: "child-a",
+    targetKind: "child",
+  });
+
+  const packageRecord = runtime.getCmpDbContextPackageRecord(materialized.contextPackage.packageId);
+  const deliveryRecord = runtime.getCmpDbDeliveryRecord(dispatched.receipt.dispatchId);
+  assert.equal(packageRecord?.state, "delivered");
+  assert.equal(deliveryRecord?.state, "delivered");
+});
+
+test("AgentCoreRuntime second wave blocks non-skipping lineage dispatch to an ancestor", () => {
+  const runtime = createAgentCoreRuntime();
+  const root = createAgentLineage({
+    agentId: "root",
+    depth: 0,
+    projectId: "cmp-project-nonskipping",
+    branchFamily: createCmpBranchFamily({
+      workBranch: "work/root",
+      cmpBranch: "cmp/root",
+      mpBranch: "mp/root",
+      tapBranch: "tap/root",
+    }),
+    childAgentIds: ["mid"],
+  });
+  const mid = createAgentLineage({
+    agentId: "mid",
+    parentAgentId: "root",
+    depth: 1,
+    projectId: "cmp-project-nonskipping",
+    branchFamily: createCmpBranchFamily({
+      workBranch: "work/mid",
+      cmpBranch: "cmp/mid",
+      mpBranch: "mp/mid",
+      tapBranch: "tap/mid",
+    }),
+    childAgentIds: ["leaf"],
+    metadata: { ancestorAgentIds: ["root"] },
+  });
+  const leaf = createAgentLineage({
+    agentId: "leaf",
+    parentAgentId: "mid",
+    depth: 2,
+    projectId: "cmp-project-nonskipping",
+    branchFamily: createCmpBranchFamily({
+      workBranch: "work/leaf",
+      cmpBranch: "cmp/leaf",
+      mpBranch: "mp/leaf",
+      tapBranch: "tap/leaf",
+    }),
+    metadata: { ancestorAgentIds: ["mid", "root"] },
+  });
+
+  runtime.ingestRuntimeContext({
+    agentId: "root",
+    sessionId: "session-root",
+    runId: "run-root",
+    lineage: root,
+    taskSummary: "seed root",
+    materials: [{ kind: "state_marker", ref: "payload:root-seed" }],
+    requiresActiveSync: false,
+  });
+  runtime.ingestRuntimeContext({
+    agentId: "mid",
+    sessionId: "session-mid",
+    runId: "run-mid",
+    lineage: mid,
+    taskSummary: "seed mid",
+    materials: [{ kind: "state_marker", ref: "payload:mid-seed" }],
+    requiresActiveSync: false,
+  });
+  const ingested = runtime.ingestRuntimeContext({
+    agentId: "leaf",
+    sessionId: "session-leaf",
+    runId: "run-leaf",
+    lineage: leaf,
+    taskSummary: "leaf tries to over-report",
+    materials: [{ kind: "assistant_output", ref: "payload:leaf-output" }],
+  });
+  const committed = runtime.commitContextDelta({
+    agentId: "leaf",
+    sessionId: "session-leaf",
+    runId: "run-leaf",
+    eventIds: ingested.acceptedEventIds,
+    changeSummary: "Prepare non-skipping test package.",
+    syncIntent: "submit_to_parent",
+  });
+  const checked = runtime.getCmpCheckedSnapshot(committed.metadata?.checkedSnapshotId as string);
+  const materialized = runtime.materializeContextPackage({
+    agentId: "leaf",
+    snapshotId: checked!.snapshotId,
+    targetAgentId: "root",
+    packageKind: "promotion_update",
+  });
+
+  assert.throws(() => {
+    runtime.dispatchContextPackage({
+      agentId: "leaf",
+      packageId: materialized.contextPackage.packageId,
+      sourceAgentId: "leaf",
+      targetAgentId: "root",
+      targetKind: "parent",
+    });
+  }, /not allowed for non-skipping delivery|not visible/i);
+});

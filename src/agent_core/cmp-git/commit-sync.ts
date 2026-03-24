@@ -11,6 +11,7 @@ export interface CmpGitCommitSyncInput {
   commitSha: string;
   branchRef: CmpGitCommitDeltaBinding["branchRef"];
   delta: CmpGitContextDeltaLike;
+  syncIntent?: CmpGitCommitDeltaBinding["syncIntent"];
 }
 
 export interface CmpGitCommitSyncResult {
@@ -27,6 +28,7 @@ export function syncCmpGitCommitDelta(
     branchRef: input.branchRef,
     commitSha: input.commitSha,
     delta: input.delta,
+    syncIntent: input.syncIntent,
   });
   const candidate = createCmpGitSnapshotCandidateFromBinding(binding);
 

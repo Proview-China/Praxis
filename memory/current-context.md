@@ -46,6 +46,56 @@
   - `npx tsx --test src/agent_core/cmp-types/cmp-types.test.ts src/agent_core/cmp-git/*.test.ts src/agent_core/cmp-db/*.test.ts src/agent_core/cmp-mq/*.test.ts src/agent_core/cmp-runtime/*.test.ts src/agent_core/runtime.test.ts` 通过
   - 当前命中：`51 pass / 0 fail`
   - `npm run build` 通过
+- `CMP` 第二波代码也已真实落地到 `src/agent_core/**`：
+  - `cmp-git/**`
+    - 已补：
+      - `governance.ts`
+      - `refs-lifecycle.ts`
+      - `orchestrator.ts`
+    - 当前已具备：
+      - child -> direct parent PR 约束
+      - direct parent merge 约束
+      - merge 不等于 promotion
+      - checked ref / promoted ref / branch head 生命周期
+      - `CmpGitSyncRuntimeOrchestrator`
+  - `cmp-db/**`
+    - 已补：
+      - `delivery-registry.ts`
+      - `dbagent-sync.ts`
+    - 当前已具备：
+      - `ContextPackage` -> DB package record
+      - `DispatchReceipt` -> delivery registry
+      - `CheckedSnapshot` -> projection sync
+      - parent promotion helper
+  - `cmp-mq/**`
+    - 已补：
+      - `subscription-guards.ts`
+      - `critical-escalation.ts`
+    - 当前已具备：
+      - parent/peer/child subscription guard
+      - ancestor skip 阻断
+      - parent-peer direct 阻断
+      - `critical escalation` 的 alert-only / summary-only 协议基础
+  - `cmp-runtime/**`
+    - 已补：
+      - `delivery-routing.ts`
+      - `passive-delivery.ts`
+      - `visibility-enforcement.ts`
+    - 当前已具备：
+      - dispatcher parent/peer/child delivery 规划
+      - passive historical delivery 选择
+      - lineage relation 与 non-skipping enforcement
+- `AgentCoreRuntime` 当前已把第二波 helper 接回第一版 `CMP` 主链：
+  - `commitContextDelta(...)` 现在会下沉使用 `cmp-git` orchestrator 与 `cmp-db` projection sync
+  - `materializeContextPackage(...)` 现在会同步 DB package record
+  - `dispatchContextPackage(...)` 现在会走 `cmp-runtime` dispatcher routing 并同步 DB delivery record
+  - `requestHistoricalContext(...)` 现在会走 `cmp-runtime` passive delivery helper
+  - `ingestRuntimeContext(...)` 现在会用 `cmp-mq` subscription guard 约束邻接广播
+- 当前第二波验证基线：
+  - `npm run typecheck` 通过
+  - `npx tsx --test src/agent_core/cmp-git/*.test.ts src/agent_core/cmp-db/*.test.ts src/agent_core/cmp-mq/*.test.ts src/agent_core/cmp-runtime/*.test.ts src/agent_core/runtime.test.ts` 通过
+  - 当前命中：`74 pass / 0 fail`
+  - `npm run build` 通过
 - `CMP` 的关键治理纪律已先冻结：
   - 一个项目一个 `repo`
   - 一个项目一个 `CMP DB`

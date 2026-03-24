@@ -21,6 +21,16 @@ export {
 } from "./delivery.js";
 
 export type {
+  CmpDispatcherDeliveryPlan,
+  PlanCmpDispatcherDeliveryInput,
+} from "./delivery-routing.js";
+export {
+  acknowledgeCmpCoreAgentReturn,
+  createCmpCoreAgentReturnReceipt,
+  planCmpDispatcherDelivery,
+} from "./delivery-routing.js";
+
+export type {
   CmpIngressRecord,
   CmpNeighborhoodBroadcastEnvelope,
   PlanCmpNeighborhoodBroadcastInput,
@@ -33,6 +43,16 @@ export {
 } from "./ingress-contract.js";
 
 export type {
+  CmpPassiveHistoricalRequest,
+  ResolveCmpPassiveHistoricalDeliveryInput,
+  ResolveCmpPassiveHistoricalDeliveryResult,
+} from "./passive-delivery.js";
+export {
+  createCmpHistoricalReplyPackage,
+  resolveCmpPassiveHistoricalDelivery,
+} from "./passive-delivery.js";
+
+export type {
   CmpContextPackageRecord,
   CmpProjectionRecord,
   CreatePassiveHistoricalPackageInput,
@@ -43,6 +63,17 @@ export {
   createCmpProjectionRecord,
   createPassiveHistoricalPackage,
 } from "./materialization.js";
+
+export type {
+  CmpLineageRelation,
+  CmpVisibilityDecision,
+} from "./visibility-enforcement.js";
+export {
+  assertCmpNonSkippingLineage,
+  assertCmpProjectionVisibleToTarget,
+  evaluateCmpProjectionVisibility,
+  resolveCmpLineageRelation,
+} from "./visibility-enforcement.js";
 
 export type {
   CmpActiveLineStage,
@@ -67,4 +98,3 @@ export {
   validateCmpLineageNode,
   validateCmpPayloadRef,
 } from "./runtime-types.js";
-

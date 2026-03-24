@@ -15,6 +15,19 @@ export const CMP_NEIGHBORHOOD_DIRECTIONS = [
 ] as const;
 export type CmpNeighborhoodDirection = (typeof CMP_NEIGHBORHOOD_DIRECTIONS)[number];
 
+export const CMP_SUBSCRIPTION_RELATIONS = [
+  "parent",
+  "peer",
+  "child",
+] as const;
+export type CmpSubscriptionRelation = (typeof CMP_SUBSCRIPTION_RELATIONS)[number];
+
+export const CMP_CRITICAL_ESCALATION_SEVERITIES = [
+  "high",
+  "critical",
+] as const;
+export type CmpCriticalEscalationSeverity = (typeof CMP_CRITICAL_ESCALATION_SEVERITIES)[number];
+
 export interface CmpAgentNeighborhood {
   agentId: string;
   parentAgentId?: string;
@@ -38,6 +51,31 @@ export interface CmpIcmaPublishEnvelope {
   granularityLabel: string;
   payloadRef: string;
   createdAt: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface CmpSubscriptionRequest {
+  requestId: string;
+  projectId: string;
+  publisherAgentId: string;
+  subscriberAgentId: string;
+  relation: CmpSubscriptionRelation;
+  channel: CmpMqChannelKind;
+  createdAt: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface CmpCriticalEscalationEnvelope {
+  escalationId: string;
+  projectId: string;
+  sourceAgentId: string;
+  targetAncestorId: string;
+  severity: CmpCriticalEscalationSeverity;
+  reason: string;
+  evidenceRef: string;
+  createdAt: string;
+  deliveryMode: "alert_envelope";
+  redactionLevel: "summary_only";
   metadata?: Record<string, unknown>;
 }
 
@@ -84,5 +122,55 @@ export function validateCmpIcmaPublishEnvelope(
   assertNonEmptyString(envelope.createdAt, "CMP ICMA publish createdAt");
   if (envelope.targetAgentIds.length === 0) {
     throw new Error("CMP ICMA publish requires at least one target agent.");
+  }
+}
+
+export function isCmpSubscriptionRelation(value: string): value is CmpSubscriptionRelation {
+  return CMP_SUBSCRIPTION_RELATIONS.includes(value as CmpSubscriptionRelation);
+}
+
+export function isCmpCriticalEscalationSeverity(
+  value: string,
+): value is CmpCriticalEscalationSeverity {
+  return CMP_CRITICAL_ESCALATION_SEVERITIES.includes(value as CmpCriticalEscalationSeverity);
+}
+
+export function validateCmpSubscriptionRequest(
+  request: CmpSubscriptionRequest,
+): void {
+  assertNonEmptyString(request.requestId, "CMP subscription requestId");
+  assertNonEmptyString(request.projectId, "CMP subscription projectId");
+  assertNonEmptyString(request.publisherAgentId, "CMP subscription publisherAgentId");
+  assertNonEmptyString(request.subscriberAgentId, "CMP subscription subscriberAgentId");
+  assertNonEmptyString(request.createdAt, "CMP subscription createdAt");
+  if (request.publisherAgentId === request.subscriberAgentId) {
+    throw new Error("CMP subscription request cannot target the publisher itself.");
+  }
+  if (!isCmpSubscriptionRelation(request.relation)) {
+    throw new Error(`Unsupported CMP subscription relation: ${request.relation}.`);
+  }
+}
+
+export function validateCmpCriticalEscalationEnvelope(
+  envelope: CmpCriticalEscalationEnvelope,
+): void {
+  assertNonEmptyString(envelope.escalationId, "CMP critical escalation escalationId");
+  assertNonEmptyString(envelope.projectId, "CMP critical escalation projectId");
+  assertNonEmptyString(envelope.sourceAgentId, "CMP critical escalation sourceAgentId");
+  assertNonEmptyString(envelope.targetAncestorId, "CMP critical escalation targetAncestorId");
+  assertNonEmptyString(envelope.reason, "CMP critical escalation reason");
+  assertNonEmptyString(envelope.evidenceRef, "CMP critical escalation evidenceRef");
+  assertNonEmptyString(envelope.createdAt, "CMP critical escalation createdAt");
+  if (envelope.sourceAgentId === envelope.targetAncestorId) {
+    throw new Error("CMP critical escalation targetAncestorId cannot equal sourceAgentId.");
+  }
+  if (!isCmpCriticalEscalationSeverity(envelope.severity)) {
+    throw new Error(`Unsupported CMP critical escalation severity: ${envelope.severity}.`);
+  }
+  if (envelope.deliveryMode !== "alert_envelope") {
+    throw new Error("CMP critical escalation must use alert_envelope delivery mode.");
+  }
+  if (envelope.redactionLevel !== "summary_only") {
+    throw new Error("CMP critical escalation must use summary_only redaction.");
   }
 }

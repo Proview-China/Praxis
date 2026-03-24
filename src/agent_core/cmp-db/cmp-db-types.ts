@@ -26,6 +26,25 @@ export const CMP_PROJECTION_STATES = [
 ] as const;
 export type CmpProjectionState = (typeof CMP_PROJECTION_STATES)[number];
 
+export const CMP_DB_CONTEXT_PACKAGE_RECORD_STATES = [
+  "materialized",
+  "delivered",
+  "acknowledged",
+  "archived",
+] as const;
+export type CmpDbContextPackageRecordState =
+  (typeof CMP_DB_CONTEXT_PACKAGE_RECORD_STATES)[number];
+
+export const CMP_DB_DELIVERY_RECORD_STATES = [
+  "pending_delivery",
+  "delivered",
+  "acknowledged",
+  "rejected",
+  "expired",
+] as const;
+export type CmpDbDeliveryRecordState =
+  (typeof CMP_DB_DELIVERY_RECORD_STATES)[number];
+
 export interface CmpDbIndexDefinition {
   name: string;
   columns: string[];
@@ -83,6 +102,34 @@ export interface CmpProjectionRecord {
   commitRef: string;
   state: CmpProjectionState;
   updatedAt: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface CmpDbContextPackageRecord {
+  packageId: string;
+  sourceProjectionId: string;
+  sourceSnapshotId: string;
+  sourceAgentId: string;
+  targetAgentId: string;
+  packageKind: string;
+  packageRef: string;
+  fidelityLabel: string;
+  state: CmpDbContextPackageRecordState;
+  createdAt: string;
+  updatedAt: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface CmpDbDeliveryRegistryRecord {
+  deliveryId: string;
+  dispatchId: string;
+  packageId: string;
+  sourceAgentId: string;
+  targetAgentId: string;
+  state: CmpDbDeliveryRecordState;
+  createdAt: string;
+  deliveredAt?: string;
+  acknowledgedAt?: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -159,3 +206,34 @@ export function validateCmpProjectionRecord(record: CmpProjectionRecord): void {
   assertNonEmptyString(record.updatedAt, "CMP projection updatedAt");
 }
 
+export function validateCmpDbContextPackageRecord(
+  record: CmpDbContextPackageRecord,
+): void {
+  assertNonEmptyString(record.packageId, "CMP DB package record packageId");
+  assertNonEmptyString(
+    record.sourceProjectionId,
+    "CMP DB package record sourceProjectionId",
+  );
+  assertNonEmptyString(
+    record.sourceSnapshotId,
+    "CMP DB package record sourceSnapshotId",
+  );
+  assertNonEmptyString(record.sourceAgentId, "CMP DB package record sourceAgentId");
+  assertNonEmptyString(record.targetAgentId, "CMP DB package record targetAgentId");
+  assertNonEmptyString(record.packageKind, "CMP DB package record packageKind");
+  assertNonEmptyString(record.packageRef, "CMP DB package record packageRef");
+  assertNonEmptyString(record.fidelityLabel, "CMP DB package record fidelityLabel");
+  assertNonEmptyString(record.createdAt, "CMP DB package record createdAt");
+  assertNonEmptyString(record.updatedAt, "CMP DB package record updatedAt");
+}
+
+export function validateCmpDbDeliveryRegistryRecord(
+  record: CmpDbDeliveryRegistryRecord,
+): void {
+  assertNonEmptyString(record.deliveryId, "CMP DB delivery record deliveryId");
+  assertNonEmptyString(record.dispatchId, "CMP DB delivery record dispatchId");
+  assertNonEmptyString(record.packageId, "CMP DB delivery record packageId");
+  assertNonEmptyString(record.sourceAgentId, "CMP DB delivery record sourceAgentId");
+  assertNonEmptyString(record.targetAgentId, "CMP DB delivery record targetAgentId");
+  assertNonEmptyString(record.createdAt, "CMP DB delivery record createdAt");
+}
