@@ -4,3 +4,4 @@ export * from "./agent-local-hot-tables.js";
 export * from "./projection-state.js";
 export * from "./delivery-registry.js";
 export * from "./dbagent-sync.js";
+export * from "./integration-hooks.js";

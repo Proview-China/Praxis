@@ -72,3 +72,26 @@ export {
   createCmpGitSyncRuntimeOrchestrator,
   type CreateCmpGitOrchestratorInput,
 } from "./orchestrator.js";
+export type {
+  CmpGitLineageRelation,
+  CmpGitCriticalEscalationAlert,
+} from "./lineage-guard.js";
+export {
+  resolveCmpGitLineageRelation,
+  assertCmpGitNonSkippingPromotion,
+  assertCmpGitPeerExchangeStaysLocal,
+  createCmpGitCriticalEscalationAlert,
+  assertCmpGitCriticalEscalationAllowed,
+} from "./lineage-guard.js";
+export type {
+  CmpGitLineageHook,
+  CmpGitRuntimeHooks,
+  CmpGitSyncReceipt,
+  CmpGitProjectionSourceAnchor,
+} from "./integration-hooks.js";
+export {
+  createCmpGitLineageHook,
+  createCmpGitProjectionSourceAnchor,
+  createCmpGitRuntimeHooks,
+  createCmpGitSyncReceipt,
+} from "./integration-hooks.js";

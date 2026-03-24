@@ -55,9 +55,11 @@ import {
   type CmpAgentNeighborhood,
 } from "./cmp-mq/index.js";
 import {
+  acknowledgeCmpDispatchReceipt,
   acknowledgeCmpCoreAgentReturn,
   advanceCmpActiveLineRecord,
   assertCmpProjectionVisibleToTarget,
+  createCmpRuntimeSnapshot,
   createCmpActiveLineRecord,
   createCmpHistoricalReplyPackage,
   createCmpContextPackageRecord,
@@ -67,6 +69,7 @@ import {
   createCmpIngressRecord,
   createCmpProjectionRecord,
   createPassiveHistoricalPackage,
+  hydrateCmpRuntimeSnapshot,
   markCmpDispatchDelivered,
   planCmpDispatcherDelivery,
   resolveCmpPassiveHistoricalDelivery,
@@ -74,6 +77,7 @@ import {
   type CmpDispatchReceipt,
   type CmpIngressRecord,
   type CmpProjectionRecord as CmpRuntimeProjectionRecord,
+  type CmpRuntimeSnapshot,
 } from "./cmp-runtime/index.js";
 import {
   activateProvisionAsset,
@@ -593,6 +597,7 @@ export class AgentCoreRuntime {
       state: projectStateFromEvents(this.journal.readRunEvents(runId).map((entry) => entry.event)),
       sessionHeader: this.sessionManager.loadSessionHeader(run.sessionId),
       poolRuntimeSnapshots: this.createPoolRuntimeSnapshots(),
+      cmpRuntimeSnapshot: this.createCmpRuntimeSnapshot(),
     });
   }
 
@@ -641,6 +646,44 @@ export class AgentCoreRuntime {
     });
   }
 
+  async writeCmpDurableCheckpoint(
+    runId: string,
+    reason: CheckpointReason = "manual",
+  ): Promise<StoredCheckpoint | undefined> {
+    const snapshot = this.createTapCheckpointSnapshot(runId);
+    const run = this.runCoordinator.getRun(runId);
+    if (!snapshot || !run) {
+      return undefined;
+    }
+
+    const latest = this.journal.getLatestEvent(runId);
+    return this.checkpointStore.writeDurableCheckpoint({
+      checkpointId: randomUUID(),
+      sessionId: run.sessionId,
+      runId,
+      reason,
+      createdAt: new Date().toISOString(),
+      basedOnEventId: latest?.event.eventId,
+      journalCursor: latest?.cursor,
+      pendingIntentId: run.pendingIntentId,
+      snapshot: {
+        ...snapshot,
+        cmpRuntimeSnapshot: this.createCmpRuntimeSnapshot(),
+      },
+      metadata: {
+        source: "cmp-runtime-checkpoint",
+      },
+    });
+  }
+
+  async loadCmpRuntimeSnapshotFromCheckpoint(runId: string): Promise<CmpRuntimeSnapshot | undefined> {
+    const recovery = await this.checkpointStore.recoverRun({
+      runId,
+      journal: this.journal,
+    });
+    return recovery.cmpRuntimeSnapshot ? structuredClone(recovery.cmpRuntimeSnapshot) : undefined;
+  }
+
   createPoolRuntimeSnapshots(): PoolRuntimeSnapshots {
     return createPoolRuntimeSnapshots({
       tap: this.createTapRuntimeSnapshot(),
@@ -672,6 +715,7 @@ export class AgentCoreRuntime {
       ),
       sessionHeader,
       poolRuntimeSnapshots: this.createPoolRuntimeSnapshots(),
+      cmpRuntimeSnapshot: this.createCmpRuntimeSnapshot(),
     });
     const checkpointId = randomUUID();
 
@@ -867,6 +911,14 @@ export class AgentCoreRuntime {
     return this.#cmpGitOrchestrator.listPromotions();
   }
 
+  listCmpGitCheckedRefs(): readonly CmpGitCheckedSnapshotRef[] {
+    return this.#cmpGitOrchestrator.listCheckedRefs();
+  }
+
+  getCmpGitBranchHead(branchRef: string) {
+    return this.#cmpGitOrchestrator.getBranchHead(branchRef);
+  }
+
   getCmpPromotedProjection(projectionId: string): PromotedProjection | undefined {
     return this.#cmpPromotedProjections.get(projectionId);
   }
@@ -901,6 +953,172 @@ export class AgentCoreRuntime {
 
   getCmpDbDeliveryRecord(deliveryId: string): CmpDbDeliveryRegistryRecord | undefined {
     return this.#cmpDbRuntimeSync.deliveries.get(deliveryId);
+  }
+
+  acknowledgeCmpDispatch(params: {
+    dispatchId: string;
+    acknowledgedAt?: string;
+    metadata?: Record<string, unknown>;
+  }): DispatchReceipt {
+    const receipt = this.#cmpDispatchReceipts.get(params.dispatchId);
+    if (!receipt) {
+      throw new Error(`CMP dispatch receipt ${params.dispatchId} was not found.`);
+    }
+
+    const acknowledgedAt = params.acknowledgedAt ?? new Date().toISOString();
+    const targetKind = this.#mapDispatchTargetKindFromReceipt(receipt);
+    const nextReceipt = targetKind === "core_agent"
+      ? createDispatchReceipt({
+        ...acknowledgeCmpCoreAgentReturn({
+          receipt: createCmpCoreAgentReturnReceipt({
+            dispatchId: receipt.dispatchId,
+            packageId: receipt.packageId,
+            sourceAgentId: receipt.sourceAgentId,
+            coreAgentHandle: receipt.targetAgentId,
+            createdAt: receipt.deliveredAt ?? receipt.acknowledgedAt ?? acknowledgedAt,
+            metadata: receipt.metadata,
+          }),
+          acknowledgedAt,
+          metadata: params.metadata,
+        }),
+        status: "acknowledged",
+        acknowledgedAt,
+      })
+      : createDispatchReceipt({
+        ...acknowledgeCmpDispatchReceipt({
+          receipt: createCmpDispatchReceipt({
+            dispatchId: receipt.dispatchId,
+            packageId: receipt.packageId,
+            sourceAgentId: receipt.sourceAgentId,
+            targetAgentId: receipt.targetAgentId,
+            direction: targetKind,
+            status: receipt.acknowledgedAt ? "acknowledged" : "delivered",
+            createdAt: receipt.deliveredAt ?? acknowledgedAt,
+            deliveredAt: receipt.deliveredAt,
+            acknowledgedAt: receipt.acknowledgedAt,
+            metadata: receipt.metadata,
+          }),
+          acknowledgedAt,
+          metadata: params.metadata,
+        }),
+        status: "acknowledged",
+        acknowledgedAt,
+      });
+
+    this.#cmpDispatchReceipts.set(nextReceipt.dispatchId, nextReceipt);
+    syncCmpDbDeliveryFromDispatchReceipt({
+      state: this.#cmpDbRuntimeSync,
+      receipt: nextReceipt,
+      metadata: {
+        source: "cmp-runtime-ack",
+      },
+    });
+    return nextReceipt;
+  }
+
+  createCmpRuntimeSnapshot(): CmpRuntimeSnapshot {
+    return {
+      projectRepos: [...this.#cmpProjectRepos.values()],
+      lineages: [...this.#cmpLineages.values()],
+      events: [...this.#cmpEvents.values()],
+      deltas: [...this.#cmpDeltas.values()],
+      activeLines: [...this.#cmpActiveLines.values()],
+      snapshotCandidates: [...this.#cmpSnapshotCandidates.values()],
+      checkedSnapshots: [...this.#cmpCheckedSnapshots.values()],
+      promotedProjections: [...this.#cmpPromotedProjections.values()],
+      contextPackages: [...this.#cmpPackages.values()],
+      dispatchReceipts: [...this.#cmpDispatchReceipts.values()],
+      syncEvents: [...this.#cmpSyncEvents.values()],
+    };
+  }
+
+  recoverCmpRuntimeSnapshot(snapshot: CmpRuntimeSnapshot): void {
+    this.#cmpProjectRepos.clear();
+    this.#cmpLineages.clear();
+    this.#cmpEvents.clear();
+    this.#cmpEventsByAgent.clear();
+    this.#cmpDeltas.clear();
+    this.#cmpActiveLines.clear();
+    this.#cmpSnapshotCandidates.clear();
+    this.#cmpCheckedSnapshots.clear();
+    this.#cmpPromotedProjections.clear();
+    this.#cmpRuntimeProjections.clear();
+    this.#cmpPackages.clear();
+    this.#cmpDispatchReceipts.clear();
+    this.#cmpSyncEvents.clear();
+    this.#cmpDbRuntimeSync.projections.clear();
+    this.#cmpDbRuntimeSync.packages.clear();
+    this.#cmpDbRuntimeSync.deliveries.clear();
+
+    const hydrated = hydrateCmpRuntimeSnapshot(snapshot);
+
+    for (const [projectId, repo] of hydrated.projectRepos) {
+      this.#cmpProjectRepos.set(projectId, repo);
+    }
+    for (const lineage of hydrated.lineages.values()) {
+      this.#cmpLineages.set(lineage.agentId, lineage);
+      this.#ensureCmpProjectRepo(lineage);
+    }
+    for (const event of hydrated.events.values()) {
+      this.#storeCmpEvent(event);
+    }
+    for (const delta of hydrated.deltas.values()) {
+      this.#cmpDeltas.set(delta.deltaId, delta);
+    }
+    for (const line of hydrated.activeLines.values()) {
+      this.#cmpActiveLines.set(line.lineId, line);
+    }
+    for (const candidate of hydrated.snapshotCandidates.values()) {
+      this.#cmpSnapshotCandidates.set(candidate.candidateId, candidate);
+    }
+    for (const checked of hydrated.checkedSnapshots.values()) {
+      this.#cmpCheckedSnapshots.set(checked.snapshotId, checked);
+      syncCmpDbProjectionFromCheckedSnapshot({
+        state: this.#cmpDbRuntimeSync,
+        snapshot: checked,
+        projectionId: `projection:${checked.snapshotId}`,
+        metadata: checked.metadata,
+      });
+    }
+    for (const projection of hydrated.promotedProjections.values()) {
+      this.#cmpPromotedProjections.set(projection.projectionId, projection);
+      const checked = this.#cmpCheckedSnapshots.get(projection.snapshotId);
+      if (checked) {
+        this.#cmpRuntimeProjections.set(projection.projectionId, createCmpProjectionRecord({
+          projectionId: projection.projectionId,
+          checkedSnapshotRef: checked.snapshotId,
+          agentId: checked.agentId,
+          visibility: this.#mapProjectionStatusToRuntimeVisibility(projection.promotionStatus),
+          updatedAt: projection.updatedAt,
+          metadata: projection.metadata,
+        }));
+      }
+    }
+    for (const pkg of hydrated.contextPackages.values()) {
+      this.#cmpPackages.set(pkg.packageId, pkg);
+      const projection = this.#cmpPromotedProjections.get(pkg.sourceProjectionId);
+      if (projection) {
+        syncCmpDbPackageFromContextPackage({
+          state: this.#cmpDbRuntimeSync,
+          contextPackage: pkg,
+          projection: {
+            projectionId: projection.projectionId,
+            snapshotId: projection.snapshotId,
+            agentId: projection.agentId,
+          },
+        });
+      }
+    }
+    for (const receipt of hydrated.dispatchReceipts.values()) {
+      this.#cmpDispatchReceipts.set(receipt.dispatchId, receipt);
+      syncCmpDbDeliveryFromDispatchReceipt({
+        state: this.#cmpDbRuntimeSync,
+        receipt,
+      });
+    }
+    for (const syncEvent of hydrated.syncEvents.values()) {
+      this.#cmpSyncEvents.set(syncEvent.syncEventId, syncEvent);
+    }
   }
 
   listCmpSyncEvents(agentId?: string): readonly SyncEvent[] {
@@ -3063,6 +3281,16 @@ export class AgentCoreRuntime {
       case "child":
         return "to_children";
     }
+  }
+
+  #mapDispatchTargetKindFromReceipt(
+    receipt: DispatchReceipt,
+  ): "core_agent" | "parent" | "peer" | "child" {
+    const relation = receipt.metadata?.relation;
+    if (relation === "parent" || relation === "peer" || relation === "child") {
+      return relation;
+    }
+    return "core_agent";
   }
 
   #selectCmpHistoricalSnapshot(

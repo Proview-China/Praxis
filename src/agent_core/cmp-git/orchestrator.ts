@@ -179,6 +179,10 @@ export class CmpGitSyncRuntimeOrchestrator {
     return [...this.#pullRequests.values()];
   }
 
+  listCandidates(): readonly CmpGitSnapshotCandidateRecord[] {
+    return [...this.#candidates.values()];
+  }
+
   listMerges(): readonly CmpGitMergeRecord[] {
     return [...this.#merges.values()];
   }

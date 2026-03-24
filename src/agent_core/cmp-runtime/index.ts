@@ -76,6 +76,21 @@ export {
 } from "./visibility-enforcement.js";
 
 export type {
+  CmpRuntimeSnapshot,
+  CreateCmpRuntimeSnapshotInput,
+} from "./runtime-snapshot.js";
+export {
+  createCmpRuntimeSnapshot,
+} from "./runtime-snapshot.js";
+
+export type {
+  CmpRuntimeHydratedState,
+} from "./runtime-recovery.js";
+export {
+  hydrateCmpRuntimeSnapshot,
+} from "./runtime-recovery.js";
+
+export type {
   CmpActiveLineStage,
   CmpDeliveryStatus,
   CmpGitUpdateRef,

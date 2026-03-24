@@ -1737,3 +1737,487 @@ test("AgentCoreRuntime second wave blocks non-skipping lineage dispatch to an an
     });
   }, /not allowed for non-skipping delivery|not visible/i);
 });
+
+test("AgentCoreRuntime third wave can complete parent-child reseed and acknowledgement", () => {
+  const runtime = createAgentCoreRuntime();
+  const parent = createAgentLineage({
+    agentId: "parent",
+    depth: 0,
+    projectId: "cmp-project-reseed",
+    branchFamily: createCmpBranchFamily({
+      workBranch: "work/parent",
+      cmpBranch: "cmp/parent",
+      mpBranch: "mp/parent",
+      tapBranch: "tap/parent",
+    }),
+    childAgentIds: ["child-r"],
+  });
+
+  const ingested = runtime.ingestRuntimeContext({
+    agentId: "parent",
+    sessionId: "session-reseed",
+    runId: "run-reseed",
+    lineage: parent,
+    taskSummary: "prepare child reseed package",
+    materials: [{ kind: "context_package", ref: "payload:reseed-package" }],
+  });
+  const committed = runtime.commitContextDelta({
+    agentId: "parent",
+    sessionId: "session-reseed",
+    runId: "run-reseed",
+    eventIds: ingested.acceptedEventIds,
+    changeSummary: "Build child reseed package.",
+    syncIntent: "dispatch_to_children",
+  });
+  const checked = runtime.getCmpCheckedSnapshot(committed.metadata?.checkedSnapshotId as string);
+  const materialized = runtime.materializeContextPackage({
+    agentId: "parent",
+    snapshotId: checked!.snapshotId,
+    targetAgentId: "child-r",
+    packageKind: "child_seed",
+  });
+  const dispatched = runtime.dispatchContextPackage({
+    agentId: "parent",
+    packageId: materialized.contextPackage.packageId,
+    sourceAgentId: "parent",
+    targetAgentId: "child-r",
+    targetKind: "child",
+  });
+  const acknowledged = runtime.acknowledgeCmpDispatch({
+    dispatchId: dispatched.receipt.dispatchId,
+  });
+
+  assert.equal(acknowledged.status, "acknowledged");
+  assert.equal(runtime.getCmpDbContextPackageRecord(materialized.contextPackage.packageId)?.state, "acknowledged");
+  assert.equal(runtime.getCmpDbDeliveryRecord(dispatched.receipt.dispatchId)?.state, "acknowledged");
+});
+
+test("AgentCoreRuntime third wave keeps sibling exchange out of upward promotion", () => {
+  const runtime = createAgentCoreRuntime();
+  const root = createAgentLineage({
+    agentId: "root-s",
+    depth: 0,
+    projectId: "cmp-project-sibling",
+    branchFamily: createCmpBranchFamily({
+      workBranch: "work/root-s",
+      cmpBranch: "cmp/root-s",
+      mpBranch: "mp/root-s",
+      tapBranch: "tap/root-s",
+    }),
+    childAgentIds: ["sib-a", "sib-b"],
+  });
+  const siblingA = createAgentLineage({
+    agentId: "sib-a",
+    parentAgentId: "root-s",
+    depth: 1,
+    projectId: "cmp-project-sibling",
+    branchFamily: createCmpBranchFamily({
+      workBranch: "work/sib-a",
+      cmpBranch: "cmp/sib-a",
+      mpBranch: "mp/sib-a",
+      tapBranch: "tap/sib-a",
+    }),
+  });
+  const siblingB = createAgentLineage({
+    agentId: "sib-b",
+    parentAgentId: "root-s",
+    depth: 1,
+    projectId: "cmp-project-sibling",
+    branchFamily: createCmpBranchFamily({
+      workBranch: "work/sib-b",
+      cmpBranch: "cmp/sib-b",
+      mpBranch: "mp/sib-b",
+      tapBranch: "tap/sib-b",
+    }),
+  });
+  runtime.ingestRuntimeContext({
+    agentId: "root-s",
+    sessionId: "session-sibling-root",
+    runId: "run-sibling-root",
+    lineage: root,
+    taskSummary: "seed root lineage",
+    materials: [{ kind: "state_marker", ref: "payload:root-s" }],
+    requiresActiveSync: false,
+  });
+  runtime.ingestRuntimeContext({
+    agentId: "sib-b",
+    sessionId: "session-sibling-b",
+    runId: "run-sibling-b",
+    lineage: siblingB,
+    taskSummary: "register sibling B before direct peer attempt",
+    materials: [{ kind: "state_marker", ref: "payload:sibling-b" }],
+    requiresActiveSync: false,
+  });
+  const ingested = runtime.ingestRuntimeContext({
+    agentId: "sib-a",
+    sessionId: "session-sibling-a",
+    runId: "run-sibling-a",
+    lineage: siblingA,
+    taskSummary: "prepare peer exchange package",
+    materials: [{ kind: "assistant_output", ref: "payload:sibling-a" }],
+  });
+  const committed = runtime.commitContextDelta({
+    agentId: "sib-a",
+    sessionId: "session-sibling-a",
+    runId: "run-sibling-a",
+    eventIds: ingested.acceptedEventIds,
+    changeSummary: "Prepare sibling exchange without upward promotion.",
+    syncIntent: "broadcast_to_peers",
+  });
+  const checked = runtime.getCmpCheckedSnapshot(committed.metadata?.checkedSnapshotId as string);
+  const materialized = runtime.materializeContextPackage({
+    agentId: "sib-a",
+    snapshotId: checked!.snapshotId,
+    targetAgentId: "sib-b",
+    packageKind: "peer_exchange",
+  });
+  assert.throws(() => {
+    runtime.dispatchContextPackage({
+      agentId: "sib-a",
+      packageId: materialized.contextPackage.packageId,
+      sourceAgentId: "sib-a",
+      targetAgentId: "sib-b",
+      targetKind: "peer",
+    });
+  }, /not visible|non-skipping/i);
+  assert.equal(runtime.listCmpGitPromotions().length, 0);
+});
+
+test("AgentCoreRuntime third wave can recover a CMP runtime snapshot and continue serving history", () => {
+  const runtime = createAgentCoreRuntime();
+  const lineage = createAgentLineage({
+    agentId: "recover-main",
+    depth: 0,
+    projectId: "cmp-project-recover",
+    branchFamily: createCmpBranchFamily({
+      workBranch: "work/recover-main",
+      cmpBranch: "cmp/recover-main",
+      mpBranch: "mp/recover-main",
+      tapBranch: "tap/recover-main",
+    }),
+    childAgentIds: ["recover-child"],
+  });
+  const ingested = runtime.ingestRuntimeContext({
+    agentId: "recover-main",
+    sessionId: "session-recover",
+    runId: "run-recover",
+    lineage,
+    taskSummary: "prepare snapshot recovery",
+    materials: [{ kind: "assistant_output", ref: "payload:recover-main" }],
+  });
+  const committed = runtime.commitContextDelta({
+    agentId: "recover-main",
+    sessionId: "session-recover",
+    runId: "run-recover",
+    eventIds: ingested.acceptedEventIds,
+    changeSummary: "Prepare runtime snapshot.",
+    syncIntent: "submit_to_parent",
+  });
+  const checked = runtime.getCmpCheckedSnapshot(committed.metadata?.checkedSnapshotId as string);
+  const materialized = runtime.materializeContextPackage({
+    agentId: "recover-main",
+    snapshotId: checked!.snapshotId,
+    targetAgentId: "recover-child",
+    packageKind: "child_seed",
+  });
+  runtime.dispatchContextPackage({
+    agentId: "recover-main",
+    packageId: materialized.contextPackage.packageId,
+    sourceAgentId: "recover-main",
+    targetAgentId: "recover-child",
+    targetKind: "child",
+  });
+
+  const snapshot = runtime.createCmpRuntimeSnapshot();
+  const recovered = createAgentCoreRuntime();
+  recovered.recoverCmpRuntimeSnapshot(snapshot);
+
+  assert.equal(recovered.listCmpLineages().length, 2);
+  assert.equal(recovered.listCmpContextPackages().length, 1);
+  assert.equal(recovered.listCmpDispatchReceipts().length, 1);
+
+  const historical = recovered.requestHistoricalContext({
+    requesterAgentId: "recover-main",
+    projectId: "cmp-project-recover",
+    reason: "Read history after runtime recovery.",
+    query: {},
+  });
+  assert.equal(historical.found, true);
+  assert.equal(historical.contextPackage?.packageKind, "historical_reply");
+});
+
+test("AgentCoreRuntime third wave can reseed a child lineage through a parent-dispatched context package", () => {
+  const runtime = createAgentCoreRuntime();
+  const parent = createAgentLineage({
+    agentId: "parent-reseed",
+    depth: 0,
+    projectId: "cmp-project-reseed",
+    branchFamily: createCmpBranchFamily({
+      workBranch: "work/parent-reseed",
+      cmpBranch: "cmp/parent-reseed",
+      mpBranch: "mp/parent-reseed",
+      tapBranch: "tap/parent-reseed",
+    }),
+    childAgentIds: ["child-reseed"],
+  });
+  const child = createAgentLineage({
+    agentId: "child-reseed",
+    parentAgentId: "parent-reseed",
+    depth: 1,
+    projectId: "cmp-project-reseed",
+    branchFamily: createCmpBranchFamily({
+      workBranch: "work/child-reseed",
+      cmpBranch: "cmp/child-reseed",
+      mpBranch: "mp/child-reseed",
+      tapBranch: "tap/child-reseed",
+    }),
+  });
+
+  const parentIngest = runtime.ingestRuntimeContext({
+    agentId: "parent-reseed",
+    sessionId: "session-parent-reseed",
+    runId: "run-parent-reseed",
+    lineage: parent,
+    taskSummary: "Parent prepares a high-signal child seed.",
+    materials: [{ kind: "system_prompt", ref: "payload:parent-seed" }],
+  });
+  const parentCommit = runtime.commitContextDelta({
+    agentId: "parent-reseed",
+    sessionId: "session-parent-reseed",
+    runId: "run-parent-reseed",
+    eventIds: parentIngest.acceptedEventIds,
+    changeSummary: "Prepare child reseed package.",
+    syncIntent: "dispatch_to_children",
+  });
+  const parentChecked = runtime.getCmpCheckedSnapshot(parentCommit.metadata?.checkedSnapshotId as string);
+  const seedPackage = runtime.materializeContextPackage({
+    agentId: "parent-reseed",
+    snapshotId: parentChecked!.snapshotId,
+    targetAgentId: "child-reseed",
+    packageKind: "child_seed",
+  });
+  const delivered = runtime.dispatchContextPackage({
+    agentId: "parent-reseed",
+    packageId: seedPackage.contextPackage.packageId,
+    sourceAgentId: "parent-reseed",
+    targetAgentId: "child-reseed",
+    targetKind: "child",
+  });
+
+  assert.equal(delivered.receipt.status, "delivered");
+
+  const childIngest = runtime.ingestRuntimeContext({
+    agentId: "child-reseed",
+    sessionId: "session-child-reseed",
+    runId: "run-child-reseed",
+    lineage: child,
+    taskSummary: "Child consumes reseeded context package.",
+    materials: [
+      {
+        kind: "context_package",
+        ref: seedPackage.contextPackage.packageRef,
+      },
+    ],
+  });
+  const childCommit = runtime.commitContextDelta({
+    agentId: "child-reseed",
+    sessionId: "session-child-reseed",
+    runId: "run-child-reseed",
+    eventIds: childIngest.acceptedEventIds,
+    changeSummary: "Child records reseeded context locally.",
+    syncIntent: "local_record",
+  });
+
+  const childChecked = runtime.getCmpCheckedSnapshot(childCommit.metadata?.checkedSnapshotId as string);
+  assert.ok(childChecked);
+  assert.equal(runtime.readCmpEvents("child-reseed").at(-1)?.kind, "context_package_received");
+});
+
+test("AgentCoreRuntime third wave can route sibling exchange through parent mediation without turning it into upward promotion", () => {
+  const runtime = createAgentCoreRuntime();
+  const parent = createAgentLineage({
+    agentId: "parent-peer",
+    depth: 0,
+    projectId: "cmp-project-peer",
+    branchFamily: createCmpBranchFamily({
+      workBranch: "work/parent-peer",
+      cmpBranch: "cmp/parent-peer",
+      mpBranch: "mp/parent-peer",
+      tapBranch: "tap/parent-peer",
+    }),
+    childAgentIds: ["left-peer", "right-peer"],
+  });
+  const left = createAgentLineage({
+    agentId: "left-peer",
+    parentAgentId: "parent-peer",
+    depth: 1,
+    projectId: "cmp-project-peer",
+    branchFamily: createCmpBranchFamily({
+      workBranch: "work/left-peer",
+      cmpBranch: "cmp/left-peer",
+      mpBranch: "mp/left-peer",
+      tapBranch: "tap/left-peer",
+    }),
+  });
+  const right = createAgentLineage({
+    agentId: "right-peer",
+    parentAgentId: "parent-peer",
+    depth: 1,
+    projectId: "cmp-project-peer",
+    branchFamily: createCmpBranchFamily({
+      workBranch: "work/right-peer",
+      cmpBranch: "cmp/right-peer",
+      mpBranch: "mp/right-peer",
+      tapBranch: "tap/right-peer",
+    }),
+  });
+
+  runtime.ingestRuntimeContext({
+    agentId: "parent-peer",
+    sessionId: "session-parent-peer",
+    runId: "run-parent-peer",
+    lineage: parent,
+    taskSummary: "Seed parent lineage for sibling exchange.",
+    materials: [{ kind: "state_marker", ref: "payload:parent-peer-seed" }],
+    requiresActiveSync: false,
+  });
+  runtime.ingestRuntimeContext({
+    agentId: "right-peer",
+    sessionId: "session-right-peer-seed",
+    runId: "run-right-peer-seed",
+    lineage: right,
+    taskSummary: "Register the right sibling lineage before peer delivery.",
+    materials: [{ kind: "state_marker", ref: "payload:right-peer-seed" }],
+    requiresActiveSync: false,
+  });
+
+  const leftIngest = runtime.ingestRuntimeContext({
+    agentId: "left-peer",
+    sessionId: "session-left-peer",
+    runId: "run-left-peer",
+    lineage: left,
+    taskSummary: "Left sibling prepares a peer package.",
+    materials: [{ kind: "assistant_output", ref: "payload:left-peer-output" }],
+  });
+  const leftCommit = runtime.commitContextDelta({
+    agentId: "left-peer",
+    sessionId: "session-left-peer",
+    runId: "run-left-peer",
+    eventIds: leftIngest.acceptedEventIds,
+    changeSummary: "Prepare sibling exchange package.",
+    syncIntent: "submit_to_parent",
+  });
+  const leftChecked = runtime.getCmpCheckedSnapshot(leftCommit.metadata?.checkedSnapshotId as string);
+  const upwardPackage = runtime.materializeContextPackage({
+    agentId: "left-peer",
+    snapshotId: leftChecked!.snapshotId,
+    targetAgentId: "parent-peer",
+    packageKind: "promotion_update",
+  });
+  const upwardDispatch = runtime.dispatchContextPackage({
+    agentId: "left-peer",
+    packageId: upwardPackage.contextPackage.packageId,
+    sourceAgentId: "left-peer",
+    targetAgentId: "parent-peer",
+    targetKind: "parent",
+  });
+  assert.equal(upwardDispatch.receipt.status, "delivered");
+
+  const parentIngest = runtime.ingestRuntimeContext({
+    agentId: "parent-peer",
+    sessionId: "session-parent-peer-forward",
+    runId: "run-parent-peer-forward",
+    lineage: parent,
+    taskSummary: "Parent mediates a sibling exchange.",
+    materials: [{ kind: "context_package", ref: upwardPackage.contextPackage.packageRef }],
+  });
+  const parentCommit = runtime.commitContextDelta({
+    agentId: "parent-peer",
+    sessionId: "session-parent-peer-forward",
+    runId: "run-parent-peer-forward",
+    eventIds: parentIngest.acceptedEventIds,
+    changeSummary: "Repackage sibling exchange through the parent.",
+    syncIntent: "dispatch_to_children",
+  });
+  const parentChecked = runtime.getCmpCheckedSnapshot(parentCommit.metadata?.checkedSnapshotId as string);
+  const peerPackage = runtime.materializeContextPackage({
+    agentId: "parent-peer",
+    snapshotId: parentChecked!.snapshotId,
+    targetAgentId: "right-peer",
+    packageKind: "peer_exchange",
+  });
+  assert.equal(peerPackage.contextPackage.packageKind, "peer_exchange");
+  const promotion = runtime.listCmpGitPromotions().find((record) => record.sourceAgentId === "left-peer");
+  assert.ok(promotion);
+
+  const rightIngest = runtime.ingestRuntimeContext({
+    agentId: "right-peer",
+    sessionId: "session-right-peer",
+    runId: "run-right-peer",
+    lineage: right,
+    taskSummary: "Right sibling consumes peer package.",
+    materials: [{ kind: "context_package", ref: peerPackage.contextPackage.packageRef }],
+  });
+  assert.equal(rightIngest.status, "accepted");
+  assert.equal(runtime.readCmpEvents("right-peer").at(-1)?.kind, "context_package_received");
+});
+
+test("AgentCoreRuntime third wave exposes recoverable lineage snapshot anchors after an interruption-shaped flow", () => {
+  const runtime = createAgentCoreRuntime();
+  const lineage = createAgentLineage({
+    agentId: "recover-main",
+    depth: 0,
+    projectId: "cmp-project-recover",
+    branchFamily: createCmpBranchFamily({
+      workBranch: "work/recover-main",
+      cmpBranch: "cmp/recover-main",
+      mpBranch: "mp/recover-main",
+      tapBranch: "tap/recover-main",
+    }),
+    childAgentIds: ["recover-child"],
+  });
+
+  const ingested = runtime.ingestRuntimeContext({
+    agentId: "recover-main",
+    sessionId: "session-recover-main",
+    runId: "run-recover-main",
+    lineage,
+    taskSummary: "Prepare interrupted lineage snapshot anchors.",
+    materials: [{ kind: "assistant_output", ref: "payload:recover-main-output" }],
+  });
+  const committed = runtime.commitContextDelta({
+    agentId: "recover-main",
+    sessionId: "session-recover-main",
+    runId: "run-recover-main",
+    eventIds: ingested.acceptedEventIds,
+    changeSummary: "Stage checked snapshot and child package before interruption.",
+    syncIntent: "dispatch_to_children",
+  });
+  const checked = runtime.getCmpCheckedSnapshot(committed.metadata?.checkedSnapshotId as string);
+  const pkg = runtime.materializeContextPackage({
+    agentId: "recover-main",
+    snapshotId: checked!.snapshotId,
+    targetAgentId: "recover-child",
+    packageKind: "child_seed",
+  });
+
+  assert.ok(runtime.getCmpSnapshotCandidate(committed.snapshotCandidateId!));
+  assert.ok(runtime.getCmpCheckedSnapshot(checked!.snapshotId));
+  assert.ok(runtime.getCmpPromotedProjection(pkg.contextPackage.sourceProjectionId));
+  assert.ok(runtime.getCmpDbProjectionRecord(`projection:${checked!.snapshotId}`));
+  assert.ok(runtime.getCmpDbContextPackageRecord(pkg.contextPackage.packageId));
+
+  const historical = runtime.requestHistoricalContext({
+    requesterAgentId: "recover-main",
+    projectId: "cmp-project-recover",
+    reason: "Use the last checked snapshot as a recovery anchor after interruption.",
+    query: {
+      snapshotId: checked!.snapshotId,
+      packageKindHint: "historical_reply",
+    },
+  });
+
+  assert.equal(historical.found, true);
+  assert.equal(historical.snapshot?.snapshotId, checked!.snapshotId);
+  assert.equal(historical.contextPackage?.packageKind, "historical_reply");
+});

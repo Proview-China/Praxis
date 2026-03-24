@@ -96,6 +96,53 @@
   - `npx tsx --test src/agent_core/cmp-git/*.test.ts src/agent_core/cmp-db/*.test.ts src/agent_core/cmp-mq/*.test.ts src/agent_core/cmp-runtime/*.test.ts src/agent_core/runtime.test.ts` 通过
   - 当前命中：`74 pass / 0 fail`
   - `npm run build` 通过
+- `CMP` 第三波代码也已真实落地到 `src/agent_core/**`：
+  - `cmp-git/**`
+    - 已补：
+      - `lineage-guard.ts`
+      - `integration-hooks.ts`
+      - `lineage-governance-smoke.test.ts`
+    - 当前已具备：
+      - git 侧 non-skipping promotion guard
+      - peer exchange stays local guard
+      - git-side critical escalation alert-only / summary-only 边界
+      - 给 Part 1/3/4 的 runtime hooks 与 source anchors
+  - `cmp-db/**`
+    - 已补：
+      - `integration-hooks.ts`
+      - `integration-hooks.test.ts`
+    - 当前已具备：
+      - `CheckedSnapshot + git promotion -> DB projection` cross-part helper
+      - `ContextPackage + DispatchReceipt -> package/delivery` pipeline helper
+  - `cmp-mq/**`
+    - 已补：
+      - `integration-hooks.ts`
+      - `integration-e2e.test.ts`
+    - 当前已具备：
+      - neighborhood publish plan lowering
+      - parent/peer/child subscription validation
+      - `critical escalation` 作为唯一 upward exception 的集成测试
+  - `cmp-runtime/**`
+    - 已补：
+      - `runtime-snapshot.ts`
+      - `runtime-recovery.ts`
+    - 当前已具备：
+      - `CMP` runtime snapshot 序列化
+      - `CMP` runtime snapshot hydration
+- `AgentCoreRuntime` 当前已把第三波 helper 和恢复能力接回主链：
+  - `createCmpRuntimeSnapshot()`
+  - `writeCmpDurableCheckpoint(...)`
+  - `loadCmpRuntimeSnapshotFromCheckpoint(...)`
+  - `recoverCmpRuntimeSnapshot(snapshot)`
+  - 并且 `createTapCheckpointSnapshot(...)` / TAP 控制面 checkpoint 写入现在会同时携带 `cmpRuntimeSnapshot`
+  - `dispatchContextPackage(...)` 现在会走 `cmp-runtime` delivery routing
+  - `requestHistoricalContext(...)` 现在会走 `cmp-runtime` passive delivery helper
+  - `ingestRuntimeContext(...)` 现在会通过 `cmp-mq` integration hooks + guards 约束邻接传播
+- 当前第三波验证基线：
+  - `npm run typecheck` 通过
+  - `npx tsx --test src/agent_core/cmp-git/*.test.ts src/agent_core/cmp-db/*.test.ts src/agent_core/cmp-mq/*.test.ts src/agent_core/cmp-runtime/*.test.ts src/agent_core/runtime.test.ts` 通过
+  - 当前命中：`96 pass / 0 fail`
+  - `npm run build` 通过
 - `CMP` 的关键治理纪律已先冻结：
   - 一个项目一个 `repo`
   - 一个项目一个 `CMP DB`

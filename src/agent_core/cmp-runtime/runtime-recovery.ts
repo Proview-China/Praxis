@@ -1,0 +1,122 @@
+import type { CmpGitProjectRepo } from "../cmp-git/index.js";
+import type { AgentLineage, CheckedSnapshot, ContextDelta, ContextEvent, ContextPackage, DispatchReceipt, PromotedProjection, SnapshotCandidate, SyncEvent } from "../cmp-types/index.js";
+import type { CmpActiveLineRecord } from "./active-line.js";
+import { createCmpRuntimeSnapshot, type CmpRuntimeSnapshot } from "./runtime-snapshot.js";
+
+export interface CmpRuntimeHydratedState {
+  projectRepos: Map<string, CmpGitProjectRepo>;
+  lineages: Map<string, AgentLineage>;
+  events: Map<string, ContextEvent>;
+  deltas: Map<string, ContextDelta>;
+  activeLines: Map<string, CmpActiveLineRecord>;
+  snapshotCandidates: Map<string, SnapshotCandidate>;
+  checkedSnapshots: Map<string, CheckedSnapshot>;
+  promotedProjections: Map<string, PromotedProjection>;
+  contextPackages: Map<string, ContextPackage>;
+  dispatchReceipts: Map<string, DispatchReceipt>;
+  syncEvents: Map<string, SyncEvent>;
+}
+
+function assertUniqueKey(kind: string, key: string, seen: Set<string>): void {
+  if (seen.has(key)) {
+    throw new Error(`Duplicate ${kind} key detected during CMP runtime recovery: ${key}.`);
+  }
+  seen.add(key);
+}
+
+export function hydrateCmpRuntimeSnapshot(
+  snapshot?: CmpRuntimeSnapshot,
+): CmpRuntimeHydratedState {
+  const normalized = createCmpRuntimeSnapshot(snapshot);
+  const projectRepos = new Map<string, CmpGitProjectRepo>();
+  const lineages = new Map<string, AgentLineage>();
+  const events = new Map<string, ContextEvent>();
+  const deltas = new Map<string, ContextDelta>();
+  const activeLines = new Map<string, CmpActiveLineRecord>();
+  const snapshotCandidates = new Map<string, SnapshotCandidate>();
+  const checkedSnapshots = new Map<string, CheckedSnapshot>();
+  const promotedProjections = new Map<string, PromotedProjection>();
+  const contextPackages = new Map<string, ContextPackage>();
+  const dispatchReceipts = new Map<string, DispatchReceipt>();
+  const syncEvents = new Map<string, SyncEvent>();
+
+  const seenProjectRepos = new Set<string>();
+  for (const repo of normalized.projectRepos) {
+    assertUniqueKey("cmp project repo", repo.projectId, seenProjectRepos);
+    projectRepos.set(repo.projectId, repo);
+  }
+
+  const seenLineages = new Set<string>();
+  for (const lineage of normalized.lineages) {
+    assertUniqueKey("cmp lineage", lineage.agentId, seenLineages);
+    lineages.set(lineage.agentId, lineage);
+  }
+
+  const seenEvents = new Set<string>();
+  for (const event of normalized.events) {
+    assertUniqueKey("cmp event", event.eventId, seenEvents);
+    events.set(event.eventId, event);
+  }
+
+  const seenDeltas = new Set<string>();
+  for (const delta of normalized.deltas) {
+    assertUniqueKey("cmp delta", delta.deltaId, seenDeltas);
+    deltas.set(delta.deltaId, delta);
+  }
+
+  const seenActiveLines = new Set<string>();
+  for (const activeLine of normalized.activeLines) {
+    assertUniqueKey("cmp active line", activeLine.lineId, seenActiveLines);
+    activeLines.set(activeLine.lineId, activeLine);
+  }
+
+  const seenCandidates = new Set<string>();
+  for (const candidate of normalized.snapshotCandidates) {
+    assertUniqueKey("cmp snapshot candidate", candidate.candidateId, seenCandidates);
+    snapshotCandidates.set(candidate.candidateId, candidate);
+  }
+
+  const seenCheckedSnapshots = new Set<string>();
+  for (const snapshotRecord of normalized.checkedSnapshots) {
+    assertUniqueKey("cmp checked snapshot", snapshotRecord.snapshotId, seenCheckedSnapshots);
+    checkedSnapshots.set(snapshotRecord.snapshotId, snapshotRecord);
+  }
+
+  const seenProjections = new Set<string>();
+  for (const projection of normalized.promotedProjections) {
+    assertUniqueKey("cmp promoted projection", projection.projectionId, seenProjections);
+    promotedProjections.set(projection.projectionId, projection);
+  }
+
+  const seenPackages = new Set<string>();
+  for (const contextPackage of normalized.contextPackages) {
+    assertUniqueKey("cmp context package", contextPackage.packageId, seenPackages);
+    contextPackages.set(contextPackage.packageId, contextPackage);
+  }
+
+  const seenReceipts = new Set<string>();
+  for (const receipt of normalized.dispatchReceipts) {
+    assertUniqueKey("cmp dispatch receipt", receipt.dispatchId, seenReceipts);
+    dispatchReceipts.set(receipt.dispatchId, receipt);
+  }
+
+  const seenSyncEvents = new Set<string>();
+  for (const syncEvent of normalized.syncEvents) {
+    assertUniqueKey("cmp sync event", syncEvent.syncEventId, seenSyncEvents);
+    syncEvents.set(syncEvent.syncEventId, syncEvent);
+  }
+
+  return {
+    projectRepos,
+    lineages,
+    events,
+    deltas,
+    activeLines,
+    snapshotCandidates,
+    checkedSnapshots,
+    promotedProjections,
+    contextPackages,
+    dispatchReceipts,
+    syncEvents,
+  };
+}
