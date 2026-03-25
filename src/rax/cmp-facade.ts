@@ -274,6 +274,7 @@ function createReadbackSummary(input: {
   recoverySummary?: RaxCmpReadbackSummary["recoverySummary"];
   projectRecovery?: RaxCmpReadbackSummary["projectRecovery"];
   deliverySummary?: RaxCmpReadbackSummary["deliverySummary"];
+  fiveAgentSummary?: RaxCmpReadbackSummary["fiveAgentSummary"];
 }): RaxCmpReadbackSummary {
   const expectedLineageCount = input.receipt?.lineages.length ?? 0;
   const infraSummary = input.infraState
@@ -315,6 +316,9 @@ function createReadbackSummary(input: {
   }
   if ((input.deliverySummary?.expiredCount ?? 0) > 0) {
     issues.push(`CMP has ${input.deliverySummary?.expiredCount ?? 0} expired delivery truth record(s).`);
+  }
+  if (input.fiveAgentSummary && Object.values(input.fiveAgentSummary.roleCounts).some((count) => count === 0)) {
+    issues.push("CMP five-agent runtime has roles without observed activity yet.");
   }
 
   const status = !input.receipt
@@ -427,6 +431,7 @@ function createReadbackSummary(input: {
     recoverySummary: input.recoverySummary,
     projectRecovery: input.projectRecovery,
     deliverySummary: input.deliverySummary,
+    fiveAgentSummary: input.fiveAgentSummary,
     issues,
   };
 }
@@ -503,6 +508,7 @@ export function createRaxCmpFacade(input: CreateRaxCmpFacadeInput = {}): RaxCmpF
         recoverySummary: readbackInput.session.runtime.getCmpRuntimeRecoverySummary?.(),
         projectRecovery: readbackInput.session.runtime.getCmpRuntimeProjectRecoverySummary?.(projectId),
         deliverySummary: readbackInput.session.runtime.getCmpRuntimeDeliveryTruthSummary?.(projectId),
+        fiveAgentSummary: readbackInput.session.runtime.getCmpFiveAgentRuntimeSummary?.(control.scope.lineage.agentIds[0]),
       });
       return {
         status: "found",
@@ -795,6 +801,16 @@ export function createRaxCmpFacade(input: CreateRaxCmpFacadeInput = {}): RaxCmpF
           summary: `CMP control surface uses ${control.truth.readbackPriority}/${control.truth.fallbackPolicy}/${control.truth.recoveryPreference}.`,
         },
       ];
+      if (readback.summary?.fiveAgentSummary) {
+        checks.push({
+          id: "cmp.five_agent.summary",
+          gate: "lineage",
+          status: Object.values(readback.summary.fiveAgentSummary.roleCounts).every((count) => count > 0)
+            ? "ready"
+            : "degraded",
+          summary: `CMP five-agent roles observed counts: ${Object.entries(readback.summary.fiveAgentSummary.roleCounts).map(([role, count]) => `${role}:${count}`).join(", ")}.`,
+        });
+      }
 
       checks.push({
         id: "cmp.non_five_agent.final_gate",

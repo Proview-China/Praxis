@@ -118,6 +118,13 @@ import {
   executeCmpProjectInfraBootstrap,
 } from "./cmp-runtime/index.js";
 import {
+  createCmpFiveAgentRuntime,
+  createCheckerCheckedSnapshotMetadata,
+  type CmpFiveAgentRuntime,
+  type CmpFiveAgentRuntimeSnapshot,
+  type CmpFiveAgentSummary,
+} from "./cmp-five-agent/index.js";
+import {
   activateProvisionAsset,
   applyTaHumanGateEvent,
   createActivationFactoryResolver,
@@ -669,6 +676,7 @@ export class AgentCoreRuntime {
   readonly #cmpRuntimeDispatchReceipts = new Map<string, CmpDispatchReceipt>();
   readonly #cmpSyncEvents = new Map<string, SyncEvent>();
   readonly #cmpProjectInfraBootstrapReceipts = new Map<string, CmpProjectInfraBootstrapReceipt>();
+  readonly #cmpFiveAgentRuntime: CmpFiveAgentRuntime = createCmpFiveAgentRuntime();
   #cmpRuntimeInfraState: CmpRuntimeInfraState = createCmpRuntimeInfraState();
 
   constructor(options: AgentCoreRuntimeOptions = {}) {
@@ -1168,6 +1176,14 @@ export class AgentCoreRuntime {
     return getCmpRuntimeInfraProjectState(this.#cmpRuntimeInfraState, projectId);
   }
 
+  getCmpFiveAgentRuntimeSnapshot(agentId?: string): CmpFiveAgentRuntimeSnapshot {
+    return this.#cmpFiveAgentRuntime.createSnapshot(agentId);
+  }
+
+  getCmpFiveAgentRuntimeSummary(agentId?: string): CmpFiveAgentSummary {
+    return this.#cmpFiveAgentRuntime.createSummary(agentId);
+  }
+
   createCmpProjectInfraBootstrapPlan(
     input: BootstrapCmpProjectInfraInput,
   ): CmpProjectInfraBootstrapPlan {
@@ -1604,6 +1620,9 @@ export class AgentCoreRuntime {
       dispatchReceipts: [...this.#cmpDispatchReceipts.values()],
       syncEvents: [...this.#cmpSyncEvents.values()],
       infraState: this.#cmpRuntimeInfraState,
+      metadata: {
+        cmpFiveAgentSnapshot: this.#cmpFiveAgentRuntime.createSnapshot(),
+      },
     };
   }
 
@@ -1622,6 +1641,7 @@ export class AgentCoreRuntime {
     this.#cmpDispatchReceipts.clear();
     this.#cmpSyncEvents.clear();
     this.#cmpProjectInfraBootstrapReceipts.clear();
+    this.#cmpFiveAgentRuntime.recover();
     this.#cmpRuntimeInfraState = createCmpRuntimeInfraState();
     this.#cmpDbRuntimeSync.projections.clear();
     this.#cmpDbRuntimeSync.packages.clear();
@@ -1632,6 +1652,9 @@ export class AgentCoreRuntime {
       projects: snapshot.infraState?.projects,
     });
     const hydrated = recovery.hydrated;
+    this.#cmpFiveAgentRuntime.recover(
+      snapshot.metadata?.cmpFiveAgentSnapshot as CmpFiveAgentRuntimeSnapshot | undefined,
+    );
 
     for (const [projectId, repo] of hydrated.projectRepos) {
       this.#cmpProjectRepos.set(projectId, repo);
@@ -1754,6 +1777,11 @@ export class AgentCoreRuntime {
     this.#ensureCmpProjectRepo(lineage);
 
     const createdAt = new Date().toISOString();
+    const icmaCapture = this.#cmpFiveAgentRuntime.icma.capture({
+      ingest: normalized,
+      createdAt,
+      loopId: randomUUID(),
+    });
     const sectionIngress = createCmpSectionIngressRecordFromIngress({
       ingest: normalized,
       ingressId: randomUUID(),
@@ -1788,6 +1816,9 @@ export class AgentCoreRuntime {
         metadata: {
           ingressId: ingress.ingressId,
           materialKind: material.kind,
+          cmpIcmaRecordId: icmaCapture.loop.loopId,
+          cmpIcmaChunkIds: icmaCapture.loop.chunkIds,
+          cmpIcmaFragmentIds: icmaCapture.loop.fragmentIds,
           cmpSectionId: loweredSection?.section.id,
           cmpStoredSectionId: loweredSection?.storedSection?.id,
           cmpStoredSections: loweredSection?.storedSection ? [loweredSection.storedSection] : [],
@@ -1797,6 +1828,11 @@ export class AgentCoreRuntime {
       });
       this.#storeCmpEvent(event);
       return event;
+    });
+    const emittedIcma = this.#cmpFiveAgentRuntime.icma.emit({
+      recordId: icmaCapture.loop.loopId,
+      eventIds: acceptedEvents.map((event) => event.eventId),
+      emittedAt: createdAt,
     });
 
     this.#recordCmpNeighborhoodSyncs({
@@ -1812,6 +1848,11 @@ export class AgentCoreRuntime {
       nextAction: normalized.requiresActiveSync === false ? "noop" : "commit_context_delta",
       metadata: {
         ingressId: ingress.ingressId,
+        cmpFiveAgent: {
+          icmaRecordId: emittedIcma.loopId,
+          chunkIds: emittedIcma.chunkIds,
+          fragmentIds: emittedIcma.fragmentIds,
+        },
         sectionIds: sectionIngress.sections.map((section) => section.id),
         storedSectionIds: sectionLowering.storedSections.map((section) => section.id),
         droppedSectionIds: sectionLowering.droppedSectionIds,
@@ -1853,7 +1894,18 @@ export class AgentCoreRuntime {
       },
       syncIntent: this.#mapCmpDeltaSyncIntentToGit(delta.syncIntent),
     });
-
+    const iteratorRecord = this.#cmpFiveAgentRuntime.iteratorChecker.advanceIterator({
+      agentId: delta.agentId,
+      deltaId: delta.deltaId,
+      candidateId: gitSync.candidate.candidateId,
+      branchRef: gitSync.candidate.branchRef.fullRef,
+      commitRef: gitSync.candidate.commitSha,
+      reviewRef: `refs/cmp/review/${gitSync.candidate.candidateId}`,
+      createdAt: gitSync.candidate.createdAt,
+      metadata: {
+        gitSyncIntent: gitSync.binding.syncIntent,
+      },
+    });
     const candidate = createSnapshotCandidate({
       candidateId: gitSync.candidate.candidateId,
       agentId: delta.agentId,
@@ -1867,6 +1919,9 @@ export class AgentCoreRuntime {
         projectId: lineage.projectId,
         bindingId: gitSync.binding.bindingId,
         source: "cmp-runtime-default-checker",
+        cmpIteratorRecordId: iteratorRecord.loopId,
+        cmpIteratorReviewRef: iteratorRecord.reviewRef,
+        cmpIteratorMinimumReviewUnit: iteratorRecord.metadata?.minimumReviewUnit,
       },
     });
     this.#cmpSnapshotCandidates.set(candidate.candidateId, candidate);
@@ -1877,7 +1932,14 @@ export class AgentCoreRuntime {
       checkedAt: candidate.createdAt,
     });
     this.#cmpGitCheckedRefs.set(checkedRef.refId, checkedRef);
-
+    const checkerRecord = this.#cmpFiveAgentRuntime.iteratorChecker.evaluateChecker({
+      agentId: candidate.agentId,
+      candidateId: candidate.candidateId,
+      checkedSnapshotId: `${candidate.candidateId}:checked`,
+      parentAgentId: lineage.parentAgentId,
+      checkedAt: candidate.createdAt,
+      suggestPromote: Boolean(lineage.parentAgentId && delta.syncIntent === "submit_to_parent"),
+    });
     let promotionRecord: CmpGitPromotionRecord | undefined;
     if (delta.syncIntent === "submit_to_parent" && lineage.parentAgentId) {
       const pullRequest = this.#cmpGitOrchestrator.openPullRequest({
@@ -1940,6 +2002,19 @@ export class AgentCoreRuntime {
         checkedRefId: checkedRef.refId,
         promotionId: promotionRecord?.promotionId,
         source: "cmp-runtime-default-checker",
+        ...createCheckerCheckedSnapshotMetadata({
+          snapshot: {
+            snapshotId: `${candidate.candidateId}:checked`,
+            agentId: delta.agentId,
+            lineageRef: this.#createCmpLineageRef(lineage),
+            branchRef: candidate.branchRef,
+            commitRef: candidate.commitRef,
+            checkedAt: candidate.createdAt,
+            qualityLabel: "usable",
+            promotable: delta.syncIntent !== "local_record",
+          },
+          result: checkerRecord,
+        }),
       },
     });
     this.#cmpCheckedSnapshots.set(checked.snapshotId, checked);
@@ -1958,6 +2033,16 @@ export class AgentCoreRuntime {
         acceptedAt: promotionRecord.promotedAt ?? candidate.createdAt,
       });
     }
+    const parentPromoteReview = checkerRecord.promoteRequest
+      ? this.#cmpFiveAgentRuntime.dbagent.reviewPromote({
+        sourceAgentId: checkerRecord.promoteRequest.sourceAgentId,
+        parentAgentId: checkerRecord.promoteRequest.targetParentAgentId,
+        candidateId: checkerRecord.promoteRequest.candidateId,
+        checkedSnapshotId: checkerRecord.promoteRequest.checkedSnapshotId,
+        reviewId: checkerRecord.promoteRequest.reviewId,
+        createdAt: checkerRecord.promoteRequest.createdAt,
+      })
+      : undefined;
 
     const checkedReady = advanceCmpActiveLineRecord({
       record: candidateReady,
@@ -2046,6 +2131,11 @@ export class AgentCoreRuntime {
       snapshotCandidateId: candidate.candidateId,
       metadata: {
         checkedSnapshotId: checked.snapshotId,
+        cmpFiveAgent: {
+          iteratorRecordId: iteratorRecord.loopId,
+          checkerRecordId: checkerRecord.checkerRecord.loopId,
+          promoteReviewId: parentPromoteReview?.reviewId,
+        },
       },
     };
   }
@@ -2157,10 +2247,27 @@ export class AgentCoreRuntime {
         ...(runtimePackage.metadata ?? {}),
       },
     });
-    this.#cmpPackages.set(contextPackage.packageId, contextPackage);
+    const dbagentMaterialized = this.#cmpFiveAgentRuntime.dbagent.materialize({
+      checkedSnapshot: snapshot,
+      projectionId: projection.projectionId,
+      contextPackage,
+      createdAt: contextPackage.createdAt,
+      loopId: randomUUID(),
+    });
+    const enrichedContextPackage = createContextPackage({
+      ...contextPackage,
+      metadata: {
+        ...(contextPackage.metadata ?? {}),
+        cmpDbAgentRecordId: dbagentMaterialized.loop.loopId,
+        cmpPackageFamilyId: dbagentMaterialized.family.familyId,
+        cmpTimelinePackageId: dbagentMaterialized.family.timelinePackageId,
+        cmpTaskSnapshotIds: dbagentMaterialized.taskSnapshots.map((taskSnapshot) => taskSnapshot.snapshotId),
+      },
+    });
+    this.#cmpPackages.set(enrichedContextPackage.packageId, enrichedContextPackage);
     syncCmpDbPackageFromContextPackage({
       state: this.#cmpDbRuntimeSync,
-      contextPackage,
+      contextPackage: enrichedContextPackage,
       projection: {
         projectionId: projection.projectionId,
         snapshotId: projection.snapshotId,
@@ -2176,8 +2283,8 @@ export class AgentCoreRuntime {
       agentId: normalized.agentId,
       channel: "db",
       direction: "local",
-      objectRef: contextPackage.packageId,
-      createdAt: contextPackage.createdAt,
+      objectRef: enrichedContextPackage.packageId,
+      createdAt: enrichedContextPackage.createdAt,
       metadata: {
         projectionId: projection.projectionId,
       },
@@ -2190,7 +2297,7 @@ export class AgentCoreRuntime {
         localTableSets: projectReceipt.db.localTableSets,
       });
       const projectionRecord = this.#cmpDbRuntimeSync.projections.get(projection.projectionId);
-      const packageRecord = this.#cmpDbRuntimeSync.packages.get(contextPackage.packageId);
+      const packageRecord = this.#cmpDbRuntimeSync.packages.get(enrichedContextPackage.packageId);
       if (projectionRecord && packageRecord) {
         void Promise.all([
           executeCmpProjectionLowering({
@@ -2209,8 +2316,8 @@ export class AgentCoreRuntime {
             agentId: normalized.agentId,
             channel: "db",
             direction: "local",
-            objectRef: contextPackage.packageId,
-            createdAt: contextPackage.createdAt,
+            objectRef: enrichedContextPackage.packageId,
+            createdAt: enrichedContextPackage.createdAt,
             metadata: {
               source: "cmp-runtime-db-lowering",
               projectionWriteTarget: projectionLowering.writeStatement.target,
@@ -2225,7 +2332,7 @@ export class AgentCoreRuntime {
             agentId: normalized.agentId,
             channel: "db",
             direction: "local",
-            objectRef: contextPackage.packageId,
+            objectRef: enrichedContextPackage.packageId,
             createdAt: new Date().toISOString(),
             metadata: {
               source: "cmp-runtime-db-lowering",
@@ -2238,7 +2345,7 @@ export class AgentCoreRuntime {
 
     return {
       status: "materialized",
-      contextPackage,
+      contextPackage: enrichedContextPackage,
     };
   }
 
@@ -2275,10 +2382,26 @@ export class AgentCoreRuntime {
         input: normalized,
         createdAt,
       });
-    this.#cmpDispatchReceipts.set(receipt.dispatchId, receipt);
+    const dispatcherRecorded = this.#cmpFiveAgentRuntime.dispatcher.dispatch({
+      contextPackage,
+      dispatch: normalized,
+      receipt,
+      createdAt,
+      loopId: randomUUID(),
+    });
+    const enrichedReceipt = createDispatchReceipt({
+      ...receipt,
+      metadata: {
+        ...(receipt.metadata ?? {}),
+        cmpDispatcherRecordId: dispatcherRecorded.loop.loopId,
+        cmpDispatcherPackageMode: dispatcherRecorded.loop.packageMode,
+        cmpPeerExchangeApprovalId: dispatcherRecorded.peerApproval?.approvalId,
+      },
+    });
+    this.#cmpDispatchReceipts.set(enrichedReceipt.dispatchId, enrichedReceipt);
     syncCmpDbDeliveryFromDispatchReceipt({
       state: this.#cmpDbRuntimeSync,
-      receipt,
+      receipt: enrichedReceipt,
       metadata: {
         source: "cmp-runtime-dispatch",
       },
@@ -2289,7 +2412,7 @@ export class AgentCoreRuntime {
       agentId: normalized.sourceAgentId,
       channel: normalized.targetKind === "core_agent" ? "db" : "mq",
       direction: this.#mapDispatchTargetKindToDirection(normalized.targetKind),
-      objectRef: receipt.dispatchId,
+      objectRef: enrichedReceipt.dispatchId,
       createdAt,
       metadata: {
         packageId: contextPackage.packageId,
@@ -2304,7 +2427,7 @@ export class AgentCoreRuntime {
         topology: projectReceipt.db.topology,
         localTableSets: projectReceipt.db.localTableSets,
       });
-      const deliveryRecord = this.#cmpDbRuntimeSync.deliveries.get(receipt.dispatchId);
+      const deliveryRecord = this.#cmpDbRuntimeSync.deliveries.get(enrichedReceipt.dispatchId);
       if (deliveryRecord) {
         void executeCmpDeliveryLowering({
           adapter,
@@ -2316,7 +2439,7 @@ export class AgentCoreRuntime {
             agentId: normalized.sourceAgentId,
             channel: "db",
             direction: "local",
-            objectRef: receipt.dispatchId,
+            objectRef: enrichedReceipt.dispatchId,
             createdAt,
             metadata: {
               source: "cmp-runtime-delivery-lowering",
@@ -2330,7 +2453,7 @@ export class AgentCoreRuntime {
             agentId: normalized.sourceAgentId,
             channel: "db",
             direction: "local",
-            objectRef: receipt.dispatchId,
+            objectRef: enrichedReceipt.dispatchId,
             createdAt: new Date().toISOString(),
             metadata: {
               source: "cmp-runtime-delivery-lowering",
@@ -2375,7 +2498,7 @@ export class AgentCoreRuntime {
         adapter: this.cmpInfraBackends.mq,
         neighborhood: this.#createCmpNeighborhood(sourceLineage),
         envelope,
-        dispatchId: receipt.dispatchId,
+        dispatchId: enrichedReceipt.dispatchId,
         packageId: contextPackage.packageId,
         targetAgentId: normalized.targetAgentId,
         metadata: {
@@ -2386,9 +2509,9 @@ export class AgentCoreRuntime {
         parentPeerIds: this.#findCmpParentPeerIds(sourceLineage),
       }).then((mqLowering) => {
         const nextReceipt = createDispatchReceipt({
-          ...receipt,
+          ...enrichedReceipt,
           metadata: {
-            ...(receipt.metadata ?? {}),
+            ...(enrichedReceipt.metadata ?? {}),
             mqReceiptId: mqLowering.publishReceipt.receiptId,
             mqRedisKey: mqLowering.publishReceipt.redisKey,
             mqLane: mqLowering.publishReceipt.lane,
@@ -2421,7 +2544,7 @@ export class AgentCoreRuntime {
           agentId: normalized.sourceAgentId,
           channel: "mq",
           direction: this.#mapDispatchTargetKindToDirection(normalized.targetKind),
-          objectRef: receipt.dispatchId,
+          objectRef: enrichedReceipt.dispatchId,
           createdAt,
           metadata: {
             source: "cmp-runtime-mq-lowering",
@@ -2437,7 +2560,7 @@ export class AgentCoreRuntime {
           agentId: normalized.sourceAgentId,
           channel: "mq",
           direction: this.#mapDispatchTargetKindToDirection(normalized.targetKind),
-          objectRef: receipt.dispatchId,
+          objectRef: enrichedReceipt.dispatchId,
           createdAt: new Date().toISOString(),
           metadata: {
             source: "cmp-runtime-mq-lowering",
@@ -2449,7 +2572,7 @@ export class AgentCoreRuntime {
 
     return {
       status: "dispatched",
-      receipt,
+      receipt: enrichedReceipt,
     };
   }
 
@@ -2591,7 +2714,32 @@ export class AgentCoreRuntime {
       });
     }
 
-    this.#cmpPackages.set(contextPackage.packageId, contextPackage);
+    const dbagentPassive = this.#cmpFiveAgentRuntime.dbagent.servePassive({
+      loopId: randomUUID(),
+      request: normalized,
+      snapshot,
+      contextPackage,
+      createdAt: contextPackage.createdAt,
+    });
+    const dispatcherPassive = this.#cmpFiveAgentRuntime.dispatcher.deliverPassiveReturn({
+      loopId: randomUUID(),
+      request: normalized,
+      contextPackage,
+      createdAt: contextPackage.createdAt,
+    });
+    const enrichedContextPackage = createContextPackage({
+      ...contextPackage,
+      metadata: {
+        ...(contextPackage.metadata ?? {}),
+        cmpDbAgentRecordId: dbagentPassive.loop.loopId,
+        cmpDispatcherRecordId: dispatcherPassive.loopId,
+        cmpPackageFamilyId: dbagentPassive.family.familyId,
+        cmpTimelinePackageId: dbagentPassive.family.timelinePackageId,
+        cmpTaskSnapshotIds: dbagentPassive.taskSnapshots.map((taskSnapshot) => taskSnapshot.snapshotId),
+        cmpPassiveDefaultPayload: "ContextPackage",
+      },
+    });
+    this.#cmpPackages.set(enrichedContextPackage.packageId, enrichedContextPackage);
     if (projectReceipt?.db && this.cmpInfraBackends.dbExecutor) {
       const adapter = createCmpDbPostgresAdapter({
         topology: projectReceipt.db.topology,
@@ -2605,7 +2753,7 @@ export class AgentCoreRuntime {
           record: projectionRecord,
         }).catch(() => undefined);
       }
-      const packageRecord = this.#cmpDbRuntimeSync.packages.get(contextPackage.packageId);
+      const packageRecord = this.#cmpDbRuntimeSync.packages.get(enrichedContextPackage.packageId);
       if (packageRecord) {
         void executeCmpContextPackageLowering({
           adapter,
@@ -2617,8 +2765,8 @@ export class AgentCoreRuntime {
             agentId: normalized.requesterAgentId,
             channel: "db",
             direction: "local",
-            objectRef: contextPackage.packageId,
-            createdAt: contextPackage.createdAt,
+            objectRef: enrichedContextPackage.packageId,
+            createdAt: enrichedContextPackage.createdAt,
             metadata: {
               source: "cmp-runtime-passive-db-lowering",
               writeTarget: packageLowering.writeStatement.target,
@@ -2631,7 +2779,7 @@ export class AgentCoreRuntime {
             agentId: normalized.requesterAgentId,
             channel: "db",
             direction: "local",
-            objectRef: contextPackage.packageId,
+            objectRef: enrichedContextPackage.packageId,
             createdAt: new Date().toISOString(),
             metadata: {
               source: "cmp-runtime-passive-db-lowering",
@@ -2646,11 +2794,15 @@ export class AgentCoreRuntime {
       status: "materialized",
       found: true,
       snapshot,
-      contextPackage,
+      contextPackage: enrichedContextPackage,
       metadata: {
         degraded: fallbackDecision.degraded,
         truthSource: fallbackDecision.resolvedSource,
         fallbackReason: fallbackDecision.reason,
+        cmpFiveAgent: {
+          dbAgentRecordId: dbagentPassive.loop.loopId,
+          dispatcherRecordId: dispatcherPassive.loopId,
+        },
       },
     };
   }

@@ -97,6 +97,9 @@ export function createRaxCmpRuntime(input: CreateRaxCmpRuntimeInput): RaxCmpRunt
     getCmpRuntimeDeliveryTruthSummary(projectId) {
       return agentCoreRuntime.getCmpRuntimeDeliveryTruthSummary(projectId);
     },
+    getCmpFiveAgentRuntimeSummary(agentId) {
+      return agentCoreRuntime.getCmpFiveAgentRuntimeSummary(agentId);
+    },
     advanceCmpMqDeliveryTimeouts(input) {
       return agentCoreRuntime.advanceCmpMqDeliveryTimeouts(input);
     },

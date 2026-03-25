@@ -1,5 +1,6 @@
 import type {
   BootstrapCmpProjectInfraInput,
+  CmpFiveAgentSummary,
   CmpRuntimeDeliveryTruthSummary,
   CmpRuntimeProjectRecoverySummary,
   CmpRuntimeRecoverySummary,
@@ -299,6 +300,7 @@ export interface RaxCmpReadbackSummary {
   recoverySummary?: CmpRuntimeRecoverySummary;
   projectRecovery?: CmpRuntimeProjectRecoverySummary;
   deliverySummary?: CmpRuntimeDeliveryTruthSummary;
+  fiveAgentSummary?: CmpFiveAgentSummary;
   issues: string[];
 }
 
@@ -391,6 +393,7 @@ export interface RaxCmpRuntimeLike {
   getCmpRuntimeRecoverySummary?(): CmpRuntimeRecoverySummary;
   getCmpRuntimeProjectRecoverySummary?(projectId: string): CmpRuntimeProjectRecoverySummary | undefined;
   getCmpRuntimeDeliveryTruthSummary?(projectId: string): CmpRuntimeDeliveryTruthSummary;
+  getCmpFiveAgentRuntimeSummary?(agentId?: string): CmpFiveAgentSummary;
   advanceCmpMqDeliveryTimeouts?(input?: { projectId?: string; now?: string }): {
     projectId?: string;
     processedCount: number;

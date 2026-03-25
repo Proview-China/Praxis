@@ -1,6 +1,7 @@
 export * from "./types/index.js";
 export * from "./capability-types/index.js";
 export * from "./cmp-types/index.js";
+export * from "./cmp-five-agent/index.js";
 export * from "./cmp-git/index.js";
 export * from "./cmp-runtime/index.js";
 export {
