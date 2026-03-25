@@ -7,6 +7,7 @@ import {
   MCP_READ_FAMILY_ACTIONS,
   createRaxMcpCapabilityAdapter,
   isMcpReadFamilyAction,
+  createRaxMcpCapabilityManifest,
 } from "./rax-mcp-adapter.js";
 
 function createLease(): CapabilityLease {
@@ -144,6 +145,15 @@ test("mcp adapter supports the first-wave MCP actions", () => {
       },
     },
   })), false);
+  assert.equal(adapter.supports(createPlan("mcp.configure", {
+    route: { provider: "openai", model: "gpt-5.4" },
+    input: {
+      transport: {
+        kind: "stdio",
+        command: "node",
+      },
+    },
+  })), false);
 });
 
 test("mcp adapter groups listTools and readResource into the read family", () => {
@@ -171,10 +181,13 @@ test("mcp adapter prepares and executes shared-runtime MCP actions", async () =>
   );
 
   assert.equal(prepared.executionMode, "direct");
+  assert.equal(prepared.metadata?.riskLevel, "risky");
+  assert.equal(prepared.metadata?.recommendedMode, "standard");
   const result = await adapter.execute(prepared);
   assert.equal(result.status, "success");
   assert.equal((result.output as { toolName: string }).toolName, "browser.search");
   assert.equal(result.metadata?.provider, "openai");
+  assert.equal(result.metadata?.riskLevel, "risky");
 });
 
 test("mcp adapter prepares and executes the MCP read family through the shared runtime", async () => {
@@ -245,10 +258,76 @@ test("mcp adapter prepares and executes native MCP actions through native.build 
   );
 
   assert.equal(prepared.executionMode, "long-running");
+  assert.equal(prepared.metadata?.riskLevel, "risky");
+  assert.equal(prepared.metadata?.recommendedMode, "restricted");
   const result = await adapter.execute(prepared);
   assert.equal(result.status, "success");
   assert.equal((result.output as { ok: boolean }).ok, true);
   assert.equal(result.metadata?.capability, "mcp.native.execute");
+  assert.equal(
+    (result.metadata as { humanGateRequirements?: string[] } | undefined)?.humanGateRequirements?.[0],
+    "operator_review_required_before_native_transport_execution",
+  );
+});
+
+test("mcp adapter publishes packaged capability metadata for thick MCP actions", () => {
+  const callManifest = createRaxMcpCapabilityManifest({
+    capabilityKey: "mcp.call",
+  });
+  const nativeManifest = createRaxMcpCapabilityManifest({
+    capabilityKey: "mcp.native.execute",
+  });
+
+  assert.equal(callManifest.metadata?.riskLevel, "risky");
+  assert.equal(callManifest.metadata?.recommendedMode, "standard");
+  assert.equal(
+    (callManifest.metadata?.capabilityPackage as { manifest?: { capabilityKey?: string } }).manifest?.capabilityKey,
+    "mcp.call",
+  );
+  assert.equal(nativeManifest.supportsCancellation, true);
+  assert.equal(nativeManifest.metadata?.recommendedMode, "restricted");
+});
+
+test("mcp adapter rejects stdio native execution requests without a command", async () => {
+  const adapter = createRaxMcpCapabilityAdapter({
+    facade: createFacadeDouble(),
+  });
+
+  await assert.rejects(
+    () => adapter.prepare(
+      createPlan("mcp.native.execute", {
+        route: { provider: "openai", model: "gpt-5.4", layer: "agent" },
+        input: {
+          transport: {
+            kind: "stdio",
+          },
+        },
+      }),
+      createLease(),
+    ),
+    /stdio transport requires a non-empty command/i,
+  );
+});
+
+test("mcp adapter rejects streamable-http native execution requests without a url", async () => {
+  const adapter = createRaxMcpCapabilityAdapter({
+    facade: createFacadeDouble(),
+  });
+
+  await assert.rejects(
+    () => adapter.prepare(
+      createPlan("mcp.native.execute", {
+        route: { provider: "openai", model: "gpt-5.4", layer: "agent" },
+        input: {
+          transport: {
+            kind: "streamable-http",
+          },
+        },
+      }),
+      createLease(),
+    ),
+    /streamable-http transport requires a non-empty url/i,
+  );
 });
 
 test("mcp adapter returns failed envelope when prepared payload is missing", async () => {

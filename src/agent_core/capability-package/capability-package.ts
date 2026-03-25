@@ -34,6 +34,14 @@ import {
 } from "../ta-pool-types/ta-pool-provision.js";
 
 export const CAPABILITY_PACKAGE_TEMPLATE_VERSION = "tap-capability-package.v1";
+export const SUPPORTED_MCP_CAPABILITY_PACKAGE_KEYS = [
+  "mcp.call",
+  "mcp.native.execute",
+] as const;
+export type SupportedMcpCapabilityPackageKey =
+  (typeof SUPPORTED_MCP_CAPABILITY_PACKAGE_KEYS)[number];
+
+const MCP_CONFIGURE_CAPABILITY_KEY = "mcp.configure";
 
 export interface CapabilityPackageManifest {
   capabilityKey: string;
@@ -284,6 +292,16 @@ export interface CreateCapabilityPackageFixtureInput {
   activationSpec?: PoolActivationSpec;
 }
 
+export interface CreateMcpCapabilityPackageInput {
+  capabilityKey: SupportedMcpCapabilityPackageKey;
+  version?: string;
+  generation?: number;
+  replayPolicy?: ReplayPolicy;
+  supportedPlatforms?: string[];
+  routeHints?: CapabilityRouteHint[];
+  metadata?: Record<string, unknown>;
+}
+
 function normalizeString(value: string, label: string): string {
   const normalized = value.trim();
   if (!normalized) {
@@ -357,6 +375,363 @@ function validateScope(label: string, scope?: AccessRequestScope): void {
     !scope.denyPatterns?.length
   ) {
     throw new Error(`${label} requires at least one non-empty scope field.`);
+  }
+}
+
+export function isSupportedMcpCapabilityPackageKey(
+  capabilityKey: string,
+): capabilityKey is SupportedMcpCapabilityPackageKey {
+  return SUPPORTED_MCP_CAPABILITY_PACKAGE_KEYS.includes(
+    capabilityKey as SupportedMcpCapabilityPackageKey,
+  );
+}
+
+function createMcpCapabilityPackageActivationSpec(params: {
+  capabilityKey: SupportedMcpCapabilityPackageKey;
+  version: string;
+  generation: number;
+}): PoolActivationSpec {
+  const slug = params.capabilityKey.replace(/\./g, "-");
+  return {
+    targetPool: "ta-capability-pool",
+    activationMode: "activate_after_verify",
+    registerOrReplace: "register_or_replace",
+    generationStrategy: "create_next_generation",
+    drainStrategy: "graceful",
+    manifestPayload: {
+      capabilityKey: params.capabilityKey,
+      version: params.version,
+      generation: params.generation,
+    },
+    bindingPayload: {
+      adapterId: `adapter.${slug}`,
+      runtimeKind: "rax-mcp",
+    },
+    adapterFactoryRef: `factory:${slug}`,
+  };
+}
+
+function createMcpCallCapabilityPackage(
+  input: CreateMcpCapabilityPackageInput,
+): CapabilityPackage {
+  const version = input.version ?? "1.0.0";
+  const generation = input.generation ?? 1;
+  const replayPolicy = input.replayPolicy ?? "re_review_then_dispatch";
+  const activationSpec = createMcpCapabilityPackageActivationSpec({
+    capabilityKey: "mcp.call",
+    version,
+    generation,
+  });
+
+  return createCapabilityPackage({
+    manifest: {
+      capabilityKey: "mcp.call",
+      capabilityKind: "tool",
+      tier: "B1",
+      version,
+      generation,
+      description: "Truthful shared-runtime MCP tool call surface with TAP review metadata.",
+      dependencies: ["mcp.listTools"],
+      tags: ["mcp", "tool-call", "shared-runtime", "truthful-surface"],
+      routeHints: input.routeHints ?? [
+        { key: "pool", value: "shared" },
+        { key: "truthfulness", value: "shared-runtime" },
+      ],
+      supportedPlatforms: input.supportedPlatforms ?? ["linux", "macos", "windows"],
+    },
+    adapter: {
+      adapterId: "adapter.mcp-call",
+      runtimeKind: "rax-mcp",
+      supports: ["mcp.call"],
+      prepare: {
+        ref: "adapter.prepare:rax-mcp.call",
+        description: "Validate route plus connection-scoped tool invocation input.",
+      },
+      execute: {
+        ref: "adapter.execute:rax-mcp.call",
+        description: "Delegate to the shared rax MCP client call surface.",
+      },
+      resultMapping: {
+        successStatuses: ["success"],
+        artifactKinds: ["tool"],
+        metadata: {
+          resultSurface: "mcp.call",
+        },
+      },
+    },
+    policy: {
+      defaultBaseline: {
+        grantedTier: "B1",
+        mode: "standard",
+        scope: {
+          pathPatterns: ["workspace/**"],
+          allowedOperations: ["mcp.call", "read"],
+          providerHints: ["mcp.shared-runtime"],
+          denyPatterns: [MCP_CONFIGURE_CAPABILITY_KEY, "mcp.native.execute"],
+        },
+      },
+      recommendedMode: "standard",
+      riskLevel: "risky",
+      defaultScope: {
+        pathPatterns: ["workspace/**"],
+        allowedOperations: ["mcp.call", "read"],
+        providerHints: ["mcp.shared-runtime"],
+        denyPatterns: [MCP_CONFIGURE_CAPABILITY_KEY],
+      },
+      reviewRequirements: ["allow_with_constraints"],
+      safetyFlags: [
+        "truthful_shared_runtime_surface",
+        "remote_tool_side_effects",
+        "requires_existing_connection",
+        "no_mcp_configure",
+      ],
+      humanGateRequirements: [
+        "unknown_remote_tool_side_effects_require_operator_judgement",
+      ],
+    },
+    builder: {
+      builderId: "builder.mcp-call",
+      buildStrategy: "bind-existing-mcp-connection",
+      requiresNetwork: false,
+      requiresInstall: false,
+      requiresSystemWrite: false,
+      allowedWorkdirScope: ["workspace/**"],
+      activationSpecRef: createCapabilityPackageActivationSpecRef(activationSpec),
+      replayCapability: replayPolicy,
+    },
+    verification: {
+      smokeEntry: "smoke:mcp.call",
+      healthEntry: "health:mcp.call",
+      successCriteria: [
+        "Active connection can invoke a tool and return normalized content.",
+        "Remote tool failures stay surfaced as tool-level failures.",
+      ],
+      failureSignals: [
+        "Connection is missing or stale.",
+        "Requested tool is not exposed by the server.",
+        "Invocation attempts to expand into mcp.configure.",
+      ],
+      evidenceOutput: ["normalized-call-result", "tool-error-envelope"],
+    },
+    usage: {
+      usageDocRef: "docs/ability/25-tap-capability-package-template.md",
+      bestPractices: [
+        "Probe tool metadata with mcp.listTools before invoking unknown servers.",
+        "Keep route/provider selection explicit so the shared-runtime lowering stays truthful.",
+      ],
+      knownLimits: [
+        "Requires an existing connectionId and does not configure MCP servers.",
+        "Resource and prompt surfaces remain separate MCP capabilities.",
+      ],
+      exampleInvocations: [
+        {
+          exampleId: "example.mcp.call.browser-search",
+          capabilityKey: "mcp.call",
+          operation: "mcp.call",
+          input: {
+            route: {
+              provider: "openai",
+              model: "gpt-5.4",
+              layer: "agent",
+            },
+            input: {
+              connectionId: "conn-browser",
+              toolName: "browser.search",
+              arguments: {
+                q: "Praxis TAP",
+              },
+            },
+          },
+          notes: "Shared-runtime tool call example with an already-provisioned MCP connection.",
+        },
+      ],
+    },
+    lifecycle: {
+      installStrategy: "bind to an existing MCP connection capability without provisioning configure hooks",
+      replaceStrategy: "stage a new adapter generation before swapping call routing metadata",
+      rollbackStrategy: "restore the previous call adapter generation",
+      deprecateStrategy: "freeze new grants before removing the call adapter generation",
+      cleanupStrategy: "remove superseded call metadata after drain",
+      generationPolicy: "create_next_generation",
+    },
+    activationSpec,
+    replayPolicy,
+    metadata: {
+      ...(input.metadata ?? {}),
+      capabilityFamily: "mcp",
+      thickness: "thick",
+      truthfulness: "shared-runtime-call",
+    },
+  });
+}
+
+function createMcpNativeExecuteCapabilityPackage(
+  input: CreateMcpCapabilityPackageInput,
+): CapabilityPackage {
+  const version = input.version ?? "1.0.0";
+  const generation = input.generation ?? 1;
+  const replayPolicy = input.replayPolicy ?? "re_review_then_dispatch";
+  const activationSpec = createMcpCapabilityPackageActivationSpec({
+    capabilityKey: "mcp.native.execute",
+    version,
+    generation,
+  });
+
+  return createCapabilityPackage({
+    manifest: {
+      capabilityKey: "mcp.native.execute",
+      capabilityKind: "tool",
+      tier: "B2",
+      version,
+      generation,
+      description: "Provider-native MCP execute surface with long-running transport and TAP guardrails.",
+      dependencies: [],
+      tags: ["mcp", "native-execute", "provider-native", "long-running"],
+      routeHints: input.routeHints ?? [
+        { key: "pool", value: "native" },
+        { key: "truthfulness", value: "provider-native" },
+      ],
+      supportedPlatforms: input.supportedPlatforms ?? ["linux", "macos", "windows"],
+    },
+    adapter: {
+      adapterId: "adapter.mcp-native-execute",
+      runtimeKind: "rax-mcp",
+      supports: ["mcp.native.execute"],
+      prepare: {
+        ref: "adapter.prepare:rax-mcp.native.execute",
+        description: "Validate native transport input and build a provider-native invocation.",
+      },
+      execute: {
+        ref: "adapter.execute:rax-mcp.native.execute",
+        description: "Delegate to the provider-native MCP execution runtime.",
+      },
+      cancel: {
+        ref: "adapter.cancel:rax-mcp.native.execute",
+        description: "Cancellation is handled by the runtime control plane when available.",
+      },
+      resultMapping: {
+        successStatuses: ["success"],
+        artifactKinds: ["tool"],
+        metadata: {
+          resultSurface: "mcp.native.execute",
+          executionMode: "long-running",
+        },
+      },
+    },
+    policy: {
+      defaultBaseline: {
+        grantedTier: "B2",
+        mode: "restricted",
+        scope: {
+          pathPatterns: ["workspace/**"],
+          allowedOperations: ["mcp.native.execute", "exec"],
+          providerHints: ["mcp.provider-native"],
+          denyPatterns: [MCP_CONFIGURE_CAPABILITY_KEY, "workspace.outside.*"],
+        },
+      },
+      recommendedMode: "restricted",
+      riskLevel: "risky",
+      defaultScope: {
+        pathPatterns: ["workspace/**"],
+        allowedOperations: ["mcp.native.execute", "exec"],
+        providerHints: ["mcp.provider-native"],
+        denyPatterns: [MCP_CONFIGURE_CAPABILITY_KEY, "system.write"],
+      },
+      reviewRequirements: ["escalate_to_human"],
+      safetyFlags: [
+        "provider_native_execution",
+        "native_transport_side_effects",
+        "long_running_invocation",
+        "no_mcp_configure",
+      ],
+      humanGateRequirements: [
+        "operator_review_required_before_native_transport_execution",
+      ],
+    },
+    builder: {
+      builderId: "builder.mcp-native-execute",
+      buildStrategy: "bind-native-mcp-executor",
+      requiresNetwork: false,
+      requiresInstall: false,
+      requiresSystemWrite: false,
+      allowedWorkdirScope: ["workspace/**"],
+      activationSpecRef: createCapabilityPackageActivationSpecRef(activationSpec),
+      replayCapability: replayPolicy,
+    },
+    verification: {
+      smokeEntry: "smoke:mcp.native.execute",
+      healthEntry: "health:mcp.native.execute",
+      successCriteria: [
+        "Supported transport input is lowered into a provider-native invocation.",
+        "Execution result is returned without collapsing carrier metadata.",
+      ],
+      failureSignals: [
+        "Transport kind is unsupported or missing required fields.",
+        "Execution attempts to bypass review into mcp.configure.",
+        "Provider-native invocation is missing its adapter metadata.",
+      ],
+      evidenceOutput: ["native-build-metadata", "native-execution-result"],
+    },
+    usage: {
+      usageDocRef: "docs/ability/25-tap-capability-package-template.md",
+      bestPractices: [
+        "Prefer an explicit layer so provider-native lowering stays inspectable.",
+        "Escalate before stdio transports that may spawn or attach to local processes.",
+      ],
+      knownLimits: [
+        "Does not configure MCP servers or approve activation on its own.",
+        "Long-running execution still depends on provider/runtime cancellation support.",
+      ],
+      exampleInvocations: [
+        {
+          exampleId: "example.mcp.native.execute.stdio",
+          capabilityKey: "mcp.native.execute",
+          operation: "mcp.native.execute",
+          input: {
+            route: {
+              provider: "openai",
+              model: "gpt-5.4",
+              layer: "agent",
+            },
+            input: {
+              transport: {
+                kind: "stdio",
+                command: "node",
+                args: ["server.js"],
+              },
+            },
+          },
+          notes: "Native execution example that stays behind restricted-mode review.",
+        },
+      ],
+    },
+    lifecycle: {
+      installStrategy: "register the native execute binding without widening into configure surfaces",
+      replaceStrategy: "stage a new native execute generation before swapping bindings",
+      rollbackStrategy: "restore the previous native execute generation",
+      deprecateStrategy: "pause new native execute grants before removal",
+      cleanupStrategy: "drain old native execute bindings before cleanup",
+      generationPolicy: "create_next_generation",
+    },
+    activationSpec,
+    replayPolicy,
+    metadata: {
+      ...(input.metadata ?? {}),
+      capabilityFamily: "mcp",
+      thickness: "thick",
+      truthfulness: "provider-native-execute",
+    },
+  });
+}
+
+export function createMcpCapabilityPackage(
+  input: CreateMcpCapabilityPackageInput,
+): CapabilityPackage {
+  switch (input.capabilityKey) {
+    case "mcp.call":
+      return createMcpCallCapabilityPackage(input);
+    case "mcp.native.execute":
+      return createMcpNativeExecuteCapabilityPackage(input);
   }
 }
 
@@ -766,6 +1141,108 @@ export function validateCapabilityPackageArtifacts(
   validateArtifactRef("artifacts.usageArtifact", artifacts.usageArtifact);
 }
 
+export function validateMcpCapabilityPackage(
+  capabilityPackage: CapabilityPackage,
+): void {
+  const capabilityKey = capabilityPackage.manifest.capabilityKey;
+  if (capabilityKey === MCP_CONFIGURE_CAPABILITY_KEY) {
+    throw new Error(
+      "mcp.configure must remain outside first-class TAP capability packages.",
+    );
+  }
+
+  if (!isSupportedMcpCapabilityPackageKey(capabilityKey)) {
+    return;
+  }
+
+  if (capabilityPackage.adapter.runtimeKind !== "rax-mcp") {
+    throw new Error(
+      `${capabilityKey} capability packages must use runtimeKind rax-mcp.`,
+    );
+  }
+
+  if (!capabilityPackage.adapter.supports.includes(capabilityKey)) {
+    throw new Error(
+      `${capabilityKey} capability packages must explicitly list themselves in adapter.supports.`,
+    );
+  }
+
+  if (
+    !capabilityPackage.policy.defaultScope?.denyPatterns?.includes(
+      MCP_CONFIGURE_CAPABILITY_KEY,
+    )
+  ) {
+    throw new Error(
+      `${capabilityKey} capability packages must deny ${MCP_CONFIGURE_CAPABILITY_KEY} in policy.defaultScope.`,
+    );
+  }
+
+  if (
+    !capabilityPackage.policy.defaultBaseline.scope?.denyPatterns?.includes(
+      MCP_CONFIGURE_CAPABILITY_KEY,
+    )
+  ) {
+    throw new Error(
+      `${capabilityKey} capability packages must deny ${MCP_CONFIGURE_CAPABILITY_KEY} in policy.defaultBaseline.scope.`,
+    );
+  }
+
+  if (!capabilityPackage.policy.safetyFlags.includes("no_mcp_configure")) {
+    throw new Error(
+      `${capabilityKey} capability packages must carry the no_mcp_configure safety flag.`,
+    );
+  }
+
+  if (capabilityPackage.policy.riskLevel === "normal") {
+    throw new Error(
+      `${capabilityKey} capability packages cannot advertise normal risk.`,
+    );
+  }
+
+  if (capabilityKey === "mcp.call") {
+    if (
+      !capabilityPackage.policy.safetyFlags.includes(
+        "truthful_shared_runtime_surface",
+      )
+    ) {
+      throw new Error(
+        "mcp.call capability packages must carry the truthful_shared_runtime_surface safety flag.",
+      );
+    }
+    if (
+      capabilityPackage.builder.requiresInstall
+      || capabilityPackage.builder.requiresSystemWrite
+    ) {
+      throw new Error(
+        "mcp.call capability packages must not require install or system writes.",
+      );
+    }
+    return;
+  }
+
+  if (capabilityKey === "mcp.native.execute") {
+    if (capabilityPackage.policy.recommendedMode !== "restricted") {
+      throw new Error(
+        "mcp.native.execute capability packages must recommend restricted mode.",
+      );
+    }
+    if (
+      !capabilityPackage.policy.safetyFlags.includes(
+        "native_transport_side_effects",
+      )
+    ) {
+      throw new Error(
+        "mcp.native.execute capability packages must flag native_transport_side_effects.",
+      );
+    }
+    if (capabilityPackage.policy.humanGateRequirements.length === 0) {
+      throw new Error(
+        "mcp.native.execute capability packages require at least one humanGateRequirement.",
+      );
+    }
+  }
+}
+
 export function validateCapabilityPackage(capabilityPackage: CapabilityPackage): void {
   normalizeString(
     capabilityPackage.templateVersion,
@@ -804,6 +1281,8 @@ export function validateCapabilityPackage(capabilityPackage: CapabilityPackage):
   if (capabilityPackage.artifacts) {
     validateCapabilityPackageArtifacts(capabilityPackage.artifacts);
   }
+
+  validateMcpCapabilityPackage(capabilityPackage);
 }
 
 export function createCapabilityPackage(

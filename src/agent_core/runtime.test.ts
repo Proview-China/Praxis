@@ -8,6 +8,7 @@ import {
 } from "./capability-package/index.js";
 import { createGoalSource } from "./goal/goal-source.js";
 import type { ModelInferenceExecutionResult } from "./integrations/model-inference.js";
+import { createRaxMcpCapabilityManifest } from "./integrations/rax-mcp-adapter.js";
 import { createRaxSearchGroundCapabilityDefinition } from "./integrations/rax-port.js";
 import { createRaxMcpCapabilityAdapter } from "./integrations/rax-mcp-adapter.js";
 import { createRaxWebsearchActivationFactory } from "./integrations/rax-websearch-adapter.js";
@@ -681,6 +682,60 @@ test("AgentCoreRuntime surfaces review-required T/A access when capability is no
   assert.equal(resolved.request.requestedCapabilityKey, "mcp.playwright");
 });
 
+test("AgentCoreRuntime uses packaged MCP call policy as a review-required thick capability", async () => {
+  const runtime = createAgentCoreRuntime({
+    taProfile: createAgentCapabilityProfile({
+      profileId: "profile.runtime.mcp-call-package",
+      agentClass: "main-agent",
+      baselineCapabilities: ["docs.read"],
+      allowedCapabilityPatterns: ["mcp.*"],
+    }),
+  });
+  const session = runtime.createSession();
+  const goal = runtime.createCompiledGoal(
+    createGoalSource({
+      goalId: "goal-runtime-mcp-call-package",
+      sessionId: session.sessionId,
+      userInput: "Route MCP tool calls through TAP package policy.",
+    }),
+  );
+  const created = await runtime.createRun({
+    sessionId: session.sessionId,
+    goal,
+  });
+
+  const manifest = createRaxMcpCapabilityManifest({
+    capabilityKey: "mcp.call",
+  });
+  const capabilityPackage = manifest.metadata?.capabilityPackage as {
+    policy: {
+      defaultBaseline: {
+        grantedTier: "B1" | "B2" | "B3" | "B0";
+      };
+      recommendedMode: "standard" | "restricted" | "permissive" | "balanced" | "strict" | "yolo" | "bapr";
+      riskLevel: string;
+    };
+  };
+
+  const resolved = runtime.resolveTaCapabilityAccess({
+    sessionId: session.sessionId,
+    runId: created.run.runId,
+    agentId: "agent-main",
+    capabilityKey: manifest.capabilityKey,
+    reason: "Packaged MCP tool calls should go through reviewer flow first.",
+    requestedTier: capabilityPackage.policy.defaultBaseline.grantedTier,
+    mode: capabilityPackage.policy.recommendedMode,
+    metadata: {
+      riskLevel: capabilityPackage.policy.riskLevel,
+    },
+  });
+
+  assert.equal(resolved.status, "review_required");
+  assert.equal(resolved.request.requestedCapabilityKey, "mcp.call");
+  assert.equal(resolved.request.requestedTier, capabilityPackage.policy.defaultBaseline.grantedTier);
+  assert.equal(resolved.request.mode, capabilityPackage.policy.recommendedMode);
+});
+
 test("AgentCoreRuntime can assemble review -> dispatch through T/A pool for available capabilities", async () => {
   const runtime = createAgentCoreRuntime({
     taProfile: createAgentCapabilityProfile({
@@ -1059,6 +1114,107 @@ test("AgentCoreRuntime keeps restricted requests inside TAP until human approval
   assert.equal(approved.runOutcome?.run.runId, created.run.runId);
   assert.equal(runtime.getTaHumanGate(gate.gateId)?.status, "approved");
   assert.equal(runtime.listTaHumanGateEvents(gate.gateId).length, 2);
+});
+
+test("AgentCoreRuntime keeps packaged mcp.native.execute behind a human gate in restricted mode", async () => {
+  let executed = false;
+  const runtime = createAgentCoreRuntime({
+    taProfile: createAgentCapabilityProfile({
+      profileId: "profile.runtime.mcp-native-package",
+      agentClass: "main-agent",
+      baselineCapabilities: ["docs.read"],
+      allowedCapabilityPatterns: ["mcp.*"],
+    }),
+  });
+  const session = runtime.createSession();
+  const goal = runtime.createCompiledGoal(
+    createGoalSource({
+      goalId: "goal-runtime-mcp-native-package",
+      sessionId: session.sessionId,
+      userInput: "Keep native MCP execution behind package policy and human review.",
+    }),
+  );
+  const created = await runtime.createRun({
+    sessionId: session.sessionId,
+    goal,
+  });
+
+  const manifest = createRaxMcpCapabilityManifest({
+    capabilityKey: "mcp.native.execute",
+  });
+  const capabilityPackage = manifest.metadata?.capabilityPackage as {
+    policy: {
+      defaultBaseline: {
+        grantedTier: "B0" | "B1" | "B2" | "B3";
+      };
+      recommendedMode: "bapr" | "yolo" | "permissive" | "standard" | "restricted";
+    };
+  };
+  const adapter: CapabilityAdapter = {
+    id: "adapter.mcp-native.execute.human-gate",
+    runtimeKind: "rax-mcp",
+    supports(plan) {
+      return plan.capabilityKey === "mcp.native.execute";
+    },
+    async prepare(plan, lease) {
+      return {
+        preparedId: `${plan.planId}:prepared`,
+        leaseId: lease.leaseId,
+        capabilityKey: plan.capabilityKey,
+        bindingId: lease.bindingId,
+        generation: lease.generation,
+        executionMode: "long-running",
+      };
+    },
+    async execute() {
+      executed = true;
+      return {
+        executionId: "mcp-native-execute:unexpected",
+        resultId: "mcp-native-execute:unexpected",
+        status: "success",
+        completedAt: "2026-03-25T12:00:02.000Z",
+      };
+    },
+  };
+
+  runtime.registerCapabilityAdapter(manifest, adapter);
+
+  const waiting = await runtime.dispatchCapabilityIntentViaTaPool({
+    intentId: "intent-mcp-native-package-1",
+    sessionId: session.sessionId,
+    runId: created.run.runId,
+    kind: "capability_call",
+    createdAt: "2026-03-25T12:00:00.000Z",
+    priority: "high",
+    request: {
+      requestId: "request-mcp-native-package-1",
+      intentId: "intent-mcp-native-package-1",
+      sessionId: session.sessionId,
+      runId: created.run.runId,
+      capabilityKey: "mcp.native.execute",
+      input: {
+        route: { provider: "openai", model: "gpt-5.4", layer: "agent" },
+        input: {
+          transport: {
+            kind: "stdio",
+            command: "node",
+            args: ["server.js"],
+          },
+        },
+      },
+      priority: "high",
+    },
+  }, {
+    agentId: "agent-main",
+    requestedTier: capabilityPackage.policy.defaultBaseline.grantedTier,
+    mode: capabilityPackage.policy.recommendedMode,
+    reason: "Packaged native execute should wait for a human before dispatch.",
+  });
+
+  assert.equal(waiting.status, "waiting_human");
+  assert.equal(waiting.reviewDecision?.decision, "escalated_to_human");
+  assert.equal(waiting.humanGate?.capabilityKey, "mcp.native.execute");
+  assert.equal(executed, false);
 });
 
 test("AgentCoreRuntime can reject a waiting restricted human gate without throwing", async () => {
