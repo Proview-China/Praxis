@@ -24,6 +24,22 @@ test("risk classifier marks broad control surfaces as risky", () => {
   assert.equal(result.matchedPattern, "mcp.playwright");
 });
 
+test("risk classifier treats packaged MCP execution surfaces as risky by default", () => {
+  const callResult = classifyCapabilityRisk({
+    capabilityKey: "mcp.call",
+    requestedTier: "B1",
+  });
+  const nativeExecuteResult = classifyCapabilityRisk({
+    capabilityKey: "mcp.native.execute",
+    requestedTier: "B2",
+  });
+
+  assert.equal(callResult.riskLevel, "risky");
+  assert.equal(callResult.matchedPattern, "mcp.call");
+  assert.equal(nativeExecuteResult.riskLevel, "risky");
+  assert.equal(nativeExecuteResult.matchedPattern, "mcp.native.execute");
+});
+
 test("risk classifier marks destructive operations as dangerous", () => {
   const result = classifyCapabilityRisk({
     capabilityKey: "shell.rm.force",

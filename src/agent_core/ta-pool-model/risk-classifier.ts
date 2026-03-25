@@ -40,6 +40,8 @@ const DEFAULT_RISKY_PATTERNS = [
   "git.checkout.discard",
   "sudo",
   "mcp.root.*",
+  "mcp.call",
+  "mcp.native.execute",
   "mcp.browser.control",
   "mcp.playwright",
   "computer_use.*",
