@@ -24,7 +24,7 @@ test("package-backed first-wave profile assembly preserves baseline, allowed-pat
   );
   assert.deepEqual(
     profile.reviewOnlyCapabilities,
-    ["dependency.install", "network.download", "mcp.configure"],
+    ["dependency.install", "network.download"],
   );
 
   assert.equal(resolveBaselineCapability({ profile, capabilityKey: "docs.read" }).status, "baseline_allowed");
@@ -45,6 +45,6 @@ test("createFirstWaveCapabilityProfile publishes the same frozen first-wave assi
   assert.deepEqual(profile.metadata?.capabilityPackageAssembly, {
     baselineCapabilities: ["code.read", "docs.read"],
     allowedCapabilityPatterns: ["repo.write", "shell.restricted", "test.run", "skill.doc.generate"],
-    reviewOnlyCapabilityKeys: ["dependency.install", "network.download", "mcp.configure"],
+    reviewOnlyCapabilityKeys: ["dependency.install", "network.download"],
   });
 });

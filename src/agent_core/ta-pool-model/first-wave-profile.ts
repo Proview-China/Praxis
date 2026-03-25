@@ -29,7 +29,6 @@ export const FIRST_WAVE_BOOTSTRAP_REVIEW_ONLY_CAPABILITIES = [] as const;
 export const FIRST_WAVE_EXTENDED_REVIEW_ONLY_CAPABILITIES = [
   "dependency.install",
   "network.download",
-  "mcp.configure",
 ] as const;
 
 export const FIRST_WAVE_REVIEW_ONLY_CAPABILITIES = [

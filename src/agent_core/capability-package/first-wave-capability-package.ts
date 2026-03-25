@@ -21,7 +21,6 @@ export const FIRST_WAVE_CAPABILITY_KEYS = [
   "skill.doc.generate",
   "dependency.install",
   "network.download",
-  "mcp.configure",
 ] as const;
 export type FirstWaveCapabilityKey = (typeof FIRST_WAVE_CAPABILITY_KEYS)[number];
 
@@ -173,22 +172,6 @@ const FIRST_WAVE_CAPABILITY_SPECS: Record<FirstWaveCapabilityKey, FirstWaveCapab
     safetyFlags: ["network_access"],
     humanGateRequirements: ["remote_fetch_requires_review"],
     requiresNetwork: true,
-  },
-  "mcp.configure": {
-    capabilityKey: "mcp.configure",
-    description: "Adjust MCP-facing configuration for staged capability integration.",
-    tier: "B2",
-    profileAssignment: "review_only",
-    targetLane: "extended_tma",
-    riskLevel: "risky",
-    runtimeKind: "tool",
-    supportedOperations: ["configure_mcp"],
-    defaultScopeOperations: ["read", "write", "exec"],
-    routeHints: [{ key: "plane", value: "extended-provision" }],
-    bestPractices: ["Scope configuration changes to the staged capability.", "Capture before/after config evidence."],
-    knownLimits: ["Configuration changes require review.", "Does not auto-enable providers or runtime bridges."],
-    safetyFlags: ["config_mutation"],
-    humanGateRequirements: ["shared_runtime_config_requires_review"],
   },
 };
 
