@@ -1318,6 +1318,81 @@ test("AgentCoreRuntime can reject a waiting restricted human gate without throwi
   assert.equal(runtime.listTaHumanGateEvents(gate.gateId).length, 2);
 });
 
+test("AgentCoreRuntime does not reprovision on human-gate approval when a provision asset is already tracked", async () => {
+  const runtime = createAgentCoreRuntime({
+    taProfile: createAgentCapabilityProfile({
+      profileId: "profile.runtime.human-gate-existing-asset",
+      agentClass: "main-agent",
+      baselineCapabilities: ["docs.read"],
+      allowedCapabilityPatterns: ["computer.*"],
+    }),
+  });
+  const session = runtime.createSession();
+  const goal = runtime.createCompiledGoal(
+    createGoalSource({
+      goalId: "goal-runtime-human-gate-existing-asset",
+      sessionId: session.sessionId,
+      userInput: "Approve against an already tracked provision asset.",
+    }),
+  );
+  const created = await runtime.createRun({
+    sessionId: session.sessionId,
+    goal,
+  });
+
+  await runtime.provisionerRuntime?.submit(createProvisionRequest({
+    provisionId: "provision-existing-asset-1",
+    sourceRequestId: "request-existing-asset-1",
+    requestedCapabilityKey: "computer.use",
+    reason: "Seed existing asset before human approval.",
+    createdAt: "2026-03-25T21:00:00.000Z",
+  }));
+
+  const waiting = await runtime.dispatchCapabilityIntentViaTaPool({
+    intentId: "intent-human-gate-existing-asset-1",
+    sessionId: session.sessionId,
+    runId: created.run.runId,
+    kind: "capability_call",
+    createdAt: "2026-03-25T21:00:01.000Z",
+    priority: "normal",
+    request: {
+      requestId: "request-human-gate-existing-asset-1",
+      intentId: "intent-human-gate-existing-asset-1",
+      sessionId: session.sessionId,
+      runId: created.run.runId,
+      capabilityKey: "computer.use",
+      input: {
+        task: "reuse ready provision asset",
+      },
+      priority: "normal",
+    },
+  }, {
+    agentId: "agent-main",
+    requestedTier: "B2",
+    mode: "restricted",
+    reason: "Restricted approval should reuse tracked asset instead of reprovisioning.",
+  });
+
+  assert.equal(waiting.status, "waiting_human");
+  const gate = runtime.listTaHumanGates()[0];
+  assert.ok(gate);
+
+  const approved = await runtime.submitTaHumanGateDecision({
+    gateId: gate.gateId,
+    action: "approve",
+    actorId: "user-existing-asset",
+  });
+
+  assert.equal(approved.status, "deferred");
+  assert.equal(approved.provisionRequest, undefined);
+  assert.equal(approved.activation?.source, "provision_asset");
+  assert.equal(approved.replay?.source, "provision_asset");
+  assert.deepEqual(
+    runtime.provisionerRuntime?.getBundleHistory("provision-existing-asset-1").map((bundle) => bundle.status),
+    ["building", "ready"],
+  );
+});
+
 test("AgentCoreRuntime can persist and recover TAP control-plane snapshot through checkpoint store", async () => {
   const runtime = createAgentCoreRuntime({
     taProfile: createAgentCapabilityProfile({
@@ -1577,6 +1652,33 @@ test("AgentCoreRuntime records tool reviewer governance sessions from runtime hu
   assert.equal(runtime.toolReviewerRuntime?.listActions().every((action) => action.boundaryMode === "governance_only"), true);
 });
 
+test("AgentCoreRuntime records blocked tool-review lifecycle when target binding is missing", async () => {
+  const runtime = createAgentCoreRuntime({
+    taProfile: createAgentCapabilityProfile({
+      profileId: "profile.runtime.tool-review-lifecycle-blocked",
+      agentClass: "main-agent",
+      baselineCapabilities: ["docs.read"],
+    }),
+  });
+
+  const bindingsBefore = runtime.capabilityPool.listBindings();
+  const result = await runtime.applyTaCapabilityLifecycle({
+    capabilityKey: "mcp.playwright",
+    lifecycleAction: "suspend",
+    targetPool: "ta-capability-pool",
+    bindingId: "binding-missing",
+    reason: "Missing bindings should be recorded as blocked lifecycle governance.",
+  });
+
+  assert.equal(result.status, "blocked");
+  assert.equal(result.error?.code, "agent_core_capability_binding_missing");
+  assert.equal(runtime.capabilityPool.listBindings().length, bindingsBefore.length);
+  const latestLifecycleAction = runtime.toolReviewerRuntime?.listActions().slice(-1)[0];
+  assert.equal(latestLifecycleAction?.governanceKind, "lifecycle");
+  assert.equal(latestLifecycleAction?.boundaryMode, "governance_only");
+  assert.equal(latestLifecycleAction?.output.status, "lifecycle_blocked");
+});
+
 test("AgentCoreRuntime can recover and continue a waiting human gate approval path", async () => {
   const runtime = createAgentCoreRuntime({
     taProfile: createAgentCapabilityProfile({
@@ -1717,6 +1819,249 @@ test("AgentCoreRuntime can recover and continue a waiting human gate approval pa
   assert.equal(approved.status, "dispatched");
   assert.equal(approved.runOutcome?.run.runId, created.run.runId);
   assert.equal(recovered.getTaHumanGate(gate.gateId)?.status, "approved");
+});
+
+test("AgentCoreRuntime resolves recovered human-gate decisions idempotently after approval", async () => {
+  const runtime = createAgentCoreRuntime({
+    taProfile: createAgentCapabilityProfile({
+      profileId: "profile.runtime.human-gate-idempotent",
+      agentClass: "main-agent",
+      baselineCapabilities: ["docs.read"],
+      allowedCapabilityPatterns: ["search.*"],
+    }),
+  });
+  const session = runtime.createSession();
+  const goal = runtime.createCompiledGoal(
+    createGoalSource({
+      goalId: "goal-runtime-human-gate-idempotent",
+      sessionId: session.sessionId,
+      userInput: "Recovered approval should stay idempotent.",
+    }),
+  );
+  const created = await runtime.createRun({
+    sessionId: session.sessionId,
+    goal,
+  });
+
+  runtime.registerCapabilityAdapter({
+    capabilityId: "cap-search-ground-human-gate-idempotent",
+    capabilityKey: "search.ground",
+    kind: "tool",
+    version: "1.0.0",
+    generation: 1,
+    description: "Search capability for human gate idempotency.",
+  }, {
+    id: "adapter.search.ground.human-gate-idempotent",
+    runtimeKind: "tool",
+    supports(plan) {
+      return plan.capabilityKey === "search.ground";
+    },
+    async prepare(plan, lease) {
+      return {
+        preparedId: `${plan.planId}:prepared`,
+        leaseId: lease.leaseId,
+        capabilityKey: plan.capabilityKey,
+        bindingId: lease.bindingId,
+        generation: lease.generation,
+        executionMode: "direct",
+      };
+    },
+    async execute(prepared) {
+      return {
+        executionId: `${prepared.preparedId}:execution`,
+        resultId: `${prepared.preparedId}:result`,
+        status: "success",
+        output: {
+          answer: "human-gate-idempotent-ok",
+        },
+        completedAt: "2026-03-25T21:05:02.000Z",
+      };
+    },
+  });
+
+  const waiting = await runtime.dispatchCapabilityIntentViaTaPool({
+    intentId: "intent-human-gate-idempotent-1",
+    sessionId: session.sessionId,
+    runId: created.run.runId,
+    kind: "capability_call",
+    createdAt: "2026-03-25T21:05:00.000Z",
+    priority: "normal",
+    request: {
+      requestId: "request-human-gate-idempotent-1",
+      intentId: "intent-human-gate-idempotent-1",
+      sessionId: session.sessionId,
+      runId: created.run.runId,
+      capabilityKey: "search.ground",
+      input: {
+        query: "idempotent approval",
+      },
+      priority: "normal",
+    },
+  }, {
+    agentId: "agent-main",
+    requestedTier: "B1",
+    mode: "restricted",
+    reason: "Approval should not be replayed twice after recovery.",
+  });
+
+  assert.equal(waiting.status, "waiting_human");
+  const gate = runtime.listTaHumanGates()[0];
+  assert.ok(gate);
+  await runtime.submitTaHumanGateDecision({
+    gateId: gate.gateId,
+    action: "approve",
+    actorId: "user-idempotent",
+  });
+  await runtime.writeTapDurableCheckpoint(created.run.runId, "manual");
+
+  const recovered = createAgentCoreRuntime({
+    journal: runtime.journal,
+    checkpointStore: runtime.checkpointStore,
+    taProfile: runtime.taControlPlaneGateway?.profile,
+  });
+  recovered.registerCapabilityAdapter({
+    capabilityId: "cap-search-ground-human-gate-idempotent",
+    capabilityKey: "search.ground",
+    kind: "tool",
+    version: "1.0.0",
+    generation: 1,
+    description: "Search capability for human gate idempotency.",
+  }, {
+    id: "adapter.search.ground.human-gate-idempotent",
+    runtimeKind: "tool",
+    supports(plan) {
+      return plan.capabilityKey === "search.ground";
+    },
+    async prepare(plan, lease) {
+      return {
+        preparedId: `${plan.planId}:prepared`,
+        leaseId: lease.leaseId,
+        capabilityKey: plan.capabilityKey,
+        bindingId: lease.bindingId,
+        generation: lease.generation,
+        executionMode: "direct",
+      };
+    },
+    async execute(prepared) {
+      return {
+        executionId: `${prepared.preparedId}:execution`,
+        resultId: `${prepared.preparedId}:result`,
+        status: "success",
+        output: {
+          answer: "human-gate-idempotent-ok",
+        },
+        completedAt: "2026-03-25T21:05:03.000Z",
+      };
+    },
+  });
+  await recovered.recoverAndHydrateTapRuntime(created.run.runId);
+
+  const eventCountBefore = recovered.listTaHumanGateEvents(gate.gateId).length;
+  const second = await recovered.submitTaHumanGateDecision({
+    gateId: gate.gateId,
+    action: "approve",
+    actorId: "user-idempotent-again",
+  });
+
+  assert.equal(second.status, "dispatched");
+  assert.equal(recovered.listTaHumanGateEvents(gate.gateId).length, eventCountBefore);
+  assert.equal(recovered.getTaResumeEnvelope(`resume:human-gate:${gate.gateId}`), undefined);
+});
+
+test("AgentCoreRuntime snapshots completed reviewer durable state after human-gate resolution", async () => {
+  const runtime = createAgentCoreRuntime({
+    taProfile: createAgentCapabilityProfile({
+      profileId: "profile.runtime.reviewer-completed-after-gate",
+      agentClass: "main-agent",
+      baselineCapabilities: ["docs.read"],
+      allowedCapabilityPatterns: ["search.*"],
+    }),
+  });
+  const session = runtime.createSession();
+  const goal = runtime.createCompiledGoal(
+    createGoalSource({
+      goalId: "goal-runtime-reviewer-completed-after-gate",
+      sessionId: session.sessionId,
+      userInput: "Reviewer durable state should finish after gate resolution.",
+    }),
+  );
+  const created = await runtime.createRun({
+    sessionId: session.sessionId,
+    goal,
+  });
+
+  runtime.registerCapabilityAdapter({
+    capabilityId: "cap-search-ground-reviewer-completed",
+    capabilityKey: "search.ground",
+    kind: "tool",
+    version: "1.0.0",
+    generation: 1,
+    description: "Search capability for reviewer completion.",
+  }, {
+    id: "adapter.search.ground.reviewer-completed",
+    runtimeKind: "tool",
+    supports(plan) {
+      return plan.capabilityKey === "search.ground";
+    },
+    async prepare(plan, lease) {
+      return {
+        preparedId: `${plan.planId}:prepared`,
+        leaseId: lease.leaseId,
+        capabilityKey: plan.capabilityKey,
+        bindingId: lease.bindingId,
+        generation: lease.generation,
+        executionMode: "direct",
+      };
+    },
+    async execute(prepared) {
+      return {
+        executionId: `${prepared.preparedId}:execution`,
+        resultId: `${prepared.preparedId}:result`,
+        status: "success",
+        output: {
+          answer: "reviewer-completed-ok",
+        },
+        completedAt: "2026-03-25T21:10:02.000Z",
+      };
+    },
+  });
+
+  const waiting = await runtime.dispatchCapabilityIntentViaTaPool({
+    intentId: "intent-reviewer-completed-after-gate-1",
+    sessionId: session.sessionId,
+    runId: created.run.runId,
+    kind: "capability_call",
+    createdAt: "2026-03-25T21:10:00.000Z",
+    priority: "normal",
+    request: {
+      requestId: "request-reviewer-completed-after-gate-1",
+      intentId: "intent-reviewer-completed-after-gate-1",
+      sessionId: session.sessionId,
+      runId: created.run.runId,
+      capabilityKey: "search.ground",
+      input: {
+        query: "reviewer durable completion",
+      },
+      priority: "normal",
+    },
+  }, {
+    agentId: "agent-main",
+    requestedTier: "B1",
+    mode: "restricted",
+    reason: "Force a gate and then complete reviewer durable state.",
+  });
+
+  assert.equal(waiting.status, "waiting_human");
+
+  const gate = runtime.listTaHumanGates()[0];
+  assert.ok(gate);
+  await runtime.submitTaHumanGateDecision({
+    gateId: gate.gateId,
+    action: "approve",
+    actorId: "user-reviewer-completed",
+  });
+
+  assert.equal(runtime.reviewerRuntime?.getDurableState(waiting.accessRequest!.requestId)?.stage, "completed");
 });
 
 test("AgentCoreRuntime does not auto-resume a human-gate envelope after hydration", async () => {

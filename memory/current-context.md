@@ -797,3 +797,20 @@
        - reviewer/human-gate recovery 幂等性
        - tool_reviewer lifecycle runtime-level negative tests
        - TMA 真正 resumable orchestration
+16. 当前 `18` 已继续推进第二批更偏“终态收口”的内容：
+   - 当前新增已成立：
+     - human-gate 批准/拒绝后会清理对应 human-gate resume envelope
+     - recover 后已终态 gate 不再被当成 pending human-gate 恢复入口
+     - reviewer durable state 在 human-gate resolve 后会进入 `completed`
+     - human-gate approve 遇到已有 provision asset 时不会重复 provisioning
+     - runtime 已新增薄的 `applyTaCapabilityLifecycle(...)` 入口
+       - 现在可以把 lifecycle missing binding 之类的错误记录成 `tool_reviewer` 的 `lifecycle_blocked`
+     - provision/TMA 已新增显式 `resumeTmaSession(...)` 入口
+       - restore 后可以显式继续一次最小 build 主链
+   - 当前这批定向验证已通过：
+     - `npm run typecheck`
+     - `npx tsx --test src/agent_core/runtime.test.ts src/agent_core/ta-pool-review/reviewer-runtime.test.ts src/agent_core/ta-pool-tool-review/tool-review-runtime.test.ts src/agent_core/ta-pool-provision/provisioner-runtime.test.ts src/agent_core/ta-pool-provision/tma-executor.test.ts`
+   - 当前阶段判断：
+     - `18` 已不只是在补失败短路
+     - 现在开始同时补 reviewer/human-gate 完成态收口、tool_reviewer lifecycle blocked、TMA explicit resume
+     - 但更完整的 lifecycle orchestration / TMA resumable executor 主链 / final production closure 仍待继续

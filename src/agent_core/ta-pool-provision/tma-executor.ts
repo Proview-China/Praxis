@@ -71,7 +71,7 @@ export function executeTmaPlan(
     verificationEvidenceIds: verificationEvidence.map((item) => item.evidenceId),
     rollbackHandleId: rollbackHandle.handleId,
   });
-  const baseSessionState = input.sessionState ?? createTmaSessionState({
+  const baseSessionState = createTmaSessionState({
     sessionId: `tma:${input.plan.provisionId}:executor`,
     provisionId: input.plan.provisionId,
     planId: input.plan.planId,
@@ -79,8 +79,9 @@ export function executeTmaPlan(
     lane: input.lane ?? input.plan.requestedLane,
     phase: "executor",
     status: "in_progress",
-    createdAt: input.startedAt,
+    createdAt: input.sessionState?.createdAt ?? input.startedAt,
     resumeSummary: `Executor started processing ${input.plan.requestedCapabilityKey}.`,
+    metadata: input.sessionState?.metadata,
   });
   const sessionState = report.status === "completed"
     ? markTmaSessionCompleted(baseSessionState, {

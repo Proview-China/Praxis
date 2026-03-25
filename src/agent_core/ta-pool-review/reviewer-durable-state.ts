@@ -19,6 +19,7 @@ export const REVIEWER_DURABLE_SOURCES = [
   "routing_fast_path",
   "review_engine",
   "llm_hook",
+  "human_gate_resolution",
 ] as const;
 export type ReviewerDurableSource =
   (typeof REVIEWER_DURABLE_SOURCES)[number];

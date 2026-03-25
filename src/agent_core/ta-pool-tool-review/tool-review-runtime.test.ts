@@ -361,3 +361,32 @@ test("tool reviewer hydration restores governance records without auto-creating 
   assert.equal(restored.listActions()[0]?.governanceKind, "replay");
   assert.equal(restored.listActions()[0]?.status, "ready_for_handoff");
 });
+
+test("tool reviewer lifecycle blocked output stays governance-only and preserves failure details", async () => {
+  const runtime = createToolReviewerRuntime();
+
+  const result = await runtime.submit({
+    governanceAction: {
+      kind: "lifecycle",
+      trace: createToolReviewGovernanceTrace({
+        actionId: "action-lifecycle-blocked-1",
+        actorId: "tool-reviewer",
+        reason: "Lifecycle should stay declarative when target binding is missing.",
+        createdAt: "2026-03-25T10:45:00.000Z",
+      }),
+      capabilityKey: "mcp.playwright",
+      lifecycleAction: "suspend",
+      targetPool: "ta-capability-pool",
+      failure: {
+        code: "agent_core_capability_binding_missing",
+        message: "Capability binding missing.",
+      },
+    },
+  });
+
+  assert.equal(result.runtimeStatus, "blocked");
+  assert.equal(result.action.boundaryMode, "governance_only");
+  assert.equal(result.output.kind, "lifecycle");
+  assert.equal(result.output.status, "lifecycle_blocked");
+  assert.equal(result.output.failure?.code, "agent_core_capability_binding_missing");
+});

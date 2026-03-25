@@ -131,3 +131,19 @@ runtime 现在会在真实链路里自动给 `tool_reviewer` 记录 governance a
 - reviewer 更完整的 human-gate recovery 幂等边界还可以继续补厚
 - tool_reviewer 的 lifecycle runtime-level negative tests 还可以继续补
 - TMA 的 executor/planner 真正 resume orchestration 还没进入主链
+
+## 同日再追加：human-gate 完成态、lifecycle blocked、TMA explicit resume
+
+这轮又继续往前推进了一小波：
+
+- human-gate 批准/拒绝后会清理对应 envelope
+- recover 后如果 gate 已经处理完，不再被当成 pending 继续恢复
+- reviewer durable state 会在 gate resolve 后进入 `completed`
+- human-gate approve 遇到已有 provision asset 时不会重复 provisioning
+- runtime 已有薄的 `applyTaCapabilityLifecycle(...)` 入口，能把 lifecycle missing binding 记录成 `tool_reviewer` 的 `lifecycle_blocked`
+- provision/TMA 已有显式 `resumeTmaSession(...)` 入口，可以在 restore 后重新走一次最小 build 主链
+
+### 这轮当前验证
+
+- `npm run typecheck` 通过
+- `npx tsx --test src/agent_core/runtime.test.ts src/agent_core/ta-pool-review/reviewer-runtime.test.ts src/agent_core/ta-pool-tool-review/tool-review-runtime.test.ts src/agent_core/ta-pool-provision/provisioner-runtime.test.ts src/agent_core/ta-pool-provision/tma-executor.test.ts` 通过

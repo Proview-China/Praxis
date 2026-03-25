@@ -51,6 +51,8 @@ export interface ProvisionerRuntimeOptions {
 export interface ProvisionerRuntimeLike {
   submit(request: ProvisionRequest): Promise<ProvisionArtifactBundle>;
   getBundleHistory(provisionId: string): readonly ProvisionArtifactBundle[];
+  listResumableTmaSessions(): readonly TmaSessionState[];
+  resumeTmaSession(sessionId: string): Promise<ProvisionArtifactBundle | undefined>;
 }
 
 export interface ProvisionerRuntimeDurableState {
@@ -231,6 +233,23 @@ export class ProvisionerRuntime implements ProvisionerRuntimeLike {
 
   listTmaSessions(): readonly TmaSessionState[] {
     return [...this.#tmaSessions.values()].map(cloneTmaSessionState);
+  }
+
+  listResumableTmaSessions(): readonly TmaSessionState[] {
+    return this.listTmaSessions().filter((session) => session.status === "resumable");
+  }
+
+  async resumeTmaSession(sessionId: string): Promise<ProvisionArtifactBundle | undefined> {
+    const session = this.#tmaSessions.get(sessionId);
+    if (!session || session.status !== "resumable") {
+      return undefined;
+    }
+    const record = this.registry.get(session.provisionId);
+    if (!record) {
+      return undefined;
+    }
+
+    return this.submit(record.request);
   }
 
   serializeDurableState(): ProvisionerDurableSnapshot {

@@ -146,6 +146,10 @@ export interface ToolReviewLifecycleInputShell {
     "bindingId" | "capabilityId" | "generation" | "state" | "adapterId"
   >;
   targetPool: string;
+  failure?: {
+    code: string;
+    message: string;
+  };
   metadata?: Record<string, unknown>;
 }
 
@@ -195,6 +199,10 @@ export interface ToolReviewLifecycleOutputShell {
   targetPool: string;
   bindingId?: string;
   targetBindingState?: CapabilityBindingState;
+  failure?: {
+    code: string;
+    message: string;
+  };
   summary: string;
   metadata?: Record<string, unknown>;
 }

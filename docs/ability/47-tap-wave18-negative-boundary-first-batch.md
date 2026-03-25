@@ -79,3 +79,28 @@
 ## 一句话收口
 
 这批已经把 `18` 从“只有想法”推进到了“失败分支和越权分支开始被真实测试钉住”的阶段。
+
+## 同日追加：第二批小阶段
+
+这一步继续围绕 `18` 往前推进，但重点从“失败短路”进一步收成了“终态收口”：
+
+- `human-gate` 批准/拒绝后会清理对应的 human-gate resume envelope
+- recover 后如果 gate 已经处理完，不会再被当成 pending
+- reviewer durable state 会在 human-gate resolve 后进入 `completed`
+- human-gate approve 遇到已有 provision asset 时不会重复 provisioning
+- runtime 已新增薄的 lifecycle wrapper：
+  - `applyTaCapabilityLifecycle(...)`
+  - 当前可以把 missing binding 一类错误记录成 `tool_reviewer` 的 `lifecycle_blocked`
+- provision/TMA 已新增显式 `resumeTmaSession(...)` 入口，restore 后可以继续一次最小 build 主链
+
+### 这轮新增验证
+
+- recover 后重复处理已批准 human gate 保持幂等
+- reviewer durable state 在 gate resolve 后进入 `completed`
+- lifecycle missing binding 会被 runtime 记录成 `tool_reviewer` 的 blocked lifecycle
+- provisioner restore 后可以显式 resume 一个 resumable TMA session
+
+### 这轮当前验证
+
+- `npm run typecheck` 通过
+- `npx tsx --test src/agent_core/runtime.test.ts src/agent_core/ta-pool-review/reviewer-runtime.test.ts src/agent_core/ta-pool-tool-review/tool-review-runtime.test.ts src/agent_core/ta-pool-provision/provisioner-runtime.test.ts src/agent_core/ta-pool-provision/tma-executor.test.ts` 通过

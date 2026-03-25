@@ -96,6 +96,22 @@ function createActivationOutput(
 function createLifecycleOutput(
   input: ToolReviewLifecycleInputShell,
 ): ToolReviewLifecycleOutputShell {
+  if (input.failure) {
+    return {
+      kind: "lifecycle",
+      actionId: input.trace.actionId,
+      status: "lifecycle_blocked",
+      capabilityKey: input.capabilityKey,
+      lifecycleAction: input.lifecycleAction,
+      targetPool: input.targetPool,
+      bindingId: input.binding?.bindingId,
+      targetBindingState: resolveLifecycleTargetBindingState(input.lifecycleAction),
+      failure: input.failure,
+      summary: `Lifecycle ${input.lifecycleAction} is blocked for ${input.capabilityKey} because ${input.failure.code}.`,
+      metadata: input.metadata,
+    };
+  }
+
   return {
     kind: "lifecycle",
     actionId: input.trace.actionId,

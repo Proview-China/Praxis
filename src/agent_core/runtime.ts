@@ -77,6 +77,7 @@ import type {
 } from "./types/index.js";
 import type {
   CapabilityAdapter,
+  CapabilityBinding,
   CapabilityExecutionHandle,
   CapabilityInvocationPlan,
   CapabilityManifest,
@@ -242,6 +243,19 @@ function toIntentPriority(value: unknown): CapabilityInvocationPlan["priority"] 
     : "normal";
 }
 
+function inventoryTracksCapabilityLifecycle(
+  inventory: ReviewDecisionEngineInventory | undefined,
+  capabilityKey: string,
+): boolean {
+  return [
+    ...(inventory?.availableCapabilityKeys ?? []),
+    ...(inventory?.pendingProvisionKeys ?? []),
+    ...(inventory?.readyProvisionAssetKeys ?? []),
+    ...(inventory?.activatingProvisionAssetKeys ?? []),
+    ...(inventory?.activeProvisionAssetKeys ?? []),
+  ].includes(capabilityKey);
+}
+
 export interface SubmitTaHumanGateDecisionInput {
   gateId: string;
   action: "approve" | "reject";
@@ -269,6 +283,27 @@ export interface ActivateTaProvisionAssetResult {
   receipt?: TaActivationReceipt;
   failure?: TaActivationFailure;
   activation?: TaCapabilityActivationHandoff;
+}
+
+export interface ApplyTaCapabilityLifecycleInput {
+  capabilityKey: string;
+  lifecycleAction: "register" | "replace" | "suspend" | "resume" | "unregister";
+  targetPool: string;
+  bindingId?: string;
+  manifest?: CapabilityManifest;
+  adapter?: CapabilityAdapter;
+  accessRequest?: AccessRequest;
+  reviewDecision?: ReviewDecision;
+  reason?: string;
+}
+
+export interface ApplyTaCapabilityLifecycleResult {
+  status: "applied" | "blocked";
+  binding?: CapabilityBinding;
+  error?: {
+    code: string;
+    message: string;
+  };
 }
 
 export type ResumeTaEnvelopeStatus =
@@ -524,6 +559,14 @@ export class AgentCoreRuntime {
     return [...this.#taResumeEnvelopes.values()];
   }
 
+  listResumableTmaSessions() {
+    return this.provisionerRuntime?.listResumableTmaSessions() ?? [];
+  }
+
+  async resumeTmaSession(sessionId: string) {
+    return this.provisionerRuntime?.resumeTmaSession(sessionId);
+  }
+
   async resumeTaEnvelope(envelopeId: string): Promise<ResumeTaEnvelopeResult> {
     const envelope = this.#taResumeEnvelopes.get(envelopeId);
     if (!envelope) {
@@ -535,6 +578,14 @@ export class AgentCoreRuntime {
     if (envelope.source === "human_gate") {
       const gateId = typeof envelope.metadata?.gateId === "string" ? envelope.metadata.gateId : undefined;
       const gate = gateId ? this.#taHumanGates.get(gateId) : undefined;
+      if (gate?.status === "approved" || gate?.status === "rejected") {
+        this.#taResumeEnvelopes.delete(envelopeId);
+        return {
+          status: gate.status === "approved" ? "dispatched" : "denied",
+          envelope,
+          humanGate: this.#toHumanGateHandoff(gate, "review_decision"),
+        };
+      }
       return {
         status: "human_gate_pending",
         envelope,
@@ -988,6 +1039,91 @@ export class AgentCoreRuntime {
     };
   }
 
+  async applyTaCapabilityLifecycle(
+    input: ApplyTaCapabilityLifecycleInput,
+  ): Promise<ApplyTaCapabilityLifecycleResult> {
+    const createdAt = new Date().toISOString();
+    try {
+      switch (input.lifecycleAction) {
+        case "register":
+          if (!input.manifest || !input.adapter) {
+            throw new Error("Lifecycle register requires manifest and adapter.");
+          }
+          this.capabilityPool.register(input.manifest, input.adapter);
+          break;
+        case "replace":
+          if (!input.bindingId || !input.manifest || !input.adapter) {
+            throw new Error("Lifecycle replace requires bindingId, manifest, and adapter.");
+          }
+          this.capabilityPool.replace(input.bindingId, input.manifest, input.adapter);
+          break;
+        case "suspend":
+          if (!input.bindingId) {
+            throw new Error("Lifecycle suspend requires bindingId.");
+          }
+          this.capabilityPool.suspend(input.bindingId);
+          break;
+        case "resume":
+          if (!input.bindingId) {
+            throw new Error("Lifecycle resume requires bindingId.");
+          }
+          this.capabilityPool.resume(input.bindingId);
+          break;
+        case "unregister":
+          if (!input.bindingId) {
+            throw new Error("Lifecycle unregister requires bindingId.");
+          }
+          this.capabilityPool.unregister(input.bindingId);
+          break;
+      }
+      const binding = input.bindingId
+        ? this.capabilityPool.listBindings().find((entry) => entry.bindingId === input.bindingId)
+        : undefined;
+      await this.#recordToolReviewLifecycle({
+        capabilityKey: input.capabilityKey,
+        lifecycleAction: input.lifecycleAction,
+        targetPool: input.targetPool,
+        binding,
+        accessRequest: input.accessRequest,
+        reviewDecision: input.reviewDecision,
+        reason: input.reason ?? `Lifecycle ${input.lifecycleAction} applied for ${input.capabilityKey}.`,
+        createdAt,
+      });
+      return {
+        status: "applied",
+        binding,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const code = error instanceof Error && "code" in error && typeof error.code === "string"
+        ? error.code
+        : "ta_lifecycle_blocked";
+      await this.#recordToolReviewLifecycle({
+        capabilityKey: input.capabilityKey,
+        lifecycleAction: input.lifecycleAction,
+        targetPool: input.targetPool,
+        binding: input.bindingId
+          ? this.capabilityPool.listBindings().find((entry) => entry.bindingId === input.bindingId)
+          : undefined,
+        accessRequest: input.accessRequest,
+        reviewDecision: input.reviewDecision,
+        reason: input.reason ?? `Lifecycle ${input.lifecycleAction} failed for ${input.capabilityKey}.`,
+        createdAt,
+        failure: {
+          code,
+          message,
+        },
+      });
+      return {
+        status: "blocked",
+        error: {
+          code,
+          message,
+        },
+      };
+    }
+  }
+
   async submitTaHumanGateDecision(
     input: SubmitTaHumanGateDecisionInput,
   ): Promise<SubmitTaHumanGateDecisionResult> {
@@ -1032,6 +1168,7 @@ export class AgentCoreRuntime {
     );
     const updatedGate = this.#applyHumanGateEvent(gate.gateId, humanGateEvent);
     const humanGate = this.#toHumanGateHandoff(updatedGate, "review_decision");
+    this.#taResumeEnvelopes.delete(`resume:human-gate:${updatedGate.gateId}`);
     await this.#recordToolReviewHumanGate({
       gate: updatedGate,
       latestEvent: humanGateEvent,
@@ -1054,25 +1191,31 @@ export class AgentCoreRuntime {
           eventId: humanGateEvent.eventId,
         },
       });
+      const deniedDecision = createReviewDecision({
+        decisionId: randomUUID(),
+        requestId: context.accessRequest.requestId,
+        decision: "denied",
+        mode: context.accessRequest.mode,
+        reviewerId: input.actorId,
+        reason: input.note?.trim() || `Human gate rejected capability ${context.accessRequest.requestedCapabilityKey}.`,
+        riskLevel: updatedGate.plainLanguageRisk.riskLevel,
+        plainLanguageRisk: updatedGate.plainLanguageRisk,
+        createdAt,
+        metadata: {
+          source: "human-gate",
+          gateId: updatedGate.gateId,
+          eventId: humanGateEvent.eventId,
+        },
+      });
+      await this.reviewerRuntime?.recordDurableState({
+        request: context.accessRequest,
+        decision: deniedDecision,
+        source: "human_gate_resolution",
+      });
       return {
         status: "denied",
         accessRequest: context.accessRequest,
-        reviewDecision: createReviewDecision({
-          decisionId: randomUUID(),
-          requestId: context.accessRequest.requestId,
-          decision: "denied",
-          mode: context.accessRequest.mode,
-          reviewerId: input.actorId,
-          reason: input.note?.trim() || `Human gate rejected capability ${context.accessRequest.requestedCapabilityKey}.`,
-          riskLevel: updatedGate.plainLanguageRisk.riskLevel,
-          plainLanguageRisk: updatedGate.plainLanguageRisk,
-          createdAt,
-          metadata: {
-            source: "human-gate",
-            gateId: updatedGate.gateId,
-            eventId: humanGateEvent.eventId,
-          },
-        }),
+        reviewDecision: deniedDecision,
         humanGate,
       };
     }
@@ -1107,6 +1250,49 @@ export class AgentCoreRuntime {
     const capabilityAvailable = (inventory.availableCapabilityKeys ?? []).includes(
       context.accessRequest.requestedCapabilityKey,
     );
+    const capabilityTracked = inventoryTracksCapabilityLifecycle(
+      inventory,
+      context.accessRequest.requestedCapabilityKey,
+    );
+    const existingProvisionAsset = this.#findCurrentProvisionAsset(context.accessRequest.requestedCapabilityKey);
+    await this.reviewerRuntime?.recordDurableState({
+      request: context.accessRequest,
+      decision: approvalDecision,
+      source: "human_gate_resolution",
+    });
+    if (!capabilityAvailable && (capabilityTracked || existingProvisionAsset)) {
+      this.#writeTapControlPlaneCheckpoint({
+        sessionId: context.accessRequest.sessionId,
+        runId: context.accessRequest.runId,
+        reason: "manual",
+        metadata: {
+          sourceOperation: "human-gate-decision",
+          gateId: updatedGate.gateId,
+          decision: "approve",
+          eventId: humanGateEvent.eventId,
+          capabilityTracked,
+          reusedProvisionAsset: existingProvisionAsset?.provisionId,
+        },
+      });
+      return {
+        status: "deferred",
+        accessRequest: context.accessRequest,
+        reviewDecision: approvalDecision,
+        activation: existingProvisionAsset
+          ? this.#createActivationHandoff({
+            source: "provision_asset",
+            asset: existingProvisionAsset,
+          })
+          : undefined,
+        replay: existingProvisionAsset
+          ? this.#createReplayHandoff({
+            source: "provision_asset",
+            asset: existingProvisionAsset,
+          })
+          : undefined,
+        humanGate,
+      };
+    }
     if (!capabilityAvailable) {
       const provisionRequest = this.#assembleProvisionRequestForRuntime({
         request: createProvisionRequest({
@@ -2010,6 +2196,58 @@ export class AgentCoreRuntime {
           provisionId: params.provisionId,
           attemptId: params.attempt.attemptId,
         },
+      },
+    });
+  }
+
+  async #recordToolReviewLifecycle(params: {
+    capabilityKey: string;
+    lifecycleAction: "register" | "replace" | "suspend" | "resume" | "unregister";
+    targetPool: string;
+    binding?: CapabilityBinding;
+    accessRequest?: AccessRequest;
+    reviewDecision?: ReviewDecision;
+    reason: string;
+    createdAt: string;
+    failure?: {
+      code: string;
+      message: string;
+    };
+  }): Promise<void> {
+    if (!this.toolReviewerRuntime) {
+      return;
+    }
+
+    await this.toolReviewerRuntime.submit({
+      sessionId: `tool-review:lifecycle:${params.capabilityKey}`,
+      governanceAction: {
+        kind: "lifecycle",
+        trace: createToolReviewGovernanceTrace({
+          actionId: `tool-review:lifecycle:${params.capabilityKey}:${params.lifecycleAction}:${params.createdAt}`,
+          actorId: "tool-reviewer",
+          reason: params.reason,
+          createdAt: params.createdAt,
+          request: params.accessRequest ? this.#createToolReviewRequestRef(params.accessRequest) : undefined,
+          sourceDecision: this.#createToolReviewSourceDecisionRef(params.reviewDecision),
+        }),
+        capabilityKey: params.capabilityKey,
+        lifecycleAction: params.lifecycleAction,
+        targetPool: params.targetPool,
+        binding: params.binding
+          ? {
+            bindingId: params.binding.bindingId,
+            capabilityId: params.binding.capabilityId,
+            generation: params.binding.generation,
+            state: params.binding.state,
+            adapterId: params.binding.adapterId,
+          }
+          : undefined,
+        failure: params.failure,
+        metadata: params.failure
+          ? {
+            failureCode: params.failure.code,
+          }
+          : undefined,
       },
     });
   }

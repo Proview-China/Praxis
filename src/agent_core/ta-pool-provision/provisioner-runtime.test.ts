@@ -283,3 +283,54 @@ test("provisioner runtime restore clamps tampered TMA session boundary back to c
   assert.equal(restored.listTmaSessions()[0]?.boundary.mayExecuteOriginalTask, false);
   assert.equal(restored.listTmaSessions()[0]?.boundary.scope, "capability_build_only");
 });
+
+test("provisioner runtime can explicitly resume a resumable TMA session after restore", async () => {
+  let failedOnce = true;
+  const failing = createProvisionerRuntime({
+    workerBridge: async () => {
+      if (failedOnce) {
+        failedOnce = false;
+        throw new Error("planner boundary pause");
+      }
+      throw new Error("unexpected");
+    },
+    clock: () => new Date("2026-03-25T11:00:00.000Z"),
+    idFactory: (() => {
+      let counter = 0;
+      return () => `bundle-resume-${++counter}`;
+    })(),
+  });
+
+  const request = createProvisionRequest({
+    provisionId: "provision-resume-tma-1",
+    sourceRequestId: "request-resume-tma-1",
+    requestedCapabilityKey: "mcp.playwright",
+    reason: "Leave a resumable TMA session first.",
+    createdAt: "2026-03-25T11:00:00.000Z",
+  });
+
+  const failedBundle = await failing.submit(request);
+  assert.equal(failedBundle.status, "failed");
+  const snapshot = createProvisionerDurableSnapshot(failing.serializeDurableState());
+
+  const restored = createProvisionerRuntime({
+    clock: () => new Date("2026-03-25T11:00:10.000Z"),
+    idFactory: (() => {
+      let counter = 10;
+      return () => `bundle-resume-${++counter}`;
+    })(),
+  });
+  restored.restoreDurableState(snapshot);
+
+  const resumable = restored.listResumableTmaSessions();
+  assert.equal(resumable.length >= 1, true);
+
+  const resumedBundle = await restored.resumeTmaSession(resumable[0]!.sessionId);
+
+  assert.equal(resumedBundle?.status, "ready");
+  assert.deepEqual(
+    restored.getBundleHistory(request.provisionId).map((bundle) => bundle.status),
+    ["building", "failed", "building", "ready"],
+  );
+  assert.equal(restored.listTmaSessions().some((session) => session.phase === "executor"), true);
+});

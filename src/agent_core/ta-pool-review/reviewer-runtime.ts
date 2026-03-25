@@ -125,6 +125,14 @@ export class ReviewerRuntime {
     await this.#durableStateHook?.(state);
   }
 
+  async recordDurableState(input: {
+    request: AccessRequest;
+    decision: ReviewDecision;
+    source: ReviewerDurableSource;
+  }): Promise<void> {
+    await this.#recordDurableState(input.request, input.decision, input.source);
+  }
+
   async submit(input: ReviewerRuntimeSubmitInput): Promise<ReviewDecision> {
     const requestedAction = input.request.requestedAction
       ?? `request capability ${input.request.requestedCapabilityKey}`;
