@@ -776,3 +776,24 @@
      - 后半段的 runtime resume / `tool_reviewer` mainline hookup 已开始 code-backed
      - 但 `18-three-agent-negative-boundary-tests` 还没有完整铺满
      - 更深的 `TMA durable resume / activation orchestration / final production closure` 仍待继续
+15. 当前 `18-three-agent-negative-boundary-tests` 已开始进入第一批真实代码与测试：
+   - 当前已补上的边界：
+     - `replay resume` 遇到 activation 失败时会短路，不再继续 dispatch
+     - `resumeTaEnvelope(...)` 已补：
+       - `resume_envelope_not_found`
+       - malformed replay envelope -> `resume_not_supported`
+       - malformed activation envelope -> `resume_not_supported`
+     - `manual replay policy` 现在有 runtime 级负例，明确只停在 handoff
+     - `tool_reviewer` runtime 主链产出的 action 已有 `governance_only` 断言
+     - reviewer 非法 bridge 输出后不会污染 durable state
+     - provision/TMA restore 会把被篡改的 boundary 重新钳回 `capability_build_only`
+   - 当前这一批验证已通过：
+     - `npm run typecheck`
+     - `npx tsx --test src/agent_core/runtime.test.ts src/agent_core/ta-pool-review/reviewer-runtime.test.ts src/agent_core/ta-pool-review/reviewer-worker-bridge.test.ts src/agent_core/ta-pool-tool-review/tool-review-runtime.test.ts src/agent_core/ta-pool-provision/provisioner-runtime.test.ts`
+   - 当前阶段判断：
+     - `18` 已开始落地
+     - 但还只是第一批 negative boundary tests
+     - 后面仍可继续补：
+       - reviewer/human-gate recovery 幂等性
+       - tool_reviewer lifecycle runtime-level negative tests
+       - TMA 真正 resumable orchestration

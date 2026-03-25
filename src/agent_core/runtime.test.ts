@@ -19,6 +19,7 @@ import { createFirstWaveCapabilityProfile } from "./ta-pool-model/index.js";
 import { createReviewerRuntime } from "./ta-pool-review/index.js";
 import { createToolReviewGovernanceTrace } from "./ta-pool-tool-review/index.js";
 import { TA_ENFORCEMENT_METADATA_KEY } from "./ta-pool-runtime/enforcement-guard.js";
+import { createTaResumeEnvelope } from "./ta-pool-runtime/index.js";
 import type { RaxFacade } from "../rax/facade.js";
 import {
   DEFAULT_COMPATIBILITY_PROFILES,
@@ -1531,6 +1532,7 @@ test("AgentCoreRuntime records tool reviewer governance sessions from runtime hu
   assert.equal(runtime.toolReviewerRuntime?.listSessions().length, 1);
   assert.equal(runtime.toolReviewerRuntime?.listActions().length, 1);
   assert.equal(runtime.toolReviewerRuntime?.listActions()[0]?.governanceKind, "human_gate");
+  assert.equal(runtime.toolReviewerRuntime?.listActions().every((action) => action.boundaryMode === "governance_only"), true);
 
   const approved = await runtime.submitTaHumanGateDecision({
     gateId: runtime.listTaHumanGates()[0]!.gateId,
@@ -1572,6 +1574,7 @@ test("AgentCoreRuntime records tool reviewer governance sessions from runtime hu
   const activation = await runtime.activateTaProvisionAsset(approved.provisionRequest!.provisionId);
   assert.equal(activation.status, "activated");
   assert.equal(runtime.toolReviewerRuntime?.listActions().some((action) => action.governanceKind === "activation"), true);
+  assert.equal(runtime.toolReviewerRuntime?.listActions().every((action) => action.boundaryMode === "governance_only"), true);
 });
 
 test("AgentCoreRuntime can recover and continue a waiting human gate approval path", async () => {
@@ -1905,6 +1908,208 @@ test("AgentCoreRuntime can recover and resume a pending replay from a stored TAP
   assert.equal(resumed.status, "dispatched");
   assert.equal(resumed.dispatchResult?.grant?.capabilityKey, "computer.use");
   assert.equal(recovered.getTaResumeEnvelope(replayEnvelope!.envelopeId), undefined);
+});
+
+test("AgentCoreRuntime returns resume_envelope_not_found for unknown envelope ids", async () => {
+  const runtime = createAgentCoreRuntime({
+    taProfile: createAgentCapabilityProfile({
+      profileId: "profile.runtime.resume-envelope-missing",
+      agentClass: "main-agent",
+      baselineCapabilities: ["docs.read"],
+    }),
+  });
+
+  const result = await runtime.resumeTaEnvelope("resume:missing");
+
+  assert.equal(result.status, "resume_envelope_not_found");
+  assert.equal(runtime.listTaResumeEnvelopes().length, 0);
+});
+
+test("AgentCoreRuntime returns resume_not_supported for malformed replay envelopes", async () => {
+  const runtime = createAgentCoreRuntime({
+    taProfile: createAgentCapabilityProfile({
+      profileId: "profile.runtime.resume-envelope-malformed",
+      agentClass: "main-agent",
+      baselineCapabilities: ["docs.read"],
+    }),
+  });
+  const malformed = createTaResumeEnvelope({
+    envelopeId: "resume:malformed-replay",
+    source: "replay",
+    requestId: "request-malformed-replay",
+    sessionId: "session-malformed-replay",
+    runId: "run-malformed-replay",
+    capabilityKey: "computer.use",
+    requestedTier: "B2",
+    mode: "balanced",
+    reason: "Malformed replay envelope for boundary testing.",
+  });
+  runtime.hydrateRecoveredTapRuntimeSnapshot({
+    humanGates: [],
+    humanGateEvents: [],
+    pendingReplays: [],
+    activationAttempts: [],
+    resumeEnvelopes: [malformed],
+  });
+
+  const result = await runtime.resumeTaEnvelope(malformed.envelopeId);
+
+  assert.equal(result.status, "resume_not_supported");
+  assert.equal(runtime.getTaResumeEnvelope(malformed.envelopeId)?.envelopeId, malformed.envelopeId);
+});
+
+test("AgentCoreRuntime returns resume_not_supported for activation envelopes without provisionId", async () => {
+  const runtime = createAgentCoreRuntime({
+    taProfile: createAgentCapabilityProfile({
+      profileId: "profile.runtime.activation-envelope-malformed",
+      agentClass: "main-agent",
+      baselineCapabilities: ["docs.read"],
+    }),
+  });
+  const malformed = createTaResumeEnvelope({
+    envelopeId: "resume:activation:malformed",
+    source: "activation",
+    requestId: "request-activation-malformed",
+    sessionId: "session-activation-malformed",
+    runId: "run-activation-malformed",
+    capabilityKey: "computer.use",
+    requestedTier: "B2",
+    mode: "balanced",
+    reason: "Activation envelope should carry a provision id.",
+  });
+  runtime.hydrateRecoveredTapRuntimeSnapshot({
+    humanGates: [],
+    humanGateEvents: [],
+    pendingReplays: [],
+    activationAttempts: [],
+    resumeEnvelopes: [malformed],
+  });
+
+  const result = await runtime.resumeTaEnvelope(malformed.envelopeId);
+
+  assert.equal(result.status, "resume_not_supported");
+  assert.equal(result.activationResult, undefined);
+});
+
+test("AgentCoreRuntime keeps replay envelope pending when activation fails during resume", async () => {
+  const runtime = createAgentCoreRuntime({
+    taProfile: createAgentCapabilityProfile({
+      profileId: "profile.runtime.resume-replay-activation-fail",
+      agentClass: "main-agent",
+      baselineCapabilities: ["docs.read"],
+      allowedCapabilityPatterns: ["computer.*"],
+    }),
+  });
+  const session = runtime.createSession();
+  const goal = runtime.createCompiledGoal(
+    createGoalSource({
+      goalId: "goal-runtime-resume-replay-activation-fail",
+      sessionId: session.sessionId,
+      userInput: "Replay resume should stop if activation fails.",
+    }),
+  );
+  const created = await runtime.createRun({
+    sessionId: session.sessionId,
+    goal,
+  });
+
+  const provisioned = await runtime.dispatchCapabilityIntentViaTaPool({
+    intentId: "intent-resume-replay-activation-fail-1",
+    sessionId: session.sessionId,
+    runId: created.run.runId,
+    kind: "capability_call",
+    createdAt: "2026-03-25T20:30:00.000Z",
+    priority: "normal",
+    request: {
+      requestId: "request-resume-replay-activation-fail-1",
+      intentId: "intent-resume-replay-activation-fail-1",
+      sessionId: session.sessionId,
+      runId: created.run.runId,
+      capabilityKey: "computer.use",
+      input: {
+        task: "do not dispatch after failed activation",
+      },
+      priority: "normal",
+    },
+  }, {
+    agentId: "agent-main",
+    requestedTier: "B2",
+    mode: "balanced",
+    reason: "Create a replay envelope that will fail activation.",
+  });
+
+  assert.equal(provisioned.status, "provisioned");
+  const replayEnvelope = runtime.listTaResumeEnvelopes().find((envelope) => envelope.source === "replay");
+  assert.ok(replayEnvelope);
+
+  const result = await runtime.resumeTaEnvelope(replayEnvelope!.envelopeId);
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.dispatchResult, undefined);
+  assert.equal(runtime.getTaResumeEnvelope(replayEnvelope!.envelopeId)?.envelopeId, replayEnvelope!.envelopeId);
+});
+
+test("AgentCoreRuntime keeps manual replay policy at handoff only without auto-opening human gate", async () => {
+  const runtime = createAgentCoreRuntime({
+    taProfile: createAgentCapabilityProfile({
+      profileId: "profile.runtime.manual-replay-boundary",
+      agentClass: "main-agent",
+      baselineCapabilities: ["docs.read"],
+      allowedCapabilityPatterns: ["computer.*"],
+    }),
+  });
+  const session = runtime.createSession();
+  const goal = runtime.createCompiledGoal(
+    createGoalSource({
+      goalId: "goal-runtime-manual-replay-boundary",
+      sessionId: session.sessionId,
+      userInput: "Manual replay should stay at handoff only.",
+    }),
+  );
+  const created = await runtime.createRun({
+    sessionId: session.sessionId,
+    goal,
+  });
+
+  const provisionBundle = await runtime.provisionerRuntime?.submit(createProvisionRequest({
+    provisionId: "provision-manual-replay-boundary",
+    sourceRequestId: "request-manual-replay-boundary",
+    requestedCapabilityKey: "computer.use",
+    reason: "Manual replay boundary test.",
+    replayPolicy: "manual",
+    createdAt: "2026-03-25T20:40:00.000Z",
+  }));
+  assert.equal(provisionBundle?.status, "ready");
+
+  const result = await runtime.dispatchCapabilityIntentViaTaPool({
+    intentId: "intent-manual-replay-boundary-1",
+    sessionId: session.sessionId,
+    runId: created.run.runId,
+    kind: "capability_call",
+    createdAt: "2026-03-25T20:40:01.000Z",
+    priority: "normal",
+    request: {
+      requestId: "request-manual-replay-boundary-1",
+      intentId: "intent-manual-replay-boundary-1",
+      sessionId: session.sessionId,
+      runId: created.run.runId,
+      capabilityKey: "computer.use",
+      input: {
+        task: "manual replay handoff only",
+      },
+      priority: "normal",
+    },
+  }, {
+    agentId: "agent-main",
+    requestedTier: "B2",
+    mode: "balanced",
+    reason: "Ready manual replay asset should only surface handoff state.",
+  });
+
+  assert.equal(result.status, "deferred");
+  assert.equal(result.replay?.policy, "manual");
+  assert.equal(result.humanGate?.source, "replay_policy");
+  assert.equal(runtime.listTaHumanGates().length, 0);
 });
 
 test("AgentCoreRuntime inventory sees ready provision assets and avoids duplicate provisioning redirects", async () => {

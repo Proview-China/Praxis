@@ -210,3 +210,76 @@ test("provisioner runtime can serialize and restore durable state without losing
     "ready_for_review",
   );
 });
+
+test("provisioner runtime restore keeps TMA sessions resumable without auto-submitting new work", async () => {
+  let counter = 0;
+  const runtime = createProvisionerRuntime({
+    clock: () => new Date("2026-03-25T10:30:00.000Z"),
+    idFactory: () => `bundle-restore-${++counter}`,
+  });
+
+  const request = createProvisionRequest({
+    provisionId: "provision-restore-boundary-1",
+    sourceRequestId: "request-restore-boundary-1",
+    requestedCapabilityKey: "dependency.install",
+    reason: "Keep restore boundary explicit.",
+    createdAt: "2026-03-25T10:30:00.000Z",
+    metadata: {
+      approvedProvisionerLane: "extended",
+    },
+  });
+
+  const bundle = await runtime.submit(request);
+  const snapshot = createProvisionerDurableSnapshot(runtime.serializeDurableState());
+  const restored = createProvisionerRuntime();
+  restored.restoreDurableState(snapshot);
+
+  assert.equal(bundle.status, "ready");
+  assert.equal(restored.listTmaSessions().length >= 1, true);
+  assert.equal(
+    restored.listTmaSessions().every((session) => session.boundary.mayExecuteOriginalTask === false),
+    true,
+  );
+  assert.equal(
+    restored.listTmaSessions().some((session) => session.status === "resumable" || session.status === "completed"),
+    true,
+  );
+  assert.deepEqual(
+    restored.getBundleHistory(request.provisionId).map((entry) => entry.status),
+    ["building", "ready"],
+  );
+});
+
+test("provisioner runtime restore clamps tampered TMA session boundary back to capability_build_only", async () => {
+  let counter = 0;
+  const runtime = createProvisionerRuntime({
+    clock: () => new Date("2026-03-25T10:45:00.000Z"),
+    idFactory: () => `bundle-tampered-${++counter}`,
+  });
+
+  await runtime.submit(createProvisionRequest({
+    provisionId: "provision-tampered-boundary-1",
+    sourceRequestId: "request-tampered-boundary-1",
+    requestedCapabilityKey: "mcp.playwright",
+    reason: "Create a resumable TMA snapshot first.",
+    createdAt: "2026-03-25T10:45:00.000Z",
+  }));
+
+  const snapshot = createProvisionerDurableSnapshot(runtime.serializeDurableState());
+  if (snapshot.tmaSessions?.[0]) {
+    snapshot.tmaSessions[0] = {
+      ...snapshot.tmaSessions[0],
+      boundary: {
+        mayExecuteOriginalTask: true as false,
+        scope: "tampered_scope" as "capability_build_only",
+      },
+    };
+  }
+
+  const restored = createProvisionerRuntime();
+  restored.restoreDurableState(snapshot);
+
+  assert.equal(restored.listTmaSessions().length >= 1, true);
+  assert.equal(restored.listTmaSessions()[0]?.boundary.mayExecuteOriginalTask, false);
+  assert.equal(restored.listTmaSessions()[0]?.boundary.scope, "capability_build_only");
+});

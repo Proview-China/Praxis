@@ -199,6 +199,7 @@ test("reviewer runtime rejects bridge output that tries to return an inline gran
     }),
     /vote-only; forbidden field grant/i,
   );
+  assert.equal(runtime.listDurableStates().length, 0);
 });
 
 test("reviewer runtime records durable state after submit and can export/hydrate snapshot", async () => {

@@ -98,3 +98,36 @@ runtime 现在会在真实链路里自动给 `tool_reviewer` 记录 governance a
 - `tool_reviewer` 的 lifecycle / full orchestration 还可以继续加深
 - `TMA` 的 durable resume 还没有真正接成 executor/planner 可继续执行的主链
 - 更完整的 activation / replay / human gate durable orchestration 仍待后续继续收口
+
+## 同日追加：18 第一批负向边界测试
+
+在上面这轮 runtime resume 收口之后，又继续补了一波 `18-three-agent-negative-boundary-tests` 的第一批内容。
+
+### 这轮重点
+
+- `replay resume` 在 activation 失败时现在会短路，不再继续偷偷 dispatch
+- `resumeTaEnvelope(...)` 已补：
+  - `resume_envelope_not_found`
+  - malformed replay envelope -> `resume_not_supported`
+  - malformed activation envelope -> `resume_not_supported`
+- `manual replay policy` 已有 runtime 级负例：
+  - 只停在 handoff
+  - 不自动开真实 human gate
+  - 不自动 dispatch
+- `tool_reviewer` runtime 主链产出的 action 现在有 runtime 级断言：
+  - 全程保持 `governance_only`
+- `reviewer` 非法输出后不落 durable state
+- `TMA`/provision restore 对被篡改的 boundary 会重新钳回：
+  - `mayExecuteOriginalTask: false`
+  - `scope: capability_build_only`
+
+### 当前这一批的验证
+
+- `npm run typecheck` 通过
+- `npx tsx --test src/agent_core/runtime.test.ts src/agent_core/ta-pool-review/reviewer-runtime.test.ts src/agent_core/ta-pool-review/reviewer-worker-bridge.test.ts src/agent_core/ta-pool-tool-review/tool-review-runtime.test.ts src/agent_core/ta-pool-provision/provisioner-runtime.test.ts` 通过
+
+### 这批之后还剩的缺口
+
+- reviewer 更完整的 human-gate recovery 幂等边界还可以继续补厚
+- tool_reviewer 的 lifecycle runtime-level negative tests 还可以继续补
+- TMA 的 executor/planner 真正 resume orchestration 还没进入主链

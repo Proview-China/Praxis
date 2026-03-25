@@ -207,3 +207,26 @@ test("reviewer worker bridge rejects forbidden execution-bearing fields so it st
     /forbidden field decisionToken/i,
   );
 });
+
+test("reviewer worker bridge rejects non-allow votes that carry compiler directives", () => {
+  const request = createRequest();
+
+  assert.throws(
+    () => compileReviewerWorkerVote({
+      request,
+      promptPack: createReviewerWorkerPromptPack(),
+      output: {
+        schemaVersion: REVIEWER_WORKER_OUTPUT_SCHEMA_VERSION,
+        workerKind: "reviewer",
+        lane: REVIEWER_WORKER_BRIDGE_LANE,
+        vote: "defer",
+        reason: "Deferred votes must not smuggle compiler directives.",
+        recommendedTier: "B1",
+        recommendedScope: {
+          pathPatterns: ["src/**"],
+        },
+      } as never,
+    }),
+    /cannot carry grant compiler directives/i,
+  );
+});

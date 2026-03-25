@@ -580,7 +580,16 @@ export class AgentCoreRuntime {
       ? envelope.metadata.provisionId
       : undefined;
     if (provisionId) {
-      await this.activateTaProvisionAsset(provisionId);
+      const activationResult = await this.activateTaProvisionAsset(provisionId);
+      if (activationResult.status !== "activated") {
+        return {
+          status: activationResult.status,
+          envelope,
+          replay,
+          activation: activationResult.activation,
+          activationResult,
+        };
+      }
     }
     await this.#ensureRunAvailable(envelope.runId);
 

@@ -320,3 +320,44 @@ test("tool reviewer runtime can restore durable-friendly session snapshots", asy
   assert.equal(snapshots.length, 1);
   assert.equal(snapshots[0]?.session.latestActionId, "action-restore-1");
 });
+
+test("tool reviewer hydration restores governance records without auto-creating new actions", async () => {
+  const original = createToolReviewerRuntime();
+  const trace = createToolReviewGovernanceTrace({
+    actionId: "action-no-auto-run-1",
+    actorId: "tool-reviewer",
+    reason: "Persist a replay handoff without executing it.",
+    createdAt: "2026-03-25T10:40:00.000Z",
+  });
+
+  await original.submit({
+    governanceAction: {
+      kind: "replay",
+      trace,
+      capabilityKey: "computer.use",
+      replay: createTaPendingReplay({
+        replayId: "replay-no-auto-run-1",
+        request: {
+          requestId: "req-no-auto-run-1",
+          requestedCapabilityKey: "computer.use",
+        },
+        provisionBundle: {
+          provisionId: "prov-no-auto-run-1",
+          replayPolicy: "re_review_then_dispatch",
+        },
+        createdAt: "2026-03-25T10:39:59.000Z",
+      }),
+    },
+    sessionId: "tool-review-session:no-auto-run",
+  });
+
+  const snapshots = original.createSnapshots();
+  const restored = createToolReviewerRuntime({
+    restoreSnapshot: snapshots,
+  });
+
+  assert.equal(restored.listSessions().length, 1);
+  assert.equal(restored.listActions().length, 1);
+  assert.equal(restored.listActions()[0]?.governanceKind, "replay");
+  assert.equal(restored.listActions()[0]?.status, "ready_for_handoff");
+});
