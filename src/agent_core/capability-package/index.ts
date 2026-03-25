@@ -50,3 +50,18 @@ export {
   validateCapabilityPackageUsageExample,
   validateCapabilityPackageVerification,
 } from "./capability-package.js";
+export type {
+  FirstClassToolingAllowedOperation,
+  FirstClassToolingCapabilityBaselineDescriptor,
+  FirstClassToolingBaselineCapabilityKey,
+} from "./first-class-tooling-baseline.js";
+export {
+  createCapabilityManifestFromPackage,
+  createCodeReadCapabilityPackage,
+  createDocsReadCapabilityPackage,
+  FIRST_CLASS_TOOLING_ALLOWED_OPERATIONS,
+  FIRST_CLASS_TOOLING_BASELINE_CAPABILITY_KEYS,
+  getFirstClassToolingCapabilityBaselineDescriptor,
+  listFirstClassToolingBaselineCapabilityPackages,
+  listFirstClassToolingCapabilityBaselineDescriptors,
+} from "./first-class-tooling-baseline.js";

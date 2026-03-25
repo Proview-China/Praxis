@@ -58,3 +58,29 @@ export {
   matchBaselineCapability,
   resolveBaselineCapability,
 } from "./profile-baseline.js";
+export type {
+  FirstClassToolingBaselineConsumer,
+  FirstClassToolingBaselineDescriptor,
+} from "./first-class-tooling-baseline.js";
+export {
+  createProfileWithFirstClassToolingBaseline,
+  extendProfileWithFirstClassToolingBaseline,
+  FIRST_CLASS_TOOLING_BASELINE_CONSUMERS,
+  getFirstClassToolingBaselineDescriptor,
+  getFirstClassToolingBaselineCapabilities,
+  isFirstClassToolingBaselineCapability,
+} from "./first-class-tooling-baseline.js";
+
+export type {
+  CreateFirstClassToolingProfileInput,
+  FirstClassToolingBaselineKind,
+} from "./first-class-tooling-baseline.js";
+export {
+  createFirstClassToolingProfile,
+  listFirstClassToolingBaselineDescriptors,
+  listFirstClassToolingBaselineCapabilities,
+  mergeFirstClassToolingBaselineCapabilities,
+  REVIEWER_FIRST_CLASS_BASELINE_CAPABILITIES,
+  TMA_BOOTSTRAP_FIRST_CLASS_BASELINE_CAPABILITIES,
+  TMA_EXTENDED_FIRST_CLASS_BASELINE_CAPABILITIES,
+} from "./first-class-tooling-baseline.js";
