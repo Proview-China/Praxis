@@ -50,3 +50,11 @@ export {
   validateCapabilityPackageUsageExample,
   validateCapabilityPackageVerification,
 } from "./capability-package.js";
+export type {
+  CreateRaxWebsearchCapabilityPackageOptions,
+} from "./search-ground-capability-package.js";
+export {
+  createRaxWebsearchCapabilityPackage,
+  RAX_WEBSEARCH_ACTIVATION_FACTORY_REF,
+  SEARCH_GROUND_CAPABILITY_KEY,
+} from "./search-ground-capability-package.js";

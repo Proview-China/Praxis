@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  RAX_WEBSEARCH_ACTIVATION_FACTORY_REF,
   createCapabilityPackage,
   createCapabilityPackageActivationSpecRef,
   createCapabilityPackageFixture,
   createCapabilityPackageFromProvisionBundle,
+  createRaxWebsearchCapabilityPackage,
 } from "./index.js";
 import { createPoolActivationSpec, createProvisionArtifactBundle } from "../ta-pool-types/index.js";
 
@@ -178,4 +180,22 @@ test("capability package validation rejects replay policy drift between builder 
       }),
     /replayPolicy must match builder\.replayCapability/,
   );
+});
+
+test("search.ground capability package is ready for first-class TAP activation", () => {
+  const capabilityPackage = createRaxWebsearchCapabilityPackage();
+
+  assert.equal(capabilityPackage.manifest.capabilityKey, "search.ground");
+  assert.equal(capabilityPackage.adapter.runtimeKind, "rax-websearch");
+  assert.deepEqual(capabilityPackage.adapter.supports, ["search.ground"]);
+  assert.equal(
+    capabilityPackage.activationSpec?.adapterFactoryRef,
+    RAX_WEBSEARCH_ACTIVATION_FACTORY_REF,
+  );
+  assert.equal(
+    capabilityPackage.builder.activationSpecRef,
+    createCapabilityPackageActivationSpecRef(capabilityPackage.activationSpec!),
+  );
+  assert.equal(capabilityPackage.policy.riskLevel, "normal");
+  assert.equal(capabilityPackage.replayPolicy, "re_review_then_dispatch");
 });
