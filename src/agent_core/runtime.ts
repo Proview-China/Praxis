@@ -25,6 +25,10 @@ import { AgentRunCoordinator } from "./run/index.js";
 import { SessionManager } from "./session/index.js";
 import { projectStateFromEvents } from "./state/index.js";
 import {
+  assembleCapabilityProfileFromPackages,
+  type AssembleCapabilityProfileFromPackagesInput,
+} from "./ta-pool-model/index.js";
+import {
   activateProvisionAsset,
   applyTaHumanGateEvent,
   createActivationFactoryResolver,
@@ -287,6 +291,12 @@ export interface DispatchTaCapabilityGrantInput {
   priority: CapabilityInvocationPlan["priority"];
   timeoutMs?: number;
   metadata?: Record<string, unknown>;
+}
+
+export function createRuntimeTaProfileFromPackages(
+  input: AssembleCapabilityProfileFromPackagesInput,
+): AgentCapabilityProfile {
+  return assembleCapabilityProfileFromPackages(input);
 }
 
 export class AgentCoreRuntime {

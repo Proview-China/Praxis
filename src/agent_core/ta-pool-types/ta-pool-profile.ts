@@ -58,6 +58,8 @@ export interface AgentCapabilityProfile {
   baselineTier: TaCapabilityTier;
   baselineCapabilities?: string[];
   allowedCapabilityPatterns?: string[];
+  reviewOnlyCapabilities?: string[];
+  reviewOnlyCapabilityPatterns?: string[];
   deniedCapabilityPatterns?: string[];
   notes?: string;
   metadata?: Record<string, unknown>;
@@ -70,6 +72,8 @@ export interface CreateAgentCapabilityProfileInput {
   baselineTier?: TaCapabilityTier;
   baselineCapabilities?: string[];
   allowedCapabilityPatterns?: string[];
+  reviewOnlyCapabilities?: string[];
+  reviewOnlyCapabilityPatterns?: string[];
   deniedCapabilityPatterns?: string[];
   notes?: string;
   metadata?: Record<string, unknown>;
@@ -127,6 +131,8 @@ export function createAgentCapabilityProfile(
     baselineTier: input.baselineTier ?? "B0",
     baselineCapabilities: normalizeStringArray(input.baselineCapabilities),
     allowedCapabilityPatterns: normalizeStringArray(input.allowedCapabilityPatterns),
+    reviewOnlyCapabilities: normalizeStringArray(input.reviewOnlyCapabilities),
+    reviewOnlyCapabilityPatterns: normalizeStringArray(input.reviewOnlyCapabilityPatterns),
     deniedCapabilityPatterns: normalizeStringArray(input.deniedCapabilityPatterns),
     notes: input.notes?.trim() || undefined,
     metadata: input.metadata,
@@ -164,13 +170,20 @@ export function isCapabilityAllowedByProfile(params: {
 }): boolean {
   const { profile, capabilityKey } = params;
 
+  if (matchesCapabilityPattern({
+    capabilityKey,
+    patterns: profile.deniedCapabilityPatterns,
+  })) {
+    return false;
+  }
+
   if (profile.baselineCapabilities?.includes(capabilityKey)) {
     return true;
   }
 
-  if (matchesCapabilityPattern({
+  if (isCapabilityReviewOnlyByProfile({
+    profile,
     capabilityKey,
-    patterns: profile.deniedCapabilityPatterns,
   })) {
     return false;
   }
@@ -192,5 +205,21 @@ export function isInvocationBaselineAllowed(params: {
   return isCapabilityAllowedByProfile({
     profile: params.profile,
     capabilityKey: params.plan.capabilityKey,
+  });
+}
+
+export function isCapabilityReviewOnlyByProfile(params: {
+  profile: AgentCapabilityProfile;
+  capabilityKey: string;
+}): boolean {
+  const { profile, capabilityKey } = params;
+
+  if (profile.reviewOnlyCapabilities?.includes(capabilityKey)) {
+    return true;
+  }
+
+  return matchesCapabilityPattern({
+    capabilityKey,
+    patterns: profile.reviewOnlyCapabilityPatterns,
   });
 }

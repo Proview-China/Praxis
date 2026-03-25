@@ -15,6 +15,7 @@ import { createRaxWebsearchActivationFactory } from "./integrations/rax-websearc
 import { createAgentCoreRuntime } from "./runtime.js";
 import type { CapabilityAdapter, CapabilityCallIntent, CapabilityPackage } from "./index.js";
 import { createAgentCapabilityProfile, createProvisionArtifactBundle, createProvisionRequest } from "./ta-pool-types/index.js";
+import { createFirstWaveCapabilityProfile } from "./ta-pool-model/index.js";
 import { createReviewerRuntime } from "./ta-pool-review/index.js";
 import { TA_ENFORCEMENT_METADATA_KEY } from "./ta-pool-runtime/enforcement-guard.js";
 import type { RaxFacade } from "../rax/facade.js";
@@ -27,6 +28,22 @@ import {
   defaultCapabilityRouter,
   type WebSearchRuntimeLike,
 } from "../rax/index.js";
+
+function readCapabilityAccessAssignment(
+  metadata: Record<string, unknown> | undefined,
+): string | undefined {
+  const capabilityAccess = metadata?.capabilityAccess;
+  if (
+    capabilityAccess
+    && typeof capabilityAccess === "object"
+    && "assignment" in capabilityAccess
+    && typeof capabilityAccess.assignment === "string"
+  ) {
+    return capabilityAccess.assignment;
+  }
+
+  return undefined;
+}
 
 function createFakeRaxFacade() {
   const fakeWebSearchRuntime: WebSearchRuntimeLike = {
@@ -265,7 +282,7 @@ test("AgentCoreRuntime can dispatch a capability intent through the new gateway 
 
 test("AgentCoreRuntime can resolve a baseline T/A grant and dispatch it through the pooled path", async () => {
   const runtime = createAgentCoreRuntime({
-    taProfile: createAgentCapabilityProfile({
+    taProfile: createFirstWaveCapabilityProfile({
       profileId: "profile.runtime",
       agentClass: "main-agent",
       baselineCapabilities: ["search.ground"],
@@ -335,6 +352,7 @@ test("AgentCoreRuntime can resolve a baseline T/A grant and dispatch it through 
   });
 
   assert.equal(resolved.status, "baseline_granted");
+  assert.equal(readCapabilityAccessAssignment(resolved.grant.metadata), "baseline");
 
   const dispatched = await runtime.dispatchTaCapabilityGrant({
     grant: resolved.grant,
@@ -649,10 +667,10 @@ test("AgentCoreRuntime can dispatch search.ground through TAP after package-back
 
 test("AgentCoreRuntime surfaces review-required T/A access when capability is not baseline", async () => {
   const runtime = createAgentCoreRuntime({
-    taProfile: createAgentCapabilityProfile({
+    taProfile: createFirstWaveCapabilityProfile({
       profileId: "profile.runtime",
       agentClass: "main-agent",
-      baselineCapabilities: ["docs.read"],
+      reviewOnlyCapabilities: ["mcp.playwright"],
     }),
   });
   const session = runtime.createSession();
@@ -680,6 +698,7 @@ test("AgentCoreRuntime surfaces review-required T/A access when capability is no
 
   assert.equal(resolved.status, "review_required");
   assert.equal(resolved.request.requestedCapabilityKey, "mcp.playwright");
+  assert.equal(readCapabilityAccessAssignment(resolved.request.metadata), "review_only");
 });
 
 test("AgentCoreRuntime uses packaged MCP call policy as a review-required thick capability", async () => {
@@ -738,10 +757,9 @@ test("AgentCoreRuntime uses packaged MCP call policy as a review-required thick 
 
 test("AgentCoreRuntime can assemble review -> dispatch through T/A pool for available capabilities", async () => {
   const runtime = createAgentCoreRuntime({
-    taProfile: createAgentCapabilityProfile({
+    taProfile: createFirstWaveCapabilityProfile({
       profileId: "profile.runtime.review",
       agentClass: "main-agent",
-      baselineCapabilities: ["docs.read"],
       allowedCapabilityPatterns: ["search.*"],
     }),
   });
@@ -794,6 +812,19 @@ test("AgentCoreRuntime can assemble review -> dispatch through T/A pool for avai
     generation: 1,
     description: "Review-driven grounded search capability.",
   }, adapter);
+
+  const resolved = runtime.resolveTaCapabilityAccess({
+    sessionId: session.sessionId,
+    runId: created.run.runId,
+    agentId: "agent-main",
+    capabilityKey: "search.ground",
+    reason: "Pattern-allowed capability should stay on the reviewer path in balanced mode.",
+    requestedTier: "B1",
+    mode: "balanced",
+  });
+
+  assert.equal(resolved.status, "review_required");
+  assert.equal(readCapabilityAccessAssignment(resolved.request.metadata), "allowed_pattern");
 
   const intent: CapabilityCallIntent = {
     intentId: "intent-ta-review-1",

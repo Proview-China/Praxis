@@ -8,7 +8,10 @@ export type {
   CapabilityPackageManifest,
   CapabilityPackagePolicy,
   CapabilityPackagePolicyBaseline,
+  CapabilityPackageProfileAssignment,
+  CapabilityPackageRegistrationAssembly,
   CapabilityPackageResultMapping,
+  CapabilityPackageTargetLane,
   CapabilityPackageUsage,
   CapabilityPackageUsageExample,
   CapabilityPackageVerification,
@@ -21,6 +24,7 @@ export type {
   CreateCapabilityPackageManifestInput,
   CreateMcpCapabilityPackageInput,
   CreateCapabilityPackagePolicyInput,
+  CreateCapabilityPackageRegistrationAssemblyInput,
   CreateCapabilityPackageUsageExampleInput,
   CreateCapabilityPackageUsageInput,
   CreateCapabilityPackageVerificationInput,
@@ -40,6 +44,8 @@ export type {
 } from "./first-class-tooling-baseline.js";
 export type { TapToolingBaselineCapabilityKey } from "./tap-tooling-baseline.js";
 export {
+  CAPABILITY_PACKAGE_PROFILE_ASSIGNMENTS,
+  CAPABILITY_PACKAGE_TARGET_LANES,
   CAPABILITY_PACKAGE_TEMPLATE_VERSION,
   SUPPORTED_MCP_CAPABILITY_PACKAGE_KEYS,
   createCapabilityPackage,
@@ -53,6 +59,7 @@ export {
   createCapabilityPackageManifest,
   createMcpCapabilityPackage,
   createCapabilityPackagePolicy,
+  createCapabilityPackageRegistrationAssembly,
   createCapabilityPackageUsage,
   createCapabilityPackageUsageExample,
   createCapabilityPackageVerification,
@@ -65,6 +72,7 @@ export {
   validateCapabilityPackageManifest,
   validateMcpCapabilityPackage,
   validateCapabilityPackagePolicy,
+  validateCapabilityPackageRegistrationAssembly,
   validateCapabilityPackageUsage,
   validateCapabilityPackageUsageExample,
   validateCapabilityPackageVerification,
@@ -95,3 +103,11 @@ export {
   listFirstClassToolingBaselineCapabilityPackages,
   listFirstClassToolingCapabilityBaselineDescriptors,
 } from "./first-class-tooling-baseline.js";
+export type {
+  FirstWaveCapabilityKey,
+} from "./first-wave-capability-package.js";
+export {
+  FIRST_WAVE_CAPABILITY_KEYS,
+  createFirstWaveCapabilityPackage,
+  createFirstWaveCapabilityPackageCatalog,
+} from "./first-wave-capability-package.js";

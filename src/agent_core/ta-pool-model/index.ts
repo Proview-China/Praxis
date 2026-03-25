@@ -43,11 +43,13 @@ export type {
   BaselineCapabilityResolution,
   BaselineCapabilityStatus,
   BaselineMatchResult,
+  CapabilityAccessAssignment,
   CreateBaselineGrantInput,
   CreateDefaultGrantInput,
   EvaluatedBaselineProfile,
 } from "./profile-baseline.js";
 export {
+  CAPABILITY_ACCESS_ASSIGNMENTS,
   createBaselineGrantInput,
   createDefaultBaselineGrant,
   createDefaultCapabilityGrant,
@@ -57,6 +59,7 @@ export {
   isBaselineCapabilityMatched,
   matchBaselineCapability,
   resolveBaselineCapability,
+  toCapabilityAccessAssignment,
 } from "./profile-baseline.js";
 export {
   TAP_BOOTSTRAP_TMA_BASELINE_CAPABILITY_KEYS,
@@ -94,3 +97,19 @@ export {
   TMA_BOOTSTRAP_FIRST_CLASS_BASELINE_CAPABILITIES,
   TMA_EXTENDED_FIRST_CLASS_BASELINE_CAPABILITIES,
 } from "./first-class-tooling-baseline.js";
+
+export type {
+  AssembleCapabilityProfileFromPackagesInput,
+  CapabilityPackageProfileAssemblySummary,
+  CreateFirstWaveCapabilityProfileInput,
+} from "./first-wave-profile.js";
+export {
+  assembleCapabilityProfileFromPackages,
+  createFirstWaveCapabilityProfile,
+  FIRST_WAVE_ALLOWED_CAPABILITY_PATTERNS,
+  FIRST_WAVE_BASELINE_CAPABILITIES,
+  FIRST_WAVE_BOOTSTRAP_REVIEW_ONLY_CAPABILITIES,
+  FIRST_WAVE_EXTENDED_REVIEW_ONLY_CAPABILITIES,
+  FIRST_WAVE_REVIEW_ONLY_CAPABILITIES,
+  resolveFirstWaveCapabilityAssignment,
+} from "./first-wave-profile.js";

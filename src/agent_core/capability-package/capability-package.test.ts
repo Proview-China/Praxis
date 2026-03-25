@@ -8,10 +8,11 @@ import {
   createCapabilityPackageActivationSpecRef,
   createCapabilityPackageFixture,
   createCapabilityPackageFromProvisionBundle,
+  createFirstWaveCapabilityPackageCatalog,
   createMcpCapabilityPackage,
   createMcpReadCapabilityPackage,
-  isMcpReadFamilyCapabilityKey,
   createRaxWebsearchCapabilityPackage,
+  isMcpReadFamilyCapabilityKey,
 } from "./index.js";
 import { createPoolActivationSpec, createProvisionArtifactBundle } from "../ta-pool-types/index.js";
 
@@ -26,6 +27,7 @@ test("capability package fixture satisfies the frozen seven-part template", () =
   assert.equal(capabilityPackage.builder.replayCapability, "auto_after_verify");
   assert.equal(capabilityPackage.replayPolicy, "auto_after_verify");
   assert.equal(capabilityPackage.activationSpec?.targetPool, "ta-capability-pool");
+  assert.equal(capabilityPackage.policy.registrationAssembly.profileAssignment, "review_only");
   assert.equal(capabilityPackage.usage.exampleInvocations.length, 1);
 });
 
@@ -49,6 +51,19 @@ test("MCP read family capability packages freeze lower-risk defaults for listToo
       capabilityKey,
     );
   }
+});
+
+test("first-wave capability package catalog encodes baseline, allowed-pattern, and review-only assembly", () => {
+  const catalog = createFirstWaveCapabilityPackageCatalog();
+  const docsRead = catalog.find((entry) => entry.manifest.capabilityKey === "docs.read");
+  const repoWrite = catalog.find((entry) => entry.manifest.capabilityKey === "repo.write");
+  const dependencyInstall = catalog.find((entry) => entry.manifest.capabilityKey === "dependency.install");
+
+  assert.equal(docsRead?.policy.registrationAssembly.profileAssignment, "baseline_capability");
+  assert.equal(repoWrite?.policy.registrationAssembly.profileAssignment, "allowed_pattern");
+  assert.equal(repoWrite?.policy.registrationAssembly.allowedPattern, "repo.write");
+  assert.equal(dependencyInstall?.policy.registrationAssembly.profileAssignment, "review_only");
+  assert.equal(dependencyInstall?.policy.registrationAssembly.targetLane, "extended_tma");
 });
 
 test("capability package can be created directly from a ready provision bundle", () => {

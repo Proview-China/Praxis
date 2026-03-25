@@ -5,6 +5,7 @@ import { createAgentCapabilityProfile } from "../ta-pool-types/index.js";
 import {
   createDefaultCapabilityGrant,
   resolveBaselineCapability,
+  toCapabilityAccessAssignment,
 } from "./profile-baseline.js";
 
 const profile = createAgentCapabilityProfile({
@@ -14,6 +15,8 @@ const profile = createAgentCapabilityProfile({
   baselineTier: "B0",
   baselineCapabilities: ["docs.read", "code.read"],
   allowedCapabilityPatterns: ["search.*", "mcp.*"],
+  reviewOnlyCapabilities: ["dependency.install"],
+  reviewOnlyCapabilityPatterns: ["computer.*"],
   deniedCapabilityPatterns: ["shell.*", "system.*"],
 });
 
@@ -46,6 +49,24 @@ test("profile baseline can classify allowed patterns without baseline grants", (
   });
 
   assert.equal(resolution.status, "pattern_allowed");
+  assert.equal(toCapabilityAccessAssignment(resolution.status), "allowed_pattern");
+});
+
+test("profile baseline marks review-only capabilities without promoting them to baseline", () => {
+  const explicitReviewOnly = resolveBaselineCapability({
+    profile,
+    capabilityKey: "dependency.install",
+    requestedTier: "B2",
+  });
+  const patternReviewOnly = resolveBaselineCapability({
+    profile,
+    capabilityKey: "computer.browser",
+    requestedTier: "B2",
+  });
+
+  assert.equal(explicitReviewOnly.status, "review_only");
+  assert.equal(patternReviewOnly.status, "review_only");
+  assert.equal(toCapabilityAccessAssignment(explicitReviewOnly.status), "review_only");
 });
 
 test("profile baseline builds default grants for downstream control plane use", () => {

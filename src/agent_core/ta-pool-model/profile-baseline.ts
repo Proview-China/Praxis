@@ -8,9 +8,24 @@ import {
   type TaCapabilityTier,
 } from "../ta-pool-types/index.js";
 
+export const CAPABILITY_ACCESS_ASSIGNMENTS = [
+  "baseline",
+  "allowed_pattern",
+  "review_only",
+  "denied",
+  "unmatched",
+] as const;
+export type CapabilityAccessAssignment = (typeof CAPABILITY_ACCESS_ASSIGNMENTS)[number];
+
 export interface BaselineMatchResult {
   matched: boolean;
-  reason: "denied_by_pattern" | "baseline_capability" | "allowed_pattern" | "unmatched";
+  reason:
+    | "denied_by_pattern"
+    | "baseline_capability"
+    | "allowed_pattern"
+    | "review_only_capability"
+    | "review_only_pattern"
+    | "unmatched";
   matchedPattern?: string;
 }
 
@@ -21,7 +36,7 @@ export interface EvaluatedBaselineProfile {
 }
 
 export interface BaselineCapabilityResolution {
-  status: "baseline_allowed" | "pattern_allowed" | "denied" | "unmatched";
+  status: "baseline_allowed" | "pattern_allowed" | "review_only" | "denied" | "unmatched";
   capabilityKey: string;
   tier: TaCapabilityTier;
   matchedPattern?: string;
@@ -93,6 +108,25 @@ export function matchBaselineCapability(params: {
     };
   }
 
+  if (profile.reviewOnlyCapabilities?.includes(capabilityKey)) {
+    return {
+      matched: false,
+      reason: "review_only_capability",
+    };
+  }
+
+  const reviewOnlyPattern = firstMatchingPattern({
+    capabilityKey,
+    patterns: profile.reviewOnlyCapabilityPatterns,
+  });
+  if (reviewOnlyPattern) {
+    return {
+      matched: false,
+      reason: "review_only_pattern",
+      matchedPattern: reviewOnlyPattern,
+    };
+  }
+
   const allowedPattern = firstMatchingPattern({
     capabilityKey,
     patterns: profile.allowedCapabilityPatterns,
@@ -147,6 +181,14 @@ export function resolveBaselineCapability(params: {
         tier: params.requestedTier ?? params.profile.baselineTier,
         matchedPattern: result.matchedPattern,
       };
+    case "review_only_capability":
+    case "review_only_pattern":
+      return {
+        status: "review_only",
+        capabilityKey: params.capabilityKey,
+        tier: params.requestedTier ?? params.profile.baselineTier,
+        matchedPattern: result.matchedPattern,
+      };
     case "denied_by_pattern":
       return {
         status: "denied",
@@ -160,6 +202,23 @@ export function resolveBaselineCapability(params: {
         capabilityKey: params.capabilityKey,
         tier: params.requestedTier ?? params.profile.baselineTier,
       };
+  }
+}
+
+export function toCapabilityAccessAssignment(
+  status: BaselineCapabilityStatus,
+): CapabilityAccessAssignment {
+  switch (status) {
+    case "baseline_allowed":
+      return "baseline";
+    case "pattern_allowed":
+      return "allowed_pattern";
+    case "review_only":
+      return "review_only";
+    case "denied":
+      return "denied";
+    case "unmatched":
+      return "unmatched";
   }
 }
 

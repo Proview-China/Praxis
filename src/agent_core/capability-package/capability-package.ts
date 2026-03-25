@@ -86,8 +86,33 @@ export interface CapabilityPackagePolicyBaseline {
   metadata?: Record<string, unknown>;
 }
 
+export const CAPABILITY_PACKAGE_PROFILE_ASSIGNMENTS = [
+  "baseline_capability",
+  "allowed_pattern",
+  "review_only",
+] as const;
+export type CapabilityPackageProfileAssignment =
+  (typeof CAPABILITY_PACKAGE_PROFILE_ASSIGNMENTS)[number];
+
+export const CAPABILITY_PACKAGE_TARGET_LANES = [
+  "reviewer",
+  "bootstrap_tma",
+  "extended_tma",
+] as const;
+export type CapabilityPackageTargetLane =
+  (typeof CAPABILITY_PACKAGE_TARGET_LANES)[number];
+
+export interface CapabilityPackageRegistrationAssembly {
+  profileAssignment: CapabilityPackageProfileAssignment;
+  targetLane: CapabilityPackageTargetLane;
+  allowedPattern?: string;
+  notes?: string[];
+  metadata?: Record<string, unknown>;
+}
+
 export interface CapabilityPackagePolicy {
   defaultBaseline: CapabilityPackagePolicyBaseline;
+  registrationAssembly: CapabilityPackageRegistrationAssembly;
   recommendedMode: TaPoolMode;
   riskLevel: TaPoolRiskLevel;
   defaultScope?: AccessRequestScope;
@@ -195,6 +220,7 @@ export interface CreateCapabilityPackageAdapterInput {
 
 export interface CreateCapabilityPackagePolicyInput {
   defaultBaseline: CapabilityPackagePolicyBaseline;
+  registrationAssembly?: CapabilityPackageRegistrationAssembly;
   recommendedMode: TaPoolMode;
   riskLevel: TaPoolRiskLevel;
   defaultScope?: AccessRequestScope;
@@ -299,6 +325,14 @@ export interface CreateMcpCapabilityPackageInput {
   replayPolicy?: ReplayPolicy;
   supportedPlatforms?: string[];
   routeHints?: CapabilityRouteHint[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface CreateCapabilityPackageRegistrationAssemblyInput {
+  profileAssignment?: CapabilityPackageProfileAssignment;
+  targetLane?: CapabilityPackageTargetLane;
+  allowedPattern?: string;
+  notes?: readonly string[];
   metadata?: Record<string, unknown>;
 }
 
@@ -733,6 +767,53 @@ export function createMcpCapabilityPackage(
     case "mcp.native.execute":
       return createMcpNativeExecuteCapabilityPackage(input);
   }
+
+  throw new Error(
+    `Unsupported MCP capability package key: ${input.capabilityKey}.`,
+  );
+}
+
+export function createCapabilityPackageRegistrationAssembly(
+  input: CreateCapabilityPackageRegistrationAssemblyInput
+    | CapabilityPackageRegistrationAssembly = {},
+): CapabilityPackageRegistrationAssembly {
+  const registrationAssembly: CapabilityPackageRegistrationAssembly = {
+    profileAssignment: input.profileAssignment ?? "review_only",
+    targetLane: input.targetLane ?? "extended_tma",
+    allowedPattern: input.allowedPattern?.trim() || undefined,
+    notes: normalizeStringArray(input.notes),
+    metadata: input.metadata,
+  };
+
+  validateCapabilityPackageRegistrationAssembly(registrationAssembly);
+  return registrationAssembly;
+}
+
+export function validateCapabilityPackageRegistrationAssembly(
+  registrationAssembly: CapabilityPackageRegistrationAssembly,
+): void {
+  if (!CAPABILITY_PACKAGE_PROFILE_ASSIGNMENTS.includes(registrationAssembly.profileAssignment)) {
+    throw new Error(
+      `Unsupported capability package profileAssignment: ${registrationAssembly.profileAssignment}.`,
+    );
+  }
+
+  if (!CAPABILITY_PACKAGE_TARGET_LANES.includes(registrationAssembly.targetLane)) {
+    throw new Error(
+      `Unsupported capability package targetLane: ${registrationAssembly.targetLane}.`,
+    );
+  }
+
+  if (registrationAssembly.profileAssignment === "allowed_pattern") {
+    normalizeString(
+      registrationAssembly.allowedPattern ?? "",
+      "policy.registrationAssembly.allowedPattern",
+    );
+  } else if (registrationAssembly.allowedPattern !== undefined) {
+    throw new Error(
+      "policy.registrationAssembly.allowedPattern is only valid for allowed_pattern entries.",
+    );
+  }
 }
 
 export function createCapabilityPackageActivationSpecRef(
@@ -854,6 +935,9 @@ export function createCapabilityPackagePolicy(
       scope: normalizeScope(input.defaultBaseline.scope),
       metadata: input.defaultBaseline.metadata,
     },
+    registrationAssembly: createCapabilityPackageRegistrationAssembly(
+      input.registrationAssembly,
+    ),
     recommendedMode: input.recommendedMode,
     riskLevel: input.riskLevel,
     defaultScope: normalizeScope(input.defaultScope),
@@ -893,6 +977,7 @@ export function validateCapabilityPackagePolicy(
   }
 
   validateScope("policy.defaultBaseline.scope", policy.defaultBaseline.scope);
+  validateCapabilityPackageRegistrationAssembly(policy.registrationAssembly);
   validateScope("policy.defaultScope", policy.defaultScope);
 
   if (policy.reviewRequirements.length === 0) {
@@ -1394,6 +1479,13 @@ export function createCapabilityPackageFixture(
           pathPatterns: ["workspace/**"],
           allowedOperations: ["exec", "read"],
         },
+      },
+      registrationAssembly: {
+        profileAssignment: "review_only",
+        targetLane: "extended_tma",
+        notes: [
+          "Provisioned browser capability stays off the baseline profile by default.",
+        ],
       },
       recommendedMode: "standard",
       riskLevel: "risky",
