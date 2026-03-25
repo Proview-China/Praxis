@@ -14,6 +14,7 @@ export {
   isCanonicalTaPoolMode,
   isCapabilityAllowedByProfile,
   isCapabilityDeniedByProfile,
+  isCapabilityReviewOnlyByProfile,
   isLegacyTaPoolMode,
   isInvocationBaselineAllowed,
   isTaPoolMode,

@@ -2,10 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  MCP_READ_FAMILY_CAPABILITY_KEYS,
+  RAX_WEBSEARCH_ACTIVATION_FACTORY_REF,
   createCapabilityPackage,
   createCapabilityPackageActivationSpecRef,
   createCapabilityPackageFixture,
   createCapabilityPackageFromProvisionBundle,
+  createFirstWaveCapabilityPackageCatalog,
+  createMcpCapabilityPackage,
+  createMcpReadCapabilityPackage,
+  createRaxWebsearchCapabilityPackage,
+  isMcpReadFamilyCapabilityKey,
 } from "./index.js";
 import { createPoolActivationSpec, createProvisionArtifactBundle } from "../ta-pool-types/index.js";
 
@@ -20,7 +27,43 @@ test("capability package fixture satisfies the frozen seven-part template", () =
   assert.equal(capabilityPackage.builder.replayCapability, "auto_after_verify");
   assert.equal(capabilityPackage.replayPolicy, "auto_after_verify");
   assert.equal(capabilityPackage.activationSpec?.targetPool, "ta-capability-pool");
+  assert.equal(capabilityPackage.policy.registrationAssembly.profileAssignment, "review_only");
   assert.equal(capabilityPackage.usage.exampleInvocations.length, 1);
+});
+
+test("MCP read family capability packages freeze lower-risk defaults for listTools and readResource", () => {
+  for (const capabilityKey of MCP_READ_FAMILY_CAPABILITY_KEYS) {
+    const capabilityPackage = createMcpReadCapabilityPackage({
+      capabilityKey,
+    });
+
+    assert.equal(isMcpReadFamilyCapabilityKey(capabilityKey), true);
+    assert.equal(capabilityPackage.manifest.capabilityKey, capabilityKey);
+    assert.equal(capabilityPackage.manifest.capabilityKind, "resource");
+    assert.equal(capabilityPackage.policy.riskLevel, "normal");
+    assert.deepEqual(capabilityPackage.policy.defaultBaseline.scope?.allowedOperations, ["read"]);
+    assert.deepEqual(capabilityPackage.adapter.supports, [capabilityKey]);
+    assert.equal(capabilityPackage.adapter.adapterId, "rax.mcp.adapter");
+    assert.equal(capabilityPackage.builder.replayCapability, "auto_after_verify");
+    assert.equal(capabilityPackage.metadata?.capabilityFamily, "mcp-read");
+    assert.equal(
+      capabilityPackage.usage.exampleInvocations[0]?.capabilityKey,
+      capabilityKey,
+    );
+  }
+});
+
+test("first-wave capability package catalog encodes baseline, allowed-pattern, and review-only assembly", () => {
+  const catalog = createFirstWaveCapabilityPackageCatalog();
+  const docsRead = catalog.find((entry) => entry.manifest.capabilityKey === "docs.read");
+  const repoWrite = catalog.find((entry) => entry.manifest.capabilityKey === "repo.write");
+  const dependencyInstall = catalog.find((entry) => entry.manifest.capabilityKey === "dependency.install");
+
+  assert.equal(docsRead?.policy.registrationAssembly.profileAssignment, "baseline_capability");
+  assert.equal(repoWrite?.policy.registrationAssembly.profileAssignment, "allowed_pattern");
+  assert.equal(repoWrite?.policy.registrationAssembly.allowedPattern, "repo.write");
+  assert.equal(dependencyInstall?.policy.registrationAssembly.profileAssignment, "review_only");
+  assert.equal(dependencyInstall?.policy.registrationAssembly.targetLane, "extended_tma");
 });
 
 test("capability package can be created directly from a ready provision bundle", () => {
@@ -177,5 +220,245 @@ test("capability package validation rejects replay policy drift between builder 
         replayPolicy: "auto_after_verify",
       }),
     /replayPolicy must match builder\.replayCapability/,
+  );
+});
+
+test("search.ground capability package is ready for first-class TAP activation", () => {
+  const capabilityPackage = createRaxWebsearchCapabilityPackage();
+
+  assert.equal(capabilityPackage.manifest.capabilityKey, "search.ground");
+  assert.equal(capabilityPackage.adapter.runtimeKind, "rax-websearch");
+  assert.deepEqual(capabilityPackage.adapter.supports, ["search.ground"]);
+  assert.equal(
+    capabilityPackage.activationSpec?.adapterFactoryRef,
+    RAX_WEBSEARCH_ACTIVATION_FACTORY_REF,
+  );
+  assert.equal(
+    capabilityPackage.builder.activationSpecRef,
+    createCapabilityPackageActivationSpecRef(capabilityPackage.activationSpec!),
+  );
+  assert.equal(capabilityPackage.policy.riskLevel, "normal");
+  assert.equal(capabilityPackage.replayPolicy, "re_review_then_dispatch");
+});
+
+test("capability package factory builds thick MCP call and native execute packages with frozen policy metadata", () => {
+  const mcpCallPackage = createMcpCapabilityPackage({
+    capabilityKey: "mcp.call",
+  });
+  const nativeExecutePackage = createMcpCapabilityPackage({
+    capabilityKey: "mcp.native.execute",
+  });
+
+  assert.equal(mcpCallPackage.policy.riskLevel, "risky");
+  assert.equal(mcpCallPackage.policy.recommendedMode, "standard");
+  assert.equal(
+    mcpCallPackage.policy.defaultScope?.denyPatterns?.includes("mcp.configure"),
+    true,
+  );
+  assert.equal(nativeExecutePackage.policy.recommendedMode, "restricted");
+  assert.equal(
+    nativeExecutePackage.policy.humanGateRequirements[0],
+    "operator_review_required_before_native_transport_execution",
+  );
+});
+
+test("capability package validation rejects MCP packages that reopen mcp.configure or weaken native execute policy", () => {
+  assert.throws(
+    () =>
+      createCapabilityPackage({
+        manifest: {
+          capabilityKey: "mcp.call",
+          capabilityKind: "tool",
+          description: "Invalid MCP call package.",
+          supportedPlatforms: ["linux"],
+        },
+        adapter: {
+          adapterId: "adapter.invalid-mcp-call",
+          runtimeKind: "rax-mcp",
+          supports: ["mcp.call"],
+          prepare: { ref: "adapter.prepare:invalid" },
+          execute: { ref: "adapter.execute:invalid" },
+        },
+        policy: {
+          defaultBaseline: {
+            grantedTier: "B1",
+            mode: "standard",
+            scope: {
+              pathPatterns: ["workspace/**"],
+              allowedOperations: ["mcp.call"],
+            },
+          },
+          recommendedMode: "standard",
+          riskLevel: "risky",
+          defaultScope: {
+            pathPatterns: ["workspace/**"],
+            allowedOperations: ["mcp.call"],
+          },
+          reviewRequirements: ["allow_with_constraints"],
+          safetyFlags: ["truthful_shared_runtime_surface"],
+          humanGateRequirements: ["manual review"],
+        },
+        builder: {
+          builderId: "builder.invalid-mcp-call",
+          buildStrategy: "invalid",
+          activationSpecRef: "activation-spec:tap:activate_after_verify:factory:invalid",
+        },
+        verification: {
+          smokeEntry: "smoke:invalid",
+          healthEntry: "health:invalid",
+        },
+        usage: {
+          usageDocRef: "docs/ability/25-tap-capability-package-template.md",
+          exampleInvocations: [
+            {
+              exampleId: "example.invalid-mcp-call",
+              capabilityKey: "mcp.call",
+              operation: "mcp.call",
+            },
+          ],
+        },
+        lifecycle: {
+          installStrategy: "invalid",
+          replaceStrategy: "invalid",
+          rollbackStrategy: "invalid",
+          deprecateStrategy: "invalid",
+          cleanupStrategy: "invalid",
+        },
+      }),
+    /must deny mcp\.configure/i,
+  );
+
+  assert.throws(
+    () =>
+      createCapabilityPackage({
+        manifest: {
+          capabilityKey: "mcp.native.execute",
+          capabilityKind: "tool",
+          description: "Invalid native execute package.",
+          supportedPlatforms: ["linux"],
+        },
+        adapter: {
+          adapterId: "adapter.invalid-mcp-native",
+          runtimeKind: "rax-mcp",
+          supports: ["mcp.native.execute"],
+          prepare: { ref: "adapter.prepare:invalid-native" },
+          execute: { ref: "adapter.execute:invalid-native" },
+        },
+        policy: {
+          defaultBaseline: {
+            grantedTier: "B2",
+            mode: "standard",
+            scope: {
+              pathPatterns: ["workspace/**"],
+              allowedOperations: ["mcp.native.execute"],
+              denyPatterns: ["mcp.configure"],
+            },
+          },
+          recommendedMode: "standard",
+          riskLevel: "risky",
+          defaultScope: {
+            pathPatterns: ["workspace/**"],
+            allowedOperations: ["mcp.native.execute"],
+            denyPatterns: ["mcp.configure"],
+          },
+          reviewRequirements: ["escalate_to_human"],
+          safetyFlags: ["native_transport_side_effects", "no_mcp_configure"],
+          humanGateRequirements: [],
+        },
+        builder: {
+          builderId: "builder.invalid-mcp-native",
+          buildStrategy: "invalid",
+          activationSpecRef: "activation-spec:tap:activate_after_verify:factory:invalid-native",
+        },
+        verification: {
+          smokeEntry: "smoke:invalid-native",
+          healthEntry: "health:invalid-native",
+        },
+        usage: {
+          usageDocRef: "docs/ability/25-tap-capability-package-template.md",
+          exampleInvocations: [
+            {
+              exampleId: "example.invalid-mcp-native",
+              capabilityKey: "mcp.native.execute",
+              operation: "mcp.native.execute",
+            },
+          ],
+        },
+        lifecycle: {
+          installStrategy: "invalid",
+          replaceStrategy: "invalid",
+          rollbackStrategy: "invalid",
+          deprecateStrategy: "invalid",
+          cleanupStrategy: "invalid",
+        },
+      }),
+    /must recommend restricted mode/i,
+  );
+
+  assert.throws(
+    () =>
+      createCapabilityPackage({
+        manifest: {
+          capabilityKey: "mcp.configure",
+          capabilityKind: "tool",
+          description: "Forbidden configure surface.",
+          supportedPlatforms: ["linux"],
+        },
+        adapter: {
+          adapterId: "adapter.mcp-configure",
+          runtimeKind: "rax-mcp",
+          supports: ["mcp.configure"],
+          prepare: { ref: "adapter.prepare:mcp-configure" },
+          execute: { ref: "adapter.execute:mcp-configure" },
+        },
+        policy: {
+          defaultBaseline: {
+            grantedTier: "B2",
+            mode: "restricted",
+            scope: {
+              pathPatterns: ["workspace/**"],
+              allowedOperations: ["mcp.configure"],
+              denyPatterns: ["mcp.configure"],
+            },
+          },
+          recommendedMode: "restricted",
+          riskLevel: "dangerous",
+          defaultScope: {
+            pathPatterns: ["workspace/**"],
+            allowedOperations: ["mcp.configure"],
+            denyPatterns: ["mcp.configure"],
+          },
+          reviewRequirements: ["escalate_to_human"],
+          safetyFlags: ["no_mcp_configure"],
+          humanGateRequirements: ["human approval"],
+        },
+        builder: {
+          builderId: "builder.mcp-configure",
+          buildStrategy: "invalid",
+          activationSpecRef: "activation-spec:tap:activate_after_verify:factory:mcp-configure",
+        },
+        verification: {
+          smokeEntry: "smoke:mcp-configure",
+          healthEntry: "health:mcp-configure",
+        },
+        usage: {
+          usageDocRef: "docs/ability/25-tap-capability-package-template.md",
+          exampleInvocations: [
+            {
+              exampleId: "example.mcp-configure",
+              capabilityKey: "mcp.configure",
+              operation: "mcp.configure",
+            },
+          ],
+        },
+        lifecycle: {
+          installStrategy: "invalid",
+          replaceStrategy: "invalid",
+          rollbackStrategy: "invalid",
+          deprecateStrategy: "invalid",
+          cleanupStrategy: "invalid",
+        },
+      }),
+    /must remain outside first-class TAP capability packages/i,
   );
 });

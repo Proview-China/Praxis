@@ -43,11 +43,13 @@ export type {
   BaselineCapabilityResolution,
   BaselineCapabilityStatus,
   BaselineMatchResult,
+  CapabilityAccessAssignment,
   CreateBaselineGrantInput,
   CreateDefaultGrantInput,
   EvaluatedBaselineProfile,
 } from "./profile-baseline.js";
 export {
+  CAPABILITY_ACCESS_ASSIGNMENTS,
   createBaselineGrantInput,
   createDefaultBaselineGrant,
   createDefaultCapabilityGrant,
@@ -57,4 +59,57 @@ export {
   isBaselineCapabilityMatched,
   matchBaselineCapability,
   resolveBaselineCapability,
+  toCapabilityAccessAssignment,
 } from "./profile-baseline.js";
+export {
+  TAP_BOOTSTRAP_TMA_BASELINE_CAPABILITY_KEYS,
+  TAP_EXTENDED_TMA_BASELINE_CAPABILITY_KEYS,
+  TAP_EXTENDED_TMA_EXTRA_CAPABILITY_KEYS,
+  TAP_REVIEWER_BASELINE_CAPABILITY_KEYS,
+  TAP_REVIEWER_DENIED_EXECUTION_PATTERNS,
+  createTapBootstrapTmaProfile,
+  createTapExtendedTmaProfile,
+  createTapReviewerProfile,
+} from "./tooling-baseline.js";
+export type {
+  FirstClassToolingBaselineConsumer,
+  FirstClassToolingBaselineDescriptor,
+} from "./first-class-tooling-baseline.js";
+export {
+  createProfileWithFirstClassToolingBaseline,
+  extendProfileWithFirstClassToolingBaseline,
+  FIRST_CLASS_TOOLING_BASELINE_CONSUMERS,
+  getFirstClassToolingBaselineDescriptor,
+  getFirstClassToolingBaselineCapabilities,
+  isFirstClassToolingBaselineCapability,
+} from "./first-class-tooling-baseline.js";
+
+export type {
+  CreateFirstClassToolingProfileInput,
+  FirstClassToolingBaselineKind,
+} from "./first-class-tooling-baseline.js";
+export {
+  createFirstClassToolingProfile,
+  listFirstClassToolingBaselineDescriptors,
+  listFirstClassToolingBaselineCapabilities,
+  mergeFirstClassToolingBaselineCapabilities,
+  REVIEWER_FIRST_CLASS_BASELINE_CAPABILITIES,
+  TMA_BOOTSTRAP_FIRST_CLASS_BASELINE_CAPABILITIES,
+  TMA_EXTENDED_FIRST_CLASS_BASELINE_CAPABILITIES,
+} from "./first-class-tooling-baseline.js";
+
+export type {
+  AssembleCapabilityProfileFromPackagesInput,
+  CapabilityPackageProfileAssemblySummary,
+  CreateFirstWaveCapabilityProfileInput,
+} from "./first-wave-profile.js";
+export {
+  assembleCapabilityProfileFromPackages,
+  createFirstWaveCapabilityProfile,
+  FIRST_WAVE_ALLOWED_CAPABILITY_PATTERNS,
+  FIRST_WAVE_BASELINE_CAPABILITIES,
+  FIRST_WAVE_BOOTSTRAP_REVIEW_ONLY_CAPABILITIES,
+  FIRST_WAVE_EXTENDED_REVIEW_ONLY_CAPABILITIES,
+  FIRST_WAVE_REVIEW_ONLY_CAPABILITIES,
+  resolveFirstWaveCapabilityAssignment,
+} from "./first-wave-profile.js";

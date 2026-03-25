@@ -10,16 +10,30 @@ import type {
   McpReadResourceInput,
   McpReadResourceResult,
   McpConnectInput,
+  McpInMemoryTransportConfig,
+  McpStdioTransportConfig,
+  McpStreamableHttpTransportConfig,
 } from "../../rax/mcp-types.js";
 import type { RaxFacade } from "../../rax/facade.js";
 import { rax } from "../../rax/index.js";
 import { createPreparedCapabilityCall } from "../capability-invocation/index.js";
+import {
+  createMcpCapabilityPackage,
+  isSupportedMcpCapabilityPackageKey,
+  type SupportedMcpCapabilityPackageKey,
+} from "../capability-package/index.js";
 import { createCapabilityResultEnvelope } from "../capability-result/index.js";
+
+export const MCP_READ_FAMILY_ACTIONS = [
+  "mcp.listTools",
+  "mcp.readResource",
+] as const;
+
+export type McpReadFamilyAction = (typeof MCP_READ_FAMILY_ACTIONS)[number];
 
 type SupportedMcpAction =
   | "mcp.call"
-  | "mcp.listTools"
-  | "mcp.readResource"
+  | McpReadFamilyAction
   | "mcp.native.execute";
 
 interface McpRouteSelection {
@@ -44,6 +58,13 @@ type SupportedMcpPreparedPayload = {
   invocation?: Awaited<ReturnType<RaxFacade["mcp"]["native"]["build"]>>;
 };
 
+const DEFAULT_MCP_CAPABILITY_PACKAGES = new Map(
+  (["mcp.call", "mcp.native.execute"] as const).map((capabilityKey) => [
+    capabilityKey,
+    createMcpCapabilityPackage({ capabilityKey }),
+  ]),
+);
+
 export interface RaxMcpAdapterPlanInput<TAction extends SupportedMcpAction = SupportedMcpAction> {
   route: McpRouteSelection;
   input: McpActionPayloadMap[TAction];
@@ -53,11 +74,23 @@ export interface CreateRaxMcpCapabilityAdapterOptions {
   facade?: Pick<RaxFacade, "mcp">;
 }
 
+export function isMcpReadFamilyAction(action: string): action is McpReadFamilyAction {
+  return MCP_READ_FAMILY_ACTIONS.includes(action as McpReadFamilyAction);
+}
+
+export interface CreateRaxMcpCapabilityManifestOptions {
+  capabilityKey: SupportedMcpCapabilityPackageKey;
+  capabilityId?: string;
+  version?: string;
+  generation?: number;
+  description?: string;
+  metadata?: Record<string, unknown>;
+}
+
 function isSupportedAction(action: string): action is SupportedMcpAction {
   return (
     action === "mcp.call" ||
-    action === "mcp.listTools" ||
-    action === "mcp.readResource" ||
+    isMcpReadFamilyAction(action) ||
     action === "mcp.native.execute"
   );
 }
@@ -71,6 +104,51 @@ function asObject(value: unknown): Record<string, unknown> | undefined {
 
 function asString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+function asStringRecord(
+  value: unknown,
+): Record<string, string> | undefined {
+  const record = asObject(value);
+  if (!record) {
+    return undefined;
+  }
+
+  return Object.fromEntries(
+    Object.entries(record).filter((entry): entry is [string, string] => {
+      return typeof entry[1] === "string";
+    }),
+  );
+}
+
+function asArrayOfStrings(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value.filter((entry): entry is string => typeof entry === "string");
+}
+
+function getCapabilityPackageMetadata(
+  action: SupportedMcpAction,
+): Record<string, unknown> | undefined {
+  if (!isSupportedMcpCapabilityPackageKey(action)) {
+    return undefined;
+  }
+
+  const capabilityPackage = DEFAULT_MCP_CAPABILITY_PACKAGES.get(action);
+  if (!capabilityPackage) {
+    return undefined;
+  }
+
+  return {
+    capabilityPackageKey: capabilityPackage.manifest.capabilityKey,
+    capabilityPackageVersion: capabilityPackage.manifest.version,
+    recommendedMode: capabilityPackage.policy.recommendedMode,
+    riskLevel: capabilityPackage.policy.riskLevel,
+    reviewRequirements: capabilityPackage.policy.reviewRequirements,
+    humanGateRequirements: capabilityPackage.policy.humanGateRequirements,
+  };
 }
 
 function parseRouteSelection(input: Record<string, unknown>): McpRouteSelection {
@@ -145,8 +223,69 @@ function parseNativeExecuteInput(input: Record<string, unknown>): McpConnectInpu
   if (!kind || (kind !== "stdio" && kind !== "streamable-http" && kind !== "in-memory")) {
     throw new Error("MCP native.execute input is missing a supported transport.kind.");
   }
+  const strategyCandidate = asString(payload?.strategy);
+  const strategy = strategyCandidate === "auto"
+    || strategyCandidate === "shared-runtime"
+    || strategyCandidate === "provider-native"
+    ? strategyCandidate
+    : undefined;
+  const connectionId = asString(payload?.connectionId);
+  const metadata = asObject(payload?.metadata);
 
-  return payload as unknown as McpConnectInput;
+  switch (kind) {
+    case "stdio": {
+      const command = asString(transport?.command);
+      if (!command) {
+        throw new Error("MCP native.execute stdio transport requires a non-empty command.");
+      }
+      const stdioTransport: McpStdioTransportConfig = {
+        kind,
+        command,
+        args: asArrayOfStrings(transport?.args),
+        env: asStringRecord(transport?.env),
+        cwd: asString(transport?.cwd),
+        stderr: transport?.stderr as McpStdioTransportConfig["stderr"],
+      };
+      return {
+        connectionId,
+        strategy,
+        metadata,
+        transport: stdioTransport,
+      };
+    }
+    case "streamable-http": {
+      const url = asString(transport?.url);
+      if (!url) {
+        throw new Error("MCP native.execute streamable-http transport requires a non-empty url.");
+      }
+      const streamableHttpTransport: McpStreamableHttpTransportConfig = {
+        kind,
+        url,
+        headers: asStringRecord(transport?.headers),
+      };
+      return {
+        connectionId,
+        strategy,
+        metadata,
+        transport: streamableHttpTransport,
+      };
+    }
+    case "in-memory": {
+      if (!transport?.transport || typeof transport.transport !== "object") {
+        throw new Error("MCP native.execute in-memory transport requires a transport object.");
+      }
+      const inMemoryTransport: McpInMemoryTransportConfig = {
+        kind,
+        transport: transport.transport as McpInMemoryTransportConfig["transport"],
+      };
+      return {
+        connectionId,
+        strategy,
+        metadata,
+        transport: inMemoryTransport,
+      };
+    }
+  }
 }
 
 function parsePreparedPayload(action: SupportedMcpAction, input: Record<string, unknown>): SupportedMcpPreparedPayload {
@@ -199,10 +338,44 @@ function createFailureEnvelope(params: {
 function createExecutionMetadata(action: SupportedMcpAction, route: McpRouteSelection, extra?: Record<string, unknown>): Record<string, unknown> {
   return {
     capability: action,
+    actionFamily: isMcpReadFamilyAction(action) ? "read" : "invoke",
     provider: route.provider,
     model: route.model,
     layer: route.layer,
+    ...getCapabilityPackageMetadata(action),
     ...extra,
+  };
+}
+
+export function createRaxMcpCapabilityManifest(
+  options: CreateRaxMcpCapabilityManifestOptions,
+) {
+  const capabilityPackage = createMcpCapabilityPackage({
+    capabilityKey: options.capabilityKey,
+    version: options.version,
+    generation: options.generation,
+  });
+
+  return {
+    capabilityId:
+      options.capabilityId
+      ?? `cap.${options.capabilityKey.replace(/\./g, "-")}`,
+    capabilityKey: capabilityPackage.manifest.capabilityKey,
+    kind: capabilityPackage.manifest.capabilityKind,
+    version: capabilityPackage.manifest.version,
+    generation: capabilityPackage.manifest.generation,
+    description: options.description ?? capabilityPackage.manifest.description,
+    supportsPrepare: true,
+    supportsCancellation: options.capabilityKey === "mcp.native.execute",
+    routeHints: capabilityPackage.manifest.routeHints,
+    tags: capabilityPackage.manifest.tags,
+    metadata: {
+      ...(options.metadata ?? {}),
+      capabilityPackage,
+      riskLevel: capabilityPackage.policy.riskLevel,
+      recommendedMode: capabilityPackage.policy.recommendedMode,
+      truthfulness: capabilityPackage.metadata?.truthfulness,
+    },
   };
 }
 
@@ -249,6 +422,10 @@ export class RaxMcpCapabilityAdapter implements CapabilityAdapter {
       executionMode: parsed.action === "mcp.native.execute" ? "long-running" : "direct",
       preparedPayloadRef: `${this.id}:${plan.planId}`,
       cacheKey: plan.idempotencyKey,
+      metadata: {
+        ...(plan.metadata ?? {}),
+        ...getCapabilityPackageMetadata(parsed.action),
+      },
     });
     this.#preparedPayloads.set(prepared.preparedId, preparedPayload);
     return prepared;

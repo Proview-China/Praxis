@@ -13,7 +13,10 @@ import {
   type TaCapabilityTier,
   type TaPoolMode,
 } from "../ta-pool-types/index.js";
-import { resolveBaselineCapability } from "../ta-pool-model/index.js";
+import {
+  resolveBaselineCapability,
+  toCapabilityAccessAssignment,
+} from "../ta-pool-model/index.js";
 import type {
   ReviewRoutingResult,
   RouteAccessRequestOptions,
@@ -135,13 +138,25 @@ export class TaControlPlaneGateway {
     if (baseline.status === "baseline_allowed") {
       return {
         status: "baseline_granted",
-        grant: this.#createBaselineGrant(input),
+        grant: this.#createBaselineGrant(input, baseline.matchedPattern),
       };
     }
 
+    const capabilityAccess = {
+      assignment: toCapabilityAccessAssignment(baseline.status),
+      matchedPattern: baseline.matchedPattern,
+      profileId: this.profile.profileId,
+    };
+
     return {
       status: "review_required",
-      request: this.submitAccessRequest(input),
+      request: this.submitAccessRequest({
+        ...input,
+        metadata: {
+          ...(input.metadata ?? {}),
+          capabilityAccess,
+        },
+      }),
     };
   }
 
@@ -238,7 +253,10 @@ export class TaControlPlaneGateway {
     return [...this.#requests.values()];
   }
 
-  #createBaselineGrant(input: ResolveCapabilityAccessInput): CapabilityGrant {
+  #createBaselineGrant(
+    input: ResolveCapabilityAccessInput,
+    matchedPattern?: string,
+  ): CapabilityGrant {
     return createCapabilityGrant({
       grantId: this.#idFactory(),
       requestId: `baseline:${input.capabilityKey}:${input.runId}`,
@@ -250,7 +268,14 @@ export class TaControlPlaneGateway {
       constraints: {
         source: "baseline",
       },
-      metadata: input.metadata,
+      metadata: {
+        ...(input.metadata ?? {}),
+        capabilityAccess: {
+          assignment: "baseline",
+          matchedPattern,
+          profileId: this.profile.profileId,
+        },
+      },
     });
   }
 }

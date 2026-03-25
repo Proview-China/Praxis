@@ -27,6 +27,7 @@ import {
   decisionKindToReviewVote,
   isCapabilityAllowedByProfile,
   isCapabilityDeniedByProfile,
+  isCapabilityReviewOnlyByProfile,
   isTerminalReviewDecision,
   reviewVoteToDecisionKind,
   TMA_EXECUTION_LANES,
@@ -95,6 +96,8 @@ test("agent capability profile preserves baseline semantics and exposes canonica
     defaultMode: "balanced",
     baselineCapabilities: ["docs.read", "code.read"],
     allowedCapabilityPatterns: ["search.*", "code.write.*"],
+    reviewOnlyCapabilities: ["dependency.install"],
+    reviewOnlyCapabilityPatterns: ["computer.*"],
     deniedCapabilityPatterns: ["shell.*", "system.*"],
   });
 
@@ -103,6 +106,9 @@ test("agent capability profile preserves baseline semantics and exposes canonica
   assert.equal(toCanonicalTaPoolMode("strict"), "standard");
   assert.equal(isCapabilityAllowedByProfile({ profile, capabilityKey: "docs.read" }), true);
   assert.equal(isCapabilityAllowedByProfile({ profile, capabilityKey: "search.web" }), true);
+  assert.equal(isCapabilityReviewOnlyByProfile({ profile, capabilityKey: "dependency.install" }), true);
+  assert.equal(isCapabilityReviewOnlyByProfile({ profile, capabilityKey: "computer.browser" }), true);
+  assert.equal(isCapabilityAllowedByProfile({ profile, capabilityKey: "dependency.install" }), false);
   assert.equal(isCapabilityAllowedByProfile({ profile, capabilityKey: "shell.exec" }), false);
   assert.equal(isCapabilityDeniedByProfile({ profile, capabilityKey: "system.sudo" }), true);
 });
