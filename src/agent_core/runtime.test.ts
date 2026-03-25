@@ -1474,10 +1474,437 @@ test("AgentCoreRuntime can hydrate reviewer, tool_reviewer, and provision durabl
   recovered.hydrateRecoveredTapRuntimeSnapshot(snapshot);
 
   assert.equal(recovered.reviewerRuntime?.listDurableStates().length, 1);
-  assert.equal(recovered.toolReviewerRuntime?.listSessions().length, 1);
+  assert.equal(recovered.toolReviewerRuntime?.listSessions().length, 2);
   assert.equal(recovered.provisionerRuntime?.getBundleHistory("provision-hydrate-1").length, 2);
   assert.equal(recovered.listTaHumanGates().length, 1);
   assert.equal(recovered.listTaResumeEnvelopes().length >= 1, true);
+});
+
+test("AgentCoreRuntime records tool reviewer governance sessions from runtime human-gate, replay, and activation paths", async () => {
+  const runtime = createAgentCoreRuntime({
+    taProfile: createAgentCapabilityProfile({
+      profileId: "profile.runtime.tool-review-mainline",
+      agentClass: "main-agent",
+      baselineCapabilities: ["docs.read"],
+      allowedCapabilityPatterns: ["computer.*"],
+    }),
+  });
+  const session = runtime.createSession();
+  const goal = runtime.createCompiledGoal(
+    createGoalSource({
+      goalId: "goal-runtime-tool-review-mainline",
+      sessionId: session.sessionId,
+      userInput: "Record tool reviewer mainline governance events.",
+    }),
+  );
+  const created = await runtime.createRun({
+    sessionId: session.sessionId,
+    goal,
+  });
+
+  const waiting = await runtime.dispatchCapabilityIntentViaTaPool({
+    intentId: "intent-tool-review-mainline-1",
+    sessionId: session.sessionId,
+    runId: created.run.runId,
+    kind: "capability_call",
+    createdAt: "2026-03-25T20:00:00.000Z",
+    priority: "normal",
+    request: {
+      requestId: "request-tool-review-mainline-1",
+      intentId: "intent-tool-review-mainline-1",
+      sessionId: session.sessionId,
+      runId: created.run.runId,
+      capabilityKey: "computer.use",
+      input: {
+        task: "capture screenshot",
+      },
+      priority: "normal",
+    },
+  }, {
+    agentId: "agent-main",
+    requestedTier: "B2",
+    mode: "restricted",
+    reason: "Need tool reviewer to follow the human gate path.",
+  });
+
+  assert.equal(waiting.status, "waiting_human");
+  assert.equal(runtime.toolReviewerRuntime?.listSessions().length, 1);
+  assert.equal(runtime.toolReviewerRuntime?.listActions().length, 1);
+  assert.equal(runtime.toolReviewerRuntime?.listActions()[0]?.governanceKind, "human_gate");
+
+  const approved = await runtime.submitTaHumanGateDecision({
+    gateId: runtime.listTaHumanGates()[0]!.gateId,
+    action: "approve",
+    actorId: "user-tool-reviewer",
+  });
+  assert.equal(approved.status, "provisioned");
+  assert.equal(runtime.toolReviewerRuntime?.listActions().some((action) => action.governanceKind === "replay"), true);
+
+  runtime.registerTaActivationFactory("factory:computer.use", () => ({
+    id: "adapter.computer.use.tool-review-mainline",
+    runtimeKind: "tool",
+    supports(plan) {
+      return plan.capabilityKey === "computer.use";
+    },
+    async prepare(plan, lease) {
+      return {
+        preparedId: `${plan.planId}:prepared`,
+        leaseId: lease.leaseId,
+        capabilityKey: plan.capabilityKey,
+        bindingId: lease.bindingId,
+        generation: lease.generation,
+        executionMode: "direct",
+      };
+    },
+    async execute(prepared) {
+      return {
+        executionId: `${prepared.preparedId}:execution`,
+        resultId: `${prepared.preparedId}:result`,
+        status: "success",
+        output: {
+          answer: "tool-review-mainline-activation-ok",
+        },
+        completedAt: "2026-03-25T20:00:02.000Z",
+      };
+    },
+  }));
+
+  const activation = await runtime.activateTaProvisionAsset(approved.provisionRequest!.provisionId);
+  assert.equal(activation.status, "activated");
+  assert.equal(runtime.toolReviewerRuntime?.listActions().some((action) => action.governanceKind === "activation"), true);
+});
+
+test("AgentCoreRuntime can recover and continue a waiting human gate approval path", async () => {
+  const runtime = createAgentCoreRuntime({
+    taProfile: createAgentCapabilityProfile({
+      profileId: "profile.runtime.recover-human-gate",
+      agentClass: "main-agent",
+      baselineCapabilities: ["docs.read"],
+      allowedCapabilityPatterns: ["search.*"],
+    }),
+  });
+  const session = runtime.createSession();
+  const goal = runtime.createCompiledGoal(
+    createGoalSource({
+      goalId: "goal-runtime-recover-human-gate",
+      sessionId: session.sessionId,
+      userInput: "Recover and continue a human gate.",
+    }),
+  );
+  const created = await runtime.createRun({
+    sessionId: session.sessionId,
+    goal,
+  });
+
+  runtime.registerCapabilityAdapter({
+    capabilityId: "cap-search-ground-recover-human-gate",
+    capabilityKey: "search.ground",
+    kind: "tool",
+    version: "1.0.0",
+    generation: 1,
+    description: "Recovered human gate capability.",
+  }, {
+    id: "adapter.search.ground.recover-human-gate",
+    runtimeKind: "tool",
+    supports(plan) {
+      return plan.capabilityKey === "search.ground";
+    },
+    async prepare(plan, lease) {
+      return {
+        preparedId: `${plan.planId}:prepared`,
+        leaseId: lease.leaseId,
+        capabilityKey: plan.capabilityKey,
+        bindingId: lease.bindingId,
+        generation: lease.generation,
+        executionMode: "direct",
+      };
+    },
+    async execute(prepared) {
+      return {
+        executionId: `${prepared.preparedId}:execution`,
+        resultId: `${prepared.preparedId}:result`,
+        status: "success",
+        output: {
+          answer: "recovered-human-gate-ok",
+        },
+        completedAt: "2026-03-25T20:10:02.000Z",
+      };
+    },
+  });
+
+  const waiting = await runtime.dispatchCapabilityIntentViaTaPool({
+    intentId: "intent-recover-human-gate-1",
+    sessionId: session.sessionId,
+    runId: created.run.runId,
+    kind: "capability_call",
+    createdAt: "2026-03-25T20:10:00.000Z",
+    priority: "normal",
+    request: {
+      requestId: "request-recover-human-gate-1",
+      intentId: "intent-recover-human-gate-1",
+      sessionId: session.sessionId,
+      runId: created.run.runId,
+      capabilityKey: "search.ground",
+      input: {
+        query: "recover and continue",
+      },
+      priority: "normal",
+    },
+  }, {
+    agentId: "agent-main",
+    requestedTier: "B1",
+    mode: "restricted",
+    reason: "Need recovery to preserve the human gate path.",
+  });
+
+  assert.equal(waiting.status, "waiting_human");
+  await runtime.writeTapDurableCheckpoint(created.run.runId, "manual");
+
+  const recovered = createAgentCoreRuntime({
+    journal: runtime.journal,
+    checkpointStore: runtime.checkpointStore,
+    taProfile: runtime.taControlPlaneGateway?.profile,
+  });
+  recovered.registerCapabilityAdapter({
+    capabilityId: "cap-search-ground-recover-human-gate",
+    capabilityKey: "search.ground",
+    kind: "tool",
+    version: "1.0.0",
+    generation: 1,
+    description: "Recovered human gate capability.",
+  }, {
+    id: "adapter.search.ground.recover-human-gate",
+    runtimeKind: "tool",
+    supports(plan) {
+      return plan.capabilityKey === "search.ground";
+    },
+    async prepare(plan, lease) {
+      return {
+        preparedId: `${plan.planId}:prepared`,
+        leaseId: lease.leaseId,
+        capabilityKey: plan.capabilityKey,
+        bindingId: lease.bindingId,
+        generation: lease.generation,
+        executionMode: "direct",
+      };
+    },
+    async execute(prepared) {
+      return {
+        executionId: `${prepared.preparedId}:execution`,
+        resultId: `${prepared.preparedId}:result`,
+        status: "success",
+        output: {
+          answer: "recovered-human-gate-ok",
+        },
+        completedAt: "2026-03-25T20:10:03.000Z",
+      };
+    },
+  });
+  await recovered.recoverAndHydrateTapRuntime(created.run.runId);
+
+  const gate = recovered.listTaHumanGates()[0];
+  assert.ok(gate);
+
+  const approved = await recovered.submitTaHumanGateDecision({
+    gateId: gate.gateId,
+    action: "approve",
+    actorId: "user-after-recovery",
+  });
+
+  assert.equal(approved.status, "dispatched");
+  assert.equal(approved.runOutcome?.run.runId, created.run.runId);
+  assert.equal(recovered.getTaHumanGate(gate.gateId)?.status, "approved");
+});
+
+test("AgentCoreRuntime does not auto-resume a human-gate envelope after hydration", async () => {
+  const runtime = createAgentCoreRuntime({
+    taProfile: createAgentCapabilityProfile({
+      profileId: "profile.runtime.human-gate-envelope-boundary",
+      agentClass: "main-agent",
+      baselineCapabilities: ["docs.read"],
+      allowedCapabilityPatterns: ["search.*"],
+    }),
+  });
+  const session = runtime.createSession();
+  const goal = runtime.createCompiledGoal(
+    createGoalSource({
+      goalId: "goal-runtime-human-gate-envelope-boundary",
+      sessionId: session.sessionId,
+      userInput: "Hydration should not auto-approve a human gate.",
+    }),
+  );
+  const created = await runtime.createRun({
+    sessionId: session.sessionId,
+    goal,
+  });
+
+  const waiting = await runtime.dispatchCapabilityIntentViaTaPool({
+    intentId: "intent-human-gate-envelope-boundary-1",
+    sessionId: session.sessionId,
+    runId: created.run.runId,
+    kind: "capability_call",
+    createdAt: "2026-03-25T20:15:00.000Z",
+    priority: "normal",
+    request: {
+      requestId: "request-human-gate-envelope-boundary-1",
+      intentId: "intent-human-gate-envelope-boundary-1",
+      sessionId: session.sessionId,
+      runId: created.run.runId,
+      capabilityKey: "search.ground",
+      input: {
+        query: "do not auto resume",
+      },
+      priority: "normal",
+    },
+  }, {
+    agentId: "agent-main",
+    requestedTier: "B1",
+    mode: "restricted",
+    reason: "Hydration must leave the human gate pending.",
+  });
+
+  assert.equal(waiting.status, "waiting_human");
+  const envelope = runtime.listTaResumeEnvelopes().find((entry) => entry.source === "human_gate");
+  assert.ok(envelope);
+
+  const recovered = createAgentCoreRuntime({
+    taProfile: runtime.taControlPlaneGateway?.profile,
+  });
+  recovered.hydrateRecoveredTapRuntimeSnapshot(runtime.createTapRuntimeSnapshot());
+
+  const resumed = await recovered.resumeTaEnvelope(envelope!.envelopeId);
+
+  assert.equal(resumed.status, "human_gate_pending");
+  assert.equal(resumed.dispatchResult, undefined);
+  assert.equal(recovered.listTaHumanGates()[0]?.status, "waiting_human");
+});
+
+test("AgentCoreRuntime can recover and resume a pending replay from a stored TAP envelope", async () => {
+  const runtime = createAgentCoreRuntime({
+    taProfile: createAgentCapabilityProfile({
+      profileId: "profile.runtime.resume-replay-envelope",
+      agentClass: "main-agent",
+      baselineCapabilities: ["docs.read"],
+      allowedCapabilityPatterns: ["computer.*"],
+    }),
+  });
+  const session = runtime.createSession();
+  const goal = runtime.createCompiledGoal(
+    createGoalSource({
+      goalId: "goal-runtime-resume-replay-envelope",
+      sessionId: session.sessionId,
+      userInput: "Recover and resume a staged replay envelope.",
+    }),
+  );
+  const created = await runtime.createRun({
+    sessionId: session.sessionId,
+    goal,
+  });
+
+  const provisioned = await runtime.dispatchCapabilityIntentViaTaPool({
+    intentId: "intent-resume-replay-envelope-1",
+    sessionId: session.sessionId,
+    runId: created.run.runId,
+    kind: "capability_call",
+    createdAt: "2026-03-25T20:20:00.000Z",
+    priority: "normal",
+    request: {
+      requestId: "request-resume-replay-envelope-1",
+      intentId: "intent-resume-replay-envelope-1",
+      sessionId: session.sessionId,
+      runId: created.run.runId,
+      capabilityKey: "computer.use",
+      input: {
+        task: "recover replay envelope",
+      },
+      priority: "normal",
+    },
+  }, {
+    agentId: "agent-main",
+    requestedTier: "B2",
+    mode: "balanced",
+    reason: "Need a staged replay before recovery.",
+  });
+
+  assert.equal(provisioned.status, "provisioned");
+
+  runtime.registerTaActivationFactory("factory:computer.use", () => ({
+    id: "adapter.computer.use.resume-envelope",
+    runtimeKind: "tool",
+    supports(plan) {
+      return plan.capabilityKey === "computer.use";
+    },
+    async prepare(plan, lease) {
+      return {
+        preparedId: `${plan.planId}:prepared`,
+        leaseId: lease.leaseId,
+        capabilityKey: plan.capabilityKey,
+        bindingId: lease.bindingId,
+        generation: lease.generation,
+        executionMode: "direct",
+      };
+    },
+    async execute(prepared) {
+      return {
+        executionId: `${prepared.preparedId}:execution`,
+        resultId: `${prepared.preparedId}:result`,
+        status: "success",
+        output: {
+          answer: "resume-envelope-ok",
+        },
+        completedAt: "2026-03-25T20:20:03.000Z",
+      };
+    },
+  }));
+  await runtime.activateTaProvisionAsset(provisioned.provisionRequest!.provisionId);
+  await runtime.writeTapDurableCheckpoint(created.run.runId, "manual");
+
+  const replayEnvelope = runtime.listTaResumeEnvelopes().find((envelope) => envelope.source === "replay");
+  assert.ok(replayEnvelope);
+
+  const recovered = createAgentCoreRuntime({
+    journal: runtime.journal,
+    checkpointStore: runtime.checkpointStore,
+    taProfile: runtime.taControlPlaneGateway?.profile,
+  });
+  recovered.registerTaActivationFactory("factory:computer.use", () => ({
+    id: "adapter.computer.use.resume-envelope",
+    runtimeKind: "tool",
+    supports(plan) {
+      return plan.capabilityKey === "computer.use";
+    },
+    async prepare(plan, lease) {
+      return {
+        preparedId: `${plan.planId}:prepared`,
+        leaseId: lease.leaseId,
+        capabilityKey: plan.capabilityKey,
+        bindingId: lease.bindingId,
+        generation: lease.generation,
+        executionMode: "direct",
+      };
+    },
+    async execute(prepared) {
+      return {
+        executionId: `${prepared.preparedId}:execution`,
+        resultId: `${prepared.preparedId}:result`,
+        status: "success",
+        output: {
+          answer: "resume-envelope-ok",
+        },
+        completedAt: "2026-03-25T20:20:04.000Z",
+      };
+    },
+  }));
+  await recovered.recoverAndHydrateTapRuntime(created.run.runId);
+
+  assert.equal(recovered.listTaActivationAttempts().length, 1);
+  assert.equal(recovered.toolReviewerRuntime?.listActions().some((action) => action.governanceKind === "activation"), true);
+
+  const resumed = await recovered.resumeTaEnvelope(replayEnvelope!.envelopeId);
+
+  assert.equal(resumed.status, "dispatched");
+  assert.equal(resumed.dispatchResult?.grant?.capabilityKey, "computer.use");
+  assert.equal(recovered.getTaResumeEnvelope(replayEnvelope!.envelopeId), undefined);
 });
 
 test("AgentCoreRuntime inventory sees ready provision assets and avoids duplicate provisioning redirects", async () => {

@@ -57,7 +57,11 @@ import {
 import { createReviewerRuntime, ReviewerRuntime } from "./ta-pool-review/index.js";
 import { createProvisionerRuntime, ProvisionerRuntime } from "./ta-pool-provision/index.js";
 import type { ProvisionAssetRecord } from "./ta-pool-provision/index.js";
-import { createToolReviewerRuntime, ToolReviewerRuntime } from "./ta-pool-tool-review/index.js";
+import {
+  createToolReviewGovernanceTrace,
+  createToolReviewerRuntime,
+  ToolReviewerRuntime,
+} from "./ta-pool-tool-review/index.js";
 import { evaluateSafetyInterception, type TaSafetyInterceptorConfig } from "./ta-pool-safety/index.js";
 import { formatPlainLanguageRisk } from "./ta-pool-context/plain-language-risk.js";
 import { toProvisionRequestFromReviewDecision, type ReviewDecisionEngineInventory } from "./ta-pool-review/index.js";
@@ -232,6 +236,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function toIntentPriority(value: unknown): CapabilityInvocationPlan["priority"] {
+  return value === "low" || value === "normal" || value === "high" || value === "critical"
+    ? value
+    : "normal";
+}
+
 export interface SubmitTaHumanGateDecisionInput {
   gateId: string;
   action: "approve" | "reject";
@@ -259,6 +269,23 @@ export interface ActivateTaProvisionAssetResult {
   receipt?: TaActivationReceipt;
   failure?: TaActivationFailure;
   activation?: TaCapabilityActivationHandoff;
+}
+
+export type ResumeTaEnvelopeStatus =
+  | DispatchCapabilityIntentViaTaPoolResult["status"]
+  | ActivateTaProvisionAssetStatus
+  | "resume_envelope_not_found"
+  | "human_gate_pending"
+  | "resume_not_supported";
+
+export interface ResumeTaEnvelopeResult {
+  status: ResumeTaEnvelopeStatus;
+  envelope?: ReturnType<typeof createTaResumeEnvelope>;
+  replay?: TaPendingReplay;
+  humanGate?: TaCapabilityHumanGateHandoff;
+  activation?: TaCapabilityActivationHandoff;
+  dispatchResult?: DispatchCapabilityIntentViaTaPoolResult;
+  activationResult?: ActivateTaProvisionAssetResult;
 }
 
 interface TaHumanGateContext {
@@ -489,8 +516,120 @@ export class AgentCoreRuntime {
     return [...this.#taActivationAttempts.values()];
   }
 
+  getTaResumeEnvelope(envelopeId: string) {
+    return this.#taResumeEnvelopes.get(envelopeId);
+  }
+
   listTaResumeEnvelopes() {
     return [...this.#taResumeEnvelopes.values()];
+  }
+
+  async resumeTaEnvelope(envelopeId: string): Promise<ResumeTaEnvelopeResult> {
+    const envelope = this.#taResumeEnvelopes.get(envelopeId);
+    if (!envelope) {
+      return {
+        status: "resume_envelope_not_found",
+      };
+    }
+
+    if (envelope.source === "human_gate") {
+      const gateId = typeof envelope.metadata?.gateId === "string" ? envelope.metadata.gateId : undefined;
+      const gate = gateId ? this.#taHumanGates.get(gateId) : undefined;
+      return {
+        status: "human_gate_pending",
+        envelope,
+        humanGate: gate ? this.#toHumanGateHandoff(gate, "review_decision") : undefined,
+      };
+    }
+
+    if (envelope.source === "activation") {
+      const provisionId = typeof envelope.metadata?.provisionId === "string"
+        ? envelope.metadata.provisionId
+        : undefined;
+      if (!provisionId) {
+        return {
+          status: "resume_not_supported",
+          envelope,
+        };
+      }
+      const activationResult = await this.activateTaProvisionAsset(provisionId);
+      if (activationResult.status !== "activation_asset_not_found") {
+        this.#taResumeEnvelopes.delete(envelopeId);
+      }
+      return {
+        status: activationResult.status,
+        envelope,
+        activation: activationResult.activation,
+        activationResult,
+      };
+    }
+
+    const replayId = typeof envelope.metadata?.replayId === "string"
+      ? envelope.metadata.replayId
+      : undefined;
+    const replay = replayId ? this.#taPendingReplays.get(replayId) : undefined;
+    if (!envelope.intentRequest || !replay) {
+      return {
+        status: "resume_not_supported",
+        envelope,
+        replay,
+      };
+    }
+
+    const provisionId = typeof envelope.metadata?.provisionId === "string"
+      ? envelope.metadata.provisionId
+      : undefined;
+    if (provisionId) {
+      await this.activateTaProvisionAsset(provisionId);
+    }
+    await this.#ensureRunAvailable(envelope.runId);
+
+    const dispatchResult = await this.dispatchCapabilityIntentViaTaPool({
+      intentId: envelope.intentRequest.intentId,
+      sessionId: envelope.sessionId,
+      runId: envelope.runId,
+      kind: "capability_call",
+      createdAt: new Date().toISOString(),
+      priority: toIntentPriority(envelope.intentRequest.priority),
+      correlationId: envelope.intentRequest.intentId,
+      request: {
+        requestId: envelope.intentRequest.requestId,
+        intentId: envelope.intentRequest.intentId,
+        sessionId: envelope.sessionId,
+        runId: envelope.runId,
+        capabilityKey: envelope.intentRequest.capabilityKey,
+        input: envelope.intentRequest.input,
+        priority: toIntentPriority(envelope.intentRequest.priority),
+        timeoutMs: envelope.intentRequest.timeoutMs,
+        metadata: envelope.intentRequest.metadata,
+      },
+      metadata: isRecord(envelope.metadata) ? envelope.metadata : undefined,
+    }, {
+      agentId: typeof envelope.metadata?.agentId === "string"
+        ? envelope.metadata.agentId
+        : `agent-core-runtime:${envelope.sessionId}`,
+      reason: envelope.reason,
+      requestedTier: envelope.requestedTier,
+      mode: envelope.mode,
+      requestedScope: envelope.requestedScope,
+      taskContext: isRecord(envelope.metadata?.taskContext)
+        ? envelope.metadata.taskContext as Record<string, unknown>
+        : undefined,
+      metadata: {
+        resumedFromEnvelopeId: envelope.envelopeId,
+        resumedFromReplayId: replayId,
+      },
+    });
+
+    this.#taPendingReplays.delete(replay.replayId);
+    this.#taResumeEnvelopes.delete(envelopeId);
+
+    return {
+      status: dispatchResult.status,
+      envelope,
+      replay,
+      dispatchResult,
+    };
   }
 
   createTapCheckpointSnapshot(runId: string) {
@@ -558,12 +697,22 @@ export class AgentCoreRuntime {
     }
     this.#taHumanGateContexts.clear();
     for (const [gateId, context] of hydrated.humanGateContexts) {
+      if (!this.sessionManager.loadSessionHeader(context.accessRequest.sessionId)) {
+        this.sessionManager.createSession({
+          sessionId: context.accessRequest.sessionId,
+          activeRunId: context.accessRequest.runId,
+          runIds: [context.accessRequest.runId],
+          status: "active",
+        });
+      }
       this.#taHumanGateContexts.set(gateId, {
         intent: context.intent,
         accessRequest: context.accessRequest,
         reviewDecision: context.reviewDecision,
         options: context.options,
       });
+      this.taControlPlaneGateway?.restoreRequest(context.accessRequest);
+      this.taControlPlaneGateway?.restoreDecision(context.reviewDecision);
     }
     this.#taHumanGateEvents.clear();
     for (const [gateId, events] of hydrated.humanGateEvents) {
@@ -579,6 +728,14 @@ export class AgentCoreRuntime {
     }
     this.#taResumeEnvelopes.clear();
     for (const [envelopeId, envelope] of hydrated.resumeEnvelopes) {
+      if (!this.sessionManager.loadSessionHeader(envelope.sessionId)) {
+        this.sessionManager.createSession({
+          sessionId: envelope.sessionId,
+          activeRunId: envelope.runId,
+          runIds: [envelope.runId],
+          status: "active",
+        });
+      }
       this.#taResumeEnvelopes.set(envelopeId, envelope);
     }
     this.reviewerRuntime?.hydrateDurableSnapshot(hydrated.reviewerDurableSnapshot);
@@ -758,6 +915,42 @@ export class AgentCoreRuntime {
     const runId = typeof relatedReplay?.metadata?.runId === "string"
       ? relatedReplay.metadata.runId
       : undefined;
+    await this.#recordToolReviewActivation({
+      provisionId,
+      capabilityKey: currentAsset?.capabilityKey ?? asset.capabilityKey,
+      activationSpec: currentAsset?.activation.spec ?? asset.activation.spec,
+      attempt: activationResult.attempt,
+      receipt: activationResult.status === "activated" ? activationResult.receipt : undefined,
+      failure: activationResult.status === "failed" ? activationResult.failure : undefined,
+      requestId: relatedReplay?.requestId,
+      sessionId,
+      runId,
+      reason: activationResult.status === "activated"
+        ? `Activation completed for ${currentAsset?.capabilityKey ?? asset.capabilityKey}.`
+        : `Activation failed for ${currentAsset?.capabilityKey ?? asset.capabilityKey}.`,
+    });
+    if (activationResult.status === "failed" && sessionId && runId) {
+      this.#recordResumeEnvelope(createTaResumeEnvelope({
+        envelopeId: `resume:activation:${provisionId}:${activationResult.attempt.attemptId}`,
+        source: "activation",
+        requestId: relatedReplay?.requestId ?? `${provisionId}:activation`,
+        sessionId,
+        runId,
+        capabilityKey: currentAsset?.capabilityKey ?? asset.capabilityKey,
+        requestedTier: typeof relatedReplay?.metadata?.requestedTier === "string"
+          ? relatedReplay.metadata.requestedTier as TaCapabilityTier
+          : "B1",
+        mode: typeof relatedReplay?.metadata?.mode === "string"
+          ? relatedReplay.metadata.mode as TaPoolMode
+          : "balanced",
+        reason: activationResult.failure?.message
+          ?? `Retry activation for ${currentAsset?.capabilityKey ?? asset.capabilityKey}.`,
+        metadata: {
+          provisionId,
+          attemptId: activationResult.attempt.attemptId,
+        },
+      }));
+    }
     if (sessionId && runId) {
       this.#writeTapControlPlaneCheckpoint({
         sessionId,
@@ -830,8 +1023,28 @@ export class AgentCoreRuntime {
     );
     const updatedGate = this.#applyHumanGateEvent(gate.gateId, humanGateEvent);
     const humanGate = this.#toHumanGateHandoff(updatedGate, "review_decision");
+    await this.#recordToolReviewHumanGate({
+      gate: updatedGate,
+      latestEvent: humanGateEvent,
+      accessRequest: context.accessRequest,
+      reviewDecision: context.reviewDecision,
+      reason: input.action === "approve"
+        ? `Human gate ${updatedGate.gateId} approved for ${updatedGate.capabilityKey}.`
+        : `Human gate ${updatedGate.gateId} rejected for ${updatedGate.capabilityKey}.`,
+    });
 
     if (input.action === "reject") {
+      this.#writeTapControlPlaneCheckpoint({
+        sessionId: context.accessRequest.sessionId,
+        runId: context.accessRequest.runId,
+        reason: "manual",
+        metadata: {
+          sourceOperation: "human-gate-decision",
+          gateId: updatedGate.gateId,
+          decision: "reject",
+          eventId: humanGateEvent.eventId,
+        },
+      });
       return {
         status: "denied",
         accessRequest: context.accessRequest,
@@ -910,6 +1123,19 @@ export class AgentCoreRuntime {
       const provisionAsset = provisionBundle.status === "ready"
         ? this.provisionerRuntime.assetIndex.getCurrent(provisionRequest.provisionId)
         : undefined;
+      this.#writeTapControlPlaneCheckpoint({
+        sessionId: context.accessRequest.sessionId,
+        runId: context.accessRequest.runId,
+        reason: "manual",
+        metadata: {
+          sourceOperation: "human-gate-decision",
+          gateId: updatedGate.gateId,
+          decision: "approve",
+          eventId: humanGateEvent.eventId,
+          provisionStatus: provisionBundle.status,
+          provisionId: provisionRequest.provisionId,
+        },
+      });
       return {
         status: provisionBundle.status === "ready" ? "provisioned" : "provisioning_failed",
         accessRequest: context.accessRequest,
@@ -924,11 +1150,13 @@ export class AgentCoreRuntime {
           })
           : undefined,
         replay: provisionBundle.status === "ready"
-          ? this.#stageProvisionReplay({
+          ? await this.#stageProvisionReplay({
               accessRequest: context.accessRequest,
               provisionBundle,
               intent: context.intent,
               source: "human-gate-approval",
+              options: context.options,
+              reviewDecision: approvalDecision,
               metadata: {
                 gateId: updatedGate.gateId,
                 eventId: humanGateEvent.eventId,
@@ -949,6 +1177,7 @@ export class AgentCoreRuntime {
       };
     }
 
+    await this.#ensureRunAvailable(context.intent.runId);
     const executionRequestId = consumed.decisionToken?.requestId ?? context.intent.request.requestId;
     const dispatch = await this.dispatchTaCapabilityGrant({
       grant: consumed.grant,
@@ -966,6 +1195,18 @@ export class AgentCoreRuntime {
     const runOutcome = await this.#awaitCapabilityRunOutcome({
       requestId: executionRequestId,
       timeoutMs: context.intent.request.timeoutMs,
+    });
+    this.#writeTapControlPlaneCheckpoint({
+      sessionId: context.accessRequest.sessionId,
+      runId: context.accessRequest.runId,
+      reason: "manual",
+      metadata: {
+        sourceOperation: "human-gate-decision",
+        gateId: updatedGate.gateId,
+        decision: "approve",
+        eventId: humanGateEvent.eventId,
+        dispatchStatus: "dispatched",
+      },
     });
     return {
       status: "dispatched",
@@ -1062,7 +1303,7 @@ export class AgentCoreRuntime {
         safety,
         accessRequest,
         reviewDecision,
-        humanGate: this.#openHumanGate({
+        humanGate: await this.#openHumanGate({
           accessRequest,
           reviewDecision,
           intent,
@@ -1178,11 +1419,13 @@ export class AgentCoreRuntime {
         ? this.provisionerRuntime.assetIndex.getCurrent(provisionRequest.provisionId)
         : undefined;
       if (provisionBundle.status === "ready") {
-        this.#stageProvisionReplay({
+        await this.#stageProvisionReplay({
           accessRequest,
           provisionBundle,
           intent,
           source: "review-provisioning",
+          options,
+          reviewDecision,
           metadata: {
             decisionId: reviewDecision.decisionId,
           },
@@ -1237,7 +1480,7 @@ export class AgentCoreRuntime {
         : undefined,
       replay,
       humanGate: reviewDecision.decision === "escalated_to_human"
-        ? this.#openHumanGate({
+        ? await this.#openHumanGate({
           accessRequest,
           reviewDecision,
           intent,
@@ -1608,6 +1851,160 @@ export class AgentCoreRuntime {
     };
   }
 
+  #createToolReviewRequestRef(accessRequest: AccessRequest) {
+    return {
+      requestId: accessRequest.requestId,
+      sessionId: accessRequest.sessionId,
+      runId: accessRequest.runId,
+      requestedCapabilityKey: accessRequest.requestedCapabilityKey,
+      requestedTier: accessRequest.requestedTier,
+      mode: accessRequest.mode,
+      canonicalMode: accessRequest.canonicalMode,
+      riskLevel: accessRequest.riskLevel,
+    };
+  }
+
+  #createToolReviewSourceDecisionRef(reviewDecision?: ReviewDecision) {
+    if (!reviewDecision) {
+      return undefined;
+    }
+
+    return {
+      decisionId: reviewDecision.decisionId,
+      decision: reviewDecision.decision,
+      vote: reviewDecision.vote,
+      reason: reviewDecision.reason,
+      escalationTarget: reviewDecision.escalationTarget,
+      createdAt: reviewDecision.createdAt,
+    };
+  }
+
+  async #recordToolReviewHumanGate(params: {
+    gate: TaHumanGateState;
+    latestEvent?: TaHumanGateEvent;
+    accessRequest?: AccessRequest;
+    reviewDecision?: ReviewDecision;
+    reason: string;
+  }): Promise<void> {
+    if (!this.toolReviewerRuntime) {
+      return;
+    }
+
+    await this.toolReviewerRuntime.submit({
+      sessionId: `tool-review:request:${params.gate.requestId}`,
+      governanceAction: {
+        kind: "human_gate",
+        trace: createToolReviewGovernanceTrace({
+          actionId: `tool-review:human-gate:${params.gate.gateId}:${params.latestEvent?.eventId ?? params.gate.updatedAt}`,
+          actorId: "tool-reviewer",
+          reason: params.reason,
+          createdAt: params.latestEvent?.createdAt ?? params.gate.updatedAt,
+          request: params.accessRequest ? this.#createToolReviewRequestRef(params.accessRequest) : undefined,
+          sourceDecision: this.#createToolReviewSourceDecisionRef(params.reviewDecision),
+          metadata: {
+            gateId: params.gate.gateId,
+          },
+        }),
+        capabilityKey: params.gate.capabilityKey,
+        gate: params.gate,
+        latestEvent: params.latestEvent,
+        metadata: {
+          gateId: params.gate.gateId,
+          latestEventType: params.latestEvent?.type,
+        },
+      },
+    });
+  }
+
+  async #recordToolReviewReplay(params: {
+    replay: TaPendingReplay;
+    accessRequest?: AccessRequest;
+    reviewDecision?: ReviewDecision;
+    reason: string;
+  }): Promise<void> {
+    if (!this.toolReviewerRuntime) {
+      return;
+    }
+
+    await this.toolReviewerRuntime.submit({
+      sessionId: `tool-review:provision:${params.replay.provisionId}`,
+      governanceAction: {
+        kind: "replay",
+        trace: createToolReviewGovernanceTrace({
+          actionId: `tool-review:replay:${params.replay.replayId}:${params.replay.updatedAt}`,
+          actorId: "tool-reviewer",
+          reason: params.reason,
+          createdAt: params.replay.updatedAt,
+          request: params.accessRequest ? this.#createToolReviewRequestRef(params.accessRequest) : undefined,
+          sourceDecision: this.#createToolReviewSourceDecisionRef(params.reviewDecision),
+          metadata: {
+            replayId: params.replay.replayId,
+          },
+        }),
+        capabilityKey: params.replay.capabilityKey,
+        replay: params.replay,
+        metadata: {
+          replayId: params.replay.replayId,
+          provisionId: params.replay.provisionId,
+        },
+      },
+    });
+  }
+
+  async #recordToolReviewActivation(params: {
+    provisionId: string;
+    capabilityKey: string;
+    activationSpec?: PoolActivationSpec;
+    attempt: TaActivationAttemptRecord;
+    receipt?: TaActivationReceipt;
+    failure?: TaActivationFailure;
+    requestId?: string;
+    sessionId?: string;
+    runId?: string;
+    reason: string;
+  }): Promise<void> {
+    if (!this.toolReviewerRuntime || !params.activationSpec) {
+      return;
+    }
+
+    await this.toolReviewerRuntime.submit({
+      sessionId: `tool-review:provision:${params.provisionId}`,
+      governanceAction: {
+        kind: "activation",
+        trace: createToolReviewGovernanceTrace({
+          actionId: `tool-review:activation:${params.provisionId}:${params.attempt.attemptId}`,
+          actorId: "tool-reviewer",
+          reason: params.reason,
+          createdAt: params.attempt.updatedAt,
+          metadata: {
+            provisionId: params.provisionId,
+            attemptId: params.attempt.attemptId,
+            requestId: params.requestId,
+            sessionId: params.sessionId,
+            runId: params.runId,
+          },
+        }),
+        provisionId: params.provisionId,
+        capabilityKey: params.capabilityKey,
+        activationSpec: {
+          targetPool: params.activationSpec.targetPool,
+          activationMode: params.activationSpec.activationMode,
+          registerOrReplace: params.activationSpec.registerOrReplace,
+          generationStrategy: params.activationSpec.generationStrategy,
+          drainStrategy: params.activationSpec.drainStrategy,
+          adapterFactoryRef: params.activationSpec.adapterFactoryRef,
+        },
+        currentAttempt: params.attempt,
+        latestReceipt: params.receipt,
+        latestFailure: params.failure,
+        metadata: {
+          provisionId: params.provisionId,
+          attemptId: params.attempt.attemptId,
+        },
+      },
+    });
+  }
+
   #findCurrentProvisionAsset(capabilityKey: string): ProvisionAssetRecord | undefined {
     if (!this.provisionerRuntime) {
       return undefined;
@@ -1856,12 +2253,12 @@ export class AgentCoreRuntime {
     };
   }
 
-  #openHumanGate(params: {
+  async #openHumanGate(params: {
     accessRequest: AccessRequest;
     reviewDecision: ReviewDecision;
     intent: CapabilityCallIntent;
     options: DispatchCapabilityIntentViaTaPoolOptions;
-  }): TaCapabilityHumanGateHandoff {
+  }): Promise<TaCapabilityHumanGateHandoff> {
     const gateId = randomUUID();
     const createdAt = new Date().toISOString();
     const plainLanguageRisk = this.#buildHumanGateRiskPayload({
@@ -1919,7 +2316,18 @@ export class AgentCoreRuntime {
         priority: params.intent.priority,
         metadata: params.intent.request.metadata,
       },
+      metadata: {
+        gateId,
+        agentId: params.options.agentId,
+        taskContext: params.options.taskContext,
+      },
     }));
+    await this.#recordToolReviewHumanGate({
+      gate,
+      accessRequest: params.accessRequest,
+      reviewDecision: params.reviewDecision,
+      reason: params.reviewDecision.reason,
+    });
     this.#writeTapControlPlaneCheckpoint({
       sessionId: params.accessRequest.sessionId,
       runId: params.accessRequest.runId,
@@ -1953,13 +2361,15 @@ export class AgentCoreRuntime {
     return event;
   }
 
-  #stageProvisionReplay(params: {
+  async #stageProvisionReplay(params: {
     accessRequest: AccessRequest;
     provisionBundle: ProvisionArtifactBundle;
     intent: CapabilityCallIntent;
     source: string;
+    options?: DispatchCapabilityIntentViaTaPoolOptions;
+    reviewDecision?: ReviewDecision;
     metadata?: Record<string, unknown>;
-  }): TaCapabilityReplayHandoff {
+  }): Promise<TaCapabilityReplayHandoff> {
     const replay = createTaPendingReplay({
       replayId: `replay:${params.accessRequest.requestId}:${params.provisionBundle.provisionId}`,
       request: params.accessRequest,
@@ -1967,9 +2377,13 @@ export class AgentCoreRuntime {
       createdAt: params.provisionBundle.completedAt ?? new Date().toISOString(),
       metadata: {
         source: params.source,
+        agentId: params.options?.agentId,
         intentId: params.intent.intentId,
         runId: params.intent.runId,
         sessionId: params.intent.sessionId,
+        requestedTier: params.accessRequest.requestedTier,
+        mode: params.accessRequest.mode,
+        taskContext: params.options?.taskContext,
         ...(params.metadata ?? {}),
       },
     });
@@ -1995,8 +2409,16 @@ export class AgentCoreRuntime {
       metadata: {
         replayId: replay.replayId,
         provisionId: params.provisionBundle.provisionId,
+        agentId: params.options?.agentId,
+        taskContext: params.options?.taskContext,
       },
     }));
+    await this.#recordToolReviewReplay({
+      replay,
+      accessRequest: params.accessRequest,
+      reviewDecision: params.reviewDecision,
+      reason: replay.reason,
+    });
     this.#writeTapControlPlaneCheckpoint({
       sessionId: params.intent.sessionId,
       runId: params.intent.runId,
@@ -2027,6 +2449,18 @@ export class AgentCoreRuntime {
     envelope: ReturnType<typeof createTaResumeEnvelope>,
   ): void {
     this.#taResumeEnvelopes.set(envelope.envelopeId, envelope);
+  }
+
+  async #ensureRunAvailable(runId: string): Promise<void> {
+    if (this.runCoordinator.getRun(runId)) {
+      return;
+    }
+
+    try {
+      await this.runCoordinator.resumeRun({ runId });
+    } catch {
+      // Let the later dispatch path surface the truthful failure if recovery is impossible.
+    }
   }
 
   #createDefaultTaDispatchOptions(

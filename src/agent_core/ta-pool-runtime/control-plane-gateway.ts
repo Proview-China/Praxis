@@ -253,6 +253,14 @@ export class TaControlPlaneGateway {
     return [...this.#requests.values()];
   }
 
+  restoreRequest(request: AccessRequest): void {
+    this.#requests.set(request.requestId, request);
+  }
+
+  restoreDecision(decision: ReviewDecision): void {
+    this.#decisions.set(decision.decisionId, decision);
+  }
+
   #createBaselineGrant(
     input: ResolveCapabilityAccessInput,
     matchedPattern?: string,

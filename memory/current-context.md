@@ -728,3 +728,51 @@
      - `TAP` 已不只是“可用控制面”
      - 第三阶段第一波 helper 与 activation runtime integration 已开始成立
      - 但 durable checkpoint 写入点和更深的 `TMA -> provisioner runtime` 主链仍待继续推进
+14. 当前 `TAP` 的 `Wave 4-5` 后半段已经继续推进一小波真实代码落地：
+   - 当前工作树：
+     - `/home/proview/Desktop/Praxis_series/Praxis/.parallel-worktrees/reboot-merge`
+   - 当前分支：
+     - `reboot/blank-slate`
+   - 当前在 `f924c82` 之后继续完成的核心内容：
+     - `tool_reviewer` 已开始真实接入 runtime 主链
+       - runtime 现在会自动记录：
+         - `human_gate`
+         - `replay`
+         - `activation`
+       - 不再只是“手工 submit 一条治理壳记录”
+     - `resume envelope` 已新增显式恢复入口：
+       - `resumeTaEnvelope(...)`
+       - 当前可以：
+         - 保持 `human_gate` 待人工批准
+         - 从 pending replay 重新进入 review / dispatch
+         - 对 activation retry 走第一版恢复入口
+     - `recover + hydrate` 已补回更多控制面状态：
+       - 会恢复 `tool_reviewer / reviewer / provisioner / TMA`
+       - 会恢复必要的 `session header`
+       - 会恢复 control-plane 的 `request / decision`
+     - `run-coordinator.resumeRun(...)` 已补一刀：
+       - 不再先要求 run 必须已经在内存 map 里
+       - 允许先走 checkpoint/journal 恢复再回到 runtime
+   - 当前新增的关键验证：
+     - recover 之后继续批准 `waiting_human` 仍能 dispatch
+     - recover 之后按 replay envelope 重新进入 review / dispatch
+     - hydrate 后 human-gate envelope 不会偷偷 auto-approve
+     - runtime 主链会自动产出 `tool_reviewer` governance session / action ledger
+   - 当前验证基线已更新为：
+     - `npm run typecheck` 通过
+     - `npx tsx --test src/agent_core/runtime.test.ts` 通过
+     - `npx tsx --test src/agent_core/**/*.test.ts` 通过
+     - 当前 `agent_core` 定向测试：`306 pass / 0 fail`
+     - `npm test` 通过
+     - 当前仓库级测试：`190 pass / 0 fail / 1 skipped`
+   - 当前这轮涉及的主文件：
+     - `src/agent_core/runtime.ts`
+     - `src/agent_core/runtime.test.ts`
+     - `src/agent_core/run/run-coordinator.ts`
+     - `src/agent_core/ta-pool-runtime/control-plane-gateway.ts`
+     - `docs/ability/46-tap-wave4-wave5-durable-lanes-and-hydration.md`
+   - 当前最准确的阶段判断：
+     - `Wave 4-5 durable lane baseline` 已经不是终点
+     - 后半段的 runtime resume / `tool_reviewer` mainline hookup 已开始 code-backed
+     - 但 `18-three-agent-negative-boundary-tests` 还没有完整铺满
+     - 更深的 `TMA durable resume / activation orchestration / final production closure` 仍待继续

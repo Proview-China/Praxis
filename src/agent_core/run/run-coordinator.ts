@@ -125,9 +125,6 @@ export class AgentRunCoordinator {
 
   async resumeRun(input: ResumeRunInput): Promise<RunTransitionOutcome> {
     const current = this.#runs.get(input.runId) ?? this.#restoreRunRecord(input.runId);
-    if (!current) {
-      throw new Error(`Run ${input.runId} was not found.`);
-    }
 
     const { recoveredRun } = await recoverRunContext({
       ...input,
@@ -135,6 +132,9 @@ export class AgentRunCoordinator {
       journal: this.#journal
     });
     const run = recoveredRun ?? current;
+    if (!run) {
+      throw new Error(`Run ${input.runId} was not found.`);
+    }
     this.#runs.set(run.runId, run);
 
     const resumedEvent = createRunResumedEvent(run, input, this.#clock, this.#idFactory);

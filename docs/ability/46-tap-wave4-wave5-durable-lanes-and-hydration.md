@@ -1,6 +1,6 @@
 # TAP Wave4-Wave5 Durable Lanes And Hydration
 
-状态：已落地第一段 durable lane 与 hydration 基线。
+状态：已落地 durable lane / hydration 基线，并继续推进了后半段 runtime resume 与 tool_reviewer 主链接缝。
 
 更新时间：2026-03-25
 
@@ -89,15 +89,45 @@
 
 这一步还没把 `Wave 4-5` 全部终结，剩下的真实缺口主要是：
 
-- tool_reviewer 还没有深度接进 runtime 主链业务路径
-- reviewer / tool_reviewer / TMA 的更完整 resume 驱动还可以继续加强
-- `three-agent negative boundary tests` 还没有作为独立波次完整收口
-- 更重的 activation / replay / human gate “自动续跑”仍可继续细化
+- `tool_reviewer` 已经开始进入 human_gate / replay / activation 主链，但 lifecycle 等更完整治理编排还可以继续加深
+- reviewer / tool_reviewer / TMA 的 resume 驱动已经有第一版公开恢复入口，但更细的 durable orchestration 还可以继续加强
+- `three-agent negative boundary tests` 已经开始进入 runtime 级测试，但还没有作为独立波次完全铺满
+- 更重的 activation / replay / human gate “自动续跑”仍可继续细化，当前仍以显式恢复调用为主
 
 所以它当前更准确的定位是：
 
 - `Wave 4-5 durable lane baseline is code-backed`
-- 但不是 `Wave 4-5 final closure`
+- `Wave 4-5 late-half resume/runtime hookup is partially code-backed`
+- 但还不是 `Wave 4-5 final closure`
+
+## 本轮继续推进的后半段收口
+
+这一轮在 baseline 之上，又补了 4 件很关键的事：
+
+- `tool_reviewer` 不再只是能 hydrate 回来的壳子，而是开始从 runtime 主链自动记录：
+  - `human_gate`
+  - `replay`
+  - `activation`
+- `resume envelope` 不再只是静态记录，runtime 现在已有显式恢复入口，可以按 envelope 继续：
+  - 保持 human gate 待批准
+  - 重试 activation
+  - 从 pending replay 重新进入 review / dispatch
+- `recover + hydrate` 现在不只恢复 reviewer / tool_reviewer / provision / TMA 子状态，也会把必要的 session / control-plane request 一起补回 runtime
+- run recovery 的主链也补了一刀，恢复后的 `resumeRun(...)` 不再过早依赖内存态 run 记录，能更真实地接住 checkpoint 恢复场景
+
+一句白话：
+
+- 现在 TAP 已经不只是“把状态存下来”
+- 而是开始真的具备“恢复以后继续把事往下跑”的能力了
+
+## 本轮新增验证重点
+
+这轮新增并跑通的重点验证包括：
+
+- recover 之后继续批准 waiting human gate，主链还能重新 dispatch
+- recover 之后按 replay envelope 继续进入 review / dispatch
+- hydrate 之后 human gate envelope 不会偷偷自动放行
+- runtime 主链会自动把 `tool_reviewer` 的 governance session / action ledger 补出来，而不是只能手工 submit
 
 ## 一句话收口
 
