@@ -3070,6 +3070,207 @@ test("AgentCoreRuntime continueTaProvisioning can continue auto-after-verify rep
   assert.equal(runtime.listTaResumeEnvelopes().some((entry) => entry.source === "replay"), false);
 });
 
+test("AgentCoreRuntime continueTaProvisioning stops when tool reviewer still marks the provision lane blocked", async () => {
+  const runtime = createAgentCoreRuntime({
+    taProfile: createAgentCapabilityProfile({
+      profileId: "profile.runtime.continue-provisioning-blocked-by-tool-review",
+      agentClass: "main-agent",
+      baselineCapabilities: ["docs.read"],
+      allowedCapabilityPatterns: ["computer.*"],
+    }),
+  });
+
+  const provisionBundle = await runtime.provisionerRuntime?.submit(createProvisionRequest({
+    provisionId: "provision-blocked-by-tool-review",
+    sourceRequestId: "request-blocked-by-tool-review-1",
+    requestedCapabilityKey: "computer.use",
+    reason: "Tool reviewer should be able to keep the provision lane blocked.",
+    replayPolicy: "re_review_then_dispatch",
+    createdAt: "2026-03-25T21:40:00.000Z",
+  }));
+  assert.equal(provisionBundle?.status, "ready");
+
+  const replay = createTaPendingReplay({
+    replayId: "replay:blocked-by-tool-review",
+    request: {
+      requestId: "request-blocked-by-tool-review-1",
+      requestedCapabilityKey: "computer.use",
+    },
+    provisionBundle: provisionBundle!,
+    createdAt: "2026-03-25T21:40:01.000Z",
+  });
+  runtime.hydrateRecoveredTapRuntimeSnapshot({
+    humanGates: [],
+    humanGateEvents: [],
+    pendingReplays: [replay],
+    activationAttempts: [],
+    resumeEnvelopes: [createTaResumeEnvelope({
+      envelopeId: "resume:replay:blocked-by-tool-review",
+      source: "replay",
+      requestId: "request-blocked-by-tool-review-1",
+      sessionId: "session-blocked-by-tool-review",
+      runId: "run-blocked-by-tool-review",
+      capabilityKey: "computer.use",
+      requestedTier: "B2",
+      mode: "balanced",
+      reason: "Blocked governance should stop continueTaProvisioning before replay resumes.",
+      intentRequest: {
+        requestId: "request-blocked-by-tool-review-1",
+        intentId: "intent-blocked-by-tool-review-1",
+        capabilityKey: "computer.use",
+        input: {
+          task: "do not continue while tool reviewer is blocked",
+        },
+        priority: "normal",
+      },
+      metadata: {
+        replayId: replay.replayId,
+        provisionId: "provision-blocked-by-tool-review",
+        agentId: "agent-main",
+      },
+    })],
+  });
+  await runtime.toolReviewerRuntime?.submit({
+    sessionId: "tool-review:provision:provision-blocked-by-tool-review",
+    governanceAction: {
+      kind: "lifecycle",
+      trace: createToolReviewGovernanceTrace({
+        actionId: "action-tool-review-blocked-provision",
+        actorId: "tool-reviewer",
+        reason: "Keep the provision lane blocked until lifecycle issues are fixed.",
+        createdAt: "2026-03-25T21:40:02.000Z",
+      }),
+      capabilityKey: "computer.use",
+      lifecycleAction: "register",
+      targetPool: "ta-capability-pool",
+      failure: {
+        code: "binding_missing",
+        message: "Binding is not ready yet.",
+      },
+    },
+  });
+
+  const continued = await runtime.continueTaProvisioning("provision-blocked-by-tool-review");
+
+  assert.equal(continued.status, "blocked");
+  assert.equal(runtime.getTaPendingReplay(replay.replayId)?.replayId, replay.replayId);
+  assert.equal(runtime.getTaReplayResumeEnvelope(replay.replayId)?.envelopeId, "resume:replay:blocked-by-tool-review");
+});
+
+test("AgentCoreRuntime continueTaProvisioning keeps replay backlog when resumed replay opens a fresh human gate", async () => {
+  const runtime = createAgentCoreRuntime({
+    taProfile: createAgentCapabilityProfile({
+      profileId: "profile.runtime.continue-provisioning-waiting-human",
+      agentClass: "main-agent",
+      baselineCapabilities: ["docs.read"],
+      allowedCapabilityPatterns: ["computer.*"],
+    }),
+  });
+  const session = runtime.createSession();
+  const goal = runtime.createCompiledGoal(
+    createGoalSource({
+      goalId: "goal-runtime-continue-provisioning-waiting-human",
+      sessionId: session.sessionId,
+      userInput: "Continue provisioning should preserve replay backlog when a new gate opens.",
+    }),
+  );
+  const created = await runtime.createRun({
+    sessionId: session.sessionId,
+    goal,
+  });
+
+  const provisionBundle = await runtime.provisionerRuntime?.submit(createProvisionRequest({
+    provisionId: "provision-waiting-human-on-continue",
+    sourceRequestId: "request-waiting-human-on-continue-1",
+    requestedCapabilityKey: "computer.use",
+    reason: "Replay resume should reopen a human gate in restricted mode.",
+    replayPolicy: "re_review_then_dispatch",
+    createdAt: "2026-03-25T21:50:00.000Z",
+  }));
+  assert.equal(provisionBundle?.status, "ready");
+  const replay = createTaPendingReplay({
+    replayId: "replay:waiting-human-on-continue",
+    request: {
+      requestId: "request-waiting-human-on-continue-1",
+      requestedCapabilityKey: "computer.use",
+    },
+    provisionBundle: provisionBundle!,
+    createdAt: "2026-03-25T21:50:01.000Z",
+    metadata: {
+      sessionId: session.sessionId,
+      runId: created.run.runId,
+      mode: "restricted",
+      requestedTier: "B3",
+    },
+  });
+  runtime.hydrateRecoveredTapRuntimeSnapshot({
+    humanGates: [],
+    humanGateEvents: [],
+    pendingReplays: [replay],
+    activationAttempts: [],
+    resumeEnvelopes: [createTaResumeEnvelope({
+      envelopeId: "resume:replay:waiting-human-on-continue",
+      source: "replay",
+      requestId: "request-waiting-human-on-continue-1",
+      sessionId: session.sessionId,
+      runId: created.run.runId,
+      capabilityKey: "computer.use",
+      requestedTier: "B3",
+      mode: "restricted",
+      reason: "Restricted replay should reopen a human gate instead of dropping backlog.",
+      intentRequest: {
+        requestId: "request-waiting-human-on-continue-1",
+        intentId: "intent-waiting-human-on-continue-1",
+        capabilityKey: "computer.use",
+        input: {
+          task: "reopen restricted gate",
+        },
+        priority: "normal",
+      },
+      metadata: {
+        replayId: replay.replayId,
+        provisionId: "provision-waiting-human-on-continue",
+        agentId: "agent-main",
+      },
+    })],
+  });
+  runtime.registerTaActivationFactory("factory:computer.use", () => ({
+    id: "adapter.computer.use.waiting-human-on-continue",
+    runtimeKind: "tool",
+    supports(plan) {
+      return plan.capabilityKey === "computer.use";
+    },
+    async prepare(plan, lease) {
+      return {
+        preparedId: `${plan.planId}:prepared`,
+        leaseId: lease.leaseId,
+        capabilityKey: plan.capabilityKey,
+        bindingId: lease.bindingId,
+        generation: lease.generation,
+        executionMode: "direct",
+      };
+    },
+    async execute(prepared) {
+      return {
+        executionId: `${prepared.preparedId}:execution`,
+        resultId: `${prepared.preparedId}:result`,
+        status: "success",
+        output: {
+          answer: "should-not-run-before-human-gate",
+        },
+        completedAt: "2026-03-25T21:50:04.000Z",
+      };
+    },
+  }));
+
+  const continued = await runtime.continueTaProvisioning("provision-waiting-human-on-continue");
+
+  assert.equal(continued.status, "waiting_human");
+  assert.equal(runtime.getTaPendingReplay(replay.replayId)?.replayId, replay.replayId);
+  assert.equal(runtime.getTaReplayResumeEnvelope(replay.replayId)?.envelopeId, "resume:replay:waiting-human-on-continue");
+  assert.equal(runtime.listTaHumanGates().length, 1);
+});
+
 test("AgentCoreRuntime lets bapr mode dispatch straight through TAP for available capabilities", async () => {
   const runtime = createAgentCoreRuntime({
     taProfile: createAgentCapabilityProfile({

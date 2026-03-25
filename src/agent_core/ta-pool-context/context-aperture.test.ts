@@ -67,6 +67,60 @@ test("provision context aperture upgrades requested capability input to v1 struc
   assert.equal(aperture.reviewerInstructions.status, "ready");
 });
 
+test("context aperture normalizes structured sections for future CMP/MP handoff", () => {
+  const aperture = createReviewContextAperture({
+    userIntentSummary: "需要审查真实浏览器能力。",
+    riskSummary: {
+      requestedAction: "review browser automation capability",
+      capabilityKey: "mcp.playwright",
+      riskLevel: "risky",
+    },
+    sections: [
+      {
+        sectionId: "project-state",
+        title: "Project State",
+        summary: "Praxis 正在推进 TAP final closure。",
+        status: "ready",
+        source: "cmp-placeholder",
+        freshness: "fresh",
+        trustLevel: "declared",
+      },
+      "Memory slot placeholder for later registry wiring.",
+    ],
+  });
+
+  assert.equal(aperture.sections.length, 2);
+  assert.equal(aperture.sections[0]?.sectionId, "project-state");
+  assert.equal(aperture.sections[0]?.freshness, "fresh");
+  assert.equal(aperture.sections[0]?.trustLevel, "declared");
+  assert.equal(aperture.sections[1]?.sectionId, "section-2");
+  assert.equal(aperture.sections[1]?.status, "ready");
+});
+
+test("context aperture rejects duplicate section ids", () => {
+  assert.throws(() => createReviewContextAperture({
+    userIntentSummary: "duplicate sections should fail",
+    riskSummary: {
+      requestedAction: "review duplicate section ids",
+      riskLevel: "normal",
+    },
+    sections: [
+      {
+        sectionId: "dup",
+        title: "First",
+        summary: "first summary",
+        status: "ready",
+      },
+      {
+        sectionId: "dup",
+        title: "Second",
+        summary: "second summary",
+        status: "ready",
+      },
+    ],
+  }), /duplicate sectionId/i);
+});
+
 test("context aperture rejects forbidden live handles and secret slots", () => {
   assert.throws(() => createReviewContextAperture({
     runSummary: "run-1",

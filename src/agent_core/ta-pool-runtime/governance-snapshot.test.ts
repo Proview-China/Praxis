@@ -7,6 +7,12 @@ import {
   createReviewDecision,
 } from "../ta-pool-types/index.js";
 import {
+  createToolReviewActionLedgerEntry,
+  createToolReviewGovernanceTrace,
+  createToolReviewSessionState,
+} from "../ta-pool-tool-review/index.js";
+import { createTmaSessionState } from "../ta-pool-provision/index.js";
+import {
   createTaActivationAttemptRecord,
   createTaActivationFailure,
   createTaActivationReceipt,
@@ -256,6 +262,67 @@ test("createTapGovernanceSnapshot groups TAP governance backlog by capability st
         reason: resumeOnlyRequest.reason,
       }),
     ],
+    toolReviewerSessions: [{
+      session: {
+        ...createToolReviewSessionState({
+          sessionId: "tool-review:provision:resume-1",
+          createdAt: "2026-03-25T10:00:03.000Z",
+        }),
+        status: "blocked",
+        latestActionId: "action-tool-review-blocked",
+        actionIds: ["action-tool-review-blocked"],
+      },
+      actions: [
+        createToolReviewActionLedgerEntry({
+          reviewId: "review-tool-review-blocked",
+          sessionId: "tool-review:provision:resume-1",
+          input: {
+            kind: "lifecycle",
+            trace: createToolReviewGovernanceTrace({
+              actionId: "action-tool-review-blocked",
+              actorId: "tool-reviewer",
+              reason: "Lifecycle blocked should stay visible in governance backlog.",
+              createdAt: "2026-03-25T10:00:03.000Z",
+            }),
+            capabilityKey: "mcp.playwright",
+            lifecycleAction: "register",
+            targetPool: "ta-capability-pool",
+            failure: {
+              code: "binding_missing",
+              message: "Binding not ready.",
+            },
+          },
+          output: {
+            kind: "lifecycle",
+            actionId: "action-tool-review-blocked",
+            status: "lifecycle_blocked",
+            capabilityKey: "mcp.playwright",
+            lifecycleAction: "register",
+            targetPool: "ta-capability-pool",
+            summary: "Lifecycle blocked for governance snapshot coverage.",
+            failure: {
+              code: "binding_missing",
+              message: "Binding not ready.",
+            },
+          },
+          status: "blocked",
+          recordedAt: "2026-03-25T10:00:03.000Z",
+        }),
+      ],
+    }],
+    tmaSessions: [
+      createTmaSessionState({
+        sessionId: "tma:repo.write:planner",
+        provisionId: "provision-tma-1",
+        planId: "plan-repo-write",
+        requestedCapabilityKey: "repo.write",
+        lane: "bootstrap",
+        phase: "planner",
+        status: "resumable",
+        createdAt: "2026-03-25T10:00:09.000Z",
+        resumeSummary: "Planner can resume repo.write bundle generation.",
+      }),
+    ],
     metadata: {
       checkpointId: "cp-governance-1",
     },
@@ -291,8 +358,22 @@ test("createTapGovernanceSnapshot groups TAP governance backlog by capability st
     replay: 0,
     activation: 1,
   });
+  assert.deepEqual(summary.counts.toolReviewerSessions, {
+    total: 1,
+    open: 0,
+    waitingHuman: 0,
+    blocked: 1,
+    completed: 0,
+  });
+  assert.deepEqual(summary.counts.tmaSessions, {
+    total: 1,
+    inProgress: 0,
+    resumable: 1,
+    completed: 0,
+  });
   assert.deepEqual(summary.blockingCapabilityKeys, [
     "computer.use",
+    "mcp.playwright",
     "repo.write",
     "shell.exec",
     "skill.doc.generate",
@@ -302,6 +383,7 @@ test("createTapGovernanceSnapshot groups TAP governance backlog by capability st
     summary.capabilities.map((entry) => [entry.capabilityKey, entry.stage]),
     [
       ["computer.use", "waiting_human"],
+      ["mcp.playwright", "tool_review_blocked"],
       ["repo.write", "activation_failed"],
       ["shell.exec", "activation_pending"],
       ["skill.doc.generate", "replay_pending"],
@@ -312,6 +394,14 @@ test("createTapGovernanceSnapshot groups TAP governance backlog by capability st
   assert.deepEqual(
     summary.capabilities.find((entry) => entry.capabilityKey === "repo.write")?.activationAttempts.targetPools,
     ["ta-governance-pool"],
+  );
+  assert.equal(
+    summary.capabilities.find((entry) => entry.capabilityKey === "mcp.playwright")?.toolReviewerSessions.blocked,
+    1,
+  );
+  assert.equal(
+    summary.capabilities.find((entry) => entry.capabilityKey === "repo.write")?.tmaSessions.resumable,
+    1,
   );
   assert.deepEqual(summary.metadata, {
     checkpointId: "cp-governance-1",

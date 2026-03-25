@@ -458,3 +458,59 @@ test("tool reviewer runtime can summarize a governance plan and quality report f
   assert.equal(report?.readyForHandoffReviewIds.length, 1);
   assert.match(report?.summary ?? "", /ready to hand back/i);
 });
+
+test("tool reviewer quality report follows the latest active governance state instead of stale blocked history", async () => {
+  const runtime = createToolReviewerRuntime();
+  const sessionId = "tool-review-session:quality-latest-state";
+
+  await runtime.submit({
+    sessionId,
+    governanceAction: {
+      kind: "lifecycle",
+      trace: createToolReviewGovernanceTrace({
+        actionId: "action-quality-blocked-1",
+        actorId: "tool-reviewer",
+        reason: "Start with a blocked lifecycle action.",
+        createdAt: "2026-03-25T11:10:00.000Z",
+      }),
+      capabilityKey: "computer.use",
+      lifecycleAction: "register",
+      targetPool: "ta-capability-pool",
+      failure: {
+        code: "binding_missing",
+        message: "Binding missing.",
+      },
+    },
+  });
+  await runtime.submit({
+    sessionId,
+    governanceAction: {
+      kind: "replay",
+      trace: createToolReviewGovernanceTrace({
+        actionId: "action-quality-ready-1",
+        actorId: "tool-reviewer",
+        reason: "A later replay handoff becomes ready.",
+        createdAt: "2026-03-25T11:11:00.000Z",
+      }),
+      capabilityKey: "computer.use",
+      replay: createTaPendingReplay({
+        replayId: "replay-quality-ready-1",
+        request: {
+          requestId: "req-quality-ready-1",
+          requestedCapabilityKey: "computer.use",
+        },
+        provisionBundle: {
+          provisionId: "prov-quality-ready-1",
+          replayPolicy: "re_review_then_dispatch",
+        },
+        createdAt: "2026-03-25T11:10:59.000Z",
+      }),
+    },
+  });
+
+  const report = runtime.createQualityReport(sessionId);
+
+  assert.equal(runtime.getSession(sessionId)?.status, "open");
+  assert.equal(report?.verdict, "handoff_ready");
+  assert.equal(report?.readyForHandoffReviewIds.includes("tool-review:action-quality-ready-1"), true);
+});

@@ -589,6 +589,10 @@ export class AgentCoreRuntime {
     return this.toolReviewerRuntime?.listGovernancePlans() ?? [];
   }
 
+  getToolReviewerGovernancePlan(sessionId: string): ToolReviewGovernancePlan | undefined {
+    return this.toolReviewerRuntime?.createGovernancePlan(sessionId);
+  }
+
   listToolReviewerQualityReports(): readonly ToolReviewQualityReport[] {
     return this.toolReviewerRuntime?.listQualityReports() ?? [];
   }
@@ -637,9 +641,34 @@ export class AgentCoreRuntime {
     return this.provisionerRuntime?.listDeliveryReports() ?? [];
   }
 
+  #readProvisionContinuationGate(provisionId: string): "waiting_human" | "blocked" | undefined {
+    const plan = this.getToolReviewerGovernancePlan(`tool-review:provision:${provisionId}`);
+    const latestStatus = plan?.items.at(-1)?.status;
+    if (latestStatus === "waiting_human" || latestStatus === "blocked") {
+      return latestStatus;
+    }
+    return undefined;
+  }
+
   async continueTaProvisioning(provisionId: string): Promise<ContinueTaProvisioningResult> {
-    const activationResult = await this.#ensureProvisionAssetActivated(provisionId);
     const replay = this.#findPendingReplayByProvisionId(provisionId);
+    const asset = this.provisionerRuntime?.assetIndex.getCurrent(provisionId);
+    const continuationGate = this.#readProvisionContinuationGate(provisionId);
+    if (continuationGate) {
+      return {
+        status: continuationGate,
+        provisionId,
+        replay,
+        activation: asset
+          ? this.#createActivationHandoff({
+            source: "provision_asset",
+            asset,
+          })
+          : undefined,
+      };
+    }
+
+    const activationResult = await this.#ensureProvisionAssetActivated(provisionId);
     const activation = activationResult.activation;
 
     if (activationResult.status !== "activated") {
@@ -2989,8 +3018,12 @@ export class AgentCoreRuntime {
       },
     });
 
-    this.#taPendingReplays.delete(replay.replayId);
-    this.#taResumeEnvelopes.delete(envelope.envelopeId);
+    const shouldFinalizeReplay = dispatchResult.status === "dispatched"
+      || dispatchResult.status === "denied";
+    if (shouldFinalizeReplay) {
+      this.#taPendingReplays.delete(replay.replayId);
+      this.#taResumeEnvelopes.delete(envelope.envelopeId);
+    }
 
     return {
       status: dispatchResult.status,

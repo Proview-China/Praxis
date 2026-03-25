@@ -129,15 +129,19 @@ function resolveRecommendedNextStep(
 }
 
 function resolveQualityVerdict(
-  counts: ToolReviewGovernancePlanCounts,
+  input: {
+    sessionStatus: ToolReviewSessionState["status"];
+    latestItem?: ToolReviewGovernancePlanItem;
+    counts: ToolReviewGovernancePlanCounts;
+  },
 ): TaToolReviewQualityVerdict {
-  if (counts.blocked > 0) {
+  if (input.sessionStatus === "blocked") {
     return "blocked";
   }
-  if (counts.waitingHuman > 0) {
+  if (input.sessionStatus === "waiting_human") {
     return "waiting_human";
   }
-  if (counts.readyForHandoff > 0) {
+  if (input.latestItem?.readyForHandoff || input.counts.readyForHandoff > 0) {
     return "handoff_ready";
   }
   return "recorded_only";
@@ -440,7 +444,11 @@ export class ToolReviewerRuntime {
     }
 
     const latestItem = plan.items.at(-1);
-    const verdict = resolveQualityVerdict(plan.counts);
+    const verdict = resolveQualityVerdict({
+      sessionStatus: plan.status,
+      latestItem,
+      counts: plan.counts,
+    });
     const blockingItems = plan.items.filter((item) => item.blocked);
     const waitingHumanItems = plan.items.filter((item) => item.requiresHuman);
     const readyItems = plan.items.filter((item) => item.readyForHandoff);

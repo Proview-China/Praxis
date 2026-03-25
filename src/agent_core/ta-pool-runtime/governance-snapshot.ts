@@ -18,10 +18,12 @@ import {
 export const TAP_GOVERNANCE_CAPABILITY_STAGES = [
   "idle",
   "waiting_human",
+  "tool_review_blocked",
   "activation_failed",
   "activation_pending",
   "replay_pending",
   "resume_pending",
+  "tma_pending",
   "settled",
 ] as const;
 export type TapGovernanceCapabilityStage =
@@ -58,6 +60,19 @@ export interface TapGovernanceCounts {
     replay: number;
     activation: number;
   };
+  toolReviewerSessions: {
+    total: number;
+    open: number;
+    waitingHuman: number;
+    blocked: number;
+    completed: number;
+  };
+  tmaSessions: {
+    total: number;
+    inProgress: number;
+    resumable: number;
+    completed: number;
+  };
 }
 
 export interface TapCapabilityGovernanceSnapshot {
@@ -75,6 +90,8 @@ export interface TapCapabilityGovernanceSnapshot {
     targetPools: string[];
   };
   resumeEnvelopes: TapGovernanceCounts["resumeEnvelopes"];
+  toolReviewerSessions: TapGovernanceCounts["toolReviewerSessions"];
+  tmaSessions: TapGovernanceCounts["tmaSessions"];
 }
 
 export interface TapGovernanceSnapshot {
@@ -97,16 +114,20 @@ interface CapabilityAccumulator {
     targetPools: Set<string>;
   };
   resumeEnvelopes: TapGovernanceCounts["resumeEnvelopes"];
+  toolReviewerSessions: TapGovernanceCounts["toolReviewerSessions"];
+  tmaSessions: TapGovernanceCounts["tmaSessions"];
 }
 
 const STAGE_PRIORITY: Record<TapGovernanceCapabilityStage, number> = {
   waiting_human: 0,
-  activation_failed: 1,
-  activation_pending: 2,
-  replay_pending: 3,
-  resume_pending: 4,
-  settled: 5,
-  idle: 6,
+  tool_review_blocked: 1,
+  activation_failed: 2,
+  activation_pending: 3,
+  replay_pending: 4,
+  resume_pending: 5,
+  tma_pending: 6,
+  settled: 7,
+  idle: 8,
 };
 
 function createEmptyCounts(): TapGovernanceCounts {
@@ -141,6 +162,19 @@ function createEmptyCounts(): TapGovernanceCounts {
       replay: 0,
       activation: 0,
     },
+    toolReviewerSessions: {
+      total: 0,
+      open: 0,
+      waitingHuman: 0,
+      blocked: 0,
+      completed: 0,
+    },
+    tmaSessions: {
+      total: 0,
+      inProgress: 0,
+      resumable: 0,
+      completed: 0,
+    },
   };
 }
 
@@ -159,6 +193,8 @@ function createCapabilityAccumulator(capabilityKey: string): CapabilityAccumulat
       targetPools: new Set<string>(),
     },
     resumeEnvelopes: createEmptyCounts().resumeEnvelopes,
+    toolReviewerSessions: createEmptyCounts().toolReviewerSessions,
+    tmaSessions: createEmptyCounts().tmaSessions,
   };
 }
 
@@ -250,14 +286,59 @@ function incrementResumeSource(
   }
 }
 
+function incrementToolReviewerSessionStatus(
+  target: TapGovernanceCounts["toolReviewerSessions"],
+  status: "open" | "waiting_human" | "blocked" | "completed",
+): void {
+  switch (status) {
+    case "open":
+      target.open += 1;
+      return;
+    case "waiting_human":
+      target.waitingHuman += 1;
+      return;
+    case "blocked":
+      target.blocked += 1;
+      return;
+    case "completed":
+      target.completed += 1;
+      return;
+  }
+}
+
+function incrementTmaSessionStatus(
+  target: TapGovernanceCounts["tmaSessions"],
+  status: "in_progress" | "resumable" | "completed",
+): void {
+  switch (status) {
+    case "in_progress":
+      target.inProgress += 1;
+      return;
+    case "resumable":
+      target.resumable += 1;
+      return;
+    case "completed":
+      target.completed += 1;
+      return;
+  }
+}
+
 function summarizeStage(
   summary: Pick<
     TapCapabilityGovernanceSnapshot,
-    "humanGates" | "activationAttempts" | "pendingReplays" | "resumeEnvelopes"
+    | "humanGates"
+    | "activationAttempts"
+    | "pendingReplays"
+    | "resumeEnvelopes"
+    | "toolReviewerSessions"
+    | "tmaSessions"
   >,
 ): Exclude<TapGovernanceCapabilityStage, "idle"> {
-  if (summary.humanGates.waitingHuman > 0) {
+  if (summary.humanGates.waitingHuman > 0 || summary.toolReviewerSessions.waitingHuman > 0) {
     return "waiting_human";
+  }
+  if (summary.toolReviewerSessions.blocked > 0) {
+    return "tool_review_blocked";
   }
   if (summary.activationAttempts.failed > 0) {
     return "activation_failed";
@@ -270,6 +351,9 @@ function summarizeStage(
   }
   if (summary.resumeEnvelopes.total > 0) {
     return "resume_pending";
+  }
+  if (summary.tmaSessions.inProgress > 0 || summary.tmaSessions.resumable > 0) {
+    return "tma_pending";
   }
   return "settled";
 }
@@ -297,6 +381,8 @@ function toCapabilitySnapshot(
       targetPools: toSortedArray(accumulator.activationAttempts.targetPools),
     },
     resumeEnvelopes: { ...accumulator.resumeEnvelopes },
+    toolReviewerSessions: { ...accumulator.toolReviewerSessions },
+    tmaSessions: { ...accumulator.tmaSessions },
   };
 
   snapshot.stage = summarizeStage(snapshot);
@@ -380,6 +466,32 @@ export function createTapGovernanceSnapshot(
     capability.requestedTiers.add(envelope.requestedTier);
     capability.resumeEnvelopes.total += 1;
     incrementResumeSource(capability.resumeEnvelopes, envelope.source);
+  }
+
+  for (const toolReviewSession of normalized.toolReviewerSessions ?? []) {
+    counts.toolReviewerSessions.total += 1;
+    incrementToolReviewerSessionStatus(counts.toolReviewerSessions, toolReviewSession.session.status);
+    const capabilityKeys = [...new Set(
+      toolReviewSession.actions.map((action) => action.capabilityKey),
+    )];
+    for (const capabilityKey of capabilityKeys) {
+      const capability = getCapabilityAccumulator(byCapability, capabilityKey);
+      capability.sessionIds.add(toolReviewSession.session.sessionId);
+      capability.toolReviewerSessions.total += 1;
+      incrementToolReviewerSessionStatus(
+        capability.toolReviewerSessions,
+        toolReviewSession.session.status,
+      );
+    }
+  }
+
+  for (const tmaSession of normalized.tmaSessions ?? []) {
+    counts.tmaSessions.total += 1;
+    incrementTmaSessionStatus(counts.tmaSessions, tmaSession.status);
+    const capability = getCapabilityAccumulator(byCapability, tmaSession.requestedCapabilityKey);
+    capability.sessionIds.add(tmaSession.sessionId);
+    capability.tmaSessions.total += 1;
+    incrementTmaSessionStatus(capability.tmaSessions, tmaSession.status);
   }
 
   const capabilities = [...byCapability.values()]
