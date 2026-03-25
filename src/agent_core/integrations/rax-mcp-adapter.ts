@@ -1,6 +1,13 @@
 import { randomUUID } from "node:crypto";
 
-import type { CapabilityAdapter, CapabilityInvocationPlan, CapabilityLease, CapabilityResultEnvelope, PreparedCapabilityCall } from "../capability-types/index.js";
+import type {
+  CapabilityAdapter,
+  CapabilityInvocationPlan,
+  CapabilityLease,
+  CapabilityManifest,
+  CapabilityResultEnvelope,
+  PreparedCapabilityCall,
+} from "../capability-types/index.js";
 import type { ProviderId, SdkLayer } from "../../rax/types.js";
 import type {
   McpCallInput,
@@ -18,11 +25,18 @@ import type { RaxFacade } from "../../rax/facade.js";
 import { rax } from "../../rax/index.js";
 import { createPreparedCapabilityCall } from "../capability-invocation/index.js";
 import {
+  createCapabilityManifestFromPackage,
+  createMcpReadCapabilityPackage,
   createMcpCapabilityPackage,
   isSupportedMcpCapabilityPackageKey,
+  type CapabilityPackage,
   type SupportedMcpCapabilityPackageKey,
 } from "../capability-package/index.js";
 import { createCapabilityResultEnvelope } from "../capability-result/index.js";
+import type {
+  ActivationAdapterFactory,
+  ActivationAdapterFactoryContext,
+} from "../ta-pool-runtime/index.js";
 
 export const MCP_READ_FAMILY_ACTIONS = [
   "mcp.listTools",
@@ -35,6 +49,14 @@ type SupportedMcpAction =
   | "mcp.call"
   | McpReadFamilyAction
   | "mcp.native.execute";
+
+export const RAX_MCP_CAPABILITY_KEYS = [
+  ...MCP_READ_FAMILY_ACTIONS,
+  "mcp.call",
+  "mcp.native.execute",
+] as const;
+
+export type RaxMcpCapabilityKey = (typeof RAX_MCP_CAPABILITY_KEYS)[number];
 
 interface McpRouteSelection {
   provider: ProviderId;
@@ -74,6 +96,30 @@ export interface CreateRaxMcpCapabilityAdapterOptions {
   facade?: Pick<RaxFacade, "mcp">;
 }
 
+export interface RegisterRaxMcpCapabilitiesInput {
+  runtime: {
+    registerCapabilityAdapter(
+      manifest: CapabilityManifest,
+      adapter: CapabilityAdapter,
+    ): unknown;
+    registerTaActivationFactory(
+      ref: string,
+      factory: ActivationAdapterFactory,
+    ): void;
+  };
+  facade?: Pick<RaxFacade, "mcp">;
+  capabilityKeys?: readonly RaxMcpCapabilityKey[];
+}
+
+export interface RegisterRaxMcpCapabilitiesResult {
+  capabilityKeys: RaxMcpCapabilityKey[];
+  packages: CapabilityPackage[];
+  manifests: CapabilityManifest[];
+  bindings: unknown[];
+  activationFactoryRefs: string[];
+  adapter: RaxMcpCapabilityAdapter;
+}
+
 export function isMcpReadFamilyAction(action: string): action is McpReadFamilyAction {
   return MCP_READ_FAMILY_ACTIONS.includes(action as McpReadFamilyAction);
 }
@@ -93,6 +139,20 @@ function isSupportedAction(action: string): action is SupportedMcpAction {
     isMcpReadFamilyAction(action) ||
     action === "mcp.native.execute"
   );
+}
+
+function createCapabilityPackageForAction(
+  action: SupportedMcpAction,
+): CapabilityPackage {
+  if (isMcpReadFamilyAction(action)) {
+    return createMcpReadCapabilityPackage({
+      capabilityKey: action,
+    });
+  }
+
+  return createMcpCapabilityPackage({
+    capabilityKey: action,
+  });
 }
 
 function asObject(value: unknown): Record<string, unknown> | undefined {
@@ -347,6 +407,29 @@ function createExecutionMetadata(action: SupportedMcpAction, route: McpRouteSele
   };
 }
 
+function readCapabilityKeyFromActivationContext(
+  context: ActivationAdapterFactoryContext,
+): SupportedMcpAction {
+  const manifestCapabilityKey = context.manifest?.capabilityKey;
+  if (manifestCapabilityKey && isSupportedAction(manifestCapabilityKey)) {
+    return manifestCapabilityKey;
+  }
+
+  const packageCapabilityKey = context.capabilityPackage?.manifest.capabilityKey;
+  if (packageCapabilityKey && isSupportedAction(packageCapabilityKey)) {
+    return packageCapabilityKey;
+  }
+
+  const activationCapabilityKey = asString(context.activationSpec?.manifestPayload?.capabilityKey);
+  if (activationCapabilityKey && isSupportedAction(activationCapabilityKey)) {
+    return activationCapabilityKey;
+  }
+
+  throw new Error(
+    "RAX MCP activation factory requires one of mcp.listTools, mcp.readResource, mcp.call, or mcp.native.execute.",
+  );
+}
+
 export function createRaxMcpCapabilityManifest(
   options: CreateRaxMcpCapabilityManifestOptions,
 ) {
@@ -573,4 +656,64 @@ export function createRaxMcpCapabilityAdapter(
   options: CreateRaxMcpCapabilityAdapterOptions = {},
 ): RaxMcpCapabilityAdapter {
   return new RaxMcpCapabilityAdapter(options);
+}
+
+export function createRaxMcpActivationFactory(
+  options: CreateRaxMcpCapabilityAdapterOptions = {},
+): ActivationAdapterFactory {
+  return (context) => {
+    readCapabilityKeyFromActivationContext(context);
+    return createRaxMcpCapabilityAdapter(options);
+  };
+}
+
+export function registerRaxMcpCapabilities(
+  input: RegisterRaxMcpCapabilitiesInput,
+): RegisterRaxMcpCapabilitiesResult {
+  const capabilityKeys = [
+    ...(input.capabilityKeys ?? RAX_MCP_CAPABILITY_KEYS),
+  ];
+  const packages = capabilityKeys.map((capabilityKey) =>
+    createCapabilityPackageForAction(capabilityKey),
+  );
+  const manifests = packages.map((capabilityPackage) =>
+    createCapabilityManifestFromPackage(capabilityPackage),
+  );
+  const adapter = createRaxMcpCapabilityAdapter({
+    facade: input.facade,
+  });
+  const activationFactory = createRaxMcpActivationFactory({
+    facade: input.facade,
+  });
+  const activationFactoryRefs = [
+    ...new Set(
+      packages.map((capabilityPackage) => {
+        const activationFactoryRef =
+          capabilityPackage.activationSpec?.adapterFactoryRef;
+        if (!activationFactoryRef) {
+          throw new Error(
+            `Capability package ${capabilityPackage.manifest.capabilityKey} is missing adapterFactoryRef.`,
+          );
+        }
+        return activationFactoryRef;
+      }),
+    ),
+  ];
+
+  for (const ref of activationFactoryRefs) {
+    input.runtime.registerTaActivationFactory(ref, activationFactory);
+  }
+
+  const bindings = manifests.map((manifest) =>
+    input.runtime.registerCapabilityAdapter(manifest, adapter),
+  );
+
+  return {
+    capabilityKeys,
+    packages,
+    manifests,
+    bindings,
+    activationFactoryRefs,
+    adapter,
+  };
 }

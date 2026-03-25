@@ -14,6 +14,10 @@ import {
   createRaxWebsearchCapabilityPackage,
   isMcpReadFamilyCapabilityKey,
 } from "./index.js";
+import {
+  createCapabilityPackageSupportMatrix,
+  createCapabilityPackageSupportRoute,
+} from "./capability-package.js";
 import { createPoolActivationSpec, createProvisionArtifactBundle } from "../ta-pool-types/index.js";
 
 test("capability package fixture satisfies the frozen seven-part template", () => {
@@ -29,6 +33,8 @@ test("capability package fixture satisfies the frozen seven-part template", () =
   assert.equal(capabilityPackage.activationSpec?.targetPool, "ta-capability-pool");
   assert.equal(capabilityPackage.policy.registrationAssembly.profileAssignment, "review_only");
   assert.equal(capabilityPackage.usage.exampleInvocations.length, 1);
+  assert.equal(capabilityPackage.supportMatrix?.routes[0]?.lowering, "package-runtime");
+  assert.equal(capabilityPackage.supportMatrix?.routes[0]?.preferred, true);
 });
 
 test("MCP read family capability packages freeze lower-risk defaults for listTools and readResource", () => {
@@ -111,6 +117,17 @@ test("capability package can be created directly from a ready provision bundle",
       description: "Provisioned browser capability.",
       supportedPlatforms: ["linux"],
     },
+    supportMatrix: createCapabilityPackageSupportMatrix({
+      routes: [
+        {
+          provider: "openai",
+          sdkLayer: "agent",
+          lowering: "package-runtime",
+          status: "inferred",
+          preferred: true,
+        },
+      ],
+    }),
     adapter: {
       adapterId: "adapter.playwright",
       runtimeKind: "mcp",
@@ -162,6 +179,7 @@ test("capability package can be created directly from a ready provision bundle",
     capabilityPackage.builder.activationSpecRef,
     "activation-spec:ta-capability-pool:activate_after_verify:factory:playwright",
   );
+  assert.equal(capabilityPackage.supportMatrix?.routes[0]?.provider, "openai");
 });
 
 test("capability package validation rejects replay policy drift between builder and package", () => {
@@ -259,6 +277,76 @@ test("capability package factory builds thick MCP call and native execute packag
   assert.equal(
     nativeExecutePackage.policy.humanGateRequirements[0],
     "operator_review_required_before_native_transport_execution",
+  );
+  assert.equal(
+    mcpCallPackage.supportMatrix?.routes.find(
+      (route) => route.provider === "openai" && route.sdkLayer === "agent",
+    )?.lowering,
+    "shared-runtime",
+  );
+  assert.equal(
+    mcpCallPackage.supportMatrix?.routes.find(
+      (route) => route.provider === "anthropic" && route.sdkLayer === "api",
+    )?.preferred,
+    true,
+  );
+  assert.equal(
+    nativeExecutePackage.supportMatrix?.routes.find(
+      (route) => route.provider === "openai" && route.sdkLayer === "agent",
+    )?.lowering,
+    "provider-native-agent",
+  );
+  assert.equal(
+    nativeExecutePackage.supportMatrix?.routes.find(
+      (route) => route.provider === "deepmind" && route.sdkLayer === "agent",
+    )?.preferred,
+    true,
+  );
+});
+
+test("capability package support matrix rejects duplicate routes and invalid preferred unsupported entries", () => {
+  assert.throws(
+    () =>
+      createCapabilityPackageSupportMatrix({
+        routes: [
+          {
+            provider: "openai",
+            sdkLayer: "agent",
+            lowering: "shared-runtime",
+            status: "documented",
+          },
+          {
+            provider: "openai",
+            sdkLayer: "agent",
+            lowering: "shared-runtime",
+            status: "inferred",
+          },
+        ],
+      }),
+    /duplicate route: openai:agent:shared-runtime/,
+  );
+
+  assert.throws(
+    () =>
+      createCapabilityPackageSupportRoute({
+        provider: "anthropic",
+        sdkLayer: "api",
+        lowering: "provider-native-api",
+        status: "unsupported",
+        preferred: true,
+      }),
+    /preferred routes cannot be marked unsupported/,
+  );
+
+  assert.throws(
+    () =>
+      createCapabilityPackageSupportRoute({
+        provider: "deepmind",
+        sdkLayer: "auto" as never,
+        lowering: "provider-native-agent",
+        status: "documented",
+      }),
+    /supportMatrix sdkLayer: auto/,
   );
 });
 

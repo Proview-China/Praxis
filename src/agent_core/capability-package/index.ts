@@ -11,6 +11,10 @@ export type {
   CapabilityPackageProfileAssignment,
   CapabilityPackageRegistrationAssembly,
   CapabilityPackageResultMapping,
+  CapabilityPackageSupportLowering,
+  CapabilityPackageSupportMatrix,
+  CapabilityPackageSupportRoute,
+  CapabilityPackageSupportSdkLayer,
   CapabilityPackageTargetLane,
   CapabilityPackageUsage,
   CapabilityPackageUsageExample,
@@ -25,15 +29,22 @@ export type {
   CreateMcpCapabilityPackageInput,
   CreateCapabilityPackagePolicyInput,
   CreateCapabilityPackageRegistrationAssemblyInput,
+  CreateCapabilityPackageSupportMatrixInput,
+  CreateCapabilityPackageSupportRouteInput,
   CreateCapabilityPackageUsageExampleInput,
   CreateCapabilityPackageUsageInput,
   CreateCapabilityPackageVerificationInput,
   SupportedMcpCapabilityPackageKey,
+  SupportedSkillCapabilityPackageKey,
 } from "./capability-package.js";
 export type {
   CreateMcpReadCapabilityPackageInput,
   McpReadFamilyCapabilityKey,
 } from "./mcp-read-family-package.js";
+export type {
+  CreateRaxSkillCapabilityPackageInput,
+  SkillFamilyCapabilityKey,
+} from "./skill-family-capability-package.js";
 export type {
   CreateRaxWebsearchCapabilityPackageOptions,
 } from "./search-ground-capability-package.js";
@@ -45,9 +56,12 @@ export type {
 export type { TapToolingBaselineCapabilityKey } from "./tap-tooling-baseline.js";
 export {
   CAPABILITY_PACKAGE_PROFILE_ASSIGNMENTS,
+  CAPABILITY_PACKAGE_SUPPORT_LOWERINGS,
+  CAPABILITY_PACKAGE_SUPPORT_SDK_LAYERS,
   CAPABILITY_PACKAGE_TARGET_LANES,
   CAPABILITY_PACKAGE_TEMPLATE_VERSION,
   SUPPORTED_MCP_CAPABILITY_PACKAGE_KEYS,
+  SUPPORTED_SKILL_CAPABILITY_PACKAGE_KEYS,
   createCapabilityPackage,
   createCapabilityPackageActivationSpecRef,
   createCapabilityPackageAdapter,
@@ -60,10 +74,13 @@ export {
   createMcpCapabilityPackage,
   createCapabilityPackagePolicy,
   createCapabilityPackageRegistrationAssembly,
+  createCapabilityPackageSupportMatrix,
+  createCapabilityPackageSupportRoute,
   createCapabilityPackageUsage,
   createCapabilityPackageUsageExample,
   createCapabilityPackageVerification,
   isSupportedMcpCapabilityPackageKey,
+  isSupportedSkillCapabilityPackageKey,
   validateCapabilityPackage,
   validateCapabilityPackageAdapter,
   validateCapabilityPackageArtifacts,
@@ -73,6 +90,9 @@ export {
   validateMcpCapabilityPackage,
   validateCapabilityPackagePolicy,
   validateCapabilityPackageRegistrationAssembly,
+  validateCapabilityPackageSupportMatrix,
+  validateCapabilityPackageSupportRoute,
+  validateSkillCapabilityPackage,
   validateCapabilityPackageUsage,
   validateCapabilityPackageUsageExample,
   validateCapabilityPackageVerification,
@@ -89,6 +109,12 @@ export {
   isMcpReadFamilyCapabilityKey,
 } from "./mcp-read-family-package.js";
 export {
+  createRaxSkillCapabilityPackage,
+  createRaxSkillCapabilityPackageCatalog,
+  isSkillFamilyCapabilityKey,
+  SKILL_FAMILY_CAPABILITY_KEYS,
+} from "./skill-family-capability-package.js";
+export {
   createRaxWebsearchCapabilityPackage,
   RAX_WEBSEARCH_ACTIVATION_FACTORY_REF,
   SEARCH_GROUND_CAPABILITY_KEY,
@@ -104,10 +130,20 @@ export {
   listFirstClassToolingCapabilityBaselineDescriptors,
 } from "./first-class-tooling-baseline.js";
 export type {
+  FirstWaveCapabilityFamilyDescriptor,
+  FirstWaveCapabilityFamilyKey,
   FirstWaveCapabilityKey,
 } from "./first-wave-capability-package.js";
 export {
+  createFirstWaveCapabilityPackageCatalogForFamily,
   FIRST_WAVE_CAPABILITY_KEYS,
+  FIRST_WAVE_CAPABILITY_FAMILY_KEYS,
+  FIRST_WAVE_BOOTSTRAP_TMA_CAPABILITY_KEYS,
+  FIRST_WAVE_EXTENDED_REVIEW_ONLY_CAPABILITY_KEYS,
+  FIRST_WAVE_REVIEWER_BASELINE_CAPABILITY_KEYS,
   createFirstWaveCapabilityPackage,
   createFirstWaveCapabilityPackageCatalog,
+  getFirstWaveCapabilityFamilyDescriptor,
+  getFirstWaveCapabilityKeysForFamily,
+  listFirstWaveCapabilityFamilyDescriptors,
 } from "./first-wave-capability-package.js";

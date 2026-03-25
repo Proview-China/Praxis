@@ -132,6 +132,18 @@ export {
 } from "./runtime-snapshot.js";
 
 export type {
+  TapCapabilityGovernanceSnapshot,
+  TapGovernanceCapabilityStage,
+  TapGovernanceCounts,
+  TapGovernanceSnapshot,
+} from "./governance-snapshot.js";
+export {
+  createTapGovernanceSnapshot,
+  hasPendingTapGovernanceWork,
+  TAP_GOVERNANCE_CAPABILITY_STAGES,
+} from "./governance-snapshot.js";
+
+export type {
   TapRuntimeHydratedState,
 } from "./runtime-recovery.js";
 export {

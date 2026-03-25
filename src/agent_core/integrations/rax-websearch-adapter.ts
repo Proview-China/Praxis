@@ -2,13 +2,22 @@ import type {
   CapabilityAdapter,
   CapabilityInvocationPlan,
   CapabilityLease,
+  CapabilityManifest,
   PreparedCapabilityCall,
 } from "../capability-types/index.js";
+import type { CapabilityPackage } from "../capability-package/index.js";
 import { createCapabilityResultEnvelope } from "../capability-result/index.js";
 import { buildCapabilityInvocationFingerprint } from "../capability-invocation/capability-plan.js";
 import { createPreparedCapabilityCall } from "../capability-invocation/capability-execution.js";
-import { SEARCH_GROUND_CAPABILITY_KEY } from "../capability-package/search-ground-capability-package.js";
-import type { ActivationAdapterFactory } from "../ta-pool-runtime/index.js";
+import {
+  createRaxWebsearchCapabilityPackage,
+  RAX_WEBSEARCH_ACTIVATION_FACTORY_REF,
+  SEARCH_GROUND_CAPABILITY_KEY,
+} from "../capability-package/search-ground-capability-package.js";
+import {
+  materializeCapabilityManifestFromActivation,
+  type ActivationAdapterFactory,
+} from "../ta-pool-runtime/index.js";
 import type {
   ProviderId,
   SdkLayer,
@@ -29,6 +38,49 @@ export interface RaxWebsearchInvocationInput extends WebSearchCreateInput {
 export interface RaxWebsearchAdapterOptions {
   facade?: WebsearchFacade;
   capabilityKey?: string;
+}
+
+export interface RaxWebsearchActivationFactoryRegistrationTarget {
+  registerTaActivationFactory(
+    ref: string,
+    factory: ActivationAdapterFactory,
+  ): void;
+}
+
+export interface RaxWebsearchRegistrationTarget
+  extends RaxWebsearchActivationFactoryRegistrationTarget {
+  registerCapabilityAdapter(
+    manifest: CapabilityManifest,
+    adapter: CapabilityAdapter,
+  ): unknown;
+}
+
+export interface RegisterRaxWebsearchActivationFactoryInput
+  extends RaxWebsearchAdapterOptions {
+  target: RaxWebsearchActivationFactoryRegistrationTarget;
+  capabilityPackage?: CapabilityPackage;
+}
+
+export interface RegisterRaxWebsearchActivationFactoryResult {
+  capabilityPackage: CapabilityPackage;
+  activationFactoryRef: string;
+  factory: ActivationAdapterFactory;
+}
+
+export interface RegisterRaxWebsearchCapabilityInput
+  extends RaxWebsearchAdapterOptions {
+  runtime: RaxWebsearchRegistrationTarget;
+  capabilityPackage?: CapabilityPackage;
+  capabilityIdPrefix?: string;
+}
+
+export interface RegisterRaxWebsearchCapabilityResult {
+  capabilityPackage: CapabilityPackage;
+  manifest: CapabilityManifest;
+  adapter: CapabilityAdapter;
+  binding: unknown;
+  activationFactoryRef: string;
+  factory: ActivationAdapterFactory;
 }
 
 interface WebsearchFacade {
@@ -291,4 +343,77 @@ export function createRaxWebsearchActivationFactory(
           ? context.manifest.capabilityKey
           : options.capabilityKey,
     });
+}
+
+export function registerRaxWebsearchActivationFactory(
+  input: RegisterRaxWebsearchActivationFactoryInput,
+): RegisterRaxWebsearchActivationFactoryResult {
+  const capabilityPackage =
+    input.capabilityPackage
+    ?? createRaxWebsearchCapabilityPackage({
+      capabilityKey: input.capabilityKey,
+    });
+  const activationFactoryRef =
+    capabilityPackage.activationSpec?.adapterFactoryRef
+    ?? RAX_WEBSEARCH_ACTIVATION_FACTORY_REF;
+  const factory = createRaxWebsearchActivationFactory({
+    facade: input.facade,
+    capabilityKey: capabilityPackage.manifest.capabilityKey,
+  });
+
+  input.target.registerTaActivationFactory(activationFactoryRef, factory);
+
+  return {
+    capabilityPackage,
+    activationFactoryRef,
+    factory,
+  };
+}
+
+export function registerRaxWebsearchCapability(
+  input: RegisterRaxWebsearchCapabilityInput,
+): RegisterRaxWebsearchCapabilityResult {
+  const capabilityPackage =
+    input.capabilityPackage
+    ?? createRaxWebsearchCapabilityPackage({
+      capabilityKey: input.capabilityKey,
+    });
+  const activationSpec = capabilityPackage.activationSpec;
+  if (!activationSpec) {
+    throw new Error(
+      `Capability package ${capabilityPackage.manifest.capabilityKey} is missing an activation spec.`,
+    );
+  }
+
+  const manifest = materializeCapabilityManifestFromActivation({
+    capabilityPackage,
+    activationSpec,
+    capabilityIdPrefix: input.capabilityIdPrefix ?? "capability",
+  });
+  const { activationFactoryRef, factory } =
+    registerRaxWebsearchActivationFactory({
+      target: input.runtime,
+      capabilityPackage,
+      facade: input.facade,
+    });
+  const adapter = factory({
+    capabilityPackage,
+    activationSpec,
+    bindingPayload: activationSpec.bindingPayload,
+    manifest,
+    manifestPayload: activationSpec.manifestPayload,
+    metadata: {
+      registrationSource: "registerRaxWebsearchCapability",
+    },
+  });
+  const binding = input.runtime.registerCapabilityAdapter(manifest, adapter);
+
+  return {
+    capabilityPackage,
+    manifest,
+    adapter,
+    binding,
+    activationFactoryRef,
+    factory,
+  };
 }

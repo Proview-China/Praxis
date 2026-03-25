@@ -4,10 +4,21 @@ import test from "node:test";
 import type { RaxFacade } from "../../rax/facade.js";
 import type { CapabilityInvocationPlan, CapabilityLease } from "../capability-types/index.js";
 import {
+  createMcpCapabilityPackage,
+  createMcpReadCapabilityPackage,
+} from "../capability-package/index.js";
+import {
+  createActivationFactoryResolver,
+  materializeActivationRegistration,
+} from "../ta-pool-runtime/index.js";
+import {
   MCP_READ_FAMILY_ACTIONS,
+  RAX_MCP_CAPABILITY_KEYS,
+  createRaxMcpActivationFactory,
   createRaxMcpCapabilityAdapter,
   isMcpReadFamilyAction,
   createRaxMcpCapabilityManifest,
+  registerRaxMcpCapabilities,
 } from "./rax-mcp-adapter.js";
 
 function createLease(): CapabilityLease {
@@ -32,6 +43,45 @@ function createPlan(capabilityKey: CapabilityInvocationPlan["capabilityKey"], in
     input,
     priority: "normal",
   };
+}
+
+function createInputForCapability(
+  capabilityKey: CapabilityInvocationPlan["capabilityKey"],
+): Record<string, unknown> {
+  switch (capabilityKey) {
+    case "mcp.listTools":
+      return {
+        route: { provider: "openai", model: "gpt-5.4" },
+        input: { connectionId: "conn-list" },
+      };
+    case "mcp.readResource":
+      return {
+        route: { provider: "anthropic", model: "claude-opus-4-6-thinking" },
+        input: { connectionId: "conn-read", uri: "memory://resource" },
+      };
+    case "mcp.call":
+      return {
+        route: { provider: "openai", model: "gpt-5.4" },
+        input: {
+          connectionId: "conn-call",
+          toolName: "browser.search",
+          arguments: { q: "Praxis" },
+        },
+      };
+    case "mcp.native.execute":
+      return {
+        route: { provider: "deepmind", model: "gemini-2.5-flash", layer: "agent" },
+        input: {
+          transport: {
+            kind: "stdio",
+            command: "node",
+            args: ["server.js"],
+          },
+        },
+      };
+    default:
+      throw new Error(`Unexpected MCP capability key in test helper: ${capabilityKey}.`);
+  }
 }
 
 function createFacadeDouble(): Pick<RaxFacade, "mcp"> {
@@ -286,6 +336,110 @@ test("mcp adapter publishes packaged capability metadata for thick MCP actions",
   );
   assert.equal(nativeManifest.supportsCancellation, true);
   assert.equal(nativeManifest.metadata?.recommendedMode, "restricted");
+});
+
+test("mcp activation factory materializes package-backed adapters across the MCP family", async () => {
+  const facade = createFacadeDouble();
+  const resolver = createActivationFactoryResolver();
+  const factory = createRaxMcpActivationFactory({ facade });
+  resolver.register("factory:rax.mcp.adapter", factory);
+  resolver.register("factory:mcp-call", factory);
+  resolver.register("factory:mcp-native-execute", factory);
+
+  const packages = [
+    createMcpReadCapabilityPackage({ capabilityKey: "mcp.listTools" }),
+    createMcpReadCapabilityPackage({ capabilityKey: "mcp.readResource" }),
+    createMcpCapabilityPackage({ capabilityKey: "mcp.call" }),
+    createMcpCapabilityPackage({ capabilityKey: "mcp.native.execute" }),
+  ];
+
+  for (const capabilityPackage of packages) {
+    const materialized = await materializeActivationRegistration({
+      capabilityPackage,
+      factoryResolver: resolver,
+      capabilityIdPrefix: "capability",
+    });
+
+    const plan = createPlan(
+      capabilityPackage.manifest.capabilityKey,
+      createInputForCapability(capabilityPackage.manifest.capabilityKey),
+    );
+    const prepared = await materialized.adapter.prepare(plan, createLease());
+
+    assert.equal(materialized.adapter.id, "rax.mcp.adapter");
+    assert.equal(materialized.targetPool, "ta-capability-pool");
+    assert.equal(prepared.capabilityKey, capabilityPackage.manifest.capabilityKey);
+  }
+});
+
+test("mcp activation factory rejects unsupported capability surfaces", () => {
+  const factory = createRaxMcpActivationFactory({
+    facade: createFacadeDouble(),
+  });
+
+  assert.throws(
+    () =>
+      factory({
+        manifest: {
+          capabilityId: "capability:mcp.configure:1",
+          capabilityKey: "mcp.configure",
+          kind: "tool",
+          version: "1.0.0",
+          generation: 1,
+          description: "unsupported",
+        },
+      }),
+    /requires one of mcp\.listTools, mcp\.readResource, mcp\.call, or mcp\.native\.execute/i,
+  );
+});
+
+test("registerRaxMcpCapabilities registers the full MCP family with shared truthfulness metadata", () => {
+  const registrations: Array<{
+    capabilityKey: string;
+    adapterId: string;
+    metadata?: Record<string, unknown>;
+  }> = [];
+  const factories = new Map<string, ReturnType<typeof createRaxMcpActivationFactory>>();
+  const result = registerRaxMcpCapabilities({
+    runtime: {
+      registerCapabilityAdapter(manifest, adapter) {
+        registrations.push({
+          capabilityKey: manifest.capabilityKey,
+          adapterId: adapter.id,
+          metadata: manifest.metadata,
+        });
+        return {
+          bindingId: `binding:${manifest.capabilityKey}`,
+        };
+      },
+      registerTaActivationFactory(ref, factory) {
+        factories.set(ref, factory);
+      },
+    },
+    facade: createFacadeDouble(),
+  });
+
+  assert.deepEqual(result.capabilityKeys, [...RAX_MCP_CAPABILITY_KEYS]);
+  assert.equal(result.packages.length, 4);
+  assert.equal(result.manifests.length, 4);
+  assert.equal(result.bindings.length, 4);
+  assert.equal(result.adapter.id, "rax.mcp.adapter");
+  assert.deepEqual(
+    registrations.map((entry) => entry.capabilityKey),
+    [...RAX_MCP_CAPABILITY_KEYS],
+  );
+  assert.ok(registrations.every((entry) => entry.adapterId === "rax.mcp.adapter"));
+  assert.deepEqual(
+    [...factories.keys()],
+    ["factory:rax.mcp.adapter", "factory:mcp-call", "factory:mcp-native-execute"],
+  );
+  assert.deepEqual(result.activationFactoryRefs, [...factories.keys()]);
+  assert.equal(registrations[0]?.metadata?.riskProfile, "read-only");
+  assert.equal(registrations[2]?.metadata?.truthfulness, "shared-runtime-call");
+  assert.equal(
+    registrations[3]?.metadata?.truthfulness,
+    "provider-native-execute",
+  );
 });
 
 test("mcp adapter rejects stdio native execution requests without a command", async () => {

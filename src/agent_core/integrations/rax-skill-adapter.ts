@@ -2,10 +2,18 @@ import type {
   CapabilityAdapter,
   CapabilityInvocationPlan,
   CapabilityLease,
+  CapabilityManifest,
   CapabilityResultEnvelope,
   PreparedCapabilityCall,
 } from "../capability-types/index.js";
 import { createPreparedCapabilityCall } from "../capability-invocation/index.js";
+import type { CapabilityPackage } from "../capability-package/index.js";
+import {
+  createCapabilityManifestFromPackage,
+  createRaxSkillCapabilityPackage as createSkillFamilyCapabilityPackage,
+} from "../capability-package/index.js";
+import type { ReplayPolicy } from "../ta-pool-types/index.js";
+import type { ActivationAdapterFactory } from "../ta-pool-runtime/index.js";
 import { rax } from "../../rax/index.js";
 import type {
   ProviderId,
@@ -27,6 +35,40 @@ export const RAX_SKILL_ADAPTER_CAPABILITY_KEYS = [
 
 export type RaxSkillAdapterCapabilityKey =
   (typeof RAX_SKILL_ADAPTER_CAPABILITY_KEYS)[number];
+
+export const RAX_SKILL_ACTIVATION_FACTORY_REFS: Readonly<
+  Record<RaxSkillAdapterCapabilityKey, string>
+> = {
+  "skill.use": "factory:rax.skill:use",
+  "skill.mount": "factory:rax.skill:mount",
+  "skill.prepare": "factory:rax.skill:prepare",
+};
+
+export interface RaxSkillRegistrationTarget {
+  registerCapabilityAdapter(
+    manifest: CapabilityManifest,
+    adapter: CapabilityAdapter,
+  ): unknown;
+  registerTaActivationFactory(
+    ref: string,
+    factory: ActivationAdapterFactory,
+  ): void;
+}
+
+export interface RegisterRaxSkillCapabilityFamilyInput {
+  runtime: RaxSkillRegistrationTarget;
+  facade?: SkillFacade;
+  capabilityKeys?: readonly RaxSkillAdapterCapabilityKey[];
+  replayPolicy?: ReplayPolicy;
+}
+
+export interface RegisterRaxSkillCapabilityFamilyResult {
+  capabilityKeys: RaxSkillAdapterCapabilityKey[];
+  activationFactoryRefs: string[];
+  manifests: CapabilityManifest[];
+  packages: CapabilityPackage[];
+  bindings: unknown[];
+}
 
 interface SkillFacade {
   skill: {
@@ -108,6 +150,16 @@ function stableStringify(value: unknown): string {
     return `{${entries.join(",")}}`;
   }
   return JSON.stringify(value);
+}
+
+function createRaxSkillCapabilityPackage(
+  capabilityKey: RaxSkillAdapterCapabilityKey,
+  replayPolicy: ReplayPolicy = "re_review_then_dispatch",
+): CapabilityPackage {
+  return createSkillFamilyCapabilityPackage({
+    capabilityKey,
+    replayPolicy,
+  });
 }
 
 function isProviderId(value: unknown): value is ProviderId {
@@ -478,4 +530,62 @@ export function createRaxSkillCapabilityAdapter(
   facade: SkillFacade = rax,
 ): RaxSkillCapabilityAdapter {
   return new RaxSkillCapabilityAdapter(facade);
+}
+
+export function createRaxSkillActivationFactory(
+  options: {
+    facade?: SkillFacade;
+  } = {},
+): ActivationAdapterFactory {
+  return () => createRaxSkillCapabilityAdapter(options.facade ?? rax);
+}
+
+export function registerRaxSkillCapabilityFamily(
+  input: RegisterRaxSkillCapabilityFamilyInput,
+): RegisterRaxSkillCapabilityFamilyResult {
+  const capabilityKeys = [
+    ...(input.capabilityKeys ?? RAX_SKILL_ADAPTER_CAPABILITY_KEYS),
+  ];
+  const packages = capabilityKeys.map((capabilityKey) =>
+    createRaxSkillCapabilityPackage(capabilityKey, input.replayPolicy),
+  );
+  const manifests = packages.map((capabilityPackage) =>
+    createCapabilityManifestFromPackage(capabilityPackage),
+  );
+  const factory = createRaxSkillActivationFactory({
+    facade: input.facade,
+  });
+  const activationFactoryRefs = packages.map((capabilityPackage) => {
+    const activationRef = capabilityPackage.activationSpec?.adapterFactoryRef;
+    if (!activationRef) {
+      throw new Error(
+        `Capability package ${capabilityPackage.manifest.capabilityKey} is missing adapterFactoryRef.`,
+      );
+    }
+    return activationRef;
+  });
+
+  const bindings = packages.map((capabilityPackage, index) => {
+    const activationSpec = capabilityPackage.activationSpec;
+    const activationRef = activationFactoryRefs[index]!;
+    input.runtime.registerTaActivationFactory(activationRef, factory);
+
+    const adapter = factory({
+      capabilityPackage,
+      activationSpec,
+      bindingPayload: activationSpec?.bindingPayload,
+      manifest: manifests[index],
+      manifestPayload: activationSpec?.manifestPayload,
+    });
+
+    return input.runtime.registerCapabilityAdapter(manifests[index]!, adapter);
+  });
+
+  return {
+    capabilityKeys,
+    activationFactoryRefs,
+    manifests,
+    packages,
+    bindings,
+  };
 }

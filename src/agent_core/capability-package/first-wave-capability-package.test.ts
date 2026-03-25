@@ -6,6 +6,11 @@ import {
   createFirstWaveCapabilityPackage,
   createFirstWaveCapabilityPackageCatalog,
 } from "./index.js";
+import {
+  createFirstWaveCapabilityPackageCatalogForFamily,
+  getFirstWaveCapabilityFamilyDescriptor,
+  listFirstWaveCapabilityFamilyDescriptors,
+} from "./first-wave-capability-package.js";
 
 test("first-wave capability package catalog freezes the expected registration assembly split", () => {
   const catalog = createFirstWaveCapabilityPackageCatalog();
@@ -30,4 +35,27 @@ test("first-wave capability package carries allowed pattern only for allowed-pat
 
   assert.equal(allowedPatternPackage.policy.registrationAssembly.allowedPattern, "shell.restricted");
   assert.equal(reviewOnlyPackage.policy.registrationAssembly.allowedPattern, undefined);
+});
+
+test("first-wave capability package families expose stable assembly descriptors", () => {
+  const families = listFirstWaveCapabilityFamilyDescriptors();
+
+  assert.deepEqual(
+    families.map((descriptor) => descriptor.familyKey),
+    ["reviewer_baseline", "bootstrap_tma", "extended_review_only"],
+  );
+
+  const reviewerBaseline = getFirstWaveCapabilityFamilyDescriptor("reviewer_baseline");
+  assert.equal(reviewerBaseline.readOnly, true);
+  assert.deepEqual(reviewerBaseline.capabilityKeys, ["code.read", "docs.read"]);
+
+  const bootstrapCatalog = createFirstWaveCapabilityPackageCatalogForFamily("bootstrap_tma");
+  assert.deepEqual(
+    bootstrapCatalog.map((capabilityPackage) => capabilityPackage.manifest.capabilityKey),
+    ["repo.write", "shell.restricted", "test.run", "skill.doc.generate"],
+  );
+
+  const extendedReviewOnly = getFirstWaveCapabilityFamilyDescriptor("extended_review_only");
+  assert.equal(extendedReviewOnly.includesExternalSideEffects, true);
+  assert.equal(extendedReviewOnly.profileAssignment, "review_only");
 });

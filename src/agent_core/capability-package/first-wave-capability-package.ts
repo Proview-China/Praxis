@@ -24,6 +24,43 @@ export const FIRST_WAVE_CAPABILITY_KEYS = [
 ] as const;
 export type FirstWaveCapabilityKey = (typeof FIRST_WAVE_CAPABILITY_KEYS)[number];
 
+export const FIRST_WAVE_REVIEWER_BASELINE_CAPABILITY_KEYS = [
+  "code.read",
+  "docs.read",
+] as const satisfies readonly FirstWaveCapabilityKey[];
+
+export const FIRST_WAVE_BOOTSTRAP_TMA_CAPABILITY_KEYS = [
+  "repo.write",
+  "shell.restricted",
+  "test.run",
+  "skill.doc.generate",
+] as const satisfies readonly FirstWaveCapabilityKey[];
+
+export const FIRST_WAVE_EXTENDED_REVIEW_ONLY_CAPABILITY_KEYS = [
+  "dependency.install",
+  "network.download",
+] as const satisfies readonly FirstWaveCapabilityKey[];
+
+export const FIRST_WAVE_CAPABILITY_FAMILY_KEYS = [
+  "reviewer_baseline",
+  "bootstrap_tma",
+  "extended_review_only",
+] as const;
+export type FirstWaveCapabilityFamilyKey =
+  (typeof FIRST_WAVE_CAPABILITY_FAMILY_KEYS)[number];
+
+export interface FirstWaveCapabilityFamilyDescriptor {
+  familyKey: FirstWaveCapabilityFamilyKey;
+  summary: string;
+  reviewerSummary: string;
+  capabilityKeys: FirstWaveCapabilityKey[];
+  targetLane: CapabilityPackageTargetLane;
+  profileAssignment: CapabilityPackageProfileAssignment;
+  readOnly: boolean;
+  mayProvision: boolean;
+  includesExternalSideEffects: boolean;
+}
+
 interface FirstWaveCapabilitySpec {
   capabilityKey: FirstWaveCapabilityKey;
   description: string;
@@ -175,6 +212,51 @@ const FIRST_WAVE_CAPABILITY_SPECS: Record<FirstWaveCapabilityKey, FirstWaveCapab
   },
 };
 
+const FIRST_WAVE_CAPABILITY_FAMILY_DESCRIPTOR_MAP: Record<
+  FirstWaveCapabilityFamilyKey,
+  FirstWaveCapabilityFamilyDescriptor
+> = {
+  reviewer_baseline: {
+    familyKey: "reviewer_baseline",
+    summary:
+      "Reviewer baseline family contains the read-only grounding capabilities shared by reviewer and TMA assembly flows.",
+    reviewerSummary:
+      "Reviewer baseline can inspect repo code and docs only; it cannot write, install, or execute work.",
+    capabilityKeys: [...FIRST_WAVE_REVIEWER_BASELINE_CAPABILITY_KEYS],
+    targetLane: "reviewer",
+    profileAssignment: "baseline_capability",
+    readOnly: true,
+    mayProvision: false,
+    includesExternalSideEffects: false,
+  },
+  bootstrap_tma: {
+    familyKey: "bootstrap_tma",
+    summary:
+      "Bootstrap TMA family adds bounded repo-write, shell, test, and doc-generation tools for first-wave package assembly.",
+    reviewerSummary:
+      "Bootstrap TMA can assemble repo-local capability packages, but it still should not install dependencies or fetch remote artifacts.",
+    capabilityKeys: [...FIRST_WAVE_BOOTSTRAP_TMA_CAPABILITY_KEYS],
+    targetLane: "bootstrap_tma",
+    profileAssignment: "allowed_pattern",
+    readOnly: false,
+    mayProvision: true,
+    includesExternalSideEffects: false,
+  },
+  extended_review_only: {
+    familyKey: "extended_review_only",
+    summary:
+      "Extended review-only family holds higher-externality capabilities that stay review-gated in the first wave.",
+    reviewerSummary:
+      "Extended review-only capabilities may prepare heavier provisioning work, but they are not baseline-granted and must stay behind review.",
+    capabilityKeys: [...FIRST_WAVE_EXTENDED_REVIEW_ONLY_CAPABILITY_KEYS],
+    targetLane: "extended_tma",
+    profileAssignment: "review_only",
+    readOnly: false,
+    mayProvision: true,
+    includesExternalSideEffects: true,
+  },
+};
+
 function toAdapterRefFragment(capabilityKey: string): string {
   return capabilityKey.replace(/\./g, "_");
 }
@@ -189,6 +271,42 @@ function toBuildStrategy(targetLane: CapabilityPackageTargetLane): string {
 
 function toCapabilityKind(): "tool" {
   return "tool";
+}
+
+export function getFirstWaveCapabilityFamilyDescriptor(
+  familyKey: FirstWaveCapabilityFamilyKey,
+): FirstWaveCapabilityFamilyDescriptor {
+  const descriptor = FIRST_WAVE_CAPABILITY_FAMILY_DESCRIPTOR_MAP[familyKey];
+  return {
+    ...descriptor,
+    capabilityKeys: [...descriptor.capabilityKeys],
+  };
+}
+
+export function listFirstWaveCapabilityFamilyDescriptors(): FirstWaveCapabilityFamilyDescriptor[] {
+  return FIRST_WAVE_CAPABILITY_FAMILY_KEYS.map((familyKey) =>
+    getFirstWaveCapabilityFamilyDescriptor(familyKey),
+  );
+}
+
+export function getFirstWaveCapabilityKeysForFamily(
+  familyKey: FirstWaveCapabilityFamilyKey,
+): FirstWaveCapabilityKey[] {
+  return [...FIRST_WAVE_CAPABILITY_FAMILY_DESCRIPTOR_MAP[familyKey].capabilityKeys];
+}
+
+function createFirstWaveCapabilityPackageCatalogFromKeys(
+  capabilityKeys: readonly FirstWaveCapabilityKey[],
+): CapabilityPackage[] {
+  return capabilityKeys.map((capabilityKey) => createFirstWaveCapabilityPackage(capabilityKey));
+}
+
+export function createFirstWaveCapabilityPackageCatalogForFamily(
+  familyKey: FirstWaveCapabilityFamilyKey,
+): CapabilityPackage[] {
+  return createFirstWaveCapabilityPackageCatalogFromKeys(
+    FIRST_WAVE_CAPABILITY_FAMILY_DESCRIPTOR_MAP[familyKey].capabilityKeys,
+  );
 }
 
 function createPackageInputFromSpec(spec: FirstWaveCapabilitySpec): CreateCapabilityPackageInput {
@@ -349,7 +467,5 @@ export function createFirstWaveCapabilityPackage(
 }
 
 export function createFirstWaveCapabilityPackageCatalog(): CapabilityPackage[] {
-  return FIRST_WAVE_CAPABILITY_KEYS.map((capabilityKey) =>
-    createFirstWaveCapabilityPackage(capabilityKey)
-  );
+  return createFirstWaveCapabilityPackageCatalogFromKeys(FIRST_WAVE_CAPABILITY_KEYS);
 }

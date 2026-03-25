@@ -8,6 +8,10 @@ export {
   mergePoolRuntimeSnapshotsIntoCheckpointSnapshot,
   readTapPoolRuntimeSnapshots,
 } from "./pool-runtime-checkpoint.js";
+export {
+  checkpointHasPendingTapGovernanceWork,
+  readTapGovernanceSnapshotFromCheckpoint,
+} from "./pool-runtime-governance.js";
 export { CheckpointStore, type CheckpointStoreOptions, type CreateCheckpointInput } from "./checkpoint-store.js";
 export type {
   CheckpointRecoveryInput,

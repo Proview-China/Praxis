@@ -32,16 +32,48 @@ import {
   validatePoolActivationSpec,
   validateProvisionArtifactBundle,
 } from "../ta-pool-types/ta-pool-provision.js";
+import {
+  PROVIDERS,
+  SUPPORT_STATUSES,
+} from "../../rax/types.js";
+import type { McpLoweringMode } from "../../rax/mcp-types.js";
+import type {
+  ProviderId,
+  SdkLayer,
+  SupportStatus,
+} from "../../rax/types.js";
 
 export const CAPABILITY_PACKAGE_TEMPLATE_VERSION = "tap-capability-package.v1";
 export const SUPPORTED_MCP_CAPABILITY_PACKAGE_KEYS = [
   "mcp.call",
   "mcp.native.execute",
 ] as const;
+export const CAPABILITY_PACKAGE_SUPPORT_SDK_LAYERS = [
+  "api",
+  "agent",
+] as const;
+export const CAPABILITY_PACKAGE_SUPPORT_LOWERINGS = [
+  "package-runtime",
+  "shared-runtime",
+  "provider-native-api",
+  "provider-native-agent",
+] as const satisfies readonly ("package-runtime" | McpLoweringMode)[];
 export type SupportedMcpCapabilityPackageKey =
   (typeof SUPPORTED_MCP_CAPABILITY_PACKAGE_KEYS)[number];
+export type CapabilityPackageSupportSdkLayer =
+  (typeof CAPABILITY_PACKAGE_SUPPORT_SDK_LAYERS)[number];
+export type CapabilityPackageSupportLowering = "package-runtime" | McpLoweringMode;
+export const SUPPORTED_SKILL_CAPABILITY_PACKAGE_KEYS = [
+  "skill.use",
+  "skill.mount",
+  "skill.prepare",
+] as const;
+export type SupportedSkillCapabilityPackageKey =
+  (typeof SUPPORTED_SKILL_CAPABILITY_PACKAGE_KEYS)[number];
 
 const MCP_CONFIGURE_CAPABILITY_KEY = "mcp.configure";
+const RAX_SKILL_ADAPTER_ID = "rax.skill.adapter";
+const RAX_SKILL_RUNTIME_KIND = "rax-skill";
 
 export interface CapabilityPackageManifest {
   capabilityKey: string;
@@ -60,6 +92,22 @@ export interface CapabilityPackageManifest {
 export interface CapabilityPackageHookRef {
   ref: string;
   description?: string;
+}
+
+export interface CapabilityPackageSupportRoute {
+  provider: ProviderId;
+  sdkLayer: CapabilityPackageSupportSdkLayer;
+  lowering: CapabilityPackageSupportLowering;
+  status: SupportStatus;
+  preferred?: boolean;
+  notes?: string[];
+  constraints?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface CapabilityPackageSupportMatrix {
+  routes: CapabilityPackageSupportRoute[];
+  metadata?: Record<string, unknown>;
 }
 
 export interface CapabilityPackageResultMapping {
@@ -181,6 +229,7 @@ export interface CapabilityPackageArtifacts {
 export interface CapabilityPackage {
   templateVersion: string;
   manifest: CapabilityPackageManifest;
+  supportMatrix?: CapabilityPackageSupportMatrix;
   adapter: CapabilityPackageAdapter;
   policy: CapabilityPackagePolicy;
   builder: CapabilityPackageBuilder;
@@ -215,6 +264,25 @@ export interface CreateCapabilityPackageAdapterInput {
   execute: CapabilityPackageHookRef;
   cancel?: CapabilityPackageHookRef;
   resultMapping?: CapabilityPackageResultMapping;
+  metadata?: Record<string, unknown>;
+}
+
+export interface CreateCapabilityPackageSupportRouteInput {
+  provider: ProviderId;
+  sdkLayer: Exclude<SdkLayer, "auto">;
+  lowering: CapabilityPackageSupportLowering;
+  status: SupportStatus;
+  preferred?: boolean;
+  notes?: readonly string[];
+  constraints?: readonly string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface CreateCapabilityPackageSupportMatrixInput {
+  routes: readonly (
+    | CreateCapabilityPackageSupportRouteInput
+    | CapabilityPackageSupportRoute
+  )[];
   metadata?: Record<string, unknown>;
 }
 
@@ -282,6 +350,9 @@ export interface CreateCapabilityPackageLifecycleInput {
 export interface CreateCapabilityPackageInput {
   templateVersion?: string;
   manifest: CreateCapabilityPackageManifestInput | CapabilityPackageManifest;
+  supportMatrix?:
+    | CreateCapabilityPackageSupportMatrixInput
+    | CapabilityPackageSupportMatrix;
   adapter: CreateCapabilityPackageAdapterInput | CapabilityPackageAdapter;
   policy: CreateCapabilityPackagePolicyInput | CapabilityPackagePolicy;
   builder: CreateCapabilityPackageBuilderInput | CapabilityPackageBuilder;
@@ -299,6 +370,9 @@ export interface CreateCapabilityPackageInput {
 export interface CreateCapabilityPackageFromProvisionBundleInput {
   bundle: ProvisionArtifactBundle;
   manifest: CreateCapabilityPackageManifestInput | CapabilityPackageManifest;
+  supportMatrix?:
+    | CreateCapabilityPackageSupportMatrixInput
+    | CapabilityPackageSupportMatrix;
   adapter: CreateCapabilityPackageAdapterInput | CapabilityPackageAdapter;
   policy: CreateCapabilityPackagePolicyInput | CapabilityPackagePolicy;
   builder: CreateCapabilityPackageBuilderInput | CapabilityPackageBuilder;
@@ -368,6 +442,30 @@ function normalizeRouteHints(
     .filter((routeHint) => routeHint.key && routeHint.value);
 }
 
+function normalizeCapabilityPackageSupportSdkLayer(
+  sdkLayer: Exclude<SdkLayer, "auto">,
+): CapabilityPackageSupportSdkLayer {
+  return normalizeString(
+    sdkLayer,
+    "supportMatrix.routes.sdkLayer",
+  ) as CapabilityPackageSupportSdkLayer;
+}
+
+function normalizeCapabilityPackageSupportLowering(
+  lowering: CapabilityPackageSupportLowering,
+): CapabilityPackageSupportLowering {
+  return normalizeString(
+    lowering,
+    "supportMatrix.routes.lowering",
+  ) as CapabilityPackageSupportLowering;
+}
+
+function createCapabilityPackageSupportRouteKey(
+  route: Pick<CapabilityPackageSupportRoute, "provider" | "sdkLayer" | "lowering">,
+): string {
+  return `${route.provider}:${route.sdkLayer}:${route.lowering}`;
+}
+
 function normalizeScope(scope?: AccessRequestScope): AccessRequestScope | undefined {
   if (!scope) {
     return undefined;
@@ -418,6 +516,246 @@ export function isSupportedMcpCapabilityPackageKey(
   return SUPPORTED_MCP_CAPABILITY_PACKAGE_KEYS.includes(
     capabilityKey as SupportedMcpCapabilityPackageKey,
   );
+}
+
+export function isSupportedSkillCapabilityPackageKey(
+  capabilityKey: string,
+): capabilityKey is SupportedSkillCapabilityPackageKey {
+  return SUPPORTED_SKILL_CAPABILITY_PACKAGE_KEYS.includes(
+    capabilityKey as SupportedSkillCapabilityPackageKey,
+  );
+}
+
+export function createCapabilityPackageSupportRoute(
+  input:
+    | CreateCapabilityPackageSupportRouteInput
+    | CapabilityPackageSupportRoute,
+): CapabilityPackageSupportRoute {
+  const route: CapabilityPackageSupportRoute = {
+    provider: normalizeString(
+      input.provider,
+      "supportMatrix.routes.provider",
+    ) as ProviderId,
+    sdkLayer: normalizeCapabilityPackageSupportSdkLayer(input.sdkLayer),
+    lowering: normalizeCapabilityPackageSupportLowering(input.lowering),
+    status: normalizeString(
+      input.status,
+      "supportMatrix.routes.status",
+    ) as SupportStatus,
+    preferred: input.preferred === true ? true : undefined,
+    notes: normalizeStringArray(input.notes),
+    constraints: normalizeStringArray(input.constraints),
+    metadata: input.metadata,
+  };
+
+  validateCapabilityPackageSupportRoute(route);
+  return route;
+}
+
+export function validateCapabilityPackageSupportRoute(
+  route: CapabilityPackageSupportRoute,
+): void {
+  if (!PROVIDERS.includes(route.provider)) {
+    throw new Error(
+      `Unsupported capability package supportMatrix provider: ${route.provider}.`,
+    );
+  }
+
+  if (!CAPABILITY_PACKAGE_SUPPORT_SDK_LAYERS.includes(route.sdkLayer)) {
+    throw new Error(
+      `Unsupported capability package supportMatrix sdkLayer: ${route.sdkLayer}.`,
+    );
+  }
+
+  if (!CAPABILITY_PACKAGE_SUPPORT_LOWERINGS.includes(route.lowering)) {
+    throw new Error(
+      `Unsupported capability package supportMatrix lowering: ${route.lowering}.`,
+    );
+  }
+
+  if (!SUPPORT_STATUSES.includes(route.status)) {
+    throw new Error(
+      `Unsupported capability package supportMatrix status: ${route.status}.`,
+    );
+  }
+
+  if (route.preferred && route.status === "unsupported") {
+    throw new Error(
+      "supportMatrix preferred routes cannot be marked unsupported.",
+    );
+  }
+}
+
+export function createCapabilityPackageSupportMatrix(
+  input:
+    | CreateCapabilityPackageSupportMatrixInput
+    | CapabilityPackageSupportMatrix,
+): CapabilityPackageSupportMatrix {
+  const supportMatrix: CapabilityPackageSupportMatrix = {
+    routes: input.routes.map((route) => createCapabilityPackageSupportRoute(route)),
+    metadata: input.metadata,
+  };
+
+  validateCapabilityPackageSupportMatrix(supportMatrix);
+  return supportMatrix;
+}
+
+export function validateCapabilityPackageSupportMatrix(
+  supportMatrix: CapabilityPackageSupportMatrix,
+): void {
+  if (supportMatrix.routes.length === 0) {
+    throw new Error(
+      "Capability package supportMatrix requires at least one route.",
+    );
+  }
+
+  const seenRouteKeys = new Set<string>();
+  for (const route of supportMatrix.routes) {
+    validateCapabilityPackageSupportRoute(route);
+    const routeKey = createCapabilityPackageSupportRouteKey(route);
+    if (seenRouteKeys.has(routeKey)) {
+      throw new Error(
+        `Capability package supportMatrix contains a duplicate route: ${routeKey}.`,
+      );
+    }
+    seenRouteKeys.add(routeKey);
+  }
+}
+
+function createMcpCallSupportMatrix(): CapabilityPackageSupportMatrix {
+  return createCapabilityPackageSupportMatrix({
+    routes: [
+      {
+        provider: "openai",
+        sdkLayer: "api",
+        lowering: "shared-runtime",
+        status: "documented",
+        notes: [
+          "OpenAI documents MCP on both API and agent carriers, while this package keeps the lowering on the shared runtime.",
+        ],
+      },
+      {
+        provider: "openai",
+        sdkLayer: "agent",
+        lowering: "shared-runtime",
+        status: "documented",
+        preferred: true,
+        notes: [
+          "Agent-side MCP remains the cleaner truthful route for shared-runtime tool calling.",
+        ],
+      },
+      {
+        provider: "anthropic",
+        sdkLayer: "api",
+        lowering: "shared-runtime",
+        status: "documented",
+        preferred: true,
+        notes: [
+          "Anthropic's API connector is the current preferred MCP route, even though the package still lowers through the shared runtime.",
+        ],
+      },
+      {
+        provider: "anthropic",
+        sdkLayer: "agent",
+        lowering: "shared-runtime",
+        status: "documented",
+        notes: [
+          "Agent/runtime MCP exists, but the package contract stays honest that the lowering is still shared-runtime.",
+        ],
+      },
+      {
+        provider: "deepmind",
+        sdkLayer: "api",
+        lowering: "shared-runtime",
+        status: "documented",
+        notes: [
+          "Gemini API MCP is documented, while this capability package still routes through the shared runtime today.",
+        ],
+      },
+      {
+        provider: "deepmind",
+        sdkLayer: "agent",
+        lowering: "shared-runtime",
+        status: "documented",
+        preferred: true,
+        notes: [
+          "ADK/agent-side MCP is the preferred DeepMind route, but the current package still lowers through the shared runtime.",
+        ],
+      },
+    ],
+    metadata: {
+      capabilityFamily: "mcp",
+      executionSurface: "shared-runtime",
+    },
+  });
+}
+
+function createMcpNativeExecuteSupportMatrix(): CapabilityPackageSupportMatrix {
+  return createCapabilityPackageSupportMatrix({
+    routes: [
+      {
+        provider: "openai",
+        sdkLayer: "api",
+        lowering: "provider-native-api",
+        status: "documented",
+        constraints: [
+          "Transport and compatibility-profile constraints still apply before execution can start.",
+        ],
+      },
+      {
+        provider: "openai",
+        sdkLayer: "agent",
+        lowering: "provider-native-agent",
+        status: "documented",
+        preferred: true,
+        notes: [
+          "OpenAI agent/runtime MCP is the preferred native execute route.",
+        ],
+      },
+      {
+        provider: "anthropic",
+        sdkLayer: "api",
+        lowering: "provider-native-api",
+        status: "documented",
+        preferred: true,
+        notes: [
+          "Anthropic connector-style MCP is the preferred native execute route.",
+        ],
+      },
+      {
+        provider: "anthropic",
+        sdkLayer: "agent",
+        lowering: "provider-native-agent",
+        status: "documented",
+        constraints: [
+          "Execution still depends on the runtime carrier exposing a final assistant message.",
+        ],
+      },
+      {
+        provider: "deepmind",
+        sdkLayer: "api",
+        lowering: "provider-native-api",
+        status: "documented",
+        constraints: [
+          "Gemini API native execution remains subject to model-family and carrier restrictions.",
+        ],
+      },
+      {
+        provider: "deepmind",
+        sdkLayer: "agent",
+        lowering: "provider-native-agent",
+        status: "documented",
+        preferred: true,
+        notes: [
+          "ADK runtime is the preferred native execute route for DeepMind.",
+        ],
+      },
+    ],
+    metadata: {
+      capabilityFamily: "mcp",
+      executionSurface: "provider-native",
+    },
+  });
 }
 
 function createMcpCapabilityPackageActivationSpec(params: {
@@ -473,6 +811,7 @@ function createMcpCallCapabilityPackage(
       ],
       supportedPlatforms: input.supportedPlatforms ?? ["linux", "macos", "windows"],
     },
+    supportMatrix: createMcpCallSupportMatrix(),
     adapter: {
       adapterId: "adapter.mcp-call",
       runtimeKind: "rax-mcp",
@@ -627,6 +966,7 @@ function createMcpNativeExecuteCapabilityPackage(
       ],
       supportedPlatforms: input.supportedPlatforms ?? ["linux", "macos", "windows"],
     },
+    supportMatrix: createMcpNativeExecuteSupportMatrix(),
     adapter: {
       adapterId: "adapter.mcp-native-execute",
       runtimeKind: "rax-mcp",
@@ -1328,12 +1668,136 @@ export function validateMcpCapabilityPackage(
   }
 }
 
+function hasRouteHint(
+  routeHints: readonly CapabilityRouteHint[],
+  key: string,
+  value: string,
+): boolean {
+  return routeHints.some(
+    (routeHint) => routeHint.key === key && routeHint.value === value,
+  );
+}
+
+function validateScopeAllowsCapabilityKey(
+  scopeLabel: string,
+  scope: AccessRequestScope | undefined,
+  capabilityKey: string,
+): void {
+  if (!scope?.allowedOperations?.includes(capabilityKey)) {
+    throw new Error(
+      `${capabilityKey} capability packages must allow ${capabilityKey} in ${scopeLabel}.`,
+    );
+  }
+}
+
+export function validateSkillCapabilityPackage(
+  capabilityPackage: CapabilityPackage,
+): void {
+  const capabilityKey = capabilityPackage.manifest.capabilityKey;
+  if (!isSupportedSkillCapabilityPackageKey(capabilityKey)) {
+    return;
+  }
+
+  if (capabilityPackage.adapter.adapterId !== RAX_SKILL_ADAPTER_ID) {
+    throw new Error(
+      `${capabilityKey} capability packages must use adapterId ${RAX_SKILL_ADAPTER_ID}.`,
+    );
+  }
+
+  if (capabilityPackage.adapter.runtimeKind !== RAX_SKILL_RUNTIME_KIND) {
+    throw new Error(
+      `${capabilityKey} capability packages must use runtimeKind ${RAX_SKILL_RUNTIME_KIND}.`,
+    );
+  }
+
+  if (!capabilityPackage.adapter.supports.includes(capabilityKey)) {
+    throw new Error(
+      `${capabilityKey} capability packages must explicitly list themselves in adapter.supports.`,
+    );
+  }
+
+  validateScopeAllowsCapabilityKey(
+    "policy.defaultScope",
+    capabilityPackage.policy.defaultScope,
+    capabilityKey,
+  );
+  validateScopeAllowsCapabilityKey(
+    "policy.defaultBaseline.scope",
+    capabilityPackage.policy.defaultBaseline.scope,
+    capabilityKey,
+  );
+
+  if (
+    !hasRouteHint(
+      capabilityPackage.manifest.routeHints,
+      "capability_family",
+      "skill",
+    )
+  ) {
+    throw new Error(
+      `${capabilityKey} capability packages must declare routeHint capability_family=skill.`,
+    );
+  }
+
+  if (
+    !hasRouteHint(
+      capabilityPackage.manifest.routeHints,
+      "skill_action",
+      capabilityKey.replace("skill.", ""),
+    )
+  ) {
+    throw new Error(
+      `${capabilityKey} capability packages must declare routeHint skill_action=${capabilityKey.replace("skill.", "")}.`,
+    );
+  }
+
+  if (
+    capabilityPackage.builder.requiresInstall
+    || capabilityPackage.builder.requiresSystemWrite
+  ) {
+    throw new Error(
+      `${capabilityKey} capability packages must not require install or system writes.`,
+    );
+  }
+
+  if (capabilityPackage.activationSpec) {
+    const bindingAdapterId = capabilityPackage.activationSpec.bindingPayload?.adapterId;
+    const bindingRuntimeKind =
+      capabilityPackage.activationSpec.bindingPayload?.runtimeKind;
+
+    if (bindingAdapterId !== capabilityPackage.adapter.adapterId) {
+      throw new Error(
+        `${capabilityKey} capability packages must keep activationSpec bindingPayload.adapterId aligned with adapter.adapterId.`,
+      );
+    }
+
+    if (bindingRuntimeKind !== capabilityPackage.adapter.runtimeKind) {
+      throw new Error(
+        `${capabilityKey} capability packages must keep activationSpec bindingPayload.runtimeKind aligned with adapter.runtimeKind.`,
+      );
+    }
+
+    if (
+      !capabilityPackage.activationSpec.adapterFactoryRef.startsWith(
+        "factory:rax.skill:",
+      )
+    ) {
+      throw new Error(
+        `${capabilityKey} capability packages must use a factory:rax.skill:* activation factory ref.`,
+      );
+    }
+  }
+}
+
 export function validateCapabilityPackage(capabilityPackage: CapabilityPackage): void {
   normalizeString(
     capabilityPackage.templateVersion,
     "capabilityPackage.templateVersion",
   );
   validateCapabilityPackageManifest(capabilityPackage.manifest);
+  if (capabilityPackage.supportMatrix) {
+    validateCapabilityPackageSupportMatrix(capabilityPackage.supportMatrix);
+  }
   validateCapabilityPackageAdapter(capabilityPackage.adapter);
   validateCapabilityPackagePolicy(capabilityPackage.policy);
   validateCapabilityPackageBuilder(capabilityPackage.builder);
@@ -1368,6 +1832,7 @@ export function validateCapabilityPackage(capabilityPackage: CapabilityPackage):
   }
 
   validateMcpCapabilityPackage(capabilityPackage);
+  validateSkillCapabilityPackage(capabilityPackage);
 }
 
 export function createCapabilityPackage(
@@ -1377,6 +1842,9 @@ export function createCapabilityPackage(
     templateVersion:
       input.templateVersion ?? CAPABILITY_PACKAGE_TEMPLATE_VERSION,
     manifest: createCapabilityPackageManifest(input.manifest),
+    supportMatrix: input.supportMatrix
+      ? createCapabilityPackageSupportMatrix(input.supportMatrix)
+      : undefined,
     adapter: createCapabilityPackageAdapter(input.adapter),
     policy: createCapabilityPackagePolicy(input.policy),
     builder: createCapabilityPackageBuilder(input.builder),
@@ -1404,6 +1872,7 @@ export function createCapabilityPackageFromProvisionBundle(
 
   return createCapabilityPackage({
     manifest: input.manifest,
+    supportMatrix: input.supportMatrix,
     adapter: input.adapter,
     policy: input.policy,
     builder: input.builder,
@@ -1459,6 +1928,41 @@ export function createCapabilityPackageFixture(
       routeHints: [{ key: "provider", value: "playwright" }],
       supportedPlatforms: ["linux", "macos", "windows"],
     },
+    supportMatrix: createCapabilityPackageSupportMatrix({
+      routes: [
+        {
+          provider: "openai",
+          sdkLayer: "agent",
+          lowering: "package-runtime",
+          status: "inferred",
+          preferred: true,
+          notes: [
+            "Fixture packages model a local adapter/package runtime mounted behind the TAP execution lane.",
+          ],
+        },
+        {
+          provider: "anthropic",
+          sdkLayer: "agent",
+          lowering: "package-runtime",
+          status: "inferred",
+          notes: [
+            "The same fixture runtime shape can be mounted for Anthropic-facing TAP routes.",
+          ],
+        },
+        {
+          provider: "deepmind",
+          sdkLayer: "agent",
+          lowering: "package-runtime",
+          status: "inferred",
+          notes: [
+            "The same fixture runtime shape can be mounted for DeepMind-facing TAP routes.",
+          ],
+        },
+      ],
+      metadata: {
+        packageKind: "fixture",
+      },
+    }),
     adapter: {
       adapterId: "adapter.playwright",
       runtimeKind: input.runtimeKind ?? "mcp",

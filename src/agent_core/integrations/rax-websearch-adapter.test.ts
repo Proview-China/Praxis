@@ -10,6 +10,8 @@ import { createCapabilityInvocationPlan } from "../capability-invocation/capabil
 import {
   createRaxWebsearchActivationFactory,
   createRaxWebsearchAdapter,
+  registerRaxWebsearchActivationFactory,
+  registerRaxWebsearchCapability,
   type RaxWebsearchAdapterOptions,
 } from "./rax-websearch-adapter.js";
 import {
@@ -248,4 +250,111 @@ test("rax websearch activation factory materializes a package-backed adapter", a
     (envelope.output as { answer: string }).answer,
     "package-backed-search-ok",
   );
+});
+
+test("registerRaxWebsearchActivationFactory wires the search.ground factory ref onto a target", () => {
+  const registrations = new Map<string, ReturnType<typeof createRaxWebsearchActivationFactory>>();
+
+  const registration = registerRaxWebsearchActivationFactory({
+    target: {
+      registerTaActivationFactory(ref, factory) {
+        registrations.set(ref, factory);
+      },
+    },
+  });
+
+  assert.equal(registration.activationFactoryRef, RAX_WEBSEARCH_ACTIVATION_FACTORY_REF);
+  assert.equal(registration.capabilityPackage.manifest.capabilityKey, "search.ground");
+  assert.equal(registrations.has(RAX_WEBSEARCH_ACTIVATION_FACTORY_REF), true);
+
+  const adapter = registration.factory({
+    manifest: {
+      capabilityId: "capability:search.ground:1",
+      capabilityKey: "search.ground",
+      kind: "tool",
+      version: "1.0.0",
+      generation: 1,
+      description: "Grounded web search",
+      supportsPrepare: true,
+    },
+  });
+
+  assert.equal(adapter.id, "adapter:search.ground");
+});
+
+test("registerRaxWebsearchCapability registers the package-backed adapter and activation entry together", () => {
+  const registrations = new Map<string, ReturnType<typeof createRaxWebsearchActivationFactory>>();
+  const manifestBindings: Array<{
+    manifest: {
+      capabilityId: string;
+      capabilityKey: string;
+      generation: number;
+      version: string;
+    };
+    adapterId: string;
+  }> = [];
+  const facade = {
+    websearch: {
+      async create() {
+        return {
+          status: "success",
+          provider: "openai",
+          model: "gpt-5.4",
+          layer: "api",
+        };
+      },
+    },
+  } as RaxWebsearchAdapterOptions["facade"];
+
+  const registration = registerRaxWebsearchCapability({
+    runtime: {
+      registerCapabilityAdapter(manifest, adapter) {
+        manifestBindings.push({
+          manifest: {
+            capabilityId: manifest.capabilityId,
+            capabilityKey: manifest.capabilityKey,
+            generation: manifest.generation,
+            version: manifest.version,
+          },
+          adapterId: adapter.id,
+        });
+
+        return {
+          bindingId: "binding:search.ground",
+          capabilityId: manifest.capabilityId,
+          state: "active",
+        };
+      },
+      registerTaActivationFactory(ref, factory) {
+        registrations.set(ref, factory);
+      },
+    },
+    facade,
+    capabilityPackage: createRaxWebsearchCapabilityPackage({
+      generation: 3,
+      version: "1.3.0",
+    }),
+  });
+
+  assert.equal(registration.activationFactoryRef, RAX_WEBSEARCH_ACTIVATION_FACTORY_REF);
+  assert.equal(registration.manifest.capabilityId, "capability:search.ground:3");
+  assert.equal(registration.manifest.version, "1.3.0");
+  assert.equal(registration.adapter.id, "adapter:search.ground");
+  assert.deepEqual(manifestBindings, [
+    {
+      manifest: {
+        capabilityId: "capability:search.ground:3",
+        capabilityKey: "search.ground",
+        generation: 3,
+        version: "1.3.0",
+      },
+      adapterId: "adapter:search.ground",
+    },
+  ]);
+  assert.deepEqual(registration.binding, {
+    bindingId: "binding:search.ground",
+    capabilityId: "capability:search.ground:3",
+    state: "active",
+  });
+  assert.equal(registrations.has(RAX_WEBSEARCH_ACTIVATION_FACTORY_REF), true);
 });

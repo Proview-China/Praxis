@@ -102,6 +102,8 @@ export type {
   AssembleCapabilityProfileFromPackagesInput,
   CapabilityPackageProfileAssemblySummary,
   CreateFirstWaveCapabilityProfileInput,
+  FirstWaveProfileAssemblyDescriptor,
+  FirstWaveProfileAssemblyTarget,
 } from "./first-wave-profile.js";
 export {
   assembleCapabilityProfileFromPackages,
@@ -110,6 +112,10 @@ export {
   FIRST_WAVE_BASELINE_CAPABILITIES,
   FIRST_WAVE_BOOTSTRAP_REVIEW_ONLY_CAPABILITIES,
   FIRST_WAVE_EXTENDED_REVIEW_ONLY_CAPABILITIES,
+  FIRST_WAVE_PROFILE_ASSEMBLY_TARGETS,
   FIRST_WAVE_REVIEW_ONLY_CAPABILITIES,
+  getFirstWaveCapabilityProfileAssemblySummary,
+  getFirstWaveProfileAssemblyDescriptor,
+  listFirstWaveProfileAssemblyDescriptors,
   resolveFirstWaveCapabilityAssignment,
 } from "./first-wave-profile.js";

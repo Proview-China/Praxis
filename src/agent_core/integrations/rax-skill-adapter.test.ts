@@ -8,7 +8,23 @@ import type {
   SkillMountResult,
   SkillUseResult,
 } from "../../rax/index.js";
-import { createRaxSkillCapabilityAdapter } from "./rax-skill-adapter.js";
+import { createCapabilityLease } from "../capability-invocation/capability-lease.js";
+import { createCapabilityInvocationPlan } from "../capability-invocation/capability-plan.js";
+import {
+  createCapabilityPackage,
+  createCapabilityPackageActivationSpecRef,
+} from "../capability-package/index.js";
+import {
+  createActivationFactoryResolver,
+  materializeActivationRegistration,
+} from "../ta-pool-runtime/index.js";
+import { createPoolActivationSpec } from "../ta-pool-types/index.js";
+import {
+  createRaxSkillActivationFactory,
+  createRaxSkillCapabilityAdapter,
+  RAX_SKILL_ACTIVATION_FACTORY_REFS,
+  registerRaxSkillCapabilityFamily,
+} from "./rax-skill-adapter.js";
 
 function createContainer(): SkillContainer {
   return {
@@ -100,6 +116,135 @@ function createInvocation(provider: "openai" | "anthropic" | "deepmind"): Prepar
     },
     payload: {},
   };
+}
+
+function createSkillCapabilityPackage(
+  capabilityKey: "skill.use" | "skill.mount" | "skill.prepare",
+) {
+  const activationSpec = createPoolActivationSpec({
+    targetPool: "ta-capability-pool",
+    activationMode: "activate_after_verify",
+    registerOrReplace: "register_or_replace",
+    generationStrategy: "create_next_generation",
+    drainStrategy: "graceful",
+    manifestPayload: {
+      capabilityKey,
+      capabilityId: `capability:${capabilityKey}:1`,
+      version: "1.0.0",
+      generation: 1,
+      kind: "tool",
+      description: `Fixture package for ${capabilityKey}.`,
+      supportsPrepare: true,
+      routeHints: [
+        { key: "capability_family", value: "skill" },
+        { key: "skill_action", value: capabilityKey.replace("skill.", "") },
+      ],
+    },
+    bindingPayload: {
+      adapterId: "rax.skill.adapter",
+      runtimeKind: "rax-skill",
+      capabilityKey,
+    },
+    adapterFactoryRef: RAX_SKILL_ACTIVATION_FACTORY_REFS[capabilityKey],
+  });
+
+  return createCapabilityPackage({
+    manifest: {
+      capabilityKey,
+      capabilityKind: "tool",
+      tier: "B1",
+      version: "1.0.0",
+      generation: 1,
+      description: `Fixture package for ${capabilityKey}.`,
+      dependencies: ["rax.skill"],
+      tags: ["skill", "tap", "rax"],
+      routeHints: [
+        { key: "runtime", value: "rax-skill" },
+        { key: "capability_family", value: "skill" },
+        { key: "skill_action", value: capabilityKey.replace("skill.", "") },
+      ],
+      supportedPlatforms: ["linux", "macos", "windows"],
+    },
+    adapter: {
+      adapterId: "rax.skill.adapter",
+      runtimeKind: "rax-skill",
+      supports: [capabilityKey],
+      prepare: {
+        ref: `fixture:${capabilityKey}:prepare`,
+      },
+      execute: {
+        ref: `fixture:${capabilityKey}:execute`,
+      },
+      resultMapping: {
+        successStatuses: ["success"],
+        artifactKinds: ["tool"],
+      },
+    },
+    policy: {
+      defaultBaseline: {
+        grantedTier: "B1",
+        mode: "standard",
+        scope: {
+          allowedOperations: [capabilityKey],
+        },
+      },
+      recommendedMode: "standard",
+      riskLevel: "normal",
+      defaultScope: {
+        allowedOperations: [capabilityKey],
+      },
+      reviewRequirements: ["allow_with_constraints"],
+      safetyFlags: [],
+      humanGateRequirements: [],
+    },
+    builder: {
+      builderId: `builder:${capabilityKey}:fixture`,
+      buildStrategy: "mount-existing-runtime",
+      requiresNetwork: false,
+      requiresInstall: false,
+      requiresSystemWrite: false,
+      allowedWorkdirScope: ["workspace/**"],
+      activationSpecRef: createCapabilityPackageActivationSpecRef(activationSpec),
+      replayCapability: "re_review_then_dispatch",
+    },
+    verification: {
+      smokeEntry: `fixture:${capabilityKey}:smoke`,
+      healthEntry: `fixture:${capabilityKey}:health`,
+      successCriteria: ["returns a capability result envelope"],
+      failureSignals: ["fixture failed"],
+      evidenceOutput: ["capability-result-envelope"],
+    },
+    usage: {
+      usageDocRef: "docs/fixtures/rax-skill-adapter.md",
+      bestPractices: ["Fixture only."],
+      knownLimits: ["Fixture only."],
+      exampleInvocations: [
+        {
+          exampleId: `fixture.${capabilityKey}`,
+          capabilityKey,
+          operation: capabilityKey,
+          input: {
+            provider: "openai",
+            model: "gpt-5.4",
+          },
+        },
+      ],
+    },
+    lifecycle: {
+      installStrategy: "fixture",
+      replaceStrategy: "fixture",
+      rollbackStrategy: "fixture",
+      deprecateStrategy: "fixture",
+      cleanupStrategy: "fixture",
+      generationPolicy: "create_next_generation",
+    },
+    activationSpec,
+    replayPolicy: "re_review_then_dispatch",
+    metadata: {
+      bundleId: `bundle:${capabilityKey}:fixture`,
+      provisionId: `provision:${capabilityKey}:fixture`,
+    },
+  });
 }
 
 test("rax skill adapter supports skill.use plan with normalized route context", () => {
@@ -346,4 +491,110 @@ test("rax skill adapter execute accepts reference-first skill.use input", async 
   assert.equal(output.container.source.kind, "virtual");
   assert.equal(output.activation.composeStrategy, "runtime-only");
   assert.match(output.activation.composeNotes ?? "", /SDK runtime path/u);
+});
+
+test("rax skill activation factory materializes a package-backed skill adapter", async () => {
+  const container = createContainer();
+  const facade = {
+    skill: {
+      async use(): Promise<SkillUseResult> {
+        return {
+          container,
+          activation: createActivation("openai"),
+          invocation: createInvocation("openai"),
+        };
+      },
+      mount(): SkillMountResult {
+        throw new Error("mount should not be called in this test");
+      },
+      prepare(): PreparedInvocation<Record<string, unknown>> {
+        throw new Error("prepare should not be called in this test");
+      },
+    },
+  };
+  const capabilityPackage = createSkillCapabilityPackage("skill.use");
+  const resolver = createActivationFactoryResolver();
+  resolver.register(
+    RAX_SKILL_ACTIVATION_FACTORY_REFS["skill.use"],
+    createRaxSkillActivationFactory({ facade }),
+  );
+
+  const materialized = await materializeActivationRegistration({
+    capabilityPackage,
+    factoryResolver: resolver,
+    capabilityIdPrefix: "capability",
+  });
+  const plan = createCapabilityInvocationPlan(
+    {
+      intentId: "intent_skill_pkg_001",
+      sessionId: "session_skill_pkg_001",
+      runId: "run_skill_pkg_001",
+      capabilityKey: "skill.use",
+      input: {
+        provider: "openai",
+        model: "gpt-5.4",
+        source: "/skills/browser",
+      },
+      priority: "normal",
+    },
+    {
+      idFactory: () => "plan_skill_pkg_001",
+    },
+  );
+  const lease = createCapabilityLease(
+    {
+      capabilityId: materialized.manifest.capabilityId,
+      bindingId: "binding_skill_pkg_001",
+      generation: materialized.manifest.generation,
+      plan,
+    },
+    {
+      idFactory: () => "lease_skill_pkg_001",
+      clock: {
+        now: () => new Date("2026-03-25T00:00:00.000Z"),
+      },
+    },
+  );
+
+  const prepared = await materialized.adapter.prepare(plan, lease);
+  const envelope = await materialized.adapter.execute(prepared);
+
+  assert.equal(materialized.manifest.capabilityKey, "skill.use");
+  assert.equal(materialized.targetPool, "ta-capability-pool");
+  assert.equal(materialized.adapter.id, "rax.skill.adapter");
+  assert.equal(envelope.status, "success");
+  assert.equal((envelope.output as { action: string }).action, "skill.use");
+});
+
+test("register rax skill capability family wires requested manifests and activation factories", () => {
+  const registeredManifests: string[] = [];
+  const registeredFactories = new Map<string, ReturnType<typeof createRaxSkillActivationFactory>>();
+  const registration = registerRaxSkillCapabilityFamily({
+    runtime: {
+      registerCapabilityAdapter(manifest, adapter) {
+        registeredManifests.push(manifest.capabilityKey);
+        return adapter.id;
+      },
+      registerTaActivationFactory(ref, factory) {
+        registeredFactories.set(ref, factory);
+      },
+    },
+    capabilityKeys: ["skill.use", "skill.prepare"],
+  });
+
+  assert.deepEqual(registration.capabilityKeys, ["skill.use", "skill.prepare"]);
+  assert.deepEqual(
+    registration.activationFactoryRefs,
+    [
+      RAX_SKILL_ACTIVATION_FACTORY_REFS["skill.use"],
+      RAX_SKILL_ACTIVATION_FACTORY_REFS["skill.prepare"],
+    ],
+  );
+  assert.deepEqual(
+    registration.manifests.map((manifest) => manifest.capabilityKey),
+    ["skill.use", "skill.prepare"],
+  );
+  assert.deepEqual(registeredManifests, ["skill.use", "skill.prepare"]);
+  assert.equal(registeredFactories.size, 2);
+  assert.deepEqual(registration.bindings, ["rax.skill.adapter", "rax.skill.adapter"]);
 });
