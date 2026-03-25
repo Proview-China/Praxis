@@ -19,7 +19,7 @@ import { createFirstWaveCapabilityProfile } from "./ta-pool-model/index.js";
 import { createReviewerRuntime } from "./ta-pool-review/index.js";
 import { createToolReviewGovernanceTrace } from "./ta-pool-tool-review/index.js";
 import { TA_ENFORCEMENT_METADATA_KEY } from "./ta-pool-runtime/enforcement-guard.js";
-import { createTaResumeEnvelope } from "./ta-pool-runtime/index.js";
+import { createTaPendingReplay, createTaResumeEnvelope } from "./ta-pool-runtime/index.js";
 import type { RaxFacade } from "../rax/facade.js";
 import {
   DEFAULT_COMPATIBILITY_PROFILES,
@@ -1034,6 +1034,8 @@ test("AgentCoreRuntime can assemble review -> provisioning through T/A pool for 
   assert.equal(result.provisionBundle?.status, "ready");
   assert.equal(result.replay?.policy, "re_review_then_dispatch");
   assert.equal(result.replay?.state, "pending_re_review");
+  assert.equal(typeof result.replay?.resumeEnvelopeId, "string");
+  assert.equal(result.replay?.resumeEnvelopeId?.startsWith("resume:replay:"), true);
   assert.equal(runtime.listTaPendingReplays().length, 1);
 });
 
@@ -1677,6 +1679,109 @@ test("AgentCoreRuntime records blocked tool-review lifecycle when target binding
   assert.equal(latestLifecycleAction?.governanceKind, "lifecycle");
   assert.equal(latestLifecycleAction?.boundaryMode, "governance_only");
   assert.equal(latestLifecycleAction?.output.status, "lifecycle_blocked");
+});
+
+test("AgentCoreRuntime auto-continues eligible provisioning after lifecycle application", async () => {
+  const runtime = createAgentCoreRuntime({
+    taProfile: createAgentCapabilityProfile({
+      profileId: "profile.runtime.lifecycle-continue-provisioning",
+      agentClass: "main-agent",
+      baselineCapabilities: ["docs.read"],
+      allowedCapabilityPatterns: ["computer.*"],
+    }),
+  });
+  const session = runtime.createSession();
+  const goal = runtime.createCompiledGoal(
+    createGoalSource({
+      goalId: "goal-runtime-lifecycle-continue-provisioning",
+      sessionId: session.sessionId,
+      userInput: "Lifecycle apply should continue staged provisioning when replay is eligible.",
+    }),
+  );
+  const created = await runtime.createRun({
+    sessionId: session.sessionId,
+    goal,
+  });
+
+  const provisioned = await runtime.dispatchCapabilityIntentViaTaPool({
+    intentId: "intent-lifecycle-continue-provisioning-1",
+    sessionId: session.sessionId,
+    runId: created.run.runId,
+    kind: "capability_call",
+    createdAt: "2026-03-25T21:30:00.000Z",
+    priority: "normal",
+    request: {
+      requestId: "request-lifecycle-continue-provisioning-1",
+      intentId: "intent-lifecycle-continue-provisioning-1",
+      sessionId: session.sessionId,
+      runId: created.run.runId,
+      capabilityKey: "computer.use",
+      input: {
+        task: "auto continue after lifecycle apply",
+      },
+      priority: "normal",
+    },
+  }, {
+    agentId: "agent-main",
+    requestedTier: "B2",
+    mode: "balanced",
+    reason: "Stage provisioning, then continue it through lifecycle application.",
+  });
+
+  assert.equal(provisioned.status, "provisioned");
+  const provisionId = provisioned.provisionRequest?.provisionId;
+  assert.ok(provisionId);
+
+  runtime.registerTaActivationFactory("factory:computer.use", () => ({
+    id: "adapter.computer.use.lifecycle-continue-provisioning",
+    runtimeKind: "tool",
+    supports(plan) {
+      return plan.capabilityKey === "computer.use";
+    },
+    async prepare(plan, lease) {
+      return {
+        preparedId: `${plan.planId}:prepared`,
+        leaseId: lease.leaseId,
+        capabilityKey: plan.capabilityKey,
+        bindingId: lease.bindingId,
+        generation: lease.generation,
+        executionMode: "direct",
+      };
+    },
+    async execute(prepared) {
+      return {
+        executionId: `${prepared.preparedId}:execution`,
+        resultId: `${prepared.preparedId}:result`,
+        status: "success",
+        output: {
+          answer: "lifecycle-continue-provisioning-ok",
+        },
+        completedAt: "2026-03-25T21:30:03.000Z",
+      };
+    },
+  }));
+
+  const activation = await runtime.activateTaProvisionAsset(provisionId!);
+  assert.equal(activation.status, "activated");
+  const bindingId = activation.receipt?.bindingId;
+  assert.ok(bindingId);
+  const attemptsBeforeLifecycle = runtime.listTaActivationAttempts().length;
+
+  const lifecycleResult = await runtime.applyTaCapabilityLifecycle({
+    capabilityKey: "computer.use",
+    lifecycleAction: "resume",
+    targetPool: "ta-capability-pool",
+    bindingId,
+    reason: "Lifecycle acceptance should continue the staged replay.",
+  });
+
+  assert.equal(lifecycleResult.status, "applied");
+  assert.equal(lifecycleResult.continuedProvisioning?.length, 1);
+  assert.equal(lifecycleResult.continuedProvisioning?.[0]?.status, "dispatched");
+  assert.equal(lifecycleResult.continuedProvisioning?.[0]?.dispatchResult?.grant?.capabilityKey, "computer.use");
+  assert.equal(lifecycleResult.continuedProvisioning?.[0]?.activationResult?.status, "activated");
+  assert.equal(runtime.listTaActivationAttempts().length, attemptsBeforeLifecycle);
+  assert.equal(runtime.listTaResumeEnvelopes().some((entry) => entry.source === "replay"), false);
 });
 
 test("AgentCoreRuntime can recover and continue a waiting human gate approval path", async () => {
@@ -2639,6 +2744,310 @@ test("AgentCoreRuntime can replay provisioned capabilities after activation hand
   assert.equal(replayed.reviewDecision?.decision, "approved");
   assert.equal(replayed.grant?.capabilityKey, "computer.use");
   assert.equal(replayed.dispatch?.prepared.capabilityKey, "computer.use");
+});
+
+test("AgentCoreRuntime can continue a provisioned capability through activation and replay in one call", async () => {
+  const runtime = createAgentCoreRuntime({
+    taProfile: createAgentCapabilityProfile({
+      profileId: "profile.runtime.continue-provisioning",
+      agentClass: "main-agent",
+      baselineCapabilities: ["docs.read"],
+      allowedCapabilityPatterns: ["computer.*"],
+    }),
+  });
+  const session = runtime.createSession();
+  const goal = runtime.createCompiledGoal(
+    createGoalSource({
+      goalId: "goal-runtime-continue-provisioning",
+      sessionId: session.sessionId,
+      userInput: "Continue provisioning through activation and replay.",
+    }),
+  );
+  const created = await runtime.createRun({
+    sessionId: session.sessionId,
+    goal,
+  });
+
+  const provisioned = await runtime.dispatchCapabilityIntentViaTaPool({
+    intentId: "intent-continue-provisioning-1",
+    sessionId: session.sessionId,
+    runId: created.run.runId,
+    kind: "capability_call",
+    createdAt: "2026-03-25T21:10:00.000Z",
+    priority: "normal",
+    request: {
+      requestId: "request-continue-provisioning-1",
+      intentId: "intent-continue-provisioning-1",
+      sessionId: session.sessionId,
+      runId: created.run.runId,
+      capabilityKey: "computer.use",
+      input: {
+        task: "continue provisioning mainline",
+      },
+      priority: "normal",
+    },
+  }, {
+    agentId: "agent-main",
+    requestedTier: "B2",
+    mode: "balanced",
+    reason: "Provision first and then continue automatically.",
+  });
+
+  assert.equal(provisioned.status, "provisioned");
+  const provisionId = provisioned.provisionRequest?.provisionId;
+  assert.ok(provisionId);
+
+  runtime.registerTaActivationFactory("factory:computer.use", () => ({
+    id: "adapter.computer.use.continue-provisioning",
+    runtimeKind: "tool",
+    supports(plan) {
+      return plan.capabilityKey === "computer.use";
+    },
+    async prepare(plan, lease) {
+      return {
+        preparedId: `${plan.planId}:prepared`,
+        leaseId: lease.leaseId,
+        capabilityKey: plan.capabilityKey,
+        bindingId: lease.bindingId,
+        generation: lease.generation,
+        executionMode: "direct",
+      };
+    },
+    async execute(prepared) {
+      return {
+        executionId: `${prepared.preparedId}:execution`,
+        resultId: `${prepared.preparedId}:result`,
+        status: "success",
+        output: {
+          answer: "continue-provisioning-ok",
+        },
+        completedAt: "2026-03-25T21:10:03.000Z",
+      };
+    },
+  }));
+
+  const continued = await runtime.continueTaProvisioning(provisionId!);
+
+  assert.equal(continued.status, "dispatched");
+  assert.equal(continued.dispatchResult?.grant?.capabilityKey, "computer.use");
+  assert.equal(continued.activationResult?.status, "activated");
+  assert.equal(runtime.getTaActivationAttempt(continued.activationResult?.attempt?.attemptId ?? "")?.status, "succeeded");
+  assert.equal(runtime.listTaResumeEnvelopes().some((entry) => entry.source === "replay"), false);
+});
+
+test("AgentCoreRuntime continueTaProvisioning reuses an already active asset without creating a second activation attempt", async () => {
+  const runtime = createAgentCoreRuntime({
+    taProfile: createAgentCapabilityProfile({
+      profileId: "profile.runtime.continue-provisioning-active-asset",
+      agentClass: "main-agent",
+      baselineCapabilities: ["docs.read"],
+      allowedCapabilityPatterns: ["computer.*"],
+    }),
+  });
+  const session = runtime.createSession();
+  const goal = runtime.createCompiledGoal(
+    createGoalSource({
+      goalId: "goal-runtime-continue-provisioning-active-asset",
+      sessionId: session.sessionId,
+      userInput: "Reuse active asset when continuing provisioning.",
+    }),
+  );
+  const created = await runtime.createRun({
+    sessionId: session.sessionId,
+    goal,
+  });
+
+  const provisioned = await runtime.dispatchCapabilityIntentViaTaPool({
+    intentId: "intent-continue-provisioning-active-asset-1",
+    sessionId: session.sessionId,
+    runId: created.run.runId,
+    kind: "capability_call",
+    createdAt: "2026-03-25T21:20:00.000Z",
+    priority: "normal",
+    request: {
+      requestId: "request-continue-provisioning-active-asset-1",
+      intentId: "intent-continue-provisioning-active-asset-1",
+      sessionId: session.sessionId,
+      runId: created.run.runId,
+      capabilityKey: "computer.use",
+      input: {
+        task: "reuse active asset",
+      },
+      priority: "normal",
+    },
+  }, {
+    agentId: "agent-main",
+    requestedTier: "B2",
+    mode: "balanced",
+    reason: "Create replay envelope, then activate before continue call.",
+  });
+
+  assert.equal(provisioned.status, "provisioned");
+  const provisionId = provisioned.provisionRequest?.provisionId;
+  assert.ok(provisionId);
+
+  runtime.registerTaActivationFactory("factory:computer.use", () => ({
+    id: "adapter.computer.use.continue-active-asset",
+    runtimeKind: "tool",
+    supports(plan) {
+      return plan.capabilityKey === "computer.use";
+    },
+    async prepare(plan, lease) {
+      return {
+        preparedId: `${plan.planId}:prepared`,
+        leaseId: lease.leaseId,
+        capabilityKey: plan.capabilityKey,
+        bindingId: lease.bindingId,
+        generation: lease.generation,
+        executionMode: "direct",
+      };
+    },
+    async execute(prepared) {
+      return {
+        executionId: `${prepared.preparedId}:execution`,
+        resultId: `${prepared.preparedId}:result`,
+        status: "success",
+        output: {
+          answer: "continue-active-asset-ok",
+        },
+        completedAt: "2026-03-25T21:20:03.000Z",
+      };
+    },
+  }));
+
+  const activation = await runtime.activateTaProvisionAsset(provisionId!);
+  assert.equal(activation.status, "activated");
+  const attemptsBeforeContinue = runtime.listTaActivationAttempts().length;
+
+  const continued = await runtime.continueTaProvisioning(provisionId!);
+
+  assert.equal(continued.status, "dispatched");
+  assert.equal(continued.activationResult?.status, "activated");
+  assert.equal(runtime.listTaActivationAttempts().length, attemptsBeforeContinue);
+  assert.equal(continued.dispatchResult?.grant?.capabilityKey, "computer.use");
+});
+
+test("AgentCoreRuntime continueTaProvisioning can continue auto-after-verify replay once activation is ready", async () => {
+  const runtime = createAgentCoreRuntime({
+    taProfile: createAgentCapabilityProfile({
+      profileId: "profile.runtime.continue-provisioning-auto-after-verify",
+      agentClass: "main-agent",
+      baselineCapabilities: ["docs.read"],
+      allowedCapabilityPatterns: ["computer.*"],
+    }),
+  });
+  const session = runtime.createSession();
+  const goal = runtime.createCompiledGoal(
+    createGoalSource({
+      goalId: "goal-runtime-continue-provisioning-auto-after-verify",
+      sessionId: session.sessionId,
+      userInput: "Continue auto-after-verify replay from runtime continue driver.",
+    }),
+  );
+  const created = await runtime.createRun({
+    sessionId: session.sessionId,
+    goal,
+  });
+
+  const provisionBundle = await runtime.provisionerRuntime?.submit(createProvisionRequest({
+    provisionId: "provision-auto-after-verify-continue",
+    sourceRequestId: "request-auto-after-verify-continue-1",
+    requestedCapabilityKey: "computer.use",
+    reason: "Auto-after-verify replay should keep a resumable runtime path.",
+    replayPolicy: "auto_after_verify",
+    createdAt: "2026-03-25T21:30:00.000Z",
+  }));
+  assert.equal(provisionBundle?.status, "ready");
+
+  const replay = createTaPendingReplay({
+    replayId: "replay:auto-after-verify-continue",
+    request: {
+      requestId: "request-auto-after-verify-continue-1",
+      requestedCapabilityKey: "computer.use",
+    },
+    provisionBundle: provisionBundle!,
+    createdAt: "2026-03-25T21:30:02.000Z",
+    metadata: {
+      sessionId: session.sessionId,
+      runId: created.run.runId,
+      mode: "balanced",
+      requestedTier: "B2",
+      taskContext: {
+        source: "runtime-test",
+      },
+    },
+  });
+  runtime.hydrateRecoveredTapRuntimeSnapshot({
+    humanGates: [],
+    humanGateEvents: [],
+    pendingReplays: [replay],
+    activationAttempts: [],
+    resumeEnvelopes: [createTaResumeEnvelope({
+      envelopeId: "resume:replay:replay:auto-after-verify-continue",
+      source: "replay",
+      requestId: "request-auto-after-verify-continue-1",
+      sessionId: session.sessionId,
+      runId: created.run.runId,
+      capabilityKey: "computer.use",
+      requestedTier: "B2",
+      mode: "balanced",
+      reason: "Resume auto-after-verify replay from continue driver.",
+      intentRequest: {
+        requestId: "request-auto-after-verify-continue-1",
+        intentId: "intent-auto-after-verify-continue-1",
+        capabilityKey: "computer.use",
+        input: {
+          task: "continue auto-after-verify replay",
+        },
+        priority: "normal",
+      },
+      metadata: {
+        replayId: replay.replayId,
+        provisionId: "provision-auto-after-verify-continue",
+        agentId: "agent-main",
+        taskContext: {
+          source: "runtime-test",
+        },
+      },
+    })],
+  });
+  assert.equal(runtime.getTaReplayResumeEnvelope(replay.replayId)?.envelopeId, "resume:replay:replay:auto-after-verify-continue");
+
+  runtime.registerTaActivationFactory("factory:computer.use", () => ({
+    id: "adapter.computer.use.continue-auto-after-verify",
+    runtimeKind: "tool",
+    supports(plan) {
+      return plan.capabilityKey === "computer.use";
+    },
+    async prepare(plan, lease) {
+      return {
+        preparedId: `${plan.planId}:prepared`,
+        leaseId: lease.leaseId,
+        capabilityKey: plan.capabilityKey,
+        bindingId: lease.bindingId,
+        generation: lease.generation,
+        executionMode: "direct",
+      };
+    },
+    async execute(prepared) {
+      return {
+        executionId: `${prepared.preparedId}:execution`,
+        resultId: `${prepared.preparedId}:result`,
+        status: "success",
+        output: {
+          answer: "continue-auto-after-verify-ok",
+        },
+        completedAt: "2026-03-25T21:30:04.000Z",
+      };
+    },
+  }));
+
+  const continued = await runtime.continueTaProvisioning("provision-auto-after-verify-continue");
+
+  assert.equal(continued.status, "dispatched");
+  assert.equal(continued.activationResult?.status, "activated");
+  assert.equal(continued.dispatchResult?.grant?.capabilityKey, "computer.use");
+  assert.equal(runtime.listTaResumeEnvelopes().some((entry) => entry.source === "replay"), false);
 });
 
 test("AgentCoreRuntime lets bapr mode dispatch straight through TAP for available capabilities", async () => {

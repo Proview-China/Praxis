@@ -206,6 +206,7 @@ export interface TaCapabilityActivationHandoff {
   targetPool?: string;
   adapterFactoryRef?: string;
   bindingArtifactRef?: string;
+  resumeEnvelopeId?: string;
   note: string;
   metadata?: Record<string, unknown>;
 }
@@ -217,6 +218,7 @@ export interface TaCapabilityReplayHandoff {
   reason: string;
   requiresReviewerApproval: boolean;
   suggestedTrigger?: string;
+  resumeEnvelopeId?: string;
   nextStep: string;
   metadata?: Record<string, unknown>;
 }
@@ -300,6 +302,7 @@ export interface ApplyTaCapabilityLifecycleInput {
 export interface ApplyTaCapabilityLifecycleResult {
   status: "applied" | "blocked";
   binding?: CapabilityBinding;
+  continuedProvisioning?: ContinueTaProvisioningResult[];
   error?: {
     code: string;
     message: string;
@@ -321,6 +324,20 @@ export interface ResumeTaEnvelopeResult {
   activation?: TaCapabilityActivationHandoff;
   dispatchResult?: DispatchCapabilityIntentViaTaPoolResult;
   activationResult?: ActivateTaProvisionAssetResult;
+}
+
+export type ContinueTaProvisioningStatus =
+  | ResumeTaEnvelopeStatus
+  | ActivateTaProvisionAssetStatus
+  | "replay_envelope_not_found";
+
+export interface ContinueTaProvisioningResult {
+  status: ContinueTaProvisioningStatus;
+  provisionId: string;
+  replay?: TaPendingReplay;
+  activation?: TaCapabilityActivationHandoff;
+  activationResult?: ActivateTaProvisionAssetResult;
+  dispatchResult?: DispatchCapabilityIntentViaTaPoolResult;
 }
 
 interface TaHumanGateContext {
@@ -559,12 +576,76 @@ export class AgentCoreRuntime {
     return [...this.#taResumeEnvelopes.values()];
   }
 
+  getTaReplayResumeEnvelope(replayId: string) {
+    return this.listTaResumeEnvelopes().find((envelope) => {
+      return envelope.source === "replay" && envelope.metadata?.replayId === replayId;
+    });
+  }
+
+  getTaActivationResumeEnvelope(provisionId: string) {
+    return this.listTaResumeEnvelopes().find((envelope) => {
+      return envelope.source === "activation" && envelope.metadata?.provisionId === provisionId;
+    });
+  }
+
   listResumableTmaSessions() {
     return this.provisionerRuntime?.listResumableTmaSessions() ?? [];
   }
 
   async resumeTmaSession(sessionId: string) {
     return this.provisionerRuntime?.resumeTmaSession(sessionId);
+  }
+
+  async continueTaProvisioning(provisionId: string): Promise<ContinueTaProvisioningResult> {
+    const activationResult = await this.#ensureProvisionAssetActivated(provisionId);
+    const replay = this.#findPendingReplayByProvisionId(provisionId);
+    const activation = activationResult.activation;
+
+    if (activationResult.status !== "activated") {
+      return {
+        status: activationResult.status,
+        provisionId,
+        replay,
+        activation,
+        activationResult,
+      };
+    }
+
+    const replayEnvelope = this.#findReplayEnvelopeByProvisionId(provisionId);
+    if (!replayEnvelope) {
+      return {
+        status: "replay_envelope_not_found",
+        provisionId,
+        replay,
+        activation,
+        activationResult,
+      };
+    }
+
+    if (!replay || replay.policy === "manual" || replay.policy === "none") {
+      return {
+        status: activationResult.status,
+        provisionId,
+        replay,
+        activation,
+        activationResult,
+      };
+    }
+
+    const resumed = await this.#resumeReplayEnvelope(replayEnvelope, replay, {
+      skipActivation: true,
+    });
+    const resumedStatus: ContinueTaProvisioningStatus = resumed.status === "human_gate_pending"
+      ? "waiting_human"
+      : resumed.status;
+    return {
+      status: resumedStatus,
+      provisionId,
+      replay: resumed.replay,
+      activation: resumed.activation,
+      activationResult: resumed.activationResult ?? activationResult,
+      dispatchResult: resumed.dispatchResult,
+    };
   }
 
   async resumeTaEnvelope(envelopeId: string): Promise<ResumeTaEnvelopeResult> {
@@ -627,69 +708,7 @@ export class AgentCoreRuntime {
       };
     }
 
-    const provisionId = typeof envelope.metadata?.provisionId === "string"
-      ? envelope.metadata.provisionId
-      : undefined;
-    if (provisionId) {
-      const activationResult = await this.activateTaProvisionAsset(provisionId);
-      if (activationResult.status !== "activated") {
-        return {
-          status: activationResult.status,
-          envelope,
-          replay,
-          activation: activationResult.activation,
-          activationResult,
-        };
-      }
-    }
-    await this.#ensureRunAvailable(envelope.runId);
-
-    const dispatchResult = await this.dispatchCapabilityIntentViaTaPool({
-      intentId: envelope.intentRequest.intentId,
-      sessionId: envelope.sessionId,
-      runId: envelope.runId,
-      kind: "capability_call",
-      createdAt: new Date().toISOString(),
-      priority: toIntentPriority(envelope.intentRequest.priority),
-      correlationId: envelope.intentRequest.intentId,
-      request: {
-        requestId: envelope.intentRequest.requestId,
-        intentId: envelope.intentRequest.intentId,
-        sessionId: envelope.sessionId,
-        runId: envelope.runId,
-        capabilityKey: envelope.intentRequest.capabilityKey,
-        input: envelope.intentRequest.input,
-        priority: toIntentPriority(envelope.intentRequest.priority),
-        timeoutMs: envelope.intentRequest.timeoutMs,
-        metadata: envelope.intentRequest.metadata,
-      },
-      metadata: isRecord(envelope.metadata) ? envelope.metadata : undefined,
-    }, {
-      agentId: typeof envelope.metadata?.agentId === "string"
-        ? envelope.metadata.agentId
-        : `agent-core-runtime:${envelope.sessionId}`,
-      reason: envelope.reason,
-      requestedTier: envelope.requestedTier,
-      mode: envelope.mode,
-      requestedScope: envelope.requestedScope,
-      taskContext: isRecord(envelope.metadata?.taskContext)
-        ? envelope.metadata.taskContext as Record<string, unknown>
-        : undefined,
-      metadata: {
-        resumedFromEnvelopeId: envelope.envelopeId,
-        resumedFromReplayId: replayId,
-      },
-    });
-
-    this.#taPendingReplays.delete(replay.replayId);
-    this.#taResumeEnvelopes.delete(envelopeId);
-
-    return {
-      status: dispatchResult.status,
-      envelope,
-      replay,
-      dispatchResult,
-    };
+    return this.#resumeReplayEnvelope(envelope, replay);
   }
 
   createTapCheckpointSnapshot(runId: string) {
@@ -1089,9 +1108,15 @@ export class AgentCoreRuntime {
         reason: input.reason ?? `Lifecycle ${input.lifecycleAction} applied for ${input.capabilityKey}.`,
         createdAt,
       });
+      const continuedProvisioning = input.lifecycleAction === "register"
+        || input.lifecycleAction === "replace"
+        || input.lifecycleAction === "resume"
+        ? await this.#continuePendingProvisioningForCapability(input.capabilityKey)
+        : [];
       return {
         status: "applied",
         binding,
+        continuedProvisioning,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1652,9 +1677,13 @@ export class AgentCoreRuntime {
 
     const provisionAsset = this.#findCurrentProvisionAsset(intent.request.capabilityKey);
     const replay = provisionAsset
-      ? this.#createReplayHandoff({
-        source: "provision_asset",
+      ? await this.#ensureProvisionAssetReplay({
+        accessRequest,
+        intent,
+        source: "review-existing-provision-asset",
         asset: provisionAsset,
+        options,
+        reviewDecision,
       })
       : undefined;
 
@@ -2262,6 +2291,64 @@ export class AgentCoreRuntime {
       .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))[0];
   }
 
+  #findPendingReplayByProvisionId(provisionId: string): TaPendingReplay | undefined {
+    return [...this.#taPendingReplays.values()]
+      .find((replay) => replay.provisionId === provisionId);
+  }
+
+  #findReplayEnvelopeByProvisionId(provisionId: string) {
+    return [...this.#taResumeEnvelopes.values()]
+      .find((envelope) => envelope.source === "replay" && envelope.metadata?.provisionId === provisionId);
+  }
+
+  #hasActiveCapabilityBinding(capabilityKey: string): boolean {
+    const capabilityIds = new Set(
+      this.capabilityPool.listCapabilities()
+        .filter((manifest) => manifest.capabilityKey === capabilityKey)
+        .map((manifest) => manifest.capabilityId),
+    );
+    if (capabilityIds.size === 0) {
+      return false;
+    }
+
+    return this.capabilityPool.listBindings()
+      .some((binding) => binding.state === "active" && capabilityIds.has(binding.capabilityId));
+  }
+
+  async #ensureProvisionAssetActivated(provisionId: string): Promise<ActivateTaProvisionAssetResult> {
+    const asset = this.provisionerRuntime?.assetIndex.getCurrent(provisionId);
+    if (!asset) {
+      return {
+        status: "activation_asset_not_found",
+      };
+    }
+
+    if (
+      asset.status === "active"
+      && asset.metadata?.activatedIntoPool === true
+      && this.#hasActiveCapabilityBinding(asset.capabilityKey)
+    ) {
+      const attemptId = typeof asset.metadata?.activationAttemptId === "string"
+        ? asset.metadata.activationAttemptId
+        : undefined;
+      const receipt = isRecord(asset.metadata?.activationReceipt)
+        ? asset.metadata.activationReceipt as unknown as TaActivationReceipt
+        : undefined;
+      return {
+        status: "activated",
+        asset,
+        attempt: attemptId ? this.#taActivationAttempts.get(attemptId) : undefined,
+        receipt,
+        activation: this.#createActivationHandoff({
+          source: "provision_asset",
+          asset,
+        }),
+      };
+    }
+
+    return this.activateTaProvisionAsset(provisionId);
+  }
+
   #createActivationHandoff(params: {
     source: TaCapabilityActivationHandoff["source"];
     bundle?: ProvisionArtifactBundle;
@@ -2285,6 +2372,7 @@ export class AgentCoreRuntime {
       targetPool: activationSpec?.targetPool ?? params.asset?.activation.targetPool,
       adapterFactoryRef: activationSpec?.adapterFactoryRef ?? params.asset?.activation.adapterFactoryRef,
       bindingArtifactRef: params.bundle?.bindingArtifact?.ref ?? params.asset?.activation.bindingArtifactRef,
+      resumeEnvelopeId: params.asset ? this.getTaActivationResumeEnvelope(params.asset.provisionId)?.envelopeId : undefined,
       note: status === "ready_for_review"
         ? "Provisioned capability is staged and waiting for activation review."
         : status === "activating"
@@ -2337,8 +2425,8 @@ export class AgentCoreRuntime {
           : policy === "manual"
             ? "Replay is staged and now waits for a human-triggered resume."
             : policy === "auto_after_verify"
-              ? "Replay is staged for post-verify auto resume, but this wave only records the skeleton."
-              : "Replay is staged for re-review before dispatch, but the full replay loop is still pending."),
+              ? "Replay is staged for automatic continue after verification succeeds."
+              : "Replay is staged for re-review before dispatch once activation is ready."),
       requiresReviewerApproval: typeof replayRecommendation?.requiresReviewerApproval === "boolean"
         ? replayRecommendation.requiresReviewerApproval
         : policy === "manual" || policy === "re_review_then_dispatch",
@@ -2348,16 +2436,17 @@ export class AgentCoreRuntime {
           ? undefined
           : policy === "manual"
             ? "human_gate.approved"
-            : policy === "auto_after_verify"
+          : policy === "auto_after_verify"
               ? "verification.passed"
               : "re_review.completed",
+      resumeEnvelopeId: pendingReplay ? this.getTaReplayResumeEnvelope(pendingReplay.replayId)?.envelopeId : undefined,
       nextStep: policy === "none"
         ? "Do nothing."
         : policy === "manual"
           ? "Wait for a later explicit human approval event."
           : policy === "auto_after_verify"
-            ? "Keep the replay record and wire the verifier-trigger in a later wave."
-            : "Keep the replay record and wire the re-review loop in a later wave.",
+            ? "Wait for a verification-passed trigger or an explicit runtime continue call."
+            : "Resume the replay envelope to re-enter reviewer and dispatch.",
       metadata: {
         provisionId: params.bundle?.provisionId ?? params.asset?.provisionId,
         bundleId: params.bundle?.bundleId ?? params.asset?.bundleId,
@@ -2681,6 +2770,180 @@ export class AgentCoreRuntime {
       bundle: params.provisionBundle,
       asset: this.provisionerRuntime?.assetIndex.getCurrent(params.provisionBundle.provisionId),
     });
+  }
+
+  async #ensureProvisionAssetReplay(params: {
+    accessRequest: AccessRequest;
+    intent: CapabilityCallIntent;
+    source: string;
+    asset: ProvisionAssetRecord;
+    options?: DispatchCapabilityIntentViaTaPoolOptions;
+    reviewDecision?: ReviewDecision;
+  }): Promise<TaCapabilityReplayHandoff> {
+    const existing = this.#findPendingReplayByProvisionId(params.asset.provisionId);
+    if (existing) {
+      return this.#createReplayHandoff({
+        source: "provision_asset",
+        asset: params.asset,
+      });
+    }
+
+    const replay = createTaPendingReplay({
+      replayId: `replay:${params.accessRequest.requestId}:${params.asset.provisionId}`,
+      request: params.accessRequest,
+      provisionBundle: {
+        provisionId: params.asset.provisionId,
+        replayPolicy: params.asset.replayPolicy,
+      },
+      createdAt: params.asset.updatedAt,
+      metadata: {
+        source: params.source,
+        agentId: params.options?.agentId,
+        intentId: params.intent.intentId,
+        runId: params.intent.runId,
+        sessionId: params.intent.sessionId,
+        requestedTier: params.accessRequest.requestedTier,
+        mode: params.accessRequest.mode,
+        taskContext: params.options?.taskContext,
+      },
+    });
+    this.#taPendingReplays.set(replay.replayId, replay);
+    this.#recordResumeEnvelope(createTaResumeEnvelope({
+      envelopeId: `resume:replay:${replay.replayId}`,
+      source: "replay",
+      requestId: params.accessRequest.requestId,
+      sessionId: params.intent.sessionId,
+      runId: params.intent.runId,
+      capabilityKey: params.accessRequest.requestedCapabilityKey,
+      requestedTier: params.accessRequest.requestedTier,
+      mode: params.accessRequest.mode,
+      reason: params.accessRequest.reason,
+      intentRequest: {
+        requestId: params.intent.request.requestId,
+        intentId: params.intent.intentId,
+        capabilityKey: params.intent.request.capabilityKey,
+        input: params.intent.request.input,
+        priority: params.intent.priority,
+        metadata: params.intent.request.metadata,
+      },
+      metadata: {
+        replayId: replay.replayId,
+        provisionId: params.asset.provisionId,
+        agentId: params.options?.agentId,
+        taskContext: params.options?.taskContext,
+      },
+    }));
+    await this.#recordToolReviewReplay({
+      replay,
+      accessRequest: params.accessRequest,
+      reviewDecision: params.reviewDecision,
+      reason: replay.reason,
+    });
+    this.#writeTapControlPlaneCheckpoint({
+      sessionId: params.intent.sessionId,
+      runId: params.intent.runId,
+      reason: "manual",
+      metadata: {
+        sourceOperation: "replay-stage-existing-asset",
+        replayId: replay.replayId,
+        provisionId: params.asset.provisionId,
+      },
+    });
+
+    return this.#createReplayHandoff({
+      source: "provision_asset",
+      asset: params.asset,
+    });
+  }
+
+  async #continuePendingProvisioningForCapability(
+    capabilityKey: string,
+  ): Promise<ContinueTaProvisioningResult[]> {
+    const provisionIds = [...new Set(
+      [...this.#taPendingReplays.values()]
+        .filter((replay) =>
+          replay.capabilityKey === capabilityKey
+          && (replay.nextAction === "verify_then_auto" || replay.nextAction === "re_review_then_dispatch"))
+        .map((replay) => replay.provisionId),
+    )];
+
+    const results: ContinueTaProvisioningResult[] = [];
+    for (const provisionId of provisionIds) {
+      results.push(await this.continueTaProvisioning(provisionId));
+    }
+    return results;
+  }
+
+  async #resumeReplayEnvelope(
+    envelope: ReturnType<typeof createTaResumeEnvelope>,
+    replay: TaPendingReplay,
+    options: {
+      skipActivation?: boolean;
+    } = {},
+  ): Promise<ResumeTaEnvelopeResult> {
+    const provisionId = typeof envelope.metadata?.provisionId === "string"
+      ? envelope.metadata.provisionId
+      : undefined;
+    if (provisionId && !options.skipActivation) {
+      const activationResult = await this.#ensureProvisionAssetActivated(provisionId);
+      if (activationResult.status !== "activated") {
+        return {
+          status: activationResult.status,
+          envelope,
+          replay,
+          activation: activationResult.activation,
+          activationResult,
+        };
+      }
+    }
+    await this.#ensureRunAvailable(envelope.runId);
+
+    const dispatchResult = await this.dispatchCapabilityIntentViaTaPool({
+      intentId: envelope.intentRequest!.intentId,
+      sessionId: envelope.sessionId,
+      runId: envelope.runId,
+      kind: "capability_call",
+      createdAt: new Date().toISOString(),
+      priority: toIntentPriority(envelope.intentRequest!.priority),
+      correlationId: envelope.intentRequest!.intentId,
+      request: {
+        requestId: envelope.intentRequest!.requestId,
+        intentId: envelope.intentRequest!.intentId,
+        sessionId: envelope.sessionId,
+        runId: envelope.runId,
+        capabilityKey: envelope.intentRequest!.capabilityKey,
+        input: envelope.intentRequest!.input,
+        priority: toIntentPriority(envelope.intentRequest!.priority),
+        timeoutMs: envelope.intentRequest!.timeoutMs,
+        metadata: envelope.intentRequest!.metadata,
+      },
+      metadata: isRecord(envelope.metadata) ? envelope.metadata : undefined,
+    }, {
+      agentId: typeof envelope.metadata?.agentId === "string"
+        ? envelope.metadata.agentId
+        : `agent-core-runtime:${envelope.sessionId}`,
+      reason: envelope.reason,
+      requestedTier: envelope.requestedTier,
+      mode: envelope.mode,
+      requestedScope: envelope.requestedScope,
+      taskContext: isRecord(envelope.metadata?.taskContext)
+        ? envelope.metadata.taskContext as Record<string, unknown>
+        : undefined,
+      metadata: {
+        resumedFromEnvelopeId: envelope.envelopeId,
+        resumedFromReplayId: replay.replayId,
+      },
+    });
+
+    this.#taPendingReplays.delete(replay.replayId);
+    this.#taResumeEnvelopes.delete(envelope.envelopeId);
+
+    return {
+      status: dispatchResult.status,
+      envelope,
+      replay,
+      dispatchResult,
+    };
   }
 
   #syncSessionFromRun(run: RunTransitionOutcome["run"]): void {
