@@ -4,6 +4,8 @@ import type {
   ToolReviewActivationInputShell,
   ToolReviewActivationOutputShell,
   ToolReviewActionLedgerEntry,
+  ToolReviewDeliveryInputShell,
+  ToolReviewDeliveryOutputShell,
   ToolReviewGovernancePlan,
   ToolReviewGovernancePlanCounts,
   ToolReviewGovernancePlanItem,
@@ -184,6 +186,22 @@ function createActivationOutput(
   };
 }
 
+function createDeliveryOutput(
+  input: ToolReviewDeliveryInputShell,
+): ToolReviewDeliveryOutputShell {
+  return {
+    kind: "delivery",
+    actionId: input.trace.actionId,
+    status: "ready_for_delivery_handoff",
+    capabilityKey: input.capabilityKey,
+    provisionId: input.provisionId,
+    lane: input.receipt.lane,
+    reportId: input.receipt.reportId,
+    summary: `Ready bundle delivery is staged for ${input.capabilityKey} from TMA lane ${input.receipt.lane}.`,
+    metadata: input.metadata,
+  };
+}
+
 function createLifecycleOutput(
   input: ToolReviewLifecycleInputShell,
 ): ToolReviewLifecycleOutputShell {
@@ -269,6 +287,8 @@ function toRuntimeStatus(
   switch (output.kind) {
     case "activation":
       return output.status === "activation_failed" ? "blocked" : "ready_for_handoff";
+    case "delivery":
+      return "ready_for_handoff";
     case "lifecycle":
       return output.status === "lifecycle_blocked" ? "blocked" : "ready_for_handoff";
     case "human_gate":
@@ -376,6 +396,8 @@ export class ToolReviewerRuntime {
     switch (input.kind) {
       case "activation":
         return createActivationOutput(input);
+      case "delivery":
+        return createDeliveryOutput(input);
       case "lifecycle":
         return createLifecycleOutput(input);
       case "human_gate":

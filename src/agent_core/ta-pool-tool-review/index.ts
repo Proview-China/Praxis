@@ -10,6 +10,8 @@ export type {
   ToolReviewActionLedgerEntry,
   ToolReviewActivationInputShell,
   ToolReviewActivationOutputShell,
+  ToolReviewDeliveryInputShell,
+  ToolReviewDeliveryOutputShell,
   ToolReviewGovernancePlan,
   ToolReviewGovernancePlanCounts,
   ToolReviewGovernancePlanItem,

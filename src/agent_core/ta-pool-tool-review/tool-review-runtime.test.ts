@@ -134,6 +134,53 @@ test("tool reviewer runtime stages activation and lifecycle shells as handoff-re
   assert.equal(workOrder?.sourceGovernanceKind, "lifecycle");
 });
 
+test("tool reviewer runtime records ready bundle delivery as a handoff-ready governance action", async () => {
+  const runtime = createToolReviewerRuntime();
+
+  const delivery = await runtime.submit({
+    governanceAction: {
+      kind: "delivery",
+      trace: createToolReviewGovernanceTrace({
+        actionId: "action-delivery-1",
+        actorId: "tool-reviewer",
+        reason: "Ready bundle returned from TMA.",
+        createdAt: "2026-03-25T08:02:00.000Z",
+      }),
+      provisionId: "prov-delivery-1",
+      capabilityKey: "computer.use",
+      receipt: {
+        provisionId: "prov-delivery-1",
+        requestedCapabilityKey: "computer.use",
+        lane: "extended",
+        readyAt: "2026-03-25T08:02:00.000Z",
+        completionTarget: "ready_bundle",
+        originalTaskDisposition: "left_for_main_agent",
+        plannerSessionId: "tma:prov-delivery-1:planner",
+        executorSessionId: "tma:prov-delivery-1:executor",
+        artifactRefs: {
+          tool: "tool.json",
+          binding: "binding.json",
+          verification: "verification.json",
+          usage: "usage.md",
+        },
+        verificationEvidenceIds: ["evidence-1"],
+        verificationStatuses: ["passed"],
+        reportId: "report-delivery-1",
+      },
+    },
+    sessionId: "tool-review:provision:prov-delivery-1",
+  });
+
+  assert.equal(delivery.runtimeStatus, "ready_for_handoff");
+  assert.equal(delivery.output.kind, "delivery");
+  assert.equal(delivery.output.status, "ready_for_delivery_handoff");
+  assert.match(delivery.output.summary, /Ready bundle delivery/i);
+  const plan = runtime.createGovernancePlan("tool-review:provision:prov-delivery-1");
+  assert.equal(plan?.counts.readyForHandoff, 1);
+  assert.equal(plan?.recommendedNextStep.includes("runtime mainline"), true);
+  assert.equal(runtime.createQualityReport("tool-review:provision:prov-delivery-1")?.verdict, "handoff_ready");
+});
+
 test("tool reviewer runtime preserves human gate waiting status and replay re-review status", async () => {
   const runtime = createToolReviewerRuntime();
   const request = {

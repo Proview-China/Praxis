@@ -1103,6 +1103,16 @@ test("AgentCoreRuntime can assemble review -> provisioning through T/A pool for 
     (result.provisionBundle?.metadata?.tmaDeliveryReceipt as { completionTarget?: string } | undefined)?.completionTarget,
     "ready_bundle",
   );
+  const toolReviewSessionId = `tool-review:provision:${result.provisionRequest!.provisionId}`;
+  assert.equal(
+    runtime.getToolReviewerGovernancePlan(toolReviewSessionId)?.items.some((item) =>
+      item.governanceKind === "delivery" && item.readyForHandoff),
+    true,
+  );
+  assert.equal(
+    runtime.listToolReviewerQualityReports().find((report) => report.sessionId === toolReviewSessionId)?.verdict,
+    "handoff_ready",
+  );
 });
 
 test("AgentCoreRuntime keeps restricted requests inside TAP until human approval arrives", async () => {

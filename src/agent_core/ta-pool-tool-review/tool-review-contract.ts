@@ -9,6 +9,7 @@ import type {
   AccessRequest,
   TmaExecutionLane,
 } from "../ta-pool-types/index.js";
+import type { TmaReadyBundleReceipt } from "../ta-pool-provision/index.js";
 import type {
   TaActivationAttemptRecord,
   TaActivationFailure,
@@ -25,6 +26,7 @@ import type {
 
 export const TA_TOOL_REVIEW_GOVERNANCE_KINDS = [
   "activation",
+  "delivery",
   "lifecycle",
   "human_gate",
   "replay",
@@ -44,6 +46,7 @@ export type TaToolReviewLifecycleAction =
 
 export const TA_TOOL_REVIEW_OUTPUT_STATUSES = [
   "ready_for_activation_handoff",
+  "ready_for_delivery_handoff",
   "activation_failed",
   "ready_for_lifecycle_handoff",
   "lifecycle_blocked",
@@ -142,6 +145,15 @@ export interface ToolReviewActivationInputShell {
   metadata?: Record<string, unknown>;
 }
 
+export interface ToolReviewDeliveryInputShell {
+  kind: "delivery";
+  trace: ToolReviewGovernanceTrace;
+  provisionId: string;
+  capabilityKey: string;
+  receipt: TmaReadyBundleReceipt;
+  metadata?: Record<string, unknown>;
+}
+
 export interface ToolReviewLifecycleInputShell {
   kind: "lifecycle";
   trace: ToolReviewGovernanceTrace;
@@ -182,6 +194,7 @@ export interface ToolReviewReplayInputShell {
 
 export type ToolReviewGovernanceInputShell =
   | ToolReviewActivationInputShell
+  | ToolReviewDeliveryInputShell
   | ToolReviewLifecycleInputShell
   | ToolReviewHumanGateInputShell
   | ToolReviewReplayInputShell;
@@ -196,6 +209,18 @@ export interface ToolReviewActivationOutputShell {
   attemptId?: string;
   receipt?: TaActivationReceipt;
   failure?: TaActivationFailure;
+  summary: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ToolReviewDeliveryOutputShell {
+  kind: "delivery";
+  actionId: string;
+  status: "ready_for_delivery_handoff";
+  capabilityKey: string;
+  provisionId: string;
+  lane: string;
+  reportId: string;
   summary: string;
   metadata?: Record<string, unknown>;
 }
@@ -242,6 +267,7 @@ export interface ToolReviewReplayOutputShell {
 
 export type ToolReviewGovernanceOutputShell =
   | ToolReviewActivationOutputShell
+  | ToolReviewDeliveryOutputShell
   | ToolReviewLifecycleOutputShell
   | ToolReviewHumanGateOutputShell
   | ToolReviewReplayOutputShell;

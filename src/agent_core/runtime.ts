@@ -71,7 +71,12 @@ import {
 import { createReviewerRuntime, ReviewerRuntime } from "./ta-pool-review/index.js";
 import type { ReviewerDurableState } from "./ta-pool-review/index.js";
 import { createProvisionerRuntime, ProvisionerRuntime } from "./ta-pool-provision/index.js";
-import type { ProvisionAssetRecord, ProvisionDeliveryReport, TmaSessionState } from "./ta-pool-provision/index.js";
+import type {
+  ProvisionAssetRecord,
+  ProvisionDeliveryReport,
+  TmaReadyBundleReceipt,
+  TmaSessionState,
+} from "./ta-pool-provision/index.js";
 import {
   createToolReviewGovernanceTrace,
   createToolReviewerRuntime,
@@ -706,7 +711,11 @@ export class AgentCoreRuntime {
   }
 
   async resumeTmaSession(sessionId: string) {
-    return this.provisionerRuntime?.resumeTmaSession(sessionId);
+    const bundle = await this.provisionerRuntime?.resumeTmaSession(sessionId);
+    if (bundle?.status === "ready") {
+      await this.#recordToolReviewDeliveryFromBundle(bundle, "tma-resume");
+    }
+    return bundle;
   }
 
   getProvisionDeliveryReport(provisionId: string): ProvisionDeliveryReport | undefined {
@@ -2337,6 +2346,15 @@ export class AgentCoreRuntime {
         ? this.provisionerRuntime!.assetIndex.getCurrent(provisionRequest.provisionId)
         : undefined;
       if (provisionBundle.status === "ready") {
+        await this.#recordToolReviewDeliveryFromBundle(
+          provisionBundle,
+          "TMA delivered a ready bundle back into the TAP provision lane.",
+          {
+            requestId: params.accessRequest.requestId,
+            sessionId: params.accessRequest.sessionId,
+            runId: params.accessRequest.runId,
+          },
+        );
         await this.#stageProvisionReplay({
           accessRequest: params.accessRequest,
           provisionBundle,
@@ -2603,6 +2621,82 @@ export class AgentCoreRuntime {
           provisionId: params.replay.provisionId,
         },
       },
+    });
+  }
+
+  #readTmaDeliveryReceiptFromBundle(
+    bundle: ProvisionArtifactBundle,
+  ): TmaReadyBundleReceipt | undefined {
+    const receipt = bundle.metadata?.tmaDeliveryReceipt;
+    return isRecord(receipt) ? receipt as unknown as TmaReadyBundleReceipt : undefined;
+  }
+
+  async #recordToolReviewDelivery(params: {
+    provisionId: string;
+    capabilityKey: string;
+    receipt: TmaReadyBundleReceipt;
+    requestId?: string;
+    sessionId?: string;
+    runId?: string;
+    reason: string;
+  }): Promise<void> {
+    if (!this.toolReviewerRuntime) {
+      return;
+    }
+
+    await this.toolReviewerRuntime.submit({
+      sessionId: `tool-review:provision:${params.provisionId}`,
+      governanceAction: {
+        kind: "delivery",
+        trace: createToolReviewGovernanceTrace({
+          actionId: `tool-review:delivery:${params.provisionId}:${params.receipt.reportId}`,
+          actorId: "tool-reviewer",
+          reason: params.reason,
+          createdAt: params.receipt.readyAt,
+          metadata: {
+            provisionId: params.provisionId,
+            requestId: params.requestId,
+            sessionId: params.sessionId,
+            runId: params.runId,
+            plannerSessionId: params.receipt.plannerSessionId,
+            executorSessionId: params.receipt.executorSessionId,
+          },
+        }),
+        provisionId: params.provisionId,
+        capabilityKey: params.capabilityKey,
+        receipt: params.receipt,
+        metadata: {
+          provisionId: params.provisionId,
+          reportId: params.receipt.reportId,
+          plannerSessionId: params.receipt.plannerSessionId,
+          executorSessionId: params.receipt.executorSessionId,
+        },
+      },
+    });
+  }
+
+  async #recordToolReviewDeliveryFromBundle(
+    bundle: ProvisionArtifactBundle,
+    reason: string,
+    context?: {
+      requestId?: string;
+      sessionId?: string;
+      runId?: string;
+    },
+  ): Promise<void> {
+    const receipt = this.#readTmaDeliveryReceiptFromBundle(bundle);
+    if (!receipt) {
+      return;
+    }
+
+    await this.#recordToolReviewDelivery({
+      provisionId: bundle.provisionId,
+      capabilityKey: receipt.requestedCapabilityKey,
+      receipt,
+      requestId: context?.requestId,
+      sessionId: context?.sessionId,
+      runId: context?.runId,
+      reason,
     });
   }
 
