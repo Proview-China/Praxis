@@ -13,6 +13,10 @@ import {
   createTapToolingCapabilityPackage,
   isTapToolingBaselineCapabilityKey,
 } from "../capability-package/index.js";
+import {
+  createProvisionContextApertureSnapshot,
+  type ProvisionContextApertureSnapshot,
+} from "../ta-pool-context/context-aperture.js";
 
 export const PROVISIONER_WORKER_LANES = [
   "bootstrap",
@@ -71,6 +75,7 @@ export interface ProvisionerWorkerEnvelope {
   provisionId: string;
   targetCapabilitySpec: ProvisionerTargetCapabilitySpec;
   inventorySnapshot: ProvisionerInventorySnapshot;
+  contextAperture: ProvisionContextApertureSnapshot;
   allowedBuildScope: ProvisionerAllowedBuildScope;
   allowedSideEffects: string[];
   existingSiblingCapabilities: string[];
@@ -266,6 +271,16 @@ function createDefaultInventorySnapshot(request: ProvisionRequest): ProvisionerI
   };
 }
 
+function readToolReviewWorkOrder(request: ProvisionRequest): Record<string, unknown> | undefined {
+  const metadata = readMetadataRecord(request);
+  return isRecord(metadata.toolReviewWorkOrder) ? metadata.toolReviewWorkOrder : undefined;
+}
+
+function readToolReviewRequestedLane(request: ProvisionRequest): ProvisionerWorkerLane | undefined {
+  const workOrder = readToolReviewWorkOrder(request);
+  return workOrder ? readLane(workOrder.requestedLane) : undefined;
+}
+
 function createAllowedBuildScope(lane: ProvisionerWorkerLane): ProvisionerAllowedBuildScope {
   return lane === "extended"
     ? {
@@ -299,6 +314,11 @@ export function resolveProvisionerWorkerLane(
     return approvedLane;
   }
 
+  const workOrderLane = readToolReviewRequestedLane(request);
+  if (workOrderLane) {
+    return workOrderLane;
+  }
+
   return "bootstrap";
 }
 
@@ -307,6 +327,7 @@ export function createProvisionerWorkerEnvelope(
   lane = resolveProvisionerWorkerLane(request),
 ): ProvisionerWorkerEnvelope {
   const metadata = readMetadataRecord(request);
+  const toolReviewWorkOrder = readToolReviewWorkOrder(request);
   const inventorySnapshot = createDefaultInventorySnapshot(request);
   const siblingCapabilities = normalizeStringArray(
     metadata.existingSiblingCapabilities,
@@ -323,6 +344,9 @@ export function createProvisionerWorkerEnvelope(
       ? "Bootstrap lane cannot install dependencies, configure MCP, or perform system writes."
       : "Extended lane may prepare install/config plans but still cannot approve activation.",
   ]);
+  if (toolReviewWorkOrder?.objective && typeof toolReviewWorkOrder.objective === "string") {
+    projectConstraints.unshift(`Tool reviewer objective: ${toolReviewWorkOrder.objective}`);
+  }
   const reviewerInstructions = normalizeStringArray(metadata.reviewerInstructions, [
     "Provisioner may emit artifacts, activation payload, and replay recommendation only.",
     "Any real activation driver stays outside this worker bridge.",
@@ -330,6 +354,103 @@ export function createProvisionerWorkerEnvelope(
       ? "Escalate to extended provisioner before any install/network/system step."
       : "Reviewer or higher policy must authorize any extended side effects before execution.",
   ]);
+  if (toolReviewWorkOrder?.rationale && typeof toolReviewWorkOrder.rationale === "string") {
+    reviewerInstructions.unshift(`Tool reviewer rationale: ${toolReviewWorkOrder.rationale}`);
+  }
+  const contextAperture = createProvisionContextApertureSnapshot({
+    projectSummary: {
+      summary: `Provisioning ${request.requestedCapabilityKey} on lane ${lane} with ${inventorySnapshot.availableCapabilityKeys.length} known available capabilities.`,
+      status: "ready",
+      source: "provisioner-worker-bridge",
+    },
+    requestedCapabilityKey: request.requestedCapabilityKey,
+    capabilitySpec: {
+      capabilityKey: request.requestedCapabilityKey,
+      requestedTier: request.requestedTier,
+      desiredProviderOrRuntime: request.desiredProviderOrRuntime,
+      reason: request.reason,
+      metadata: metadata.capabilitySpecMetadata as Record<string, unknown> | undefined,
+    },
+    existingSiblingCapabilitySummary: {
+      summary: siblingCapabilities.length > 0
+        ? `Sibling capability inventory is available: ${siblingCapabilities.join(", ")}.`
+        : "No sibling capability inventory is currently available for this provision request.",
+      siblingCapabilityKeys: siblingCapabilities,
+      status: "ready",
+      metadata: {
+        inventorySummary: inventorySnapshot.summary,
+      },
+    },
+    allowedBuildScope: {
+      summary: lane === "extended"
+        ? "Extended lane may prepare install, network, and configuration work, but activation still remains outside the worker bridge."
+        : "Bootstrap lane is limited to repo-local build staging, bounded shell, and verification work.",
+      pathPatterns: createAllowedBuildScope(lane).repoWriteRoots,
+      allowedOperations: [
+        "build_artifacts",
+        "write_usage_docs",
+        "run_verification",
+        ...(lane === "extended" ? ["install_dependencies", "configure_mcp", "download_dependencies"] : []),
+      ],
+      deniedOperations: [
+        "execute_original_task",
+        "approve_activation",
+      ],
+      status: "ready",
+      metadata: {
+        shellBudget: createAllowedBuildScope(lane).shellBudget,
+      },
+    },
+    allowedSideEffects: getLaneSemantics(lane).allowedSideEffects.map((description, index) => ({
+      effectId: `allowed-side-effect-${index + 1}`,
+      description,
+      status: "ready",
+    })),
+    reviewerInstructions: {
+      summary: reviewerInstructions.join(" "),
+      status: "ready",
+      source: "provisioner-worker-bridge",
+    },
+    sections: [
+      {
+        sectionId: "provision.inventory",
+        title: "Provision Inventory",
+        summary: inventorySnapshot.summary,
+        status: "ready",
+        source: "provisioner-worker-bridge",
+        freshness: "fresh",
+        trustLevel: "derived",
+      },
+      {
+        sectionId: "provision.constraints",
+        title: "Provision Constraints",
+        summary: projectConstraints.join(" "),
+        status: "ready",
+        source: "provisioner-worker-bridge",
+        freshness: "fresh",
+        trustLevel: "declared",
+      },
+      ...(toolReviewWorkOrder
+        ? [{
+          sectionId: "provision.tool-review-work-order",
+          title: "Tool Review Work Order",
+          summary: typeof toolReviewWorkOrder.objective === "string"
+            ? toolReviewWorkOrder.objective
+            : `Tool reviewer prepared a work order for ${request.requestedCapabilityKey}.`,
+          status: "ready" as const,
+          source: "provisioner-worker-bridge",
+          freshness: "fresh" as const,
+          trustLevel: "declared" as const,
+          metadata: toolReviewWorkOrder,
+        }]
+        : []),
+    ],
+    metadata: {
+      lane,
+      requestedReplayPolicy: request.replayPolicy ?? "re_review_then_dispatch",
+    },
+  });
+  const allowedBuildScope = createAllowedBuildScope(lane);
 
   return {
     requestId: request.sourceRequestId,
@@ -352,7 +473,8 @@ export function createProvisionerWorkerEnvelope(
       requestedReplayPolicy: request.replayPolicy ?? "re_review_then_dispatch",
     },
     inventorySnapshot,
-    allowedBuildScope: createAllowedBuildScope(lane),
+    contextAperture,
+    allowedBuildScope,
     allowedSideEffects: [...getLaneSemantics(lane).allowedSideEffects],
     existingSiblingCapabilities: siblingCapabilities,
     projectConstraints,
@@ -506,8 +628,8 @@ function createPackageSectionPayload(input: ProvisionerWorkerBridgeInput) {
         "verify before activation",
       ],
       knownLimits: [
-        "real activation driver not implemented yet",
-        "builder payload is bridge-generated placeholder",
+        "activation remains owned by the outer TAP runtime",
+        "this bridge delivers a package contract, not a fully installed external runtime integration",
       ],
       exampleInvocations: [
         `request capability ${input.request.requestedCapabilityKey}`,
@@ -628,13 +750,13 @@ export function createDefaultProvisionerWorkerOutput(
     originalTaskDisposition: "left_for_main_agent",
     buildSummary: [
       capabilityPackage
-        ? `Built a formal bootstrap tooling capability package for ${input.request.requestedCapabilityKey}.`
-        : `Built a staged capability package for ${input.request.requestedCapabilityKey}.`,
+        ? `Built a formal bootstrap tooling capability package for ${input.request.requestedCapabilityKey} that is ready for tool-review quality checks.`
+        : `Built a staged capability package shell for ${input.request.requestedCapabilityKey}.`,
       `Lane: ${input.lane}.`,
       "This bridge returns a ready-bundle candidate with package artifacts, activation guidance, and replay guidance only.",
       capabilityPackage
-        ? "Activation still needs the outer runtime, but the package contract is no longer placeholder-only."
-        : "Real builder execution and activation driver remain unimplemented.",
+        ? "Activation and dispatch still stay outside the worker bridge, but the package contract is formalized."
+        : "A generic staged package contract exists, but installation-grade activation still belongs to later work.",
     ].join(" "),
     toolArtifact,
     bindingArtifact,
@@ -659,6 +781,17 @@ export function createDefaultProvisionerWorkerOutput(
         requiresReplayRecommendation: true,
         requiresActivationPayload: true,
       },
+      phasedBoundary: capabilityPackage
+        ? {
+          buildContract: "formal_ready_bundle",
+          activationOwner: "outer_tap_runtime",
+          dispatchOwner: "main_runtime_after_review",
+        }
+        : {
+          buildContract: "staged_ready_bundle_shell",
+          activationOwner: "future_runtime_integration",
+          dispatchOwner: "main_runtime_after_review",
+        },
       packageSectionsComplete: {
         manifest: true,
         adapter: true,

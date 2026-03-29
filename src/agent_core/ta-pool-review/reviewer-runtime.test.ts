@@ -110,10 +110,13 @@ test("reviewer runtime routes review-required requests through the bootstrap rev
     llmReviewerHook: async ({ request, reviewContext, promptPack, workerEnvelope }) => {
       assert.equal(reviewContext.projectSummary.status, "ready");
       assert.match(reviewContext.projectSummary.summary, /Reviewing mcp\.playwright/u);
-      assert.equal(reviewContext.memorySummaryPlaceholder.status, "placeholder");
+      assert.equal(reviewContext.memorySummaryPlaceholder.status, "ready");
+      assert.match(reviewContext.memorySummaryPlaceholder.summary, /Section-backed context is available/u);
       assert.equal(reviewContext.userIntentSummary.summary, "Need reviewer runtime decision.");
       assert.equal(reviewContext.riskSummary.requestedAction, "request capability mcp.playwright");
       assert.equal(reviewContext.riskSummary.plainLanguageRisk.riskLevel, "normal");
+      assert.equal(reviewContext.sections.length >= 3, true);
+      assert.equal(reviewContext.sections[0]?.sectionId, "review.request");
       assert.deepEqual(reviewContext.inventorySnapshot.metadata?.readyProvisionAssetKeys, ["mcp.playwright"]);
       assert.deepEqual(reviewContext.inventorySnapshot.metadata?.activeProvisionAssetKeys, ["computer.use"]);
       assert.equal(promptPack.lane, REVIEWER_WORKER_BRIDGE_LANE);

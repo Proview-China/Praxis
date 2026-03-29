@@ -37,7 +37,7 @@ test("review context aperture upgrades placeholder fields to v1 structure", () =
     modeSnapshot: "strict",
   });
 
-  assert.equal(aperture.projectSummary.status, "placeholder");
+  assert.equal(aperture.projectSummary.status, "ready");
   assert.equal(aperture.runSummary.summary, "Need browser screenshot capability.");
   assert.equal(aperture.profileSnapshot?.profileId, "profile-main");
   assert.equal(aperture.inventorySnapshot.totalCapabilities, 3);
@@ -46,6 +46,35 @@ test("review context aperture upgrades placeholder fields to v1 structure", () =
   assert.equal(aperture.userIntentSummary.status, "ready");
   assert.equal(aperture.riskSummary.plainLanguageRisk.riskLevel, "risky");
   assert.equal(aperture.forbiddenObjects, CONTEXT_APERTURE_FORBIDDEN_OBJECTS);
+});
+
+test("review context aperture can derive a safe memory summary from provided sections", () => {
+  const aperture = createReviewContextAperture({
+    userIntentSummary: "审查高风险能力请求。",
+    riskSummary: {
+      requestedAction: "review computer.use capability",
+      capabilityKey: "computer.use",
+      riskLevel: "risky",
+    },
+    sections: [
+      {
+        sectionId: "request",
+        title: "Request",
+        summary: "computer.use 请求已进入 reviewer。",
+        status: "ready",
+      },
+      {
+        sectionId: "inventory",
+        title: "Inventory",
+        summary: "当前 capability inventory 已加载。",
+        status: "ready",
+      },
+    ],
+  });
+
+  assert.equal(aperture.memorySummaryPlaceholder.status, "ready");
+  assert.match(aperture.memorySummaryPlaceholder.summary, /Section-backed context is available/i);
+  assert.equal(aperture.memorySummaryPlaceholder.metadata?.sectionCount, 2);
 });
 
 test("provision context aperture upgrades requested capability input to v1 structure", () => {
@@ -61,9 +90,12 @@ test("provision context aperture upgrades requested capability input to v1 struc
   assert.equal(aperture.requestedCapabilityKey, "mcp.playwright");
   assert.equal(aperture.capabilitySpec.capabilityKey, "mcp.playwright");
   assert.equal(aperture.inventorySnapshot?.knownTools[0], "websearch");
-  assert.equal(aperture.existingSiblingCapabilitySummary.status, "placeholder");
-  assert.equal(aperture.allowedBuildScope.status, "placeholder");
+  assert.equal(aperture.projectSummary.status, "ready");
+  assert.equal(aperture.existingSiblingCapabilitySummary.status, "ready");
+  assert.match(aperture.existingSiblingCapabilitySummary.summary, /No sibling capability inventory/i);
+  assert.equal(aperture.allowedBuildScope.status, "ready");
   assert.equal(aperture.allowedSideEffects.length, 2);
+  assert.equal(aperture.allowedSideEffects.every((effect) => effect.status === "ready"), true);
   assert.equal(aperture.reviewerInstructions.status, "ready");
 });
 

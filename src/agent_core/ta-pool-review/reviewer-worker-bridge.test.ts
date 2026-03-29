@@ -63,11 +63,6 @@ function createReviewContext() {
       totalCapabilities: 1,
       availableCapabilityKeys: ["mcp.playwright"],
     },
-    memorySummaryPlaceholder: {
-      summary: "Memory placeholder.",
-      status: "placeholder",
-      source: "test",
-    },
     userIntentSummary: {
       summary: "Need reviewer worker decision.",
       status: "ready",
@@ -93,6 +88,14 @@ function createReviewContext() {
       },
       source: "generated",
     },
+    sections: [
+      {
+        sectionId: "review.request",
+        title: "Review Request",
+        summary: "mcp.playwright 已进入 reviewer worker bridge。",
+        status: "ready",
+      },
+    ],
     modeSnapshot: "balanced",
   });
 }
@@ -122,6 +125,7 @@ test("reviewer worker bridge packages bootstrap lane input and compiles vote-onl
   assert.equal(workerEnvelope.runtimeContract.canExecute, false);
   assert.equal(workerEnvelope.runtimeContract.canDispatchGrant, false);
   assert.equal(workerEnvelope.routed.outcome, "review_required");
+  assert.equal(workerEnvelope.reviewContext.memorySummaryPlaceholder.status, "ready");
   assert.match(promptPack.outputContract.join(" "), /structured vote JSON/i);
 
   const decision = compileReviewerWorkerVote({

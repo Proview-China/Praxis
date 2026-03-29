@@ -7,6 +7,7 @@ import type {
   PoolActivationSpec,
   ReviewDecision,
   AccessRequest,
+  TmaExecutionLane,
 } from "../ta-pool-types/index.js";
 import type {
   TaActivationAttemptRecord,
@@ -309,6 +310,23 @@ export interface ToolReviewQualityReport {
   readyForHandoffReviewIds: string[];
 }
 
+export interface ToolReviewTmaWorkOrder {
+  workOrderId: string;
+  sessionId: string;
+  capabilityKey: string;
+  sourceReviewId: string;
+  sourceActionId: string;
+  sourceGovernanceKind: ToolReviewGovernanceInputShell["kind"];
+  requestedLane: TmaExecutionLane;
+  priority: "normal" | "high";
+  objective: string;
+  rationale: string;
+  implementationHints: string[];
+  acceptanceChecklist: string[];
+  generatedAt: string;
+  metadata?: Record<string, unknown>;
+}
+
 export interface CreateToolReviewActionLedgerEntryInput {
   reviewId: string;
   sessionId: string;
@@ -397,5 +415,48 @@ export function summarizeToolReviewAction(
     requiresHuman: action.status === "waiting_human",
     readyForHandoff: action.status === "ready_for_handoff",
     blocked: action.status === "blocked",
+  };
+}
+
+export function createToolReviewTmaWorkOrder(input: {
+  sessionId: string;
+  capabilityKey: string;
+  sourceAction: ToolReviewActionLedgerEntry;
+  qualityReport: ToolReviewQualityReport;
+}): ToolReviewTmaWorkOrder {
+  const isBlocked = input.sourceAction.status === "blocked";
+  const isActivationLike = input.sourceAction.governanceKind === "activation";
+  const requestedLane: TmaExecutionLane = isBlocked && isActivationLike ? "extended" : "bootstrap";
+
+  return {
+    workOrderId: `tma-work-order:${input.sourceAction.reviewId}`,
+    sessionId: input.sessionId,
+    capabilityKey: input.capabilityKey,
+    sourceReviewId: input.sourceAction.reviewId,
+    sourceActionId: input.sourceAction.actionId,
+    sourceGovernanceKind: input.sourceAction.governanceKind,
+    requestedLane,
+    priority: isBlocked ? "high" : "normal",
+    objective: isBlocked
+      ? `Repair the capability package for ${input.capabilityKey} so the blocked governance item can move forward.`
+      : `Prepare the next build-ready capability package iteration for ${input.capabilityKey}.`,
+    rationale: input.qualityReport.summary,
+    implementationHints: [
+      `Respect the current governance boundary: ${input.sourceAction.boundaryMode}.`,
+      `Review the latest tool-review summary: ${input.sourceAction.output.summary}`,
+      requestedLane === "extended"
+        ? "Extended lane is recommended because the failure likely needs deeper runtime or integration work."
+        : "Bootstrap lane is enough for the current build/package iteration unless a later reviewer explicitly widens scope.",
+    ],
+    acceptanceChecklist: [
+      "Produce a ready bundle candidate with tool, binding, verification, and usage artifacts.",
+      "Preserve replay and activation guidance for the outer TAP runtime.",
+      "Do not execute the blocked user task directly from the TMA lane.",
+    ],
+    generatedAt: input.qualityReport.generatedAt,
+    metadata: {
+      verdict: input.qualityReport.verdict,
+      sourceStatus: input.sourceAction.status,
+    },
   };
 }

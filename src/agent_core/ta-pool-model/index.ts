@@ -119,3 +119,50 @@ export {
   listFirstWaveProfileAssemblyDescriptors,
   resolveFirstWaveCapabilityAssignment,
 } from "./first-wave-profile.js";
+
+export type {
+  CreateTapGovernanceObjectInput,
+  TaGovernanceAgentRole,
+  TaGovernanceAutomationLevel,
+  TaGovernanceMatrixEntry,
+  TaGovernanceTaskInstantiation,
+  TaPoolGovernanceObject,
+  TaPoolGovernanceWorkspacePolicy,
+  TaUserOverrideContract,
+  TapAutomationDepth,
+  TapGovernanceObject,
+  TapGovernanceUserSurface,
+  TapShared15ViewCell,
+  TapTaskGovernancePolicy,
+  TapToolPolicyOverride,
+  TapUserExplanationStyle,
+  TapUserOverrideContract,
+  TapTierGovernanceSnapshot,
+  TapWorkspaceGovernancePolicy,
+} from "./governance-object.js";
+export {
+  createDefaultTaPoolGovernanceObject,
+  createTapGovernanceObject,
+  instantiateTaGovernanceForTask,
+  instantiateTapGovernanceObject,
+  listShared15ViewMatrix,
+  TA_GOVERNANCE_AGENT_ROLES,
+  TA_GOVERNANCE_AUTOMATION_LEVELS,
+  TAP_AUTOMATION_DEPTHS,
+  TAP_USER_EXPLANATION_STYLES,
+} from "./governance-object.js";
+
+export type {
+  TapUserSurfaceSnapshot,
+} from "./user-surface.js";
+export {
+  createTapUserSurfaceSnapshot,
+} from "./user-surface.js";
+
+export type {
+  TapCmpMpChecklistItem,
+  TapCmpMpReadyChecklist,
+} from "./cmp-mp-ready-checklist.js";
+export {
+  createTapCmpMpReadyChecklist,
+} from "./cmp-mp-ready-checklist.js";

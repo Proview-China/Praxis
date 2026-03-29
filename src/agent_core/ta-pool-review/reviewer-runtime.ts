@@ -97,6 +97,65 @@ function createDefaultProjectSummary(input: {
   ].join(" ");
 }
 
+function createDefaultReviewSections(input: {
+  request: AccessRequest;
+  profile: AgentCapabilityProfile;
+  inventory?: ReviewDecisionEngineInventory;
+  requestedAction: string;
+  plainLanguageRisk: ReturnType<typeof formatPlainLanguageRisk>;
+}) {
+  const availableCapabilityKeys = normalizeStringArray([
+    ...(input.inventory?.availableCapabilityKeys ?? []),
+    ...(input.inventory?.readyProvisionAssetKeys ?? []),
+    ...(input.inventory?.activatingProvisionAssetKeys ?? []),
+    ...(input.inventory?.activeProvisionAssetKeys ?? []),
+  ]);
+  const pendingProvisionKeys = normalizeStringArray(input.inventory?.pendingProvisionKeys);
+
+  return [
+    {
+      sectionId: "review.request",
+      title: "Review Request",
+      summary: `${input.request.requestedCapabilityKey} was requested for ${input.request.sessionId}/${input.request.runId}.`,
+      status: "ready" as const,
+      source: "reviewer-runtime-default",
+      freshness: "fresh" as const,
+      trustLevel: "declared" as const,
+      metadata: {
+        requestId: input.request.requestId,
+        requestedTier: input.request.requestedTier,
+        mode: input.request.mode,
+      },
+    },
+    {
+      sectionId: "review.inventory",
+      title: "Capability Inventory",
+      summary: `Available capability entries: ${availableCapabilityKeys.length}; pending provisioning entries: ${pendingProvisionKeys.length}.`,
+      status: "ready" as const,
+      source: "reviewer-runtime-default",
+      freshness: "fresh" as const,
+      trustLevel: "derived" as const,
+      metadata: {
+        availableCapabilityKeys,
+        pendingProvisionKeys,
+      },
+    },
+    {
+      sectionId: "review.risk",
+      title: "Risk Summary",
+      summary: `${input.requestedAction} is currently assessed as ${input.plainLanguageRisk.riskLevel}.`,
+      status: "ready" as const,
+      source: "reviewer-runtime-default",
+      freshness: "fresh" as const,
+      trustLevel: "derived" as const,
+      metadata: {
+        requestedAction: input.requestedAction,
+        riskLevel: input.plainLanguageRisk.riskLevel,
+      },
+    },
+  ];
+}
+
 export class ReviewerRuntime {
   readonly #llmReviewerHook?: ReviewerRuntimeLlmHook;
   readonly #durableStateHook?: ReviewerRuntimeOptions["durableStateHook"];
@@ -192,11 +251,6 @@ export class ReviewerRuntime {
           activeProvisionAssetKeys: input.inventory?.activeProvisionAssetKeys ?? [],
         },
       },
-      memorySummaryPlaceholder: {
-        summary: "Memory summary is still placeholder-only in Wave 1 reviewer runtime.",
-        status: "placeholder",
-        source: "reviewer-runtime-default",
-      },
       userIntentSummary: {
         summary: input.request.reason,
         status: "ready",
@@ -208,6 +262,13 @@ export class ReviewerRuntime {
         plainLanguageRisk,
         source: input.request.plainLanguageRisk ? "request" : "generated",
       },
+      sections: createDefaultReviewSections({
+        request: input.request,
+        profile: input.profile,
+        inventory: input.inventory,
+        requestedAction,
+        plainLanguageRisk,
+      }),
       modeSnapshot: input.request.mode,
       metadata: {
         requestedCapabilityKey: input.request.requestedCapabilityKey,

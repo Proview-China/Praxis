@@ -50,14 +50,36 @@ test("provisioner worker bridge defaults to bootstrap lane unless an approved ex
   assert.equal(resolveProvisionerWorkerLane(approvedExtended), "extended");
   assert.equal(bootstrapInput.promptPack.lane, "bootstrap");
   assert.equal(bootstrapInput.envelope.allowedBuildScope.mayInstallDependencies, false);
+  assert.equal(bootstrapInput.envelope.contextAperture.allowedBuildScope.status, "ready");
+  assert.equal(bootstrapInput.envelope.contextAperture.reviewerInstructions.status, "ready");
   assert.match(bootstrapInput.promptPack.systemPrompt, /Do not approve activation/i);
   assert.equal(extendedInput.promptPack.lane, "extended");
   assert.equal(extendedInput.envelope.allowedBuildScope.mayInstallDependencies, true);
   assert.equal(extendedInput.envelope.allowedBuildScope.mayUseNetwork, true);
+  assert.equal(extendedInput.envelope.contextAperture.allowedSideEffects.every((effect) => effect.status === "ready"), true);
   assert.equal(
     extendedInput.promptPack.laneSemantics.allowedCapabilities.includes("dependency.install"),
     true,
   );
+});
+
+test("provisioner worker bridge honors tool reviewer requested lane when no approved lane is attached", () => {
+  const toolReviewDirected = createRequest({
+    requestedCapabilityKey: "computer.use",
+    metadata: {
+      toolReviewWorkOrder: {
+        workOrderId: "tma-work-order:review-extended",
+        requestedLane: "extended",
+        objective: "Repair the blocked computer.use capability package.",
+      },
+    },
+  });
+
+  const directedInput = createProvisionerWorkerBridgeInput(toolReviewDirected);
+
+  assert.equal(resolveProvisionerWorkerLane(toolReviewDirected), "extended");
+  assert.equal(directedInput.promptPack.lane, "extended");
+  assert.equal(directedInput.envelope.allowedBuildScope.mayInstallDependencies, true);
 });
 
 test("default provisioner worker output carries package artifacts plus activation and replay guidance", () => {
@@ -82,7 +104,15 @@ test("default provisioner worker output carries package artifacts plus activatio
     (output.metadata?.evidenceContract as { requiresVerificationArtifact?: boolean } | undefined)?.requiresVerificationArtifact,
     true,
   );
-  assert.match(output.buildSummary, /Real builder execution and activation driver remain unimplemented/i);
+  assert.equal(
+    (output.metadata?.phasedBoundary as { buildContract?: string } | undefined)?.buildContract,
+    "staged_ready_bundle_shell",
+  );
+  assert.match(output.buildSummary, /generic staged package contract/i);
+  assert.deepEqual((output.usageArtifact.metadata?.usage as { knownLimits?: string[] } | undefined)?.knownLimits, [
+    "activation remains owned by the outer TAP runtime",
+    "this bridge delivers a package contract, not a fully installed external runtime integration",
+  ]);
 });
 
 test("bootstrap tooling capabilities emit formal package payloads through the worker bridge", () => {
@@ -104,5 +134,29 @@ test("bootstrap tooling capabilities emit formal package payloads through the wo
     (output.metadata?.packageSectionsComplete as { usage?: boolean } | undefined)?.usage,
     true,
   );
-  assert.match(output.buildSummary, /formal bootstrap tooling capability package/i);
+  assert.equal(
+    (output.metadata?.phasedBoundary as { buildContract?: string } | undefined)?.buildContract,
+    "formal_ready_bundle",
+  );
+  assert.match(output.buildSummary, /ready for tool-review quality checks/i);
+});
+
+test("provisioner worker envelope carries an attached tool reviewer work order into context and instructions", () => {
+  const input = createProvisionerWorkerBridgeInput(createRequest({
+    requestedCapabilityKey: "computer.use",
+    metadata: {
+      toolReviewWorkOrder: {
+        workOrderId: "tma-work-order:review-1",
+        objective: "Repair the blocked computer.use capability package.",
+        rationale: "Activation failed during the last governance pass.",
+      },
+    },
+  }));
+
+  assert.equal(input.envelope.reviewerInstructions[0], "Tool reviewer rationale: Activation failed during the last governance pass.");
+  assert.equal(input.envelope.projectConstraints[0], "Tool reviewer objective: Repair the blocked computer.use capability package.");
+  assert.equal(
+    input.envelope.contextAperture.sections.some((section) => section.sectionId === "provision.tool-review-work-order"),
+    true,
+  );
 });

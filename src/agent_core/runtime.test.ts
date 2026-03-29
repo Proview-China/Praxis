@@ -465,6 +465,67 @@ test("AgentCoreRuntime routes capability_call through TAP by default in dispatch
   );
 });
 
+test("AgentCoreRuntime default TAP dispatch applies governance tool-policy overrides before baseline fast path", async () => {
+  const runtime = createAgentCoreRuntime({
+    taProfile: createAgentCapabilityProfile({
+      profileId: "profile.runtime.tap-governance-default-route",
+      agentClass: "main-agent",
+      baselineCapabilities: ["search.ground"],
+    }),
+  });
+  const session = runtime.createSession();
+  const goal = runtime.createCompiledGoal(
+    createGoalSource({
+      goalId: "goal-runtime-tap-governance-default-route",
+      sessionId: session.sessionId,
+      userInput: "Governance object should override default TAP routing.",
+    }),
+  );
+  const created = await runtime.createRun({
+    sessionId: session.sessionId,
+    goal,
+  });
+
+  const intent: CapabilityCallIntent = {
+    intentId: "intent-tap-governance-default-route-1",
+    sessionId: session.sessionId,
+    runId: created.run.runId,
+    kind: "capability_call",
+    createdAt: new Date("2026-03-30T09:00:00.000Z").toISOString(),
+    priority: "high",
+    request: {
+      requestId: "request-tap-governance-default-route-1",
+      intentId: "intent-tap-governance-default-route-1",
+      sessionId: session.sessionId,
+      runId: created.run.runId,
+      capabilityKey: "search.ground",
+      input: {
+        query: "Force human review through governance override",
+      },
+      priority: "high",
+      metadata: {
+        tapUserOverride: {
+          toolPolicyOverrides: [
+            {
+              capabilitySelector: "search.ground",
+              policy: "human_gate",
+            },
+          ],
+        },
+      },
+    },
+  };
+
+  const dispatched = await runtime.dispatchIntent(intent);
+
+  assert.equal(dispatched.status, "waiting_human");
+  assert.equal(dispatched.dispatch, undefined);
+  assert.equal(dispatched.grant, undefined);
+  assert.equal(dispatched.reviewDecision?.decision, "escalated_to_human");
+  assert.equal(runtime.listTaHumanGates().length, 1);
+  assert.equal(runtime.listReviewerDurableStates().at(-1)?.decision, "escalated_to_human");
+});
+
 test("AgentCoreRuntime dispatches MCP read family capability packages through the default TAP path", async () => {
   const listToolsPackage = createMcpReadCapabilityPackage({
     capabilityKey: "mcp.listTools",
@@ -1671,6 +1732,33 @@ test("AgentCoreRuntime records tool reviewer governance sessions from runtime hu
   assert.equal(runtime.hasPendingTapGovernanceWork(), true);
   assert.equal(runtime.createTapGovernanceSnapshot().blockingCapabilityKeys.includes("computer.use"), true);
   assert.equal(runtime.listToolReviewerQualityReports().some((report) => report.verdict === "handoff_ready"), true);
+  assert.equal(runtime.listToolReviewerTmaWorkOrders().some((workOrder) => workOrder.capabilityKey === "computer.use"), true);
+  assert.equal(
+    runtime.getToolReviewerTmaWorkOrder(`tool-review:provision:${approved.provisionRequest!.provisionId}`)?.requestedLane,
+    "bootstrap",
+  );
+  const governanceObject = runtime.createTapGovernanceObject({
+    taskMode: "restricted",
+    userOverride: {
+      automationDepth: "prefer_human",
+    },
+  });
+  assert.equal(governanceObject.shared15ViewMatrix.length, 15);
+  assert.equal(governanceObject.taskPolicy.effectiveMode, "restricted");
+  assert.equal(governanceObject.userSurface.automationDepth, "prefer_human");
+  assert.equal(runtime.createTapUserSurfaceSnapshot().visibleMode, "permissive");
+  assert.equal(runtime.createTapCmpMpReadyChecklist().reviewerSectionRegistryReady, true);
+  const taskGovernance = runtime.createTapTaskGovernance({
+    taskId: "task-tool-review-mainline",
+    requestedMode: "standard",
+    userOverride: {
+      requestedMode: "permissive",
+      automationDepth: "prefer_auto",
+    },
+  });
+  assert.equal(taskGovernance.taskPolicy.effectiveMode, "permissive");
+  assert.equal(taskGovernance.taskPolicy.automationDepth, "prefer_auto");
+  assert.equal(taskGovernance.objectId, "tap-governance:profile.runtime.tool-review-mainline:permissive:task-tool-review-mainline");
 });
 
 test("AgentCoreRuntime records blocked tool-review lifecycle when target binding is missing", async () => {

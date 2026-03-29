@@ -10,6 +10,7 @@ import type {
   ToolReviewGovernanceInputShell,
   ToolReviewGovernanceOutputShell,
   ToolReviewQualityReport,
+  ToolReviewTmaWorkOrder,
   ToolReviewReplayInputShell,
   ToolReviewReplayOutputShell,
   ToolReviewHumanGateInputShell,
@@ -19,6 +20,7 @@ import type {
 } from "./tool-review-contract.js";
 import {
   createToolReviewActionLedgerEntry,
+  createToolReviewTmaWorkOrder,
   resolveLifecycleTargetBindingState,
   summarizeToolReviewAction,
 } from "./tool-review-contract.js";
@@ -481,6 +483,39 @@ export class ToolReviewerRuntime {
     return this.listSessions()
       .map((session) => this.createQualityReport(session.sessionId))
       .filter((report): report is ToolReviewQualityReport => report !== undefined);
+  }
+
+  createTmaWorkOrder(sessionId: string): ToolReviewTmaWorkOrder | undefined {
+    const plan = this.createGovernancePlan(sessionId);
+    const qualityReport = this.createQualityReport(sessionId);
+    if (!plan || !qualityReport) {
+      return undefined;
+    }
+
+    const sourceItem = [...plan.items]
+      .reverse()
+      .find((item) => item.blocked || item.readyForHandoff);
+    if (!sourceItem) {
+      return undefined;
+    }
+
+    const sourceAction = this.getAction(sourceItem.reviewId);
+    if (!sourceAction) {
+      return undefined;
+    }
+
+    return createToolReviewTmaWorkOrder({
+      sessionId,
+      capabilityKey: sourceItem.capabilityKey,
+      sourceAction,
+      qualityReport,
+    });
+  }
+
+  listTmaWorkOrders(): readonly ToolReviewTmaWorkOrder[] {
+    return this.listSessions()
+      .map((session) => this.createTmaWorkOrder(session.sessionId))
+      .filter((workOrder): workOrder is ToolReviewTmaWorkOrder => workOrder !== undefined);
   }
 
   createSnapshots(): ToolReviewSessionSnapshot[] {

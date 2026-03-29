@@ -32,7 +32,7 @@ const REVIEWER_ALLOWED_READS = [
   "run summary",
   "profile snapshot",
   "inventory snapshot",
-  "memory summary placeholder",
+  "memory/context summary",
   "user intent summary",
   "risk summary",
 ] as const;

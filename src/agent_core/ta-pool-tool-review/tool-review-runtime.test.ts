@@ -128,6 +128,10 @@ test("tool reviewer runtime stages activation and lifecycle shells as handoff-re
   assert.ok(report);
   assert.equal(report?.verdict, "handoff_ready");
   assert.equal(report?.readyForHandoffReviewIds.length, 2);
+  const workOrder = runtime.createTmaWorkOrder(activation.sessionId);
+  assert.ok(workOrder);
+  assert.equal(workOrder?.requestedLane, "bootstrap");
+  assert.equal(workOrder?.sourceGovernanceKind, "lifecycle");
 });
 
 test("tool reviewer runtime preserves human gate waiting status and replay re-review status", async () => {
@@ -513,4 +517,5 @@ test("tool reviewer quality report follows the latest active governance state in
   assert.equal(runtime.getSession(sessionId)?.status, "open");
   assert.equal(report?.verdict, "handoff_ready");
   assert.equal(report?.readyForHandoffReviewIds.includes("tool-review:action-quality-ready-1"), true);
+  assert.equal(runtime.listTmaWorkOrders()[0]?.requestedLane, "bootstrap");
 });

@@ -26,7 +26,18 @@ import { SessionManager } from "./session/index.js";
 import { projectStateFromEvents } from "./state/index.js";
 import {
   assembleCapabilityProfileFromPackages,
+  classifyCapabilityRisk,
+  createTapCmpMpReadyChecklist,
+  createTapGovernanceObject,
+  createTapUserSurfaceSnapshot,
+  instantiateTapGovernanceObject,
   type AssembleCapabilityProfileFromPackagesInput,
+  type CreateTapGovernanceObjectInput,
+  type TapCmpMpReadyChecklist,
+  type TapGovernanceObject,
+  type TapToolPolicyOverride,
+  type TapUserSurfaceSnapshot,
+  type TapUserOverrideContract,
 } from "./ta-pool-model/index.js";
 import {
   activateProvisionAsset,
@@ -58,6 +69,7 @@ import {
   materializeProvisionAssetActivation,
 } from "./ta-pool-runtime/index.js";
 import { createReviewerRuntime, ReviewerRuntime } from "./ta-pool-review/index.js";
+import type { ReviewerDurableState } from "./ta-pool-review/index.js";
 import { createProvisionerRuntime, ProvisionerRuntime } from "./ta-pool-provision/index.js";
 import type { ProvisionAssetRecord, ProvisionDeliveryReport, TmaSessionState } from "./ta-pool-provision/index.js";
 import {
@@ -70,8 +82,13 @@ import type {
   ToolReviewGovernancePlan,
   ToolReviewQualityReport,
   ToolReviewSessionState,
+  ToolReviewTmaWorkOrder,
 } from "./ta-pool-tool-review/index.js";
 import { evaluateSafetyInterception, type TaSafetyInterceptorConfig } from "./ta-pool-safety/index.js";
+import {
+  createProvisionContextApertureSnapshot,
+  createReviewContextApertureSnapshot,
+} from "./ta-pool-context/context-aperture.js";
 import { formatPlainLanguageRisk } from "./ta-pool-context/plain-language-risk.js";
 import { toProvisionRequestFromReviewDecision, type ReviewDecisionEngineInventory } from "./ta-pool-review/index.js";
 import type {
@@ -99,6 +116,7 @@ import type {
   CapabilityGrant,
   DecisionToken,
   PlainLanguageRiskPayload,
+  TaPoolRiskLevel,
   PoolActivationSpec,
   ProvisionArtifactBundle,
   ProvisionRequest,
@@ -110,6 +128,7 @@ import type {
 import {
   createProvisionRequest,
   createReviewDecision,
+  matchesCapabilityPattern,
 } from "./ta-pool-types/index.js";
 import type { CreateSessionInput } from "./session/index.js";
 import type { CreateRunInput, RunTransitionOutcome } from "./run/index.js";
@@ -129,6 +148,12 @@ export interface AgentCoreRuntimeOptions {
   runCoordinator?: AgentRunCoordinator;
   sessionManager?: SessionManager;
   modelInferenceExecutor?: (params: { intent: ModelInferenceIntent }) => Promise<ModelInferenceExecutionResult>;
+}
+
+export interface CreateTapTaskGovernanceInput {
+  taskId: string;
+  requestedMode?: TaPoolMode;
+  userOverride?: TapUserOverrideContract;
 }
 
 export interface CreateAgentCoreRunInput extends Omit<CreateRunInput, "goal"> {
@@ -177,6 +202,17 @@ export interface DispatchCapabilityIntentViaTaPoolOptions {
   requestedDurationMs?: number;
   taskContext?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
+}
+
+interface TapGovernanceDispatchDirective {
+  governanceObjectId: string;
+  effectiveMode: TaPoolMode;
+  automationDepth: string;
+  explanationStyle: string;
+  derivedRiskLevel: TaPoolRiskLevel;
+  matchedToolPolicy?: TapToolPolicyOverride["policy"];
+  matchedToolPolicySelector?: string;
+  forceHumanByRisk: boolean;
 }
 
 export type TaCapabilityAssemblyStatus =
@@ -246,6 +282,30 @@ export interface TaCapabilityHumanGateHandoff {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readTapUserOverrideCandidate(value: unknown): TapUserOverrideContract | undefined {
+  return isRecord(value) ? value as TapUserOverrideContract : undefined;
+}
+
+function readTapGovernanceDispatchDirective(
+  metadata: unknown,
+): TapGovernanceDispatchDirective | undefined {
+  if (!isRecord(metadata)) {
+    return undefined;
+  }
+  const directive = metadata.tapGovernanceDirective;
+  return isRecord(directive) ? directive as unknown as TapGovernanceDispatchDirective : undefined;
+}
+
+function maxCapabilityTier(
+  left: TaCapabilityTier,
+  right: TaCapabilityTier,
+): TaCapabilityTier {
+  const tiers: readonly TaCapabilityTier[] = ["B0", "B1", "B2", "B3"];
+  const leftIndex = tiers.indexOf(left);
+  const rightIndex = tiers.indexOf(right);
+  return leftIndex >= rightIndex ? left : right;
 }
 
 function toIntentPriority(value: unknown): CapabilityInvocationPlan["priority"] {
@@ -577,6 +637,14 @@ export class AgentCoreRuntime {
     return [...this.#taActivationAttempts.values()];
   }
 
+  getReviewerDurableState(requestId: string): ReviewerDurableState | undefined {
+    return this.reviewerRuntime?.getDurableState(requestId);
+  }
+
+  listReviewerDurableStates(): readonly ReviewerDurableState[] {
+    return this.reviewerRuntime?.listDurableStates() ?? [];
+  }
+
   getToolReviewerSession(sessionId: string): ToolReviewSessionState | undefined {
     return this.toolReviewerRuntime?.getSession(sessionId);
   }
@@ -595,6 +663,14 @@ export class AgentCoreRuntime {
 
   listToolReviewerQualityReports(): readonly ToolReviewQualityReport[] {
     return this.toolReviewerRuntime?.listQualityReports() ?? [];
+  }
+
+  getToolReviewerTmaWorkOrder(sessionId: string): ToolReviewTmaWorkOrder | undefined {
+    return this.toolReviewerRuntime?.createTmaWorkOrder(sessionId);
+  }
+
+  listToolReviewerTmaWorkOrders(): readonly ToolReviewTmaWorkOrder[] {
+    return this.toolReviewerRuntime?.listTmaWorkOrders() ?? [];
   }
 
   getTmaSession(sessionId: string): TmaSessionState | undefined {
@@ -926,6 +1002,71 @@ export class AgentCoreRuntime {
 
   hasPendingTapGovernanceWork(): boolean {
     return hasPendingTapGovernanceWork(this.createTapGovernanceSnapshot());
+  }
+
+  createTapGovernanceObject(
+    input: Omit<CreateTapGovernanceObjectInput, "profile"> = {},
+  ): TapGovernanceObject {
+    return createTapGovernanceObject({
+      ...input,
+      profile: this.taControlPlaneGateway?.profile,
+    });
+  }
+
+  createTapTaskGovernance(input: CreateTapTaskGovernanceInput): TapGovernanceObject {
+    return instantiateTapGovernanceObject({
+      governance: this.createTapGovernanceObject(),
+      taskId: input.taskId,
+      requestedMode: input.requestedMode,
+      userOverride: input.userOverride,
+    });
+  }
+
+  createTapUserSurfaceSnapshot(
+    input: Omit<CreateTapGovernanceObjectInput, "profile"> = {},
+  ): TapUserSurfaceSnapshot {
+    return createTapUserSurfaceSnapshot({
+      governance: this.createTapGovernanceObject(input),
+      governanceSnapshot: this.createTapGovernanceSnapshot(),
+    });
+  }
+
+  createTapCmpMpReadyChecklist(): TapCmpMpReadyChecklist {
+    return createTapCmpMpReadyChecklist({
+      reviewerContext: createReviewContextApertureSnapshot({
+        userIntentSummary: "TAP reviewer section intake readiness snapshot.",
+        riskSummary: {
+          requestedAction: "review cmp/mp section readiness",
+          riskLevel: "normal",
+        },
+        sections: [
+          {
+            sectionId: "reviewer.default",
+            title: "Reviewer Default Section",
+            summary: "Reviewer default aperture is available for future CMP/MP registry hydration.",
+            status: "ready",
+            source: "agent-core-runtime",
+            freshness: "fresh",
+            trustLevel: "derived",
+          },
+        ],
+      }),
+      provisionContext: createProvisionContextApertureSnapshot({
+        requestedCapabilityKey: "tap.checklist",
+        reviewerInstructions: "Inspect provision section readiness only.",
+        sections: [
+          {
+            sectionId: "provision.default",
+            title: "Provision Default Section",
+            summary: "Provision/TMA default aperture is available for future CMP/MP registry hydration.",
+            status: "ready",
+            source: "agent-core-runtime",
+            freshness: "fresh",
+            trustLevel: "derived",
+          },
+        ],
+      }),
+    });
   }
 
   createPoolRuntimeSnapshots(): PoolRuntimeSnapshots {
@@ -1540,6 +1681,57 @@ export class AgentCoreRuntime {
     const requestedTier = options.requestedTier ?? "B1";
     const mode = options.mode ?? this.taControlPlaneGateway.profile.defaultMode;
     const reason = options.reason ?? `Capability ${intent.request.capabilityKey} requested by runtime.`;
+    const governanceDirective = readTapGovernanceDispatchDirective(options.metadata);
+
+    if (governanceDirective?.matchedToolPolicy === "deny") {
+      const accessRequest = this.#submitAccessRequestForIntent({
+        intent,
+        options,
+        requestedTier,
+        mode,
+        reason,
+        metadata: {
+          governancePolicyDecision: "deny",
+          governanceObjectId: governanceDirective.governanceObjectId,
+          governanceRiskLevel: governanceDirective.derivedRiskLevel,
+        },
+      });
+      const reviewDecision = createReviewDecision({
+        decisionId: randomUUID(),
+        requestId: accessRequest.requestId,
+        decision: "denied",
+        mode: accessRequest.mode,
+        reason: `TAP governance policy denied ${accessRequest.requestedCapabilityKey} before execution.`,
+        riskLevel: governanceDirective.derivedRiskLevel,
+        plainLanguageRisk: formatPlainLanguageRisk({
+          requestedAction: accessRequest.requestedAction ?? this.#describeCapabilityIntentAction(intent),
+          capabilityKey: accessRequest.requestedCapabilityKey,
+          riskLevel: governanceDirective.derivedRiskLevel,
+          metadata: {
+            governanceObjectId: governanceDirective.governanceObjectId,
+            matchedToolPolicySelector: governanceDirective.matchedToolPolicySelector,
+          },
+        }),
+        createdAt: new Date().toISOString(),
+        metadata: {
+          source: "tap-governance-policy",
+          governanceObjectId: governanceDirective.governanceObjectId,
+          matchedToolPolicySelector: governanceDirective.matchedToolPolicySelector,
+        },
+      });
+      this.taControlPlaneGateway.consumeReviewDecision(reviewDecision);
+      await this.reviewerRuntime.recordDurableState({
+        request: accessRequest,
+        decision: reviewDecision,
+        source: "review_engine",
+      });
+      return {
+        status: "denied",
+        accessRequest,
+        reviewDecision,
+      };
+    }
+
     const safety = evaluateSafetyInterception({
       mode,
       requestedTier,
@@ -1601,6 +1793,11 @@ export class AgentCoreRuntime {
         },
       });
       this.taControlPlaneGateway.consumeReviewDecision(reviewDecision);
+      await this.reviewerRuntime.recordDurableState({
+        request: accessRequest,
+        decision: reviewDecision,
+        source: "routing_fast_path",
+      });
       return {
         status: "waiting_human",
         safety,
@@ -1618,6 +1815,35 @@ export class AgentCoreRuntime {
     const effectiveTier = safety.outcome === "downgrade" && safety.downgradedTier
       ? safety.downgradedTier
       : requestedTier;
+
+    if (
+      governanceDirective?.matchedToolPolicy === "review_only"
+      || governanceDirective?.matchedToolPolicy === "human_gate"
+      || governanceDirective?.forceHumanByRisk
+    ) {
+      const reviewOnlyTier = governanceDirective.matchedToolPolicy === "human_gate"
+        ? "B3"
+        : maxCapabilityTier(effectiveTier, "B1");
+      const accessRequest = this.#submitAccessRequestForIntent({
+        intent,
+        options,
+        requestedTier: reviewOnlyTier,
+        mode,
+        reason,
+        metadata: {
+          governanceObjectId: governanceDirective.governanceObjectId,
+          governanceForceReview: true,
+          governanceMatchedToolPolicy: governanceDirective.matchedToolPolicy,
+          governanceRiskLevel: governanceDirective.derivedRiskLevel,
+        },
+      });
+      return this.#completeTapReviewFlow({
+        accessRequest,
+        intent,
+        options,
+        safety,
+      });
+    }
 
     const resolved = this.resolveTaCapabilityAccess({
       sessionId: intent.sessionId,
@@ -1665,153 +1891,12 @@ export class AgentCoreRuntime {
       };
     }
 
-    const accessRequest = resolved.request;
-    const inventory = this.#buildTaReviewInventory();
-    const reviewDecision = await this.reviewerRuntime.submit({
-      request: accessRequest,
-      profile: this.taControlPlaneGateway.profile,
-      inventory,
+    return this.#completeTapReviewFlow({
+      accessRequest: resolved.request,
+      intent,
+      options,
+      safety,
     });
-    const consumed = this.taControlPlaneGateway.consumeReviewDecision(reviewDecision);
-
-    if (consumed.grant) {
-      const executionRequestId = consumed.decisionToken?.requestId ?? intent.request.requestId;
-      const dispatch = await this.dispatchTaCapabilityGrant({
-        grant: consumed.grant,
-        decisionToken: consumed.decisionToken,
-        sessionId: intent.sessionId,
-        runId: intent.runId,
-        intentId: intent.intentId,
-        requestId: executionRequestId,
-        capabilityKey: intent.request.capabilityKey,
-        input: intent.request.input,
-        priority: intent.request.priority,
-        timeoutMs: intent.request.timeoutMs,
-        metadata: intent.request.metadata,
-      });
-      const runOutcome = await this.#awaitCapabilityRunOutcome({
-        requestId: executionRequestId,
-        timeoutMs: intent.request.timeoutMs,
-      });
-      return {
-        status: "dispatched",
-        accessRequest,
-        reviewDecision,
-        grant: consumed.grant,
-        decisionToken: consumed.decisionToken,
-        dispatch,
-        runOutcome,
-        safety: safety.outcome === "allow" ? undefined : safety,
-      };
-    }
-
-    if (reviewDecision.decision === "redirected_to_provisioning") {
-      const provisionRequest = this.#assembleProvisionRequestForRuntime({
-        request: toProvisionRequestFromReviewDecision({
-          request: accessRequest,
-          decision: reviewDecision,
-          provisionId: `${reviewDecision.decisionId}:provision`,
-          createdAt: new Date().toISOString(),
-        }),
-        accessRequest,
-        reviewDecision,
-        inventory,
-      });
-      const provisionBundle = await this.provisionerRuntime.submit(provisionRequest);
-      const provisionAsset = provisionBundle.status === "ready"
-        ? this.provisionerRuntime.assetIndex.getCurrent(provisionRequest.provisionId)
-        : undefined;
-      if (provisionBundle.status === "ready") {
-        await this.#stageProvisionReplay({
-          accessRequest,
-          provisionBundle,
-          intent,
-          source: "review-provisioning",
-          options,
-          reviewDecision,
-          metadata: {
-            decisionId: reviewDecision.decisionId,
-          },
-        });
-      }
-      return {
-        status: provisionBundle.status === "ready" ? "provisioned" : "provisioning_failed",
-        accessRequest,
-        reviewDecision,
-        provisionRequest,
-        provisionBundle,
-        activation: provisionBundle.status === "ready"
-          ? this.#createActivationHandoff({
-            source: "provision_bundle",
-            bundle: provisionBundle,
-            asset: provisionAsset,
-          })
-          : undefined,
-        replay: provisionBundle.status === "ready"
-          ? this.#createReplayHandoff({
-            source: "provision_bundle",
-            bundle: provisionBundle,
-            asset: provisionAsset,
-          })
-          : undefined,
-        safety: safety.outcome === "allow" ? undefined : safety,
-      };
-    }
-
-    const provisionAsset = this.#findCurrentProvisionAsset(intent.request.capabilityKey);
-    const replay = provisionAsset
-      ? await this.#ensureProvisionAssetReplay({
-        accessRequest,
-        intent,
-        source: "review-existing-provision-asset",
-        asset: provisionAsset,
-        options,
-        reviewDecision,
-      })
-      : undefined;
-
-    return {
-      status: reviewDecision.decision === "escalated_to_human"
-        ? "waiting_human"
-        : reviewDecision.decision as Exclude<
-          DispatchCapabilityIntentViaTaPoolResult["status"],
-          "dispatched" | "waiting_human" | "provisioned" | "provisioning_failed" | "blocked" | "interrupted"
-        >,
-      accessRequest,
-      reviewDecision,
-      activation: provisionAsset
-        ? this.#createActivationHandoff({
-          source: "provision_asset",
-          asset: provisionAsset,
-        })
-        : undefined,
-      replay,
-      humanGate: reviewDecision.decision === "escalated_to_human"
-        ? await this.#openHumanGate({
-          accessRequest,
-          reviewDecision,
-          intent,
-          options,
-        })
-        : replay?.policy === "manual"
-          ? this.#createHumanGateHandoff({
-            source: "replay_policy",
-            capabilityKey: accessRequest.requestedCapabilityKey,
-            requestedTier: accessRequest.requestedTier,
-            mode: accessRequest.mode,
-            requestedAction: accessRequest.requestedAction ?? this.#describeCapabilityIntentAction(intent),
-            reason: replay.reason,
-            riskLevel: reviewDecision.riskLevel ?? accessRequest.riskLevel,
-            plainLanguageRisk: reviewDecision.plainLanguageRisk ?? accessRequest.plainLanguageRisk,
-            metadata: {
-              accessRequestId: accessRequest.requestId,
-              reviewDecisionId: reviewDecision.decisionId,
-              replayPolicy: replay.policy,
-            },
-          })
-          : undefined,
-      safety: safety.outcome === "allow" ? undefined : safety,
-    };
   }
 
   async dispatchCapabilityIntent(intent: CapabilityCallIntent): Promise<DispatchCapabilityIntentResult> {
@@ -2104,6 +2189,264 @@ export class AgentCoreRuntime {
     return `use capability ${intent.request.capabilityKey}`;
   }
 
+  #readTapUserOverrideFromIntent(intent: CapabilityCallIntent): TapUserOverrideContract | undefined {
+    const intentOverride = readTapUserOverrideCandidate(intent.metadata?.tapUserOverride);
+    if (intentOverride) {
+      return intentOverride;
+    }
+
+    return readTapUserOverrideCandidate(intent.request.metadata?.tapUserOverride);
+  }
+
+  #matchTapToolPolicyOverride(
+    governance: TapGovernanceObject,
+    capabilityKey: string,
+  ): TapToolPolicyOverride | undefined {
+    return governance.taskPolicy.toolPolicyOverrides.find((override) =>
+      matchesCapabilityPattern({
+        capabilityKey,
+        patterns: [override.capabilitySelector],
+      })
+    );
+  }
+
+  #createTapGovernanceDispatchDirective(
+    intent: CapabilityCallIntent,
+  ): TapGovernanceDispatchDirective {
+    const governance = this.createTapTaskGovernance({
+      taskId: intent.intentId,
+      userOverride: this.#readTapUserOverrideFromIntent(intent),
+    });
+    const matchedToolPolicy = this.#matchTapToolPolicyOverride(
+      governance,
+      intent.request.capabilityKey,
+    );
+    const derivedRisk = classifyCapabilityRisk({
+      capabilityKey: intent.request.capabilityKey,
+      requestedTier: "B1",
+    });
+    const forceHumanByRisk = governance.taskPolicy.requireHumanOnRiskLevels.includes(
+      derivedRisk.riskLevel,
+    );
+
+    return {
+      governanceObjectId: governance.objectId,
+      effectiveMode: (
+        matchedToolPolicy?.policy === "human_gate" || forceHumanByRisk
+      ) && governance.taskPolicy.effectiveMode !== "bapr"
+        ? "restricted"
+        : governance.taskPolicy.effectiveMode,
+      automationDepth: governance.taskPolicy.automationDepth,
+      explanationStyle: governance.taskPolicy.explanationStyle,
+      derivedRiskLevel: derivedRisk.riskLevel,
+      matchedToolPolicy: matchedToolPolicy?.policy,
+      matchedToolPolicySelector: matchedToolPolicy?.capabilitySelector,
+      forceHumanByRisk,
+    };
+  }
+
+  #submitAccessRequestForIntent(params: {
+    intent: CapabilityCallIntent;
+    options: DispatchCapabilityIntentViaTaPoolOptions;
+    requestedTier: TaCapabilityTier;
+    mode: TaPoolMode;
+    reason: string;
+    metadata?: Record<string, unknown>;
+  }): AccessRequest {
+    return this.taControlPlaneGateway!.submitAccessRequest({
+      sessionId: params.intent.sessionId,
+      runId: params.intent.runId,
+      agentId: params.options.agentId,
+      capabilityKey: params.intent.request.capabilityKey,
+      reason: params.reason,
+      requestedTier: params.requestedTier,
+      mode: params.mode,
+      taskContext: params.options.taskContext,
+      requestedScope: params.options.requestedScope,
+      requestedDurationMs: params.options.requestedDurationMs,
+      metadata: {
+        correlationId: params.intent.correlationId,
+        ...(params.intent.metadata ?? {}),
+        ...(params.intent.request.metadata ?? {}),
+        ...(params.options.metadata ?? {}),
+        ...(params.metadata ?? {}),
+      },
+    });
+  }
+
+  async #completeTapReviewFlow(params: {
+    accessRequest: AccessRequest;
+    intent: CapabilityCallIntent;
+    options: DispatchCapabilityIntentViaTaPoolOptions;
+    safety?: ReturnType<typeof evaluateSafetyInterception>;
+    inventory?: ReviewDecisionEngineInventory;
+  }): Promise<DispatchCapabilityIntentViaTaPoolResult> {
+    const inventory = params.inventory ?? this.#buildTaReviewInventory();
+    const reviewDecision = await this.reviewerRuntime!.submit({
+      request: params.accessRequest,
+      profile: this.taControlPlaneGateway!.profile,
+      inventory,
+    });
+    const consumed = this.taControlPlaneGateway!.consumeReviewDecision(reviewDecision);
+
+    if (consumed.grant) {
+      const executionRequestId = consumed.decisionToken?.requestId ?? params.intent.request.requestId;
+      const dispatch = await this.dispatchTaCapabilityGrant({
+        grant: consumed.grant,
+        decisionToken: consumed.decisionToken,
+        sessionId: params.intent.sessionId,
+        runId: params.intent.runId,
+        intentId: params.intent.intentId,
+        requestId: executionRequestId,
+        capabilityKey: params.intent.request.capabilityKey,
+        input: params.intent.request.input,
+        priority: params.intent.request.priority,
+        timeoutMs: params.intent.request.timeoutMs,
+        metadata: params.intent.request.metadata,
+      });
+      const runOutcome = await this.#awaitCapabilityRunOutcome({
+        requestId: executionRequestId,
+        timeoutMs: params.intent.request.timeoutMs,
+      });
+      return {
+        status: "dispatched",
+        accessRequest: params.accessRequest,
+        reviewDecision,
+        grant: consumed.grant,
+        decisionToken: consumed.decisionToken,
+        dispatch,
+        runOutcome,
+        safety: params.safety?.outcome === "allow" ? undefined : params.safety,
+      };
+    }
+
+    if (reviewDecision.decision === "redirected_to_provisioning") {
+      const provisionRequest = this.#assembleProvisionRequestForRuntime({
+        request: toProvisionRequestFromReviewDecision({
+          request: params.accessRequest,
+          decision: reviewDecision,
+          provisionId: `${reviewDecision.decisionId}:provision`,
+          createdAt: new Date().toISOString(),
+        }),
+        accessRequest: params.accessRequest,
+        reviewDecision,
+        inventory,
+      });
+      const provisionBundle = await this.provisionerRuntime!.submit(provisionRequest);
+      const provisionAsset = provisionBundle.status === "ready"
+        ? this.provisionerRuntime!.assetIndex.getCurrent(provisionRequest.provisionId)
+        : undefined;
+      if (provisionBundle.status === "ready") {
+        await this.#stageProvisionReplay({
+          accessRequest: params.accessRequest,
+          provisionBundle,
+          intent: params.intent,
+          source: "review-provisioning",
+          options: params.options,
+          reviewDecision,
+          metadata: {
+            decisionId: reviewDecision.decisionId,
+          },
+        });
+      }
+      return {
+        status: provisionBundle.status === "ready" ? "provisioned" : "provisioning_failed",
+        accessRequest: params.accessRequest,
+        reviewDecision,
+        provisionRequest,
+        provisionBundle,
+        activation: provisionBundle.status === "ready"
+          ? this.#createActivationHandoff({
+            source: "provision_bundle",
+            bundle: provisionBundle,
+            asset: provisionAsset,
+          })
+          : undefined,
+        replay: provisionBundle.status === "ready"
+          ? this.#createReplayHandoff({
+            source: "provision_bundle",
+            bundle: provisionBundle,
+            asset: provisionAsset,
+          })
+          : undefined,
+        safety: params.safety?.outcome === "allow" ? undefined : params.safety,
+      };
+    }
+
+    const provisionAsset = this.#findCurrentProvisionAsset(params.intent.request.capabilityKey);
+    const replay = provisionAsset
+      ? await this.#ensureProvisionAssetReplay({
+        accessRequest: params.accessRequest,
+        intent: params.intent,
+        source: "review-existing-provision-asset",
+        asset: provisionAsset,
+        options: params.options,
+        reviewDecision,
+      })
+      : undefined;
+
+    return {
+      status: reviewDecision.decision === "escalated_to_human"
+        ? "waiting_human"
+        : reviewDecision.decision as Exclude<
+          DispatchCapabilityIntentViaTaPoolResult["status"],
+          "dispatched" | "waiting_human" | "provisioned" | "provisioning_failed" | "blocked" | "interrupted"
+        >,
+      accessRequest: params.accessRequest,
+      reviewDecision,
+      activation: provisionAsset
+        ? this.#createActivationHandoff({
+          source: "provision_asset",
+          asset: provisionAsset,
+        })
+        : undefined,
+      replay,
+      humanGate: reviewDecision.decision === "escalated_to_human"
+        ? await this.#openHumanGate({
+          accessRequest: params.accessRequest,
+          reviewDecision,
+          intent: params.intent,
+          options: params.options,
+        })
+        : replay?.policy === "manual"
+          ? this.#createHumanGateHandoff({
+            source: "replay_policy",
+            capabilityKey: params.accessRequest.requestedCapabilityKey,
+            requestedTier: params.accessRequest.requestedTier,
+            mode: params.accessRequest.mode,
+            requestedAction: params.accessRequest.requestedAction ?? this.#describeCapabilityIntentAction(params.intent),
+            reason: replay.reason,
+            riskLevel: reviewDecision.riskLevel ?? params.accessRequest.riskLevel,
+            plainLanguageRisk: reviewDecision.plainLanguageRisk ?? params.accessRequest.plainLanguageRisk,
+            metadata: {
+              accessRequestId: params.accessRequest.requestId,
+              reviewDecisionId: reviewDecision.decisionId,
+              replayPolicy: replay.policy,
+            },
+          })
+          : undefined,
+      safety: params.safety?.outcome === "allow" ? undefined : params.safety,
+    };
+  }
+
+  #findLatestToolReviewerTmaWorkOrder(params: {
+    capabilityKey: string;
+    provisionId?: string;
+  }): ToolReviewTmaWorkOrder | undefined {
+    const workOrders = this.listToolReviewerTmaWorkOrders()
+      .filter((workOrder) => workOrder.capabilityKey === params.capabilityKey);
+    if (params.provisionId) {
+      const exactSessionMatch = workOrders.find((workOrder) =>
+        workOrder.sessionId === `tool-review:provision:${params.provisionId}`
+      );
+      if (exactSessionMatch) {
+        return exactSessionMatch;
+      }
+    }
+
+    return workOrders.sort((left, right) => right.generatedAt.localeCompare(left.generatedAt))[0];
+  }
+
   #assembleProvisionRequestForRuntime(params: {
     request: ProvisionRequest;
     accessRequest: AccessRequest;
@@ -2116,6 +2459,10 @@ export class AgentCoreRuntime {
       ...(params.inventory.activatingProvisionAssetKeys ?? []),
       ...(params.inventory.activeProvisionAssetKeys ?? []),
     ])].filter((capabilityKey) => capabilityKey !== params.request.requestedCapabilityKey);
+    const toolReviewWorkOrder = this.#findLatestToolReviewerTmaWorkOrder({
+      capabilityKey: params.request.requestedCapabilityKey,
+      provisionId: params.request.provisionId,
+    });
 
     return {
       ...params.request,
@@ -2149,6 +2496,7 @@ export class AgentCoreRuntime {
           `Reason: ${params.reviewDecision.reason}`,
           "Do not self-approve activation or replay from inside the provisioner lane.",
         ],
+        toolReviewWorkOrder,
         runtimeAssembly: {
           sourceRequestId: params.accessRequest.requestId,
           sourceDecisionId: params.reviewDecision.decisionId,
@@ -3063,8 +3411,14 @@ export class AgentCoreRuntime {
   #createDefaultTaDispatchOptions(
     intent: CapabilityCallIntent,
   ): DispatchCapabilityIntentViaTaPoolOptions {
+    const governanceDirective = this.#createTapGovernanceDispatchDirective(intent);
     return {
       agentId: `agent-core-runtime:${intent.sessionId}`,
+      mode: governanceDirective.effectiveMode,
+      requestedTier: governanceDirective.matchedToolPolicy === "human_gate" ? "B3" : "B1",
+      metadata: {
+        tapGovernanceDirective: governanceDirective,
+      },
     };
   }
 }

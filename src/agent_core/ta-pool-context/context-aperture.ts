@@ -296,6 +296,32 @@ function normalizeContextSections(
   return sections;
 }
 
+function createDerivedMemorySummaryFromSections(
+  sections: readonly ContextSectionRecord[],
+): ContextSummarySlot | undefined {
+  if (sections.length === 0) {
+    return undefined;
+  }
+
+  const readySections = sections.filter((section) => section.status === "ready");
+  const titles = (readySections.length > 0 ? readySections : sections)
+    .map((section) => section.title.trim())
+    .filter(Boolean)
+    .slice(0, 3);
+  const titleSummary = titles.join(", ");
+
+  return {
+    summary: `Section-backed context is available for reviewer use${titleSummary ? `: ${titleSummary}.` : "."}`,
+    status: "ready",
+    source: "context-sections",
+    metadata: {
+      sectionCount: sections.length,
+      readySectionCount: readySections.length,
+      sectionIds: sections.map((section) => section.sectionId),
+    },
+  };
+}
+
 function validateContextSections(
   label: string,
   sections: readonly ContextSectionRecord[],
@@ -434,9 +460,12 @@ function normalizeSiblingSummary(
 ): ProvisionSiblingCapabilitySummary {
   if (!input) {
     return {
-      summary: "Sibling capability summary is still placeholder in Wave 1.",
+      summary: "No sibling capability inventory has been attached yet; provisioning should proceed with isolated package assumptions.",
       siblingCapabilityKeys: [],
-      status: "placeholder",
+      status: "ready",
+      metadata: {
+        source: "default-provision-context",
+      },
     };
   }
 
@@ -467,11 +496,14 @@ function normalizeAllowedBuildScope(
 ): ProvisionAllowedBuildScope {
   if (!input) {
     return {
-      summary: "Build scope is placeholder-only in Wave 1: stage artifacts and verification notes, but do not wire a real worker bridge.",
+      summary: "Default build scope allows repo-local package staging and verification work only; activation remains outside the provision context.",
       pathPatterns: ["src/agent_core/ta-pool-context/**", "src/agent_core/ta-pool-review/**"],
       allowedOperations: ["build_artifacts", "write_context_modules", "write_tests"],
       deniedOperations: ["execute_worker_bridge", "inject_runtime_handle"],
-      status: "placeholder",
+      status: "ready",
+      metadata: {
+        source: "default-provision-context",
+      },
     };
   }
 
@@ -497,14 +529,14 @@ function normalizeAllowedSideEffects(
   if (!input || input.length === 0) {
     return [
       {
-        effectId: "stage-artifact-placeholders",
-        description: "May produce placeholder artifact summaries and verification notes for later provisioning work.",
-        status: "placeholder",
+        effectId: "stage-artifact-bundle",
+        description: "May produce build-ready package artifacts, verification notes, and usage documentation for later TAP activation.",
+        status: "ready",
       },
       {
         effectId: "review-input-shaping",
-        description: "May reshape reviewer/provisioner input envelopes without connecting a live worker bridge.",
-        status: "placeholder",
+        description: "May reshape reviewer/provisioner input envelopes without directly executing the blocked user task.",
+        status: "ready",
       },
     ];
   }
@@ -601,10 +633,6 @@ export function validateReviewContextApertureSnapshot(
   validateReviewRiskSummary(input.riskSummary);
   validateContextSections("Review context sections", input.sections);
 
-  if (input.memorySummaryPlaceholder.status !== "placeholder") {
-    throw new Error("Review context memorySummaryPlaceholder must stay in placeholder status for Wave 1.");
-  }
-
   assertNoForbiddenObjects(input, "reviewContext");
 }
 
@@ -632,36 +660,37 @@ export function createReviewContextAperture(
   const inventorySnapshot = normalizeReviewInventorySnapshot(
     input.inventorySnapshot ?? input.capabilityInventorySnapshot,
   );
+  const sections = normalizeContextSections(input.sections);
   const aperture: ReviewContextAperture = {
     projectSummary: createSummarySlot({
       value: input.projectSummary,
-      fallbackSummary: "Project summary is still placeholder in Wave 1 aperture; only safe high-level state should be threaded in.",
-      fallbackStatus: "placeholder",
+      fallbackSummary: "Project summary is not provided yet; reviewer should rely on safe high-level runtime context only.",
+      fallbackStatus: "ready",
       fallbackSource: "wave-1-context-aperture",
     }),
     runSummary: createSummarySlot({
       value: input.runSummary,
-      fallbackSummary: "Run summary placeholder.",
-      fallbackStatus: "placeholder",
+      fallbackSummary: "Run summary was not supplied; reviewer should treat this as a detached review aperture.",
+      fallbackStatus: "ready",
       fallbackSource: "wave-1-context-aperture",
     }),
     profileSnapshot: input.profileSnapshot,
     inventorySnapshot,
     capabilityInventorySnapshot: inventorySnapshot,
     memorySummaryPlaceholder: createSummarySlot({
-      value: input.memorySummaryPlaceholder,
+      value: input.memorySummaryPlaceholder ?? createDerivedMemorySummaryFromSections(sections),
       fallbackSummary: "Memory summary is intentionally placeholder-only in Wave 1; no project memory is injected yet.",
       fallbackStatus: "placeholder",
       fallbackSource: "wave-1-context-aperture",
     }),
     userIntentSummary: createSummarySlot({
       value: input.userIntentSummary,
-      fallbackSummary: "User intent summary placeholder.",
-      fallbackStatus: "placeholder",
+      fallbackSummary: "User intent summary is unavailable; use request-level reasoning only.",
+      fallbackStatus: "ready",
       fallbackSource: "wave-1-context-aperture",
     }),
     riskSummary: normalizeReviewRiskSummary(input.riskSummary),
-    sections: normalizeContextSections(input.sections),
+    sections,
     modeSnapshot: input.modeSnapshot,
     forbiddenObjects: CONTEXT_APERTURE_FORBIDDEN_OBJECTS,
     metadata: input.metadata,
@@ -677,8 +706,8 @@ export function createProvisionContextAperture(
   const aperture: ProvisionContextAperture = {
     projectSummary: createSummarySlot({
       value: input.projectSummary,
-      fallbackSummary: "Project state is still placeholder-only for Wave 1 provisioner aperture.",
-      fallbackStatus: "placeholder",
+      fallbackSummary: "Project state is not attached; provisioner should proceed with isolated package assumptions.",
+      fallbackStatus: "ready",
       fallbackSource: "wave-1-context-aperture",
     }),
     requestedCapabilityKey: capabilitySpec.capabilityKey,
@@ -691,8 +720,8 @@ export function createProvisionContextAperture(
     allowedSideEffects: normalizeAllowedSideEffects(input.allowedSideEffects),
     reviewerInstructions: createSummarySlot({
       value: input.reviewerInstructions,
-      fallbackSummary: "Reviewer instructions are placeholder-only in Wave 1: describe scope and risk plainly, but do not dispatch a live worker bridge.",
-      fallbackStatus: "placeholder",
+      fallbackSummary: "No reviewer instructions were attached; keep the build package-oriented and do not dispatch the blocked task.",
+      fallbackStatus: "ready",
       fallbackSource: "wave-1-context-aperture",
     }),
     sections: normalizeContextSections(input.sections),

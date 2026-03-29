@@ -25,10 +25,12 @@ export type {
   ToolReviewReplayOutputShell,
   ToolReviewRequestRef,
   ToolReviewSourceDecisionRef,
+  ToolReviewTmaWorkOrder,
 } from "./tool-review-contract.js";
 export {
   createToolReviewActionLedgerEntry,
   createToolReviewGovernanceTrace,
+  createToolReviewTmaWorkOrder,
   resolveLifecycleTargetBindingState,
   summarizeToolReviewAction,
   TA_TOOL_REVIEW_ACTION_STATUSES,
