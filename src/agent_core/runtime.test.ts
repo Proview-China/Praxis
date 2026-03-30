@@ -3945,6 +3945,59 @@ test("AgentCoreRuntime can finish a minimal direct-answer run through model infe
   );
 });
 
+test("AgentCoreRuntime can route model inference through TAP when model.infer is baseline-granted", async () => {
+  const runtime = createAgentCoreRuntime({
+    taProfile: createAgentCapabilityProfile({
+      profileId: "profile.runtime.model-infer-via-tap",
+      agentClass: "main-agent",
+      baselineCapabilities: ["model.infer"],
+      defaultMode: "permissive",
+    }),
+    modelInferenceExecutor: async ({ intent }): Promise<ModelInferenceExecutionResult> => ({
+      provider: "openai",
+      model: "gpt-5.4",
+      layer: "api",
+      raw: { answer: "意义在于被你活出来。" },
+      result: {
+        resultId: `${intent.intentId}:result`,
+        sessionId: intent.sessionId,
+        runId: intent.runId,
+        source: "model",
+        status: "success",
+        output: {
+          text: "意义在于被你活出来。",
+        },
+        evidence: [],
+        emittedAt: new Date("2026-03-30T00:00:02.000Z").toISOString(),
+        correlationId: intent.correlationId,
+      },
+    }),
+  });
+  const session = runtime.createSession();
+  const result = await runtime.runUntilTerminal({
+    sessionId: session.sessionId,
+    source: createGoalSource({
+      goalId: "goal-runtime-model-via-tap",
+      sessionId: session.sessionId,
+      userInput: "请你回答我生命存在的意义是什么?",
+      metadata: {
+        provider: "openai",
+        model: "gpt-5.4",
+      },
+    }),
+    maxSteps: 2,
+  });
+
+  assert.equal(result.outcome.run.status, "completed");
+  assert.equal(result.capabilityDispatch?.status, "dispatched");
+  assert.equal(result.capabilityDispatch?.dispatch?.prepared.capabilityKey, "model.infer");
+  assert.match(result.answer ?? "", /意义|活出来/u);
+  assert.deepEqual(
+    result.finalEvents.map((entry) => entry.event.type).slice(-4),
+    ["capability.result_received", "state.delta_applied", "run.completed", "state.delta_applied"],
+  );
+});
+
 test("AgentCoreRuntime runUntilTerminal stops cleanly when TAP returns a non-dispatched capability status", async () => {
   const runtime = createAgentCoreRuntime({
     taProfile: createAgentCapabilityProfile({

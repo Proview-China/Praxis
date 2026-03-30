@@ -2,6 +2,7 @@ import type {
   CapabilityAdapter,
   CapabilityInvocationPlan,
   CapabilityLease,
+  CapabilityManifest,
   PreparedCapabilityCall,
 } from "../capability-types/index.js";
 import { createPreparedCapabilityCall } from "../capability-invocation/index.js";
@@ -22,6 +23,33 @@ interface ModelInferenceAdapterPlanInput {
 export interface ModelInferenceAdapterOptions {
   capabilityKey?: string;
   executor?: (params: { intent: ModelInferenceIntent }) => Promise<ModelInferenceExecutionResult>;
+}
+
+export function createModelInferenceCapabilityManifest(
+  capabilityKey = MODEL_INFERENCE_CAPABILITY_KEY,
+): CapabilityManifest {
+  return {
+    capabilityId: `capability:${capabilityKey}`,
+    capabilityKey,
+    kind: "model",
+    version: "1.0.0",
+    generation: 1,
+    description: "Execute compiled goal-frame model inference through the TAP capability plane.",
+    supportsPrepare: true,
+    supportsStreaming: false,
+    supportsCancellation: false,
+    hotPath: true,
+    routeHints: [
+      { key: "plane", value: "model" },
+      { key: "dispatch", value: "tap" },
+    ],
+    tags: ["tap", "model", "core-agent"],
+    metadata: {
+      formalFamily: "model",
+      resultSource: "model",
+      final: true,
+    },
+  };
 }
 
 function asString(value: unknown): string | undefined {

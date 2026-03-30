@@ -16,8 +16,14 @@ import { DefaultCapabilityPool } from "./capability-pool/index.js";
 import {
   createCapabilityResultReceivedEvent,
   findCapabilityResultEventByResultId,
+  toKernelResult,
 } from "./capability-result/index.js";
 import { executeModelInference, type ModelInferenceExecutionResult } from "./integrations/model-inference.js";
+import {
+  createModelInferenceCapabilityAdapter,
+  createModelInferenceCapabilityManifest,
+  MODEL_INFERENCE_CAPABILITY_KEY,
+} from "./integrations/model-inference-adapter.js";
 import { AppendOnlyEventJournal } from "./journal/index.js";
 import type { JournalReadResult } from "./journal/journal-types.js";
 import { CapabilityPortBroker, type CapabilityDispatchReceipt, type CapabilityPortDefinition } from "./port/index.js";
@@ -104,6 +110,7 @@ import type {
   GoalFrameSource,
   KernelEvent,
   CheckpointReason,
+  KernelResult,
   SessionHeader,
 } from "./types/index.js";
 import type {
@@ -289,6 +296,22 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function readStringMetadata(
+  metadata: Record<string, unknown> | undefined,
+  key: string,
+): string | undefined {
+  const value = metadata?.[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function readBooleanMetadata(
+  metadata: Record<string, unknown> | undefined,
+  key: string,
+): boolean | undefined {
+  const value = metadata?.[key];
+  return typeof value === "boolean" ? value : undefined;
+}
+
 function readTapUserOverrideCandidate(value: unknown): TapUserOverrideContract | undefined {
   return isRecord(value) ? value as TapUserOverrideContract : undefined;
 }
@@ -434,6 +457,8 @@ interface TaHumanGateContext {
   reviewDecision: ReviewDecision;
 }
 
+const DEFAULT_MODEL_INFERENCE_TAP_TIMEOUT_MS = 120_000;
+
 export interface ResolveTaCapabilityAccessInput {
   sessionId: string;
   runId: string;
@@ -486,6 +511,7 @@ export class AgentCoreRuntime {
   readonly #capabilityExecutionContext = new Map<string, DispatchCapabilityPlanInput>();
   readonly #capabilityPreparedContext = new Map<string, DispatchCapabilityPlanInput>();
   readonly #capabilityRunOutcomes = new Map<string, RunTransitionOutcome>();
+  readonly #kernelResultsByRun = new Map<string, KernelResult>();
   readonly #capabilityRunOutcomeWaiters = new Map<string, {
     resolve: (outcome: RunTransitionOutcome | undefined) => void;
     timeout: ReturnType<typeof setTimeout>;
@@ -523,6 +549,12 @@ export class AgentCoreRuntime {
     });
     this.sessionManager = options.sessionManager ?? new SessionManager();
     this.#modelInferenceExecutor = options.modelInferenceExecutor ?? executeModelInference;
+    this.registerCapabilityAdapter(
+      createModelInferenceCapabilityManifest(),
+      createModelInferenceCapabilityAdapter({
+        executor: this.#modelInferenceExecutor,
+      }),
+    );
     this.capabilityGateway.onResult((result) => {
       void this.#handleCapabilityResultEnvelope(result);
     });
@@ -623,7 +655,8 @@ export class AgentCoreRuntime {
       runId: input.runId,
       requestId,
       correlationId: input.intentId,
-      resultSource: "capability",
+      resultSource: readStringMetadata(input.metadata, "resultSource") === "model" ? "model" : "capability",
+      final: readBooleanMetadata(input.metadata, "final"),
     });
   }
 
@@ -1999,6 +2032,7 @@ export class AgentCoreRuntime {
 
   async dispatchModelInferenceIntent(intent: ModelInferenceIntent): Promise<DispatchModelInferenceIntentResult> {
     const execution = await this.#modelInferenceExecutor({ intent });
+    this.#kernelResultsByRun.set(intent.runId, execution.result);
     const resultEvent: KernelEvent = {
       eventId: randomUUID(),
       type: "capability.result_received",
@@ -2038,12 +2072,21 @@ export class AgentCoreRuntime {
   }
 
   async dispatchIntent(intent: CapabilityCallIntent): Promise<DispatchCapabilityIntentViaTaPoolResult>;
-  async dispatchIntent(intent: ModelInferenceIntent): Promise<DispatchModelInferenceIntentResult>;
+  async dispatchIntent(
+    intent: ModelInferenceIntent,
+  ): Promise<DispatchModelInferenceIntentResult | DispatchCapabilityIntentViaTaPoolResult>;
   async dispatchIntent(intent: CapabilityCallIntent | ModelInferenceIntent) {
     if (intent.kind === "capability_call") {
       return this.dispatchCapabilityIntentViaTaPool(
         intent,
         this.#createDefaultTaDispatchOptions(intent),
+      );
+    }
+
+    if (this.#shouldRouteModelInferenceViaTaPool()) {
+      return this.dispatchCapabilityIntentViaTaPool(
+        this.#createCapabilityIntentFromModelInferenceIntent(intent),
+        this.#createModelInferenceTaDispatchOptions(intent),
       );
     }
 
@@ -2074,6 +2117,22 @@ export class AgentCoreRuntime {
       }
 
       if (intent.kind === "model_inference") {
+        if (this.#shouldRouteModelInferenceViaTaPool()) {
+          const dispatched = await this.dispatchCapabilityIntentViaTaPool(
+            this.#createCapabilityIntentFromModelInferenceIntent(intent),
+            this.#createModelInferenceTaDispatchOptions(intent),
+          );
+          lastCapabilityDispatch = dispatched;
+          if (dispatched.status !== "dispatched" || !dispatched.runOutcome) {
+            break;
+          }
+          current = dispatched.runOutcome;
+          if (current.run.status === "completed" || current.run.status === "failed" || current.run.status === "cancelled") {
+            break;
+          }
+          continue;
+        }
+
         const dispatched = await this.dispatchModelInferenceIntent(intent);
         lastModelResult = dispatched.kernelResult;
         current = dispatched.runOutcome;
@@ -2102,13 +2161,18 @@ export class AgentCoreRuntime {
       throw new Error(`Unsupported queued intent kind for terminal runner: ${intent.kind}`);
     }
 
+    const fallbackAnswer =
+      lastModelResult?.output
+      && typeof lastModelResult.output === "object"
+      && lastModelResult.output !== null
+      && "text" in lastModelResult.output
+        ? (lastModelResult.output as { text?: string }).text
+        : undefined;
+
     return {
       session: this.sessionManager.loadSessionHeader(params.sessionId),
       outcome: current,
-      answer:
-        lastModelResult?.output && typeof lastModelResult.output === "object" && lastModelResult.output !== null && "text" in lastModelResult.output
-          ? (lastModelResult.output as { text?: string }).text
-          : undefined,
+      answer: this.#readAnswerTextForRun(current.run.runId) ?? fallbackAnswer,
       capabilityDispatch: lastCapabilityDispatch,
       steps,
       finalEvents: this.readRunEvents(current.run.runId),
@@ -2149,6 +2213,16 @@ export class AgentCoreRuntime {
         ...(result.metadata ?? {}),
       },
     });
+    this.#kernelResultsByRun.set(
+      context.runId,
+      toKernelResult({
+        result,
+        sessionId: context.sessionId,
+        runId: context.runId,
+        source: context.resultSource ?? "capability",
+        correlationId: context.correlationId,
+      }),
+    );
 
     this.journal.appendEvent(event);
     let runOutcome = await this.runCoordinator.tickRun({
@@ -3568,6 +3642,90 @@ export class AgentCoreRuntime {
     } catch {
       // Let the later dispatch path surface the truthful failure if recovery is impossible.
     }
+  }
+
+  #shouldRouteModelInferenceViaTaPool(): boolean {
+    if (!this.taControlPlaneGateway || !this.reviewerRuntime || !this.provisionerRuntime) {
+      return false;
+    }
+
+    return this.capabilityPool.listCapabilities().some((manifest) => {
+      return manifest.capabilityKey === MODEL_INFERENCE_CAPABILITY_KEY;
+    });
+  }
+
+  #createCapabilityIntentFromModelInferenceIntent(
+    intent: ModelInferenceIntent,
+  ): CapabilityCallIntent {
+    const provider = readStringMetadata(intent.frame.metadata, "provider") ?? "openai";
+    const model = readStringMetadata(intent.frame.metadata, "model") ?? "unknown";
+    return {
+      intentId: `${intent.intentId}:tap`,
+      sessionId: intent.sessionId,
+      runId: intent.runId,
+      kind: "capability_call",
+      createdAt: intent.createdAt,
+      priority: intent.priority,
+      correlationId: intent.correlationId,
+      idempotencyKey: intent.idempotencyKey,
+      metadata: {
+        ...(intent.metadata ?? {}),
+        resultSource: "model",
+        final: true,
+      },
+      request: {
+        requestId: `${intent.intentId}:request`,
+        intentId: `${intent.intentId}:tap`,
+        sessionId: intent.sessionId,
+        runId: intent.runId,
+        capabilityKey: MODEL_INFERENCE_CAPABILITY_KEY,
+        input: {
+          provider,
+          model,
+          frame: intent.frame,
+          stateSummary: intent.stateSummary,
+          metadata: intent.metadata,
+        },
+        priority: intent.priority,
+        timeoutMs: DEFAULT_MODEL_INFERENCE_TAP_TIMEOUT_MS,
+        idempotencyKey: intent.idempotencyKey,
+        metadata: {
+          resultSource: "model",
+          final: true,
+          sourceIntentKind: "model_inference",
+        },
+      },
+    };
+  }
+
+  #createModelInferenceTaDispatchOptions(
+    intent: ModelInferenceIntent,
+  ): DispatchCapabilityIntentViaTaPoolOptions {
+    const capabilityIntent = this.#createCapabilityIntentFromModelInferenceIntent(intent);
+    const governanceDirective = this.#createTapGovernanceDispatchDirective(capabilityIntent);
+    return {
+      agentId: `agent-core-runtime:${intent.sessionId}`,
+      mode: governanceDirective.effectiveMode,
+      requestedTier: "B0",
+      reason: `Model inference via ${readStringMetadata(intent.frame.metadata, "provider") ?? "openai"}:${readStringMetadata(intent.frame.metadata, "model") ?? "unknown"} requested by runtime.`,
+      metadata: {
+        tapGovernanceDirective: governanceDirective,
+        resultSource: "model",
+        final: true,
+        sourceIntentKind: "model_inference",
+      },
+    };
+  }
+
+  #readAnswerTextForRun(runId: string): string | undefined {
+    const kernelResult = this.#kernelResultsByRun.get(runId);
+    const output = kernelResult?.output;
+    if (!output || typeof output !== "object") {
+      return undefined;
+    }
+    return typeof (output as { text?: unknown }).text === "string"
+      ? (output as { text: string }).text
+      : undefined;
   }
 
   #createDefaultTaDispatchOptions(

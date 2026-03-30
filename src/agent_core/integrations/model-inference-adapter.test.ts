@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { CapabilityInvocationPlan, CapabilityLease, GoalFrameCompiled, ModelInferenceIntent } from "../index.js";
-import { createModelInferenceCapabilityAdapter, MODEL_INFERENCE_CAPABILITY_KEY } from "./model-inference-adapter.js";
+import {
+  createModelInferenceCapabilityAdapter,
+  createModelInferenceCapabilityManifest,
+  MODEL_INFERENCE_CAPABILITY_KEY,
+} from "./model-inference-adapter.js";
 
 const frame: GoalFrameCompiled = {
   goalId: "goal-1",
@@ -92,4 +96,14 @@ test("model inference adapter executes through the injected executor", async () 
 
   assert.equal(envelope.status, "success");
   assert.deepEqual(envelope.output, { text: "42" });
+});
+
+test("model inference capability manifest is hot-path model metadata for TAP registration", () => {
+  const manifest = createModelInferenceCapabilityManifest();
+
+  assert.equal(manifest.capabilityKey, MODEL_INFERENCE_CAPABILITY_KEY);
+  assert.equal(manifest.kind, "model");
+  assert.equal(manifest.hotPath, true);
+  assert.equal(manifest.supportsPrepare, true);
+  assert.equal(manifest.metadata?.resultSource, "model");
 });
