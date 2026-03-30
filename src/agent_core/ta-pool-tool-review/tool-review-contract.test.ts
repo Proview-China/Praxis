@@ -2,12 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  TA_TOOL_REVIEW_ADVISORY_ACTORS,
+  TA_TOOL_REVIEW_ADVISORY_CODES,
+  TA_TOOL_REVIEW_ADVISORY_SEVERITIES,
   createToolReviewActionLedgerEntry,
   createToolReviewGovernanceTrace,
   createToolReviewTmaWorkOrder,
   resolveLifecycleTargetBindingState,
   TA_TOOL_REVIEW_ACTION_STATUSES,
   TA_TOOL_REVIEW_AGENT_BOUNDARY_MODES,
+  TA_TOOL_REVIEW_GOVERNANCE_SIGNAL_KINDS,
   TA_TOOL_REVIEW_GOVERNANCE_KINDS,
   TA_TOOL_REVIEW_LIFECYCLE_ACTIONS,
 } from "./tool-review-contract.js";
@@ -102,6 +106,37 @@ test("tool review contract action ledger entry stays governance-only", () => {
   assert.equal(entry.status, "ready_for_handoff");
 });
 
+test("tool review contract exposes structured advisory and governance signal vocabularies", () => {
+  assert.deepEqual(TA_TOOL_REVIEW_ADVISORY_CODES, [
+    "manual_blocked_resolution",
+    "manual_tma_follow_up",
+    "manual_human_gate_follow_up",
+    "manual_runtime_handoff",
+    "manual_re_review",
+    "record_evidence_only",
+  ]);
+  assert.deepEqual(TA_TOOL_REVIEW_ADVISORY_SEVERITIES, [
+    "info",
+    "warning",
+    "critical",
+  ]);
+  assert.deepEqual(TA_TOOL_REVIEW_ADVISORY_ACTORS, [
+    "tool_reviewer",
+    "runtime_mainline",
+    "human_reviewer",
+    "tma",
+  ]);
+  assert.deepEqual(TA_TOOL_REVIEW_GOVERNANCE_SIGNAL_KINDS, [
+    "hard_stop",
+    "human_decision_required",
+    "runtime_handoff_ready",
+    "re_review_required",
+    "tma_repair_candidate",
+    "recorded_only",
+    "governance_only_boundary",
+  ]);
+});
+
 test("tool review contract can derive a TMA work order from a blocked governance action", () => {
   const trace = createToolReviewGovernanceTrace({
     actionId: "action-3",
@@ -169,6 +204,42 @@ test("tool review contract can derive a TMA work order from a blocked governance
       blockingReviewIds: ["review-3"],
       waitingHumanReviewIds: [],
       readyForHandoffReviewIds: [],
+      advisories: [
+        {
+          code: "manual_tma_follow_up",
+          severity: "critical",
+          actor: "tma",
+          summary: "Blocked activation should be handed to TMA.",
+          detail: "Prepare a repair lane without auto-executing the blocked task.",
+          reviewIds: ["review-3"],
+          hardStop: true,
+          requiresManualAction: true,
+          autoExecutionForbidden: true,
+        },
+      ],
+      governanceSignals: [
+        {
+          kind: "hard_stop",
+          active: true,
+          summary: "Blocked activation is the active stop condition.",
+          reviewIds: ["review-3"],
+          hardStop: true,
+          metadata: {
+            reason: "blocked",
+          },
+        },
+        {
+          kind: "governance_only_boundary",
+          active: true,
+          summary: "Tool reviewer stays governance-only.",
+          reviewIds: ["review-3"],
+          hardStop: false,
+          metadata: {
+            boundaryMode: "governance_only",
+            autoExecutionForbidden: true,
+          },
+        },
+      ],
     },
   });
 

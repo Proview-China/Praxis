@@ -4,6 +4,7 @@ import type {
   ToolReviewActivationInputShell,
   ToolReviewActivationOutputShell,
   ToolReviewActionLedgerEntry,
+  ToolReviewGovernanceSignal,
   ToolReviewDeliveryInputShell,
   ToolReviewDeliveryOutputShell,
   ToolReviewGovernancePlan,
@@ -11,6 +12,7 @@ import type {
   ToolReviewGovernancePlanItem,
   ToolReviewGovernanceInputShell,
   ToolReviewGovernanceOutputShell,
+  ToolReviewQualityAdvisory,
   ToolReviewQualityReport,
   ToolReviewTmaWorkOrder,
   ToolReviewReplayInputShell,
@@ -149,6 +151,235 @@ function resolveQualityVerdict(
     return "handoff_ready";
   }
   return "recorded_only";
+}
+
+function createGovernanceSignals(input: {
+  sessionId: string;
+  verdict: TaToolReviewQualityVerdict;
+  latestItem?: ToolReviewGovernancePlanItem;
+  blockingItems: readonly ToolReviewGovernancePlanItem[];
+  waitingHumanItems: readonly ToolReviewGovernancePlanItem[];
+  readyItems: readonly ToolReviewGovernancePlanItem[];
+  reReviewActions: readonly ToolReviewActionLedgerEntry[];
+  tmaRepairCandidateActions: readonly ToolReviewActionLedgerEntry[];
+}): ToolReviewGovernanceSignal[] {
+  const hasHardStop = input.verdict === "blocked" || input.verdict === "waiting_human";
+  const hardStopReviewIds = input.verdict === "blocked"
+    ? input.blockingItems.map((item) => item.reviewId)
+    : input.verdict === "waiting_human"
+      ? input.waitingHumanItems.map((item) => item.reviewId)
+      : [];
+  const handoffReady = input.verdict === "handoff_ready";
+  const reReviewReady = handoffReady && input.reReviewActions.length > 0;
+  const tmaRepairCandidate = input.verdict === "blocked"
+    && input.tmaRepairCandidateActions.length > 0;
+  const recordedOnly = input.verdict === "recorded_only";
+
+  return [
+    {
+      kind: "hard_stop",
+      active: hasHardStop,
+      summary: input.verdict === "blocked"
+        ? "A blocked governance action is the active stop condition for this session."
+        : input.verdict === "waiting_human"
+          ? "A waiting human gate is the active stop condition for this session."
+          : "No active hard stop is currently preventing a manual governance handoff.",
+      reviewIds: hasHardStop ? hardStopReviewIds : [],
+      hardStop: hasHardStop,
+      metadata: {
+        reason: hasHardStop ? input.verdict : "none",
+        latestReviewId: input.latestItem?.reviewId,
+        sessionId: input.sessionId,
+      },
+    },
+    {
+      kind: "human_decision_required",
+      active: input.verdict === "waiting_human",
+      summary: input.verdict === "waiting_human"
+        ? "Human approval is still required before the tool governance chain may continue."
+        : "No active human-decision gate is blocking this report.",
+      reviewIds: input.waitingHumanItems.map((item) => item.reviewId),
+      hardStop: input.verdict === "waiting_human",
+      metadata: {
+        pendingCount: input.waitingHumanItems.length,
+      },
+    },
+    {
+      kind: "runtime_handoff_ready",
+      active: handoffReady,
+      summary: handoffReady
+        ? "A governance handoff is ready for the runtime mainline, but it still requires explicit pickup."
+        : "No active runtime handoff is ready from this report.",
+      reviewIds: handoffReady ? input.readyItems.map((item) => item.reviewId) : [],
+      hardStop: false,
+      metadata: {
+        readyCount: input.readyItems.length,
+      },
+    },
+    {
+      kind: "re_review_required",
+      active: reReviewReady,
+      summary: reReviewReady
+        ? "Replay governance requires a manual re-review before any future dispatch can happen."
+        : "No active replay re-review follow-up is required.",
+      reviewIds: reReviewReady ? input.reReviewActions.map((action) => action.reviewId) : [],
+      hardStop: false,
+      metadata: {
+        replayReviewIds: input.reReviewActions.map((action) => action.reviewId),
+      },
+    },
+    {
+      kind: "tma_repair_candidate",
+      active: tmaRepairCandidate,
+      summary: tmaRepairCandidate
+        ? "A blocked activation or lifecycle action points to a manual TMA/package repair follow-up."
+        : "No active blocked package-repair follow-up is being requested by this report.",
+      reviewIds: tmaRepairCandidate
+        ? input.tmaRepairCandidateActions.map((action) => action.reviewId)
+        : [],
+      hardStop: false,
+      metadata: {
+        candidateKinds: input.tmaRepairCandidateActions.map((action) => action.governanceKind),
+      },
+    },
+    {
+      kind: "recorded_only",
+      active: recordedOnly,
+      summary: recordedOnly
+        ? "Only governance evidence is recorded so far; no handoff or stop signal is active."
+        : "This report contains an actionable or blocking state beyond recorded-only evidence.",
+      reviewIds: recordedOnly && input.latestItem ? [input.latestItem.reviewId] : [],
+      hardStop: false,
+      metadata: {
+        latestReviewId: input.latestItem?.reviewId,
+      },
+    },
+    {
+      kind: "governance_only_boundary",
+      active: true,
+      summary: "Tool reviewer may advise, record, and hand off governance state, but must not execute the blocked user task or override runtime controls.",
+      reviewIds: input.latestItem ? [input.latestItem.reviewId] : [],
+      hardStop: false,
+      metadata: {
+        boundaryMode: "governance_only",
+        autoExecutionForbidden: true,
+      },
+    },
+  ];
+}
+
+function createQualityAdvisories(input: {
+  verdict: TaToolReviewQualityVerdict;
+  blockingItems: readonly ToolReviewGovernancePlanItem[];
+  waitingHumanItems: readonly ToolReviewGovernancePlanItem[];
+  readyItems: readonly ToolReviewGovernancePlanItem[];
+  reReviewActions: readonly ToolReviewActionLedgerEntry[];
+  tmaRepairCandidateActions: readonly ToolReviewActionLedgerEntry[];
+}): ToolReviewQualityAdvisory[] {
+  const advisories: ToolReviewQualityAdvisory[] = [];
+  const latestBlockingItem = input.blockingItems.at(-1);
+  const latestWaitingHumanItem = input.waitingHumanItems.at(-1);
+  const latestReadyItem = input.readyItems.at(-1);
+  const nonReplayReadyItems = input.readyItems.filter((item) => {
+    return !input.reReviewActions.some((action) => action.reviewId === item.reviewId);
+  });
+
+  if (input.verdict === "blocked") {
+    advisories.push({
+      code: "manual_blocked_resolution",
+      severity: "critical",
+      actor: latestBlockingItem?.governanceKind === "human_gate"
+        ? "human_reviewer"
+        : latestBlockingItem?.governanceKind === "activation"
+          || latestBlockingItem?.governanceKind === "lifecycle"
+          ? "tma"
+          : "tool_reviewer",
+      summary: "The latest governance state is blocked and needs a manual resolution path before anything else moves.",
+      detail: latestBlockingItem
+        ? `Review ${latestBlockingItem.reviewId} is blocked: ${latestBlockingItem.summary} Keep the tool reviewer in governance-only mode and do not auto-run the user task while resolving it.`
+        : "A blocked governance item exists, but the latest blocking summary is unavailable. Keep the tool reviewer in governance-only mode and resolve the block manually.",
+      reviewIds: latestBlockingItem ? [latestBlockingItem.reviewId] : [],
+      hardStop: true,
+      requiresManualAction: true,
+      autoExecutionForbidden: true,
+    });
+  }
+
+  if (input.tmaRepairCandidateActions.length > 0) {
+    advisories.push({
+      code: "manual_tma_follow_up",
+      severity: "critical",
+      actor: "tma",
+      summary: "A blocked activation or lifecycle item should be handed to TMA as a package-repair follow-up, not auto-fixed in place.",
+      detail: `Blocked review ids: ${input.tmaRepairCandidateActions.map((action) => action.reviewId).join(", ")}. Prepare a repair-oriented work order if needed, but do not let tool reviewer apply the fix or execute the blocked task directly.`,
+      reviewIds: input.tmaRepairCandidateActions.map((action) => action.reviewId),
+      hardStop: true,
+      requiresManualAction: true,
+      autoExecutionForbidden: true,
+    });
+  }
+
+  if (input.verdict === "waiting_human") {
+    advisories.push({
+      code: "manual_human_gate_follow_up",
+      severity: "critical",
+      actor: "human_reviewer",
+      summary: "Human approval is the active gate; tool reviewer should surface the request clearly and then stop.",
+      detail: latestWaitingHumanItem
+        ? `Waiting review ${latestWaitingHumanItem.reviewId} needs a human decision. Tool reviewer may package the context and risks, but must not approve, reject, or continue execution on the human's behalf.`
+        : "A human decision is required before governance can continue. Tool reviewer may summarize context, but must not bypass the gate.",
+      reviewIds: input.waitingHumanItems.map((item) => item.reviewId),
+      hardStop: true,
+      requiresManualAction: true,
+      autoExecutionForbidden: true,
+    });
+  }
+
+  if (input.reReviewActions.length > 0 && input.verdict === "handoff_ready") {
+    advisories.push({
+      code: "manual_re_review",
+      severity: "warning",
+      actor: "tool_reviewer",
+      summary: "Replay is ready for a manual re-review pass before any later dispatch decision.",
+      detail: `Replay-linked review ids: ${input.reReviewActions.map((action) => action.reviewId).join(", ")}. Tool reviewer should reopen review context and confirm the governance posture, but must not auto-dispatch the blocked intent.`,
+      reviewIds: input.reReviewActions.map((action) => action.reviewId),
+      hardStop: false,
+      requiresManualAction: true,
+      autoExecutionForbidden: true,
+    });
+  }
+
+  if (nonReplayReadyItems.length > 0 && input.verdict === "handoff_ready") {
+    advisories.push({
+      code: "manual_runtime_handoff",
+      severity: "info",
+      actor: "runtime_mainline",
+      summary: "A governance result is ready to hand back into the runtime mainline for explicit pickup.",
+      detail: `Ready review ids: ${nonReplayReadyItems.map((item) => item.reviewId).join(", ")}. Tool reviewer may emit the handoff package proactively, but the runtime mainline still has to decide whether to pick it up.`,
+      reviewIds: nonReplayReadyItems.map((item) => item.reviewId),
+      hardStop: false,
+      requiresManualAction: true,
+      autoExecutionForbidden: true,
+    });
+  }
+
+  if (input.verdict === "recorded_only") {
+    advisories.push({
+      code: "record_evidence_only",
+      severity: "info",
+      actor: "tool_reviewer",
+      summary: "Only evidence is recorded right now; keep the session observable without inventing extra action.",
+      detail: latestReadyItem
+        ? `Latest review ${latestReadyItem.reviewId} is still recorded as non-actionable evidence. Preserve the governance trail and wait for a later runtime/mainline decision instead of auto-progressing it.`
+        : "No actionable handoff is ready yet. Preserve the governance trail and wait for a later runtime/mainline decision instead of auto-progressing it.",
+      reviewIds: latestReadyItem ? [latestReadyItem.reviewId] : [],
+      hardStop: false,
+      requiresManualAction: false,
+      autoExecutionForbidden: true,
+    });
+  }
+
+  return advisories;
 }
 
 function createActivationOutput(
@@ -467,6 +698,9 @@ export class ToolReviewerRuntime {
       return undefined;
     }
 
+    const actions = [...this.listActions(sessionId)]
+      .slice()
+      .sort(compareActions);
     const latestItem = plan.items.at(-1);
     const verdict = resolveQualityVerdict({
       sessionStatus: plan.status,
@@ -486,6 +720,34 @@ export class ToolReviewerRuntime {
       summary = `Tool governance has ${readyItems.length} action(s) ready to hand back into the runtime mainline.`;
     }
 
+    const reReviewActions = actions.filter((action) => {
+      return action.status === "ready_for_handoff"
+        && action.output.kind === "replay"
+        && action.output.status === "ready_for_re_review";
+    });
+    const tmaRepairCandidateActions = actions.filter((action) => {
+      return action.status === "blocked"
+        && (action.governanceKind === "activation" || action.governanceKind === "lifecycle");
+    });
+    const governanceSignals = createGovernanceSignals({
+      sessionId,
+      verdict,
+      latestItem,
+      blockingItems,
+      waitingHumanItems,
+      readyItems,
+      reReviewActions,
+      tmaRepairCandidateActions,
+    });
+    const advisories = createQualityAdvisories({
+      verdict,
+      blockingItems,
+      waitingHumanItems,
+      readyItems,
+      reReviewActions,
+      tmaRepairCandidateActions,
+    });
+
     return {
       sessionId,
       verdict,
@@ -498,6 +760,8 @@ export class ToolReviewerRuntime {
       blockingReviewIds: blockingItems.map((item) => item.reviewId),
       waitingHumanReviewIds: waitingHumanItems.map((item) => item.reviewId),
       readyForHandoffReviewIds: readyItems.map((item) => item.reviewId),
+      advisories,
+      governanceSignals,
     };
   }
 

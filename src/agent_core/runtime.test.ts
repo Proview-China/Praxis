@@ -524,6 +524,11 @@ test("AgentCoreRuntime default TAP dispatch applies governance tool-policy overr
   assert.equal(dispatched.reviewDecision?.decision, "escalated_to_human");
   assert.equal(runtime.listTaHumanGates().length, 1);
   assert.equal(runtime.listReviewerDurableStates().at(-1)?.decision, "escalated_to_human");
+  const userSurface = runtime.createTapUserSurfaceSnapshot();
+  assert.equal(userSurface.currentLayer, "reviewer");
+  assert.equal(userSurface.pendingHumanGateCount, 2);
+  assert.deepEqual(userSurface.activeCapabilityKeys, []);
+  assert.match(userSurface.summary, /waiting for 2 human approval/i);
 });
 
 test("AgentCoreRuntime dispatches MCP read family capability packages through the default TAP path", async () => {

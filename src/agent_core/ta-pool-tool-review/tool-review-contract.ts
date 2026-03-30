@@ -85,6 +85,46 @@ export const TA_TOOL_REVIEW_QUALITY_VERDICTS = [
 export type TaToolReviewQualityVerdict =
   (typeof TA_TOOL_REVIEW_QUALITY_VERDICTS)[number];
 
+export const TA_TOOL_REVIEW_ADVISORY_CODES = [
+  "manual_blocked_resolution",
+  "manual_tma_follow_up",
+  "manual_human_gate_follow_up",
+  "manual_runtime_handoff",
+  "manual_re_review",
+  "record_evidence_only",
+] as const;
+export type TaToolReviewAdvisoryCode =
+  (typeof TA_TOOL_REVIEW_ADVISORY_CODES)[number];
+
+export const TA_TOOL_REVIEW_ADVISORY_SEVERITIES = [
+  "info",
+  "warning",
+  "critical",
+] as const;
+export type TaToolReviewAdvisorySeverity =
+  (typeof TA_TOOL_REVIEW_ADVISORY_SEVERITIES)[number];
+
+export const TA_TOOL_REVIEW_ADVISORY_ACTORS = [
+  "tool_reviewer",
+  "runtime_mainline",
+  "human_reviewer",
+  "tma",
+] as const;
+export type TaToolReviewAdvisoryActor =
+  (typeof TA_TOOL_REVIEW_ADVISORY_ACTORS)[number];
+
+export const TA_TOOL_REVIEW_GOVERNANCE_SIGNAL_KINDS = [
+  "hard_stop",
+  "human_decision_required",
+  "runtime_handoff_ready",
+  "re_review_required",
+  "tma_repair_candidate",
+  "recorded_only",
+  "governance_only_boundary",
+] as const;
+export type TaToolReviewGovernanceSignalKind =
+  (typeof TA_TOOL_REVIEW_GOVERNANCE_SIGNAL_KINDS)[number];
+
 export interface ToolReviewSourceDecisionRef {
   decisionId: ReviewDecision["decisionId"];
   decision: ReviewDecision["decision"];
@@ -334,6 +374,29 @@ export interface ToolReviewQualityReport {
   blockingReviewIds: string[];
   waitingHumanReviewIds: string[];
   readyForHandoffReviewIds: string[];
+  advisories: ToolReviewQualityAdvisory[];
+  governanceSignals: ToolReviewGovernanceSignal[];
+}
+
+export interface ToolReviewQualityAdvisory {
+  code: TaToolReviewAdvisoryCode;
+  severity: TaToolReviewAdvisorySeverity;
+  actor: TaToolReviewAdvisoryActor;
+  summary: string;
+  detail: string;
+  reviewIds: string[];
+  hardStop: boolean;
+  requiresManualAction: boolean;
+  autoExecutionForbidden: true;
+}
+
+export interface ToolReviewGovernanceSignal {
+  kind: TaToolReviewGovernanceSignalKind;
+  active: boolean;
+  summary: string;
+  reviewIds: string[];
+  hardStop: boolean;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ToolReviewTmaWorkOrder {

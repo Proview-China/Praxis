@@ -128,6 +128,18 @@ test("tool reviewer runtime stages activation and lifecycle shells as handoff-re
   assert.ok(report);
   assert.equal(report?.verdict, "handoff_ready");
   assert.equal(report?.readyForHandoffReviewIds.length, 2);
+  assert.equal(
+    report?.advisories.some((advisory) => advisory.code === "manual_runtime_handoff"),
+    true,
+  );
+  assert.equal(
+    report?.governanceSignals.find((signal) => signal.kind === "runtime_handoff_ready")?.active,
+    true,
+  );
+  assert.equal(
+    report?.governanceSignals.find((signal) => signal.kind === "governance_only_boundary")?.metadata?.autoExecutionForbidden,
+    true,
+  );
   const workOrder = runtime.createTmaWorkOrder(activation.sessionId);
   assert.ok(workOrder);
   assert.equal(workOrder?.requestedLane, "bootstrap");
@@ -334,10 +346,38 @@ test("tool reviewer runtime preserves human gate waiting status and replay re-re
   assert.ok(quality);
   assert.equal(quality?.verdict, "blocked");
   assert.equal(quality?.blockingReviewIds.length, 1);
+  assert.equal(
+    quality?.advisories.some((advisory) => advisory.code === "manual_blocked_resolution"),
+    true,
+  );
+  assert.equal(
+    quality?.advisories.some((advisory) => advisory.code === "manual_tma_follow_up"),
+    true,
+  );
+  assert.equal(
+    quality?.governanceSignals.find((signal) => signal.kind === "hard_stop")?.active,
+    true,
+  );
+  assert.equal(
+    quality?.governanceSignals.find((signal) => signal.kind === "tma_repair_candidate")?.active,
+    true,
+  );
   const humanGateQuality = runtime.createQualityReport(humanGate.sessionId);
   assert.ok(humanGateQuality);
   assert.equal(humanGateQuality?.verdict, "waiting_human");
   assert.equal(humanGateQuality?.waitingHumanReviewIds.length, 1);
+  assert.equal(
+    humanGateQuality?.advisories.some((advisory) => advisory.code === "manual_human_gate_follow_up"),
+    true,
+  );
+  assert.equal(
+    humanGateQuality?.governanceSignals.find((signal) => signal.kind === "hard_stop")?.metadata?.reason,
+    "waiting_human",
+  );
+  assert.equal(
+    humanGateQuality?.governanceSignals.find((signal) => signal.kind === "human_decision_required")?.active,
+    true,
+  );
   const plans = runtime.listGovernancePlans();
   assert.equal(plans.length, 2);
 });
@@ -508,6 +548,14 @@ test("tool reviewer runtime can summarize a governance plan and quality report f
   assert.equal(report?.verdict, "handoff_ready");
   assert.equal(report?.readyForHandoffReviewIds.length, 1);
   assert.match(report?.summary ?? "", /ready to hand back/i);
+  assert.equal(
+    report?.advisories.some((advisory) => advisory.code === "manual_re_review"),
+    true,
+  );
+  assert.equal(
+    report?.governanceSignals.find((signal) => signal.kind === "re_review_required")?.active,
+    true,
+  );
 });
 
 test("tool reviewer quality report follows the latest active governance state instead of stale blocked history", async () => {
@@ -564,5 +612,65 @@ test("tool reviewer quality report follows the latest active governance state in
   assert.equal(runtime.getSession(sessionId)?.status, "open");
   assert.equal(report?.verdict, "handoff_ready");
   assert.equal(report?.readyForHandoffReviewIds.includes("tool-review:action-quality-ready-1"), true);
+  assert.equal(
+    report?.governanceSignals.find((signal) => signal.kind === "hard_stop")?.active,
+    false,
+  );
+  assert.equal(
+    report?.advisories.some((advisory) => advisory.code === "manual_blocked_resolution"),
+    false,
+  );
+  assert.equal(
+    report?.governanceSignals.find((signal) => signal.kind === "runtime_handoff_ready")?.active,
+    true,
+  );
   assert.equal(runtime.listTmaWorkOrders()[0]?.requestedLane, "bootstrap");
+});
+
+test("tool reviewer quality report stays evidence-only when runtime only records non-actionable governance state", async () => {
+  const runtime = createToolReviewerRuntime();
+  const sessionId = "tool-review-session:recorded-only";
+
+  await runtime.submit({
+    sessionId,
+    governanceAction: {
+      kind: "replay",
+      trace: createToolReviewGovernanceTrace({
+        actionId: "action-recorded-only-1",
+        actorId: "tool-reviewer",
+        reason: "Replay is still pending and should only be recorded.",
+        createdAt: "2026-03-25T11:20:00.000Z",
+      }),
+      capabilityKey: "computer.use",
+      replay: createTaPendingReplay({
+        replayId: "replay-recorded-only-1",
+        request: {
+          requestId: "req-recorded-only-1",
+          requestedCapabilityKey: "computer.use",
+        },
+        provisionBundle: {
+          provisionId: "prov-recorded-only-1",
+          replayPolicy: "manual",
+        },
+        createdAt: "2026-03-25T11:19:59.000Z",
+      }),
+    },
+  });
+
+  const report = runtime.createQualityReport(sessionId);
+
+  assert.ok(report);
+  assert.equal(report?.verdict, "recorded_only");
+  assert.equal(
+    report?.advisories.some((advisory) => advisory.code === "record_evidence_only"),
+    true,
+  );
+  assert.equal(
+    report?.governanceSignals.find((signal) => signal.kind === "recorded_only")?.active,
+    true,
+  );
+  assert.equal(
+    report?.governanceSignals.find((signal) => signal.kind === "governance_only_boundary")?.active,
+    true,
+  );
 });
