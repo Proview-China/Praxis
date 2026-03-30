@@ -5,6 +5,7 @@ import { createProvisionRequest } from "../ta-pool-types/index.js";
 import { ProvisionRegistry } from "./provision-registry.js";
 import { createProvisionerDurableSnapshot } from "./provision-durable-snapshot.js";
 import { createProvisionerRuntime } from "./provisioner-runtime.js";
+import { createModelBackedProvisionerWorkerBridge } from "./provisioner-model-worker.js";
 
 test("provisioner runtime records building then ready through the default provisioner worker bridge", async () => {
   const registry = new ProvisionRegistry();
@@ -184,6 +185,66 @@ test("provisioner runtime emits a formal tooling package for bootstrap B-group c
   assert.equal(toolMetadata?.manifest?.capabilityKey, "repo.write");
   assert.equal(toolMetadata?.formalCapabilityPackage, true);
   assert.equal(bundle.activationSpec?.adapterFactoryRef, "factory:tap-tooling:repo.write");
+});
+
+test("provisioner runtime can use the model-backed worker bridge for build summary refinement", async () => {
+  let counter = 0;
+  const runtime = createProvisionerRuntime({
+    workerBridge: createModelBackedProvisionerWorkerBridge({
+      executor: async ({ intent }) => ({
+        provider: "openai",
+        model: "gpt-5.4",
+        layer: "api",
+        raw: { text: "ok" },
+        result: {
+          resultId: `${intent.intentId}:result`,
+          sessionId: intent.sessionId,
+          runId: intent.runId,
+          source: "model",
+          status: "success",
+          output: {
+            text: JSON.stringify({
+              buildSummary: "model-backed TMA summary",
+              replayRecommendationReason: "model-backed replay rationale",
+              metadata: {
+                rationale: "Keep activation outside the worker bridge.",
+              },
+            }),
+          },
+          emittedAt: "2026-03-30T10:20:00.000Z",
+        },
+      }),
+    }),
+    clock: () => new Date("2026-03-30T10:20:00.000Z"),
+    idFactory: () => `bundle-model-${++counter}`,
+  });
+
+  const request = createProvisionRequest({
+    provisionId: "provision-model-1",
+    sourceRequestId: "request-model-1",
+    requestedCapabilityKey: "repo.write",
+    reason: "Need model-backed bundle narrative.",
+    createdAt: "2026-03-30T10:20:00.000Z",
+  });
+
+  const bundle = await runtime.submit(request);
+  const provisionerModelMetadata = bundle.metadata?.provisionerModelMetadata as
+    | { rationale?: string }
+    | undefined;
+  const replayRecommendation = bundle.metadata?.replayRecommendation as
+    | { reason?: string }
+    | undefined;
+
+  assert.equal(bundle.status, "ready");
+  assert.equal(bundle.metadata?.modelBacked, true);
+  assert.equal(bundle.metadata?.buildSummary, "model-backed TMA summary");
+  assert.equal(provisionerModelMetadata?.rationale, "Keep activation outside the worker bridge.");
+  assert.equal(bundle.replayPolicy, "re_review_then_dispatch");
+  assert.equal(
+    replayRecommendation?.reason,
+    "model-backed replay rationale",
+  );
+  assert.equal(bundle.metadata?.workerBridge, true);
 });
 
 test("provisioner runtime can serialize and restore durable state without losing bundle history order", async () => {

@@ -3998,6 +3998,119 @@ test("AgentCoreRuntime can route model inference through TAP when model.infer is
   );
 });
 
+test("AgentCoreRuntime defaults reviewer, tool reviewer, and TMA to model-backed workers", async () => {
+  const runtime = createAgentCoreRuntime({
+    taProfile: createAgentCapabilityProfile({
+      profileId: "profile.runtime.default-tap-workers-model-backed",
+      agentClass: "main-agent",
+      defaultMode: "permissive",
+    }),
+    modelInferenceExecutor: async ({ intent }): Promise<ModelInferenceExecutionResult> => {
+      const workerKind = intent.frame.metadata?.tapWorkerKind;
+      const text = workerKind === "tap-reviewer"
+        ? JSON.stringify({
+          schemaVersion: "tap-reviewer-worker-output/v1",
+          workerKind: "reviewer",
+          lane: "bootstrap-reviewer",
+          vote: "allow_with_constraints",
+          reason: "default model-backed reviewer",
+        })
+        : workerKind === "tap-tool-reviewer"
+          ? JSON.stringify({
+            summary: "default model-backed tool reviewer",
+            metadata: {
+              trace: "tool-reviewer",
+            },
+          })
+          : workerKind === "tap-tma"
+            ? JSON.stringify({
+              buildSummary: "default model-backed tma",
+              replayRecommendationReason: "default model-backed replay reason",
+              metadata: {
+                trace: "tma",
+              },
+            })
+            : JSON.stringify({
+              text: "fallback",
+            });
+
+      return {
+        provider: "openai",
+        model: "gpt-5.4",
+        layer: "api",
+        raw: { text },
+        result: {
+          resultId: `${intent.intentId}:result`,
+          sessionId: intent.sessionId,
+          runId: intent.runId,
+          source: "model",
+          status: "success",
+          output: { text },
+          emittedAt: "2026-03-30T10:30:00.000Z",
+        },
+      };
+    },
+  });
+
+  const reviewerDecision = await runtime.reviewerRuntime!.submit({
+    request: {
+      requestId: "req-runtime-workers-1",
+      sessionId: "session-runtime-workers-1",
+      runId: "run-runtime-workers-1",
+      agentId: "agent-runtime-workers-1",
+      requestedCapabilityKey: "mcp.playwright",
+      requestedTier: "B1",
+      reason: "Need browser tooling.",
+      mode: "permissive",
+      canonicalMode: "permissive",
+      createdAt: "2026-03-30T10:30:00.000Z",
+    },
+    profile: createAgentCapabilityProfile({
+      profileId: "profile-runtime-workers-reviewer",
+      agentClass: "main-agent",
+      defaultMode: "permissive",
+      baselineCapabilities: ["docs.read"],
+    }),
+    inventory: {
+      availableCapabilityKeys: ["mcp.playwright"],
+    },
+  });
+
+  const toolReview = await runtime.toolReviewerRuntime!.submit({
+    governanceAction: {
+      kind: "lifecycle",
+      trace: createToolReviewGovernanceTrace({
+        actionId: "action-runtime-workers-1",
+        actorId: "tool-reviewer",
+        reason: "Need lifecycle staging.",
+        createdAt: "2026-03-30T10:30:01.000Z",
+      }),
+      capabilityKey: "mcp.playwright",
+      lifecycleAction: "register",
+      targetPool: "ta-capability-pool",
+    },
+  });
+
+  const provisionBundle = await runtime.provisionerRuntime!.submit(createProvisionRequest({
+    provisionId: "provision-runtime-workers-1",
+    sourceRequestId: "req-runtime-workers-1",
+    requestedCapabilityKey: "repo.write",
+    reason: "Need bootstrap tooling package.",
+    createdAt: "2026-03-30T10:30:02.000Z",
+  }));
+
+  assert.equal(reviewerDecision.reason, "default model-backed reviewer");
+  assert.equal(toolReview.output.summary, "default model-backed tool reviewer");
+  assert.equal(provisionBundle.metadata?.buildSummary, "default model-backed tma");
+  const provisionReplayMetadata = provisionBundle.metadata?.replayRecommendation as
+    | { reason?: string }
+    | undefined;
+  assert.equal(
+    provisionReplayMetadata?.reason,
+    "default model-backed replay reason",
+  );
+});
+
 test("AgentCoreRuntime runUntilTerminal stops cleanly when TAP returns a non-dispatched capability status", async () => {
   const runtime = createAgentCoreRuntime({
     taProfile: createAgentCapabilityProfile({

@@ -36,6 +36,10 @@ import {
   type ToolReviewSessionSnapshot,
   type ToolReviewSessionState,
 } from "./tool-review-session.js";
+import type {
+  ToolReviewerRuntimeLlmHook,
+  ToolReviewerRuntimeLlmHookInput,
+} from "./tool-review-model-hook.js";
 
 export const TA_TOOL_REVIEW_RUNTIME_STATUSES = [
   "recorded",
@@ -68,6 +72,7 @@ export interface ToolReviewerRuntimeOptions {
   sessionIdFactory?: () => string;
   reviewIdFactory?: (actionId: string) => string;
   restoreSnapshot?: ToolReviewSessionSnapshot[];
+  llmToolReviewerHook?: ToolReviewerRuntimeLlmHook;
 }
 
 function compareActions(
@@ -554,6 +559,7 @@ export class ToolReviewerRuntime {
   readonly #recordHook?: ToolReviewerRuntimeOptions["recordHook"];
   readonly #sessionIdFactory: () => string;
   readonly #reviewIdFactory: (actionId: string) => string;
+  readonly #llmToolReviewerHook?: ToolReviewerRuntimeLlmHook;
   readonly #sessions = new Map<string, ToolReviewSessionState>();
   readonly #actions = new Map<string, ToolReviewActionLedgerEntry>();
 
@@ -561,6 +567,7 @@ export class ToolReviewerRuntime {
     this.#recordHook = options.recordHook;
     this.#sessionIdFactory = options.sessionIdFactory ?? (() => "tool-review-session:1");
     this.#reviewIdFactory = options.reviewIdFactory ?? ((actionId) => `tool-review:${actionId}`);
+    this.#llmToolReviewerHook = options.llmToolReviewerHook;
 
     for (const snapshot of options.restoreSnapshot ?? []) {
       const restored = restoreToolReviewSessionSnapshot(snapshot);
@@ -585,7 +592,25 @@ export class ToolReviewerRuntime {
         actorId: input.governanceAction.trace.actorId,
       },
     });
-    const output = this.createOutputShell(input.governanceAction);
+    let output = this.createOutputShell(input.governanceAction);
+    if (this.#llmToolReviewerHook) {
+      const advice = await this.#llmToolReviewerHook({
+        sessionId,
+        governanceAction: input.governanceAction,
+        defaultOutput: output,
+      } satisfies ToolReviewerRuntimeLlmHookInput);
+      if (advice) {
+        output = {
+          ...output,
+          summary: advice.summary,
+          metadata: {
+            ...(output.metadata ?? {}),
+            ...(advice.metadata ? { toolReviewerModelMetadata: advice.metadata } : {}),
+            modelBacked: true,
+          },
+        };
+      }
+    }
     const runtimeStatus = toRuntimeStatus(output);
     const action = createToolReviewActionLedgerEntry({
       reviewId: this.#reviewIdFactory(input.governanceAction.trace.actionId),

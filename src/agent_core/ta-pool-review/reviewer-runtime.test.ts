@@ -10,6 +10,7 @@ import {
   REVIEWER_WORKER_OUTPUT_SCHEMA_VERSION,
 } from "./reviewer-worker-bridge.js";
 import { createReviewerRuntime } from "./reviewer-runtime.js";
+import { createDefaultReviewerLlmHook } from "./reviewer-model-hook.js";
 
 function createProfile() {
   return createAgentCapabilityProfile({
@@ -256,4 +257,53 @@ test("reviewer runtime keeps provisioning redirects resumable but still vote-onl
   const durable = runtime.getDurableState(request.requestId);
   assert.equal(durable?.stage, "ready_to_resume");
   assert.equal(durable?.hasGrantCompilerDirective, false);
+});
+
+test("default reviewer llm hook can drive runtime decisions through model inference", async () => {
+  const runtime = createReviewerRuntime({
+    llmReviewerHook: createDefaultReviewerLlmHook({
+      executor: async ({ intent }) => ({
+        provider: "openai",
+        model: "gpt-5.4",
+        layer: "api",
+        raw: { text: "ok" },
+        result: {
+          resultId: `${intent.intentId}:result`,
+          sessionId: intent.sessionId,
+          runId: intent.runId,
+          source: "model",
+          status: "success",
+          output: {
+            text: JSON.stringify({
+              schemaVersion: REVIEWER_WORKER_OUTPUT_SCHEMA_VERSION,
+              workerKind: "reviewer",
+              lane: REVIEWER_WORKER_BRIDGE_LANE,
+              vote: "allow_with_constraints",
+              reason: "model-backed reviewer approval",
+              requiredFollowups: ["log-reviewer-model-trace"],
+            }),
+          },
+          emittedAt: "2026-03-30T10:00:00.000Z",
+        },
+      }),
+    }),
+  });
+
+  const decision = await runtime.submit({
+    request: createRequest({
+      requestedCapabilityKey: "mcp.playwright",
+      requestedTier: "B1",
+    }),
+    profile: createProfile(),
+    inventory: {
+      availableCapabilityKeys: ["mcp.playwright"],
+    },
+  });
+
+  assert.equal(decision.vote, "allow_with_constraints");
+  assert.equal(decision.reason, "model-backed reviewer approval");
+  assert.deepEqual(
+    decision.metadata?.requiredFollowups,
+    ["log-reviewer-model-trace"],
+  );
 });

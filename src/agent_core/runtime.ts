@@ -75,8 +75,10 @@ import {
   materializeProvisionAssetActivation,
 } from "./ta-pool-runtime/index.js";
 import { createReviewerRuntime, ReviewerRuntime } from "./ta-pool-review/index.js";
+import { createDefaultReviewerLlmHook } from "./ta-pool-review/index.js";
 import type { ReviewerDurableState } from "./ta-pool-review/index.js";
 import { createProvisionerRuntime, ProvisionerRuntime } from "./ta-pool-provision/index.js";
+import { createModelBackedProvisionerWorkerBridge } from "./ta-pool-provision/provisioner-model-worker.js";
 import type {
   ProvisionAssetRecord,
   ProvisionDeliveryReport,
@@ -85,6 +87,7 @@ import type {
 } from "./ta-pool-provision/index.js";
 import {
   createToolReviewGovernanceTrace,
+  createDefaultToolReviewerLlmHook,
   createToolReviewerRuntime,
   ToolReviewerRuntime,
 } from "./ta-pool-tool-review/index.js";
@@ -312,6 +315,19 @@ function readBooleanMetadata(
   return typeof value === "boolean" ? value : undefined;
 }
 
+function shouldEnableDefaultTapAgentModels(
+  options: AgentCoreRuntimeOptions,
+): boolean {
+  if (options.modelInferenceExecutor) {
+    return true;
+  }
+
+  return typeof process.env.OPENAI_API_KEY === "string"
+    && process.env.OPENAI_API_KEY.length > 0
+    && typeof process.env.OPENAI_BASE_URL === "string"
+    && process.env.OPENAI_BASE_URL.length > 0;
+}
+
 function readTapUserOverrideCandidate(value: unknown): TapUserOverrideContract | undefined {
   return isRecord(value) ? value as TapUserOverrideContract : undefined;
 }
@@ -534,21 +550,46 @@ export class AgentCoreRuntime {
     this.capabilityGateway = options.capabilityGateway ?? createKernelCapabilityGateway({
       pool: this.capabilityPool,
     });
+    this.#modelInferenceExecutor = options.modelInferenceExecutor ?? executeModelInference;
+    const enableDefaultTapAgentModels = shouldEnableDefaultTapAgentModels(options);
     this.taControlPlaneGateway = options.taControlPlaneGateway
       ?? (options.taProfile ? new TaControlPlaneGateway({ profile: options.taProfile }) : undefined);
     this.reviewerRuntime = options.reviewerRuntime
-      ?? (this.taControlPlaneGateway ? createReviewerRuntime() : undefined);
+      ?? (this.taControlPlaneGateway ? createReviewerRuntime(
+        enableDefaultTapAgentModels
+          ? {
+            llmReviewerHook: createDefaultReviewerLlmHook({
+              executor: this.#modelInferenceExecutor,
+            }),
+          }
+          : {},
+      ) : undefined);
     this.toolReviewerRuntime = options.toolReviewerRuntime
-      ?? (this.taControlPlaneGateway ? createToolReviewerRuntime() : undefined);
+      ?? (this.taControlPlaneGateway ? createToolReviewerRuntime(
+        enableDefaultTapAgentModels
+          ? {
+            llmToolReviewerHook: createDefaultToolReviewerLlmHook({
+              executor: this.#modelInferenceExecutor,
+            }),
+          }
+          : {},
+      ) : undefined);
     this.provisionerRuntime = options.provisionerRuntime
-      ?? (this.taControlPlaneGateway ? createProvisionerRuntime() : undefined);
+      ?? (this.taControlPlaneGateway ? createProvisionerRuntime(
+        enableDefaultTapAgentModels
+          ? {
+            workerBridge: createModelBackedProvisionerWorkerBridge({
+              executor: this.#modelInferenceExecutor,
+            }),
+          }
+          : {},
+      ) : undefined);
     this.#taSafetyConfig = options.taSafetyConfig;
     this.runCoordinator = options.runCoordinator ?? new AgentRunCoordinator({
       journal: this.journal,
       checkpointStore: this.checkpointStore,
     });
     this.sessionManager = options.sessionManager ?? new SessionManager();
-    this.#modelInferenceExecutor = options.modelInferenceExecutor ?? executeModelInference;
     this.registerCapabilityAdapter(
       createModelInferenceCapabilityManifest(),
       createModelInferenceCapabilityAdapter({

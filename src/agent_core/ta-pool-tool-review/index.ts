@@ -68,3 +68,12 @@ export {
   TA_TOOL_REVIEW_RUNTIME_STATUSES,
   ToolReviewerRuntime,
 } from "./tool-review-runtime.js";
+
+export type {
+  ToolReviewerLlmAdvice,
+  ToolReviewerRuntimeLlmHook,
+  ToolReviewerRuntimeLlmHookInput,
+} from "./tool-review-model-hook.js";
+export {
+  createDefaultToolReviewerLlmHook,
+} from "./tool-review-model-hook.js";

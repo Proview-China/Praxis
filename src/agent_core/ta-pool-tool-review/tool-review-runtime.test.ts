@@ -27,6 +27,7 @@ import {
 import {
   createToolReviewerRuntime,
 } from "./tool-review-runtime.js";
+import { createDefaultToolReviewerLlmHook } from "./tool-review-model-hook.js";
 
 function createSourceDecision(
   overrides: Partial<CreateReviewDecisionInput> = {},
@@ -191,6 +192,57 @@ test("tool reviewer runtime records ready bundle delivery as a handoff-ready gov
   assert.equal(plan?.counts.readyForHandoff, 1);
   assert.equal(plan?.recommendedNextStep.includes("runtime mainline"), true);
   assert.equal(runtime.createQualityReport("tool-review:provision:prov-delivery-1")?.verdict, "handoff_ready");
+});
+
+test("tool reviewer runtime can refine governance summaries through the default model hook", async () => {
+  const runtime = createToolReviewerRuntime({
+    llmToolReviewerHook: createDefaultToolReviewerLlmHook({
+      executor: async ({ intent }) => ({
+        provider: "openai",
+        model: "gpt-5.4",
+        layer: "api",
+        raw: { text: "ok" },
+        result: {
+          resultId: `${intent.intentId}:result`,
+          sessionId: intent.sessionId,
+          runId: intent.runId,
+          source: "model",
+          status: "success",
+          output: {
+            text: JSON.stringify({
+              summary: "model-backed tool reviewer summary",
+              metadata: {
+                rationale: "Keep lifecycle governance-only and explicit.",
+              },
+            }),
+          },
+          emittedAt: "2026-03-30T10:10:00.000Z",
+        },
+      }),
+    }),
+  });
+
+  const result = await runtime.submit({
+    governanceAction: {
+      kind: "lifecycle",
+      trace: createToolReviewGovernanceTrace({
+        actionId: "action-lifecycle-model-1",
+        actorId: "tool-reviewer",
+        reason: "Model-backed lifecycle summary.",
+        createdAt: "2026-03-30T10:10:00.000Z",
+      }),
+      capabilityKey: "mcp.playwright",
+      lifecycleAction: "register",
+      targetPool: "ta-capability-pool",
+    },
+  });
+
+  assert.equal(result.output.summary, "model-backed tool reviewer summary");
+  assert.equal(result.output.metadata?.modelBacked, true);
+  assert.deepEqual(
+    result.output.metadata?.toolReviewerModelMetadata,
+    { rationale: "Keep lifecycle governance-only and explicit." },
+  );
 });
 
 test("tool reviewer runtime preserves human gate waiting status and replay re-review status", async () => {

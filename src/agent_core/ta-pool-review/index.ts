@@ -72,3 +72,7 @@ export {
   createReviewerRuntime,
   ReviewerRuntime,
 } from "./reviewer-runtime.js";
+
+export {
+  createDefaultReviewerLlmHook,
+} from "./reviewer-model-hook.js";
