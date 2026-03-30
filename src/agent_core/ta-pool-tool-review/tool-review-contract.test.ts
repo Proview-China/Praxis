@@ -39,6 +39,7 @@ test("tool review contract trace helper normalizes the minimal governance envelo
 test("tool review contract lifecycle helper maps lifecycle verbs to binding states", () => {
   assert.deepEqual(TA_TOOL_REVIEW_GOVERNANCE_KINDS, [
     "activation",
+    "delivery",
     "lifecycle",
     "human_gate",
     "replay",

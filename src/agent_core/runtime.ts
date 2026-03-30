@@ -414,6 +414,19 @@ export interface ContinueTaProvisioningResult {
   dispatchResult?: DispatchCapabilityIntentViaTaPoolResult;
 }
 
+export interface ContinueRecoveredTapProvisionResult {
+  provisionId: string;
+  resumedTmaSessionIds: string[];
+  resumedBundleStatuses: Array<ProvisionArtifactBundle["status"]>;
+  continueResult?: ContinueTaProvisioningResult;
+  skippedReason?: "replay_not_staged";
+}
+
+export interface ContinueRecoveredTapRuntimeResult {
+  runId: string;
+  provisionResults: ContinueRecoveredTapProvisionResult[];
+}
+
 interface TaHumanGateContext {
   intent: CapabilityCallIntent;
   options: DispatchCapabilityIntentViaTaPoolOptions;
@@ -921,6 +934,54 @@ export class AgentCoreRuntime {
       this.hydrateRecoveredTapRuntimeSnapshot(snapshot);
     }
     return snapshot;
+  }
+
+  async continueRecoveredTapRuntime(runId: string): Promise<ContinueRecoveredTapRuntimeResult> {
+    const provisionIds = [...new Set(this.listTaResumeEnvelopes()
+      .filter((envelope) => envelope.source === "replay" && envelope.runId === runId)
+      .map((envelope) =>
+        typeof envelope.metadata?.provisionId === "string" ? envelope.metadata.provisionId : undefined)
+      .filter((provisionId): provisionId is string => Boolean(provisionId)))];
+
+    const provisionResults: ContinueRecoveredTapProvisionResult[] = [];
+    for (const provisionId of provisionIds) {
+      const resumableSessions = this.listResumableTmaSessions()
+        .filter((session) => session.provisionId === provisionId);
+      const resumedTmaSessionIds: string[] = [];
+      const resumedBundleStatuses: Array<ProvisionArtifactBundle["status"]> = [];
+
+      for (const session of resumableSessions) {
+        const resumedBundle = await this.resumeTmaSession(session.sessionId);
+        resumedTmaSessionIds.push(session.sessionId);
+        if (resumedBundle) {
+          resumedBundleStatuses.push(resumedBundle.status);
+        }
+      }
+
+      const hasReplayBacklog = this.#findReplayEnvelopeByProvisionId(provisionId) !== undefined
+        || this.#findPendingReplayByProvisionId(provisionId) !== undefined;
+      if (!hasReplayBacklog) {
+        provisionResults.push({
+          provisionId,
+          resumedTmaSessionIds,
+          resumedBundleStatuses,
+          skippedReason: "replay_not_staged",
+        });
+        continue;
+      }
+
+      provisionResults.push({
+        provisionId,
+        resumedTmaSessionIds,
+        resumedBundleStatuses,
+        continueResult: await this.continueTaProvisioning(provisionId),
+      });
+    }
+
+    return {
+      runId,
+      provisionResults,
+    };
   }
 
   hydrateRecoveredTapRuntimeSnapshot(snapshot: TapPoolRuntimeSnapshot): void {
@@ -3272,6 +3333,9 @@ export class AgentCoreRuntime {
         provisionId: params.provisionBundle.provisionId,
         agentId: params.options?.agentId,
         taskContext: params.options?.taskContext,
+        tapGovernanceDirective: isRecord(params.options?.metadata?.tapGovernanceDirective)
+          ? params.options?.metadata?.tapGovernanceDirective
+          : undefined,
       },
     }));
     await this.#recordToolReviewReplay({
@@ -3356,6 +3420,9 @@ export class AgentCoreRuntime {
         provisionId: params.asset.provisionId,
         agentId: params.options?.agentId,
         taskContext: params.options?.taskContext,
+        tapGovernanceDirective: isRecord(params.options?.metadata?.tapGovernanceDirective)
+          ? params.options?.metadata?.tapGovernanceDirective
+          : undefined,
       },
     }));
     await this.#recordToolReviewReplay({
@@ -3455,6 +3522,7 @@ export class AgentCoreRuntime {
         ? envelope.metadata.taskContext as Record<string, unknown>
         : undefined,
       metadata: {
+        ...(isRecord(envelope.metadata) ? envelope.metadata : {}),
         resumedFromEnvelopeId: envelope.envelopeId,
         resumedFromReplayId: replay.replayId,
       },
