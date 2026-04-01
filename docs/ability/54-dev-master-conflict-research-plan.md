@@ -190,6 +190,104 @@
 3. 总装入口冲突已被缩成有限清单
 4. 后续并行施工时，worker 已有明确写域
 
+## Wave 1 初步结论
+
+当前第一轮研究已经先把几处真正高风险的口子摸出来了。
+
+### Group 1. 入口与装配层
+
+当前事实：
+
+- `src/agent_core/runtime.ts` 在 `cmp/mp` 相对新 `dev` 的 diff 量级约为：
+  - `3754 insertions`
+  - `2602 deletions`
+- `src/agent_core/runtime.test.ts` 的 diff 量级约为：
+  - `1645 insertions`
+  - `3141 deletions`
+- `package.json` 在 `cmp/mp` 只多了少量 `CMP infra` 和 status 相关脚本
+
+当前结论：
+
+- `runtime.ts` / `runtime.test.ts` 是总装最后处理的高风险入口
+- `package.json` 是相对容易先吸收的低成本入口
+
+建议顺序：
+
+1. 先补 `package.json` 的 `CMP` 脚本
+2. 再做 `rax` 表面
+3. 最后才碰 runtime assembly
+
+### Group 2. `CMP` 主体层
+
+当前事实：
+
+- `cmp/mp` 已经有完整的：
+  - `cmp-git`
+  - `cmp-db`
+  - `cmp-mq`
+  - `cmp-runtime`
+  - `cmp-five-agent`
+  - `infra/cmp`
+  - `scripts/cmp-status-panel-server.mjs`
+- 其中支撑层与 infra 层的成熟度明显高于五角色与 live LLM 化层
+
+当前结论：
+
+- `cmp-git / cmp-db / cmp-mq / cmp-runtime / infra/cmp` 适合作为第一批吸收对象
+- `cmp-five-agent`、`model-inference`、`rax.cmp` 应后置到第二批或第三批
+
+### Group 3. reboot/TAP 基座层
+
+当前事实：
+
+- 新 `dev` 基座已经完整承接 `docs/ability/20-28` 与 `43-51`
+- 这些文档表达的是当前 reboot/TAP 主线
+- `cmp/mp` 虽然也带了 `43-51` 的副本，但不代表应该回覆盖新 `dev`
+
+当前结论：
+
+- `docs/ability/20-28` 与 `43-51` 应视为 reboot/TAP 基座保护区
+- `CMP` 并入时不应反向覆盖这批基座文档
+- `CMP <-> TAP` 的主要问题更像 wiring / assembly，而不是 reboot 文档方向错误
+
+### Group 4. 文档与记忆层
+
+当前事实：
+
+- 新 `dev` 的 `docs/master.md` 仍是项目级长期主叙事入口
+- 新 `dev` 的 `memory/current-context.md` 仍停在 `2026-03-18` 的 reboot 阶段
+- `cmp/mp` 的 `memory/current-context.md` 则已经完全变成 `CMP` 收口快照
+
+当前结论：
+
+- `docs/master.md` 目前继续承担项目级长期主叙事入口
+- `memory/current-context.md` 必须重写成“总装后的项目级现状”，不能直接用任一分支版本覆盖
+- `memory/compaction-handoff-prompt*.md` 继续保留为阶段性交接材料，不升级为项目主叙事
+
+### Group 5. legacy 资产层
+
+当前事实：
+
+- legacy 线目前仍保留：
+  - `main`
+  - `deploy`
+  - `archive/dev-legacy-2026-04-01`
+- 当前总装阶段还没有必要让新 `dev` 立即接触 `main`
+
+当前结论：
+
+- legacy 资产这一轮继续只做参考
+- 真正处理 `dev -> main` 之前，先把新 `dev` 的 `CMP + TAP` 总装做实
+
+## 下一轮研究建议
+
+下一轮不再泛泛扩代理，建议按下面这个顺序继续：
+
+1. 先对 Group 2 做更细的模块级并入排序
+2. 再对 Group 1 做 runtime assembly 桥位盘点
+3. 然后用 Group 4 的结论重写项目级 `memory/current-context.md`
+4. 最后再决定第一批实际代码并入是否从 `infra/cmp + cmp-runtime` 开始
+
 一句收口：
 
 - 先研究清楚冲突面

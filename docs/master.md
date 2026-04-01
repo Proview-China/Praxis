@@ -100,6 +100,8 @@
   - [53-dev-master-cmp-import-checklist.md](/home/proview/Desktop/Praxis_series/Praxis/docs/ability/53-dev-master-cmp-import-checklist.md)
 - 新 `dev` 总装线的冲突研究计划：
   - [54-dev-master-conflict-research-plan.md](/home/proview/Desktop/Praxis_series/Praxis/docs/ability/54-dev-master-conflict-research-plan.md)
+- 新 `dev` 第一批并入任务包：
+  - [55-dev-master-batch1-task-pack.md](/home/proview/Desktop/Praxis_series/Praxis/docs/ability/55-dev-master-batch1-task-pack.md)
 - MCP 官方对齐与分阶段执行路线图：
   - [13-mcp-official-alignment-roadmap.md](/home/proview/Desktop/Praxis_series/Praxis/docs/ability/13-mcp-official-alignment-roadmap.md)
 - Agent Core raw runtime kernel 总纲：

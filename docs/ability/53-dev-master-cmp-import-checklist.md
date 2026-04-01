@@ -210,6 +210,107 @@
 - 不要让多个 worker 同时改 runtime 入口
 - 不要在文档叙事还没统一前就开始大批量代码搬运
 
+## Wave 1 初步结论
+
+这一轮已经先把高风险面摸清了一遍，当前可以先钉死下面这些事实。
+
+### 1. `cmp/mp` 相对新 `dev` 仍有 12 个主题提交
+
+当前 `origin/dev...origin/cmp/mp` 为：
+
+- `36/12`
+
+白话：
+
+- 新 `dev` 基座在 reboot/TAP 一侧继续往前走了
+- `cmp/mp` 仍有 12 个 `CMP` 主题提交需要被系统吸收
+
+这 12 个主题提交大体可分成 4 段：
+
+1. `CMP wave1-wave4`
+   - 从协议/任务包进入第一波代码落地
+2. `CMP infra / non-five-agent closure`
+   - shared infra lowering
+   - `section-first`
+   - history fallback
+   - delivery truth
+3. `CMP five-agent 第一轮结构化接线`
+   - 五角色 runtime
+   - `rax.cmp`
+   - role-level `TAP` bridge
+4. `CMP final closure`
+   - recovery
+   - acceptance gate
+   - 最小 live infra
+
+### 2. 可以最先并入的第一批资产
+
+当前最适合优先并入的是：
+
+- `docs/ability/29-40`
+- `docs/ability/44-46`
+- `docs/ability/cmp-*`
+- `memory/compaction-handoff-prompt*.md`
+- `memory/worklog/2026-03-20*`
+- `memory/worklog/2026-03-24*`
+- `memory/worklog/2026-03-25-cmp-*`
+- `infra/cmp/**`
+- `scripts/cmp-status-panel-server.mjs`
+- `src/agent_core/cmp-types/**`
+- `src/agent_core/cmp-git/**`
+- `src/agent_core/cmp-db/**`
+- `src/agent_core/cmp-mq/**`
+- `src/agent_core/cmp-runtime/**`
+
+理由很简单：
+
+- 这些资产大多是 `CMP` 自身的主体或支撑层
+- 它们与 reboot 基座的 `TAP` runtime 不是同一块写域
+- 即使有冲突，也更容易在局部解决，而不会一上来就打爆总装入口
+
+### 3. 当前应暂缓的资产
+
+下面这些内容不适合在第一批直接并入：
+
+- `src/agent_core/runtime.ts`
+- `src/agent_core/runtime.test.ts`
+- `memory/current-context.md`
+- `docs/master.md`
+- `src/agent_core/cmp-five-agent/**`
+- `src/agent_core/integrations/model-inference*.ts`
+- `src/rax/cmp-*/**`
+- `memory/live-reports/cmp-*`
+- 当前 `cmp/mp` 工作区里的未提交实验性文件
+
+原因：
+
+- `runtime.ts` 与 `runtime.test.ts` 是当前最大冲突口
+- `memory/current-context.md` 在两条线上代表的是两种完全不同阶段，不应互相覆盖
+- 五角色与 `rax.cmp` 已开始碰总装入口，不适合在第一批直接压上来
+- `memory/live-reports` 只服务阶段性 smoke，不应被当长期主线事实
+
+### 4. 第一批并入后的建议验证
+
+Wave 1 后如果开始做 Batch 1 + Batch 2，建议最小验证收成下面这组：
+
+- `npm run typecheck`
+- `npx tsx --test src/agent_core/cmp-git/*.test.ts`
+- `npx tsx --test src/agent_core/cmp-db/*.test.ts`
+- `npx tsx --test src/agent_core/cmp-mq/*.test.ts`
+- `npx tsx --test src/agent_core/cmp-runtime/*.test.ts`
+
+白话：
+
+- 先验证 `CMP` 支撑层自己能在新 `dev` 上站住
+- 不要在第一批就把五角色和总装入口一起拖进来
+
+### 5. 第一批并入时最该防的错误
+
+- 不要把 `docs/ability/43-51` 这批 reboot/TAP 文档当成 `cmp/mp` 的可覆盖区域。
+- 不要把 `memory/current-context.md` 直接从 `cmp/mp` 覆盖到新 `dev`。
+- 不要把 `CMP` 主体和 `runtime assembly` 在同一波一起处理。
+- 不要把 `cmp/mp` 的 live smoke JSON 当成长期真相。
+
 一句收口：
 
 - 先把主叙事和 `CMP` 资产接回新 `dev`
