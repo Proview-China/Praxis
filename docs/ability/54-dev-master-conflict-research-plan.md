@@ -1,6 +1,6 @@
 # Dev-Master Conflict Research Plan
 
-状态：总装冲突研究计划 / 并行爆破入口。
+状态：总装冲突研究计划 / 并行分析稿。
 
 更新时间：2026-04-02
 
@@ -8,170 +8,189 @@
 
 这份文档专门回答：
 
-- 新 `dev` 主线里真正要研究的冲突面有哪些。
-- 这些冲突面应该按什么顺序研究，而不是全仓盲看。
-- 多智能体并行时，怎样把问题拆成几个稳定 lane。
+- 新 `dev` 的总装冲突应该从哪里查起
+- 为什么不能只看 `git diff`
+- 多智能体并行时，哪些冲突面适合拆开研究
+- 每组冲突研究完成后，需要产出什么结论
 
 一句白话：
 
-- 这份文档不是实现文档。
-- 它是后续“广泛爆破”之前的作战地图。
+- 它不是修复文档
+- 它是修复前的研究地图
 
-## 研究总原则
+## 总体方法
 
-1. 先研究总装入口，再研究局部实现。
-2. 先研究长期主叙事，再研究阶段性证据。
-3. 先分清“应该保留什么”，再讨论“怎么改”。
-4. 任何 lane 都不要越权覆盖别的 lane 的写域。
+这轮不要按“文件越多越危险”的方式看冲突。
 
-## 冲突面 A. 入口与装配层
+应该按装配面拆成下面 5 组：
 
-主要文件：
+1. 入口与装配层
+2. `CMP` 主体层
+3. `TAP` 基座层
+4. 文档与记忆层
+5. legacy 资产层
+
+## Group 1. 入口与装配层
+
+主要对象：
 
 - `src/agent_core/runtime.ts`
 - `src/agent_core/runtime.test.ts`
 - `src/rax/index.ts`
 - `package.json`
 
-先回答什么：
+研究问题：
 
-1. reboot 当前 runtime assembly 的主链入口是什么。
-2. `CMP` 应该从哪里接入，而不是旁路接入。
-3. `package.json` 的 check/build/test 脚本是否已足以覆盖 `CMP + TAP`。
+- 当前 runtime assembly 是怎么接 `TAP` 的
+- `CMP` 并入后最少需要补哪些桥位
+- 哪些导出面会发生重名、重复或语义冲突
+- `check/build/test` 的当前脚本是否覆盖总装后主线
 
-## 冲突面 B. `CMP` 主体层
+产出物：
 
-主要目录：
+- 入口冲突清单
+- 最小接缝方案
+- 需要主线程统一拍板的点
+
+## Group 2. `CMP` 主体层
+
+主要对象：
 
 - `src/agent_core/cmp-*/**`
-- `src/agent_core/cmp-types/**`
 - `src/rax/cmp-*/**`
+- `infra/cmp/**`
 
-先回答什么：
+研究问题：
 
-1. `CMP` 当前最小可保真主链是哪一段。
-2. five-agent 相关实现里，哪些已经足够进入主线。
-3. 哪些 live LLM 或 smoke 入口仍属阶段性试验。
+- 哪些 `CMP` 模块已经形成最小可保真主链
+- 哪些仍属于阶段性尝试
+- 哪些模块对 runtime 入口有硬依赖
+- 哪些模块可先独立并入而不碰总装入口
 
-## 冲突面 C. `TAP` 基座层
+产出物：
 
-主要目录：
+- 可直接并入清单
+- 需要延后并入清单
+- `CMP` 主链最小闭环图
+
+## Group 3. `TAP` 基座层
+
+主要对象：
 
 - `docs/ability/20-28`
 - `docs/ability/43-51`
 - `src/agent_core/ta-pool*/**`
 
-先回答什么：
+研究问题：
 
-1. reboot 后续 `TAP` 演进对总装入口提出了哪些硬要求。
-2. `CMP <-> TAP` 最小供给接缝当前缺的是 contract 还是 wiring。
-3. 哪些 reboot 文档是主口径，哪些只是过渡态。
+- reboot 后续 `TAP` 演进对新 `dev` 的硬约束是什么
+- 哪些 `TAP` 文档仍是当前主口径
+- `CMP <-> TAP` 的当前接缝缺的是 wiring、contract，还是验收口径
+- 哪些 `CMP` 并入动作可能会误伤 `TAP` 基座
 
-## 冲突面 D. 文档与记忆层
+产出物：
 
-主要文件：
+- reboot 基座保护清单
+- `TAP` 不可覆盖区域清单
+- `CMP <-> TAP` 最小供给接缝问题单
+
+## Group 4. 文档与记忆层
+
+主要对象：
 
 - `docs/master.md`
 - `memory/current-context.md`
 - `memory/worklog/**`
 - `memory/compaction-handoff-prompt*.md`
 
-先回答什么：
+研究问题：
 
-1. 总装后哪些文件承担项目级唯一入口。
-2. 哪些 handoff prompt 仍应留在阶段性交接层。
-3. 哪些 worklog 要保留为证据而不是主叙事。
+- 哪些内容应该升级成长期主叙事
+- 哪些只应保留为阶段性交接材料
+- 总装后新的“唯一入口”应该由哪些文件承担
+- 哪些 worklog 需要在总装后改写为面向主线的摘要
 
-## 冲突面 E. legacy 资产层
+产出物：
 
-主要分支：
+- 项目级同步总纲章节表
+- 长期入口文件清单
+- 阶段性交接材料保留清单
+
+## Group 5. legacy 资产层
+
+主要对象：
 
 - `main`
 - `deploy`
 - `archive/dev-legacy-2026-04-01`
 
-先回答什么：
+研究问题：
 
-1. deploy 语义里哪些仍值得迁移。
-2. legacy `main` 在何时被新 `dev` 接管。
-3. 哪些旧实现假设必须明确丢弃。
+- 哪些旧资产只保留为历史参考
+- 哪些 deploy 语义仍应迁移到新主线
+- 什么时候再考虑 `dev -> main`
+- 当前绝对不应回搬的 legacy 包袱有哪些
 
-## 建议的研究顺序
+产出物：
 
-### Wave 1
+- legacy 归档与复用边界说明
+- deploy 语义迁移清单
 
-- 冲突面 A
-- 冲突面 D
+## 并行研究顺序
 
-目标：
+最稳妥的顺序：
 
-- 先把总装入口和项目级叙事定住。
+1. Group 4 文档与记忆层
+2. Group 3 `TAP` 基座层
+3. Group 2 `CMP` 主体层
+4. Group 1 入口与装配层
+5. Group 5 legacy 资产层
 
-### Wave 2
+原因：
 
-- 冲突面 B
-- 冲突面 C
+- 先统一口径
+- 再保护基座
+- 再判断哪些 `CMP` 资产能安全接回
+- 最后才碰高冲突入口和 legacy 切线
 
-目标：
+## 多智能体建议
 
-- 在入口稳定后，再研究 `CMP` 主体与 `TAP` 基座的真正接缝。
+### Explorer 1
 
-### Wave 3
+负责：
 
-- 冲突面 E
+- Group 4
 
-目标：
+### Explorer 2
 
-- 最后再处理 legacy 资产的迁移、归档与主线切换。
+负责：
 
-## 多智能体 lane 建议
+- Group 3
 
-Lane A：runtime / package / export 入口研究
+### Explorer 3
 
-- 聚焦：
-  - `src/agent_core/runtime.ts`
-  - `src/rax/index.ts`
-  - `package.json`
+负责：
 
-Lane B：`CMP` 主体成熟度研究
+- Group 2
 
-- 聚焦：
-  - `src/agent_core/cmp-*/**`
-  - `src/rax/cmp-*/**`
+### 主线程
 
-Lane C：`TAP` 基座保护研究
+负责：
 
-- 聚焦：
-  - `docs/ability/20-28`
-  - `docs/ability/43-51`
-  - `src/agent_core/ta-pool*/**`
+- Group 1
+- Group 5
+- 最终汇总
 
-Lane D：项目级叙事与记忆入口研究
+## 完成标志
 
-- 聚焦：
-  - `docs/master.md`
-  - `memory/current-context.md`
-  - `memory/worklog/**`
+只有同时满足下面这些条件，才算冲突研究完成：
 
-Lane E：legacy 处置研究
-
-- 聚焦：
-  - `main`
-  - `deploy`
-  - `archive/dev-legacy-2026-04-01`
-
-## 每个 lane 的统一产出格式
-
-每条 lane 都建议输出 3 段：
-
-1. 当前事实
-2. 应有变动
-3. 不应误动的保护项
-
-这样主线程回收时，不会变成一堆不可拼装的零散结论。
+1. 每组都有“关键问题 -> 结论 -> 后续动作”
+2. 每组都能落到具体文件或目录
+3. 总装入口冲突已被缩成有限清单
+4. 后续并行施工时，worker 已有明确写域
 
 一句收口：
 
-- 广泛爆破可以很猛
-- 但必须先有同一张作战地图
-
+- 先研究清楚冲突面
+- 再让多智能体去并行爆破

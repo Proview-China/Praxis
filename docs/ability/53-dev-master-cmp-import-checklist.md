@@ -1,6 +1,6 @@
 # Dev-Master CMP Import Checklist
 
-状态：总装执行清单 / `CMP` 资产并入计划。
+状态：总装并入清单 / 可并行施工版本。
 
 更新时间：2026-04-02
 
@@ -8,224 +8,209 @@
 
 这份文档专门回答：
 
-- `cmp/mp` 的哪些资产应该并入新的 `dev` 主线。
-- 这些资产应该按什么顺序并入，而不是一把乱 merge。
-- 哪些内容属于长期主线资产，哪些只属于阶段性证据或临时状态。
-- 多智能体并行时，怎样切 lane 才不会互相踩写域。
+- `cmp/mp` 这条线应该按什么顺序并入新的 `dev`
+- 哪些内容属于必须吸收的主线资产
+- 哪些内容只适合作为阶段性证据或交接材料保留
+- 多智能体并行时，应怎样分波次、分写域、分冲突责任
 
 一句白话：
 
-- 这份文档不是“再讲一遍原则”。
-- 它是给后续真正开始搬运 `CMP` 资产时使用的施工清单。
+- 它不是 branch diff 备忘录
+- 它是给总装施工直接派工的清单
 
-## 当前基线
+## 当前总原则
 
-当前新的 `dev` 主线已经切到 reboot 世界，和 `dev-master` 同头。
+1. 总装基座始终以当前 `dev` 为准。
+2. `cmp/mp` 不是整包覆盖对象，而是按主题吸收的资产源。
+3. 先吸收长期主线资产，再处理高冲突装配口。
+4. `memory/live-reports/**` 这类瞬时产物默认不先进入主线。
+5. 每一波并入后都要回读：
+   - `git status`
+   - 差异范围
+   - 最小验证结果
 
-当前 `cmp/mp` 相对新的 `dev` 仍多出 12 个主题提交：
+## 并入范围分级
 
-1. `d8b5146`
-   - Start CMP wave 1 with task packs and runtime skeleton
-2. `98c68ef`
-   - Advance CMP wave 2 governance delivery and enforcement
-3. `bdd678b`
-   - Finish CMP wave 3 hooks snapshot recovery and e2e
-4. `73ea587`
-   - Close CMP wave 4 and mark the current design complete
-5. `a073959`
-   - 完成 CMP infra 第一波总纲与真实 backend 骨架落地
-6. `32456dd`
-   - 完成 CMP 正式接入第一波落地与 infra helper 下沉
-7. `05b2ecc`
-   - 完成 CMP 非五-agent 主链收口并接入 section-first 与历史回退
-8. `2233b65`
-   - 完成 CMP 非五-agent 最后收口并更新项目级状态
-9. `de4391b`
-   - 完成 CMP 五-agent 首轮代码落地与控制面可见性接线
-10. `e38c2fe`
-   - 完成 CMP 五-agent 配置收口并接通角色级 TAP 控制面
-11. `14c8041`
-   - 推进 CMP final closure：接通五角色 TAP 执行桥并补最小 live infra
-12. `5abf0fd`
-   - 收口 CMP final closure 的 recovery 与 acceptance gate
-
-这 12 个提交不应被理解为“逐个 cherry-pick 就完成”，而应被拆成几个主题批次。
-
-## 总体导入原则
-
-1. 先导入长期主叙事，再导入代码。
-2. 先导入低耦合目录，再导入总装入口。
-3. `memory/live-reports/**` 这类瞬时证据默认不直接进主线。
-4. 当前 `cmp/mp` 工作区里的未提交试验改动，不纳入第一轮总装。
-5. 每一批导入后都要回读 `git diff --stat` 与关键测试，而不是堆到最后再看。
-
-## Batch 0. 基座保护
-
-目标：
-
-- 明确这一轮只“吸收 `CMP` 资产”，不覆盖 reboot 基座。
-
-不得覆盖的基座重点：
-
-- `docs/ability/20-28`
-- `docs/ability/43-51`
-- `memory/worklog/2026-03-18-*`
-- `memory/worklog/2026-03-19-*`
-- `src/agent_core/ta-pool*/**`
-- `tap-* task pack`
-
-## Batch 1. 文档与记忆先行
-
-目标：
-
-- 先把 `CMP` 的长期叙事和阶段收口材料导入，形成后续编码的共同语境。
-
-默认导入：
+### A 级：应优先并入的长期资产
 
 - `docs/ability/29-40`
-- `docs/ability/44-46`
+- `docs/ability/44-47`
 - `docs/ability/cmp-*`
-- `docs/ability/rax-cmp-workflow-task-pack/**`
 - `memory/current-context.md`
-- `memory/compaction-handoff-prompt.md`
-- `memory/compaction-handoff-prompt-cmp-final-closure.md`
-- `memory/compaction-handoff-prompt-five-agent.md`
-- `memory/worklog/2026-03-20-*`
-- `memory/worklog/2026-03-24-*`
+- `memory/compaction-handoff-prompt*.md`
+- `memory/worklog/2026-03-20*`
+- `memory/worklog/2026-03-24*`
 - `memory/worklog/2026-03-25-cmp-*`
-
-默认不导入：
-
-- `memory/live-reports/cmp-*`
-
-## Batch 2. `infra/cmp` 与脚本
-
-目标：
-
-- 把 `CMP` 的真实 backend 骨架和辅助脚本接回总装线。
-
-默认导入：
-
 - `infra/cmp/**`
 - `scripts/cmp-status-panel-server.mjs`
-
-重点检查：
-
-- 路径是否仍符合 reboot 当前目录约束。
-- 是否引入和 `TAP` 基座重复的 runtime helper。
-- `package.json` 是否需要补脚本、依赖或 workspace 映射。
-
-## Batch 3. `agent_core` 的 `CMP` 主体
-
-目标：
-
-- 导入 `CMP` 在 `agent_core` 里的对象模型、runtime、five-agent 相关代码。
-
-默认导入：
-
 - `src/agent_core/cmp-*/**`
-- `src/agent_core/cmp-types/**`
-- `src/agent_core/integrations/*cmp*`
-
-重点检查：
-
-- `CMP` runtime 与 reboot 当前 `agent_core` 的 assembly 方式是否已经漂移。
-- `Checkpoint`、`recovery`、`queue/port` 相关接口是否有签名变化。
-- five-agent 代码是否还依赖只存在于 `cmp/mp` 的临时假设。
-
-## Batch 4. `rax.cmp` 表面与工作流入口
-
-目标：
-
-- 导入 `CMP` 在 `rax` 表面的对外出口。
-
-默认导入：
-
 - `src/rax/cmp-*/**`
-- `src/rax/cmp-types.ts`
-- `src/rax/cmp-domain.ts`
-- `src/rax/cmp-connectors*.ts`
 
-重点检查：
-
-- `src/rax/index.ts` 的 export 面是否与 reboot 当前 `TAP`/capability 表面冲突。
-- facade/runtime shell 是否会误覆盖已有 reboot 出口。
-- status panel / smoke 入口是否应该作为主线能力保留。
-
-## Batch 5. 总装入口与验收
-
-目标：
-
-- 处理真正的高耦合总装点，让 `CMP + TAP` 能作为一条新主线成立。
-
-重点文件：
+### B 级：需要边研究边并入的装配资产
 
 - `src/agent_core/runtime.ts`
 - `src/agent_core/runtime.test.ts`
 - `src/rax/index.ts`
 - `package.json`
 - `docs/master.md`
-- `memory/current-context.md`
 
-这一批不再按目录导入，而要按“问题”导入：
-
-1. runtime assembly 先后顺序
-2. `CMP <-> TAP` 最小供给接缝
-3. 统一 check/build/test 脚本
-4. 项目级当前叙事与入口同步
-
-## 不直接视为主线资产的内容
-
-下面这些内容默认不在第一轮导入：
+### C 级：默认不先进入主线的阶段性材料
 
 - `memory/live-reports/cmp-*`
-- 只为一次 live smoke 存在的 JSON 证据
-- 明显只服务某轮 handoff 的临时说明
-- 当前 `cmp/mp` 工作区里的未提交试验性改动
+- 单次 live smoke JSON
+- 只服务某次上下文压缩的临时备注
+- 当前 `cmp/mp` 工作区尚未提交的实验性改动
 
-## 多智能体并行 lane 建议
+## 推荐波次
 
-Lane 1：文档与记忆
+## Wave 0. 文档与记忆对齐
 
-- 写域：
-  - `docs/ability/cmp-*`
-  - `memory/**`
+目标：
 
-Lane 2：`infra/cmp`
+- 先让新 `dev` 的主叙事完整
+- 避免后续代码合并时没有统一方向
 
-- 写域：
-  - `infra/cmp/**`
-  - `scripts/cmp-status-panel-server.mjs`
+建议吸收：
 
-Lane 3：`agent_core` 的 `CMP`
+- `docs/ability/29-40`
+- `docs/ability/44-47`
+- `memory/current-context.md`
+- `memory/compaction-handoff-prompt*.md`
+- `memory/worklog/2026-03-20*`
+- `memory/worklog/2026-03-24*`
+- `memory/worklog/2026-03-25-cmp-*`
 
-- 写域：
-  - `src/agent_core/cmp-*/**`
+验证：
 
-Lane 4：`rax.cmp`
-
-- 写域：
-  - `src/rax/cmp-*/**`
-
-Lane 5：总装入口
-
-- 写域：
-  - `src/agent_core/runtime.ts`
-  - `src/rax/index.ts`
-  - `package.json`
-  - `docs/master.md`
-  - `memory/current-context.md`
-
-## 每一批的完成信号
-
-每完成一批，至少回读：
-
-- `git status --short`
 - `git diff --stat`
-- 与该批直接相关的测试或类型检查结果
+- 回读 `docs/master.md`
+- 回读 `memory/current-context.md`
+
+## Wave 1. `CMP` 基础设施与脚本
+
+目标：
+
+- 先把 `CMP` 的共享施工面接回主线
+
+建议吸收：
+
+- `infra/cmp/**`
+- `scripts/cmp-status-panel-server.mjs`
+
+验证：
+
+- 目录差异回读
+- 脚本入口回读
+- 与 `package.json` 的依赖关系核对
+
+## Wave 2. `CMP` 主体模块
+
+目标：
+
+- 让 `CMP` 主体代码回到总装线
+
+建议吸收：
+
+- `src/agent_core/cmp-*/**`
+- `src/rax/cmp-*/**`
+
+验证：
+
+- `git diff --stat`
+- 相关测试文件范围核对
+- 与 `TAP`/`agent_core` 入口的引用关系核对
+
+## Wave 3. 总装入口修复
+
+目标：
+
+- 处理 `CMP` 与 reboot/TAP 基座在入口层的接缝
+
+建议处理：
+
+- `src/agent_core/runtime.ts`
+- `src/agent_core/runtime.test.ts`
+- `src/rax/index.ts`
+- `package.json`
+
+验证：
+
+- `npm run typecheck`
+- 相关测试组合
+- `git status --short`
+
+## Wave 4. 项目级同步
+
+目标：
+
+- 让后续协作者看到的是统一主线，而不是两套并行叙事
+
+建议处理：
+
+- `docs/master.md`
+- 项目级同步总纲
+- 必要的 memory 入口升级
+
+验证：
+
+- 文档入口回读
+- 当前状态文档回读
+
+## 多智能体分工建议
+
+### Worker A：文档与记忆
+
+负责：
+
+- `docs/ability/29-40`
+- `docs/ability/44-47`
+- `memory/**`
+
+不负责：
+
+- runtime 入口代码
+
+### Worker B：`CMP` 基础设施
+
+负责：
+
+- `infra/cmp/**`
+- `scripts/cmp-status-panel-server.mjs`
+
+不负责：
+
+- `src/agent_core/runtime.ts`
+
+### Worker C：`CMP` 主体代码
+
+负责：
+
+- `src/agent_core/cmp-*/**`
+- `src/rax/cmp-*/**`
+
+不负责：
+
+- `package.json`
+- `docs/master.md`
+
+### 主线程：总装入口
+
+负责：
+
+- `src/agent_core/runtime.ts`
+- `src/rax/index.ts`
+- `package.json`
+- 最终文档入口与验证
+
+## 当前不要做错的事
+
+- 不要一上来直接整体 merge `cmp/mp`
+- 不要先动 `main`
+- 不要把 live smoke 结果当长期主线资产
+- 不要让多个 worker 同时改 runtime 入口
+- 不要在文档叙事还没统一前就开始大批量代码搬运
 
 一句收口：
 
-- `CMP` 并入不是一次 merge
-- 它是一轮分批总装
-
+- 先把主叙事和 `CMP` 资产接回新 `dev`
+- 再碰总装入口
