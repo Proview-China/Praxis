@@ -430,9 +430,11 @@
 在这份总纲之后，建议继续补两类文档：
 
 1. `dev-master` 合并清单
-   - 逐项列出 `cmp/mp` 需要并入的提交主题、目录、冲突口
+   - 见 [53-dev-master-cmp-import-checklist.md](/home/proview/Desktop/Praxis_series/Praxis/docs/ability/53-dev-master-cmp-import-checklist.md)
 2. 项目级同步总纲
    - 把架构图、当前方向、分阶段目标统一成后续协作入口
+3. 总装冲突研究计划
+   - 见 [54-dev-master-conflict-research-plan.md](/home/proview/Desktop/Praxis_series/Praxis/docs/ability/54-dev-master-conflict-research-plan.md)
 
 一句收口：
 
