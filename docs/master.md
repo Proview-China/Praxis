@@ -94,6 +94,8 @@
 
 ## Current Execution Roadmaps
 
+- `dev-master` 总装分支与主线切换总纲：
+  - [52-dev-master-integration-outline.md](/home/proview/Desktop/Praxis_series/Praxis/docs/ability/52-dev-master-integration-outline.md)
 - MCP 官方对齐与分阶段执行路线图：
   - [13-mcp-official-alignment-roadmap.md](/home/proview/Desktop/Praxis_series/Praxis/docs/ability/13-mcp-official-alignment-roadmap.md)
 - Agent Core raw runtime kernel 总纲：
