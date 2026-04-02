@@ -1,5 +1,32 @@
 import { pathToFileURL } from "node:url";
 
+export {
+  CMP_RULE_ACTIONS,
+  CMP_SECTION_FIDELITY,
+  CMP_SECTION_KINDS,
+  CMP_SECTION_SOURCES,
+  CMP_STORED_SECTION_PLANES,
+  CMP_STORED_SECTION_STATES,
+  type CmpRule,
+  type CmpRuleAction,
+  type CmpRuleEvaluation,
+  type CmpRuleMatch,
+  type CmpRulePack,
+  type CmpSection,
+  type CmpSectionFidelity,
+  type CmpSectionKind,
+  type CmpSectionSource,
+  type CmpStoredSection,
+  type CmpStoredSectionPlane,
+  type CmpStoredSectionState,
+  createCmpRule,
+  createCmpRulePack,
+  createCmpSection,
+  createCmpStoredSection,
+  createCmpStoredSectionFromSection,
+  evaluateCmpRulePack,
+} from "./rax/index.js";
+
 export * from "./rax/index.js";
 export * from "./agent_core/index.js";
 

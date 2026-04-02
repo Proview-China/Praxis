@@ -1,4 +1,27 @@
 export type {
+  CmpConnectorOwnership,
+  CmpPostgresConnector,
+  CmpRedisConnector,
+  CmpSharedGitInfraConnector,
+  CmpSharedInfraConnectorMetadata,
+  CmpSharedInfraConnectors,
+  CmpWorkflowAgentInput,
+} from "./cmp-connectors.js";
+export type {
+  CmpRule,
+  CmpRuleAction,
+  CmpRuleEvaluation,
+  CmpRuleMatch,
+  CmpRulePack,
+  CmpSection,
+  CmpSectionFidelity,
+  CmpSectionKind,
+  CmpSectionSource,
+  CmpStoredSection,
+  CmpStoredSectionPlane,
+  CmpStoredSectionState,
+} from "./cmp-domain.js";
+export type {
   CapabilityAction,
   CapabilityDefinition,
   CapabilityKey,
@@ -135,6 +158,26 @@ export type {
   OpenAICompatibilityProfile
 } from "./compatibility.js";
 
+export {
+  createCmpSharedGitInfraConnector,
+  createCmpPostgresConnector,
+  createCmpRedisConnector,
+  createCmpSharedInfraConnectors,
+} from "./cmp-connectors.js";
+export {
+  CMP_RULE_ACTIONS,
+  CMP_SECTION_FIDELITY,
+  CMP_SECTION_KINDS,
+  CMP_SECTION_SOURCES,
+  CMP_STORED_SECTION_PLANES,
+  CMP_STORED_SECTION_STATES,
+  createCmpRule,
+  createCmpRulePack,
+  createCmpSection,
+  createCmpStoredSection,
+  createCmpStoredSectionFromSection,
+  evaluateCmpRulePack,
+} from "./cmp-domain.js";
 export {
   CAPABILITY_ACTIONS,
   CAPABILITY_NAMESPACES,
