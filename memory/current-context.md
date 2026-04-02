@@ -6,8 +6,8 @@
 
 - 当前项目级主线已经切换到新的 `dev` / `dev-master`。
 - 当前主线提交：
-  - `987effd`
-  - `Import Batch 1 CMP support layer`
+  - `cf394e2`
+  - `Document Batch 2 preflight and add CMP scripts`
 - 旧 `dev` 已归档为：
   - `archive/dev-legacy-2026-04-01`
   - `8d97096`
@@ -23,7 +23,8 @@ Praxis 现在已经从“纯 reboot 基座”推进到：
 
 - 以 reboot/TAP 为底座
 - 已把 `CMP` 的文档、infra、支撑层安全接回新主线
-- 但还没有进入高风险总装入口收口
+- 并且已经补上 `CMP` 的基础脚本入口与 Batch 2 前置清单
+- 但真正危险的 runtime assembly 收口还没开始
 
 白话：
 
@@ -125,21 +126,36 @@ Praxis 现在已经从“纯 reboot 基座”推进到：
 - `CMP` 的协议、git/DB/MQ 支撑层、runtime 支撑层已经进入新 `dev`
 - 但五角色和总装入口还没接回来
 
+### 五、低风险总装入口
+
+当前已经接回新主线：
+
+- `package.json` 里的：
+  - `cmp:infra:up`
+  - `cmp:infra:down`
+  - `cmp:infra:ps`
+  - `cmp:infra:status`
+  - `cmp:status:serve`
+- `docs/ability/56-dev-master-batch2-preflight.md`
+
+白话：
+
+- 现在 `CMP` 的基础脚本入口已经在主线上
+- Batch 2 的前置风险清单也已经形成文档
+
 ## 当前还没有接回来的高风险部分
 
 下面这些当前仍明确后置：
 
 - `src/agent_core/runtime.ts`
 - `src/agent_core/runtime.test.ts`
-- `src/rax/index.ts`
-- `package.json` 的更深总装入口调整
 - `src/agent_core/cmp-five-agent/**`
 - `src/agent_core/integrations/model-inference*.ts`
-- `src/rax/cmp-*/**`
+- 五角色 live LLM 化的更深接线
 
 原因：
 
-- 它们是 reboot/TAP 基座与 `CMP` 主体真正会撞上的装配口
+- 它们是 reboot/TAP 基座与 `CMP` 主体真正会撞上的高风险装配口
 - 一旦过早处理，容易把当前新主线再次打散
 
 ## 当前验证基线
@@ -170,6 +186,7 @@ Praxis 现在已经从“纯 reboot 基座”推进到：
 - `docs/ability/53-dev-master-cmp-import-checklist.md`
 - `docs/ability/54-dev-master-conflict-research-plan.md`
 - `docs/ability/55-dev-master-batch1-task-pack.md`
+- `docs/ability/56-dev-master-batch2-preflight.md`
 
 ## 当前最推荐下一步
 
@@ -177,14 +194,13 @@ Praxis 现在已经从“纯 reboot 基座”推进到：
 
 而是：
 
-1. 继续做总装入口桥位盘点
-2. 决定 `package.json` 与 `rax` 表面的低风险调整
+1. 继续做 `runtime assembly` 桥位盘点
+2. 判断 `cmp-five-agent` 的最小准入边界
 3. 在明确桥位后，再进入：
    - `cmp-five-agent`
-   - `rax.cmp`
    - runtime assembly
 
 一句收口：
 
-- Praxis 现在已经完成了 reboot 基座 + `CMP` 支撑层的第一轮接合
-- 下一步开始进入真正的高风险总装阶段
+- Praxis 现在已经完成了 reboot 基座 + `CMP` 支撑层 + 基础脚本入口的第一轮接合
+- 下一步开始进入真正的高风险 runtime 总装阶段

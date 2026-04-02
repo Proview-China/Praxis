@@ -104,6 +104,8 @@
   - [55-dev-master-batch1-task-pack.md](/home/proview/Desktop/Praxis_series/Praxis/docs/ability/55-dev-master-batch1-task-pack.md)
 - 新 `dev` 第二批高风险总装前置清单：
   - [56-dev-master-batch2-preflight.md](/home/proview/Desktop/Praxis_series/Praxis/docs/ability/56-dev-master-batch2-preflight.md)
+- 新 `dev` 第二波细查报告：
+  - [57-dev-master-deepcheck-report-wave2.md](/home/proview/Desktop/Praxis_series/Praxis/docs/ability/57-dev-master-deepcheck-report-wave2.md)
 - MCP 官方对齐与分阶段执行路线图：
   - [13-mcp-official-alignment-roadmap.md](/home/proview/Desktop/Praxis_series/Praxis/docs/ability/13-mcp-official-alignment-roadmap.md)
 - Agent Core raw runtime kernel 总纲：
