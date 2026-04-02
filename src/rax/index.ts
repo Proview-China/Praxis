@@ -1,4 +1,8 @@
 export type {
+  CreateRaxCmpConfigInput,
+  RaxCmpConfig,
+} from "./cmp-config.js";
+export type {
   CmpConnectorOwnership,
   CmpPostgresConnector,
   CmpRedisConnector,
@@ -7,6 +11,49 @@ export type {
   CmpSharedInfraConnectors,
   CmpWorkflowAgentInput,
 } from "./cmp-connectors.js";
+export type {
+  RaxCmpAcceptanceReadiness,
+  RaxCmpAutomationPolicy,
+  RaxCmpBootstrapAgentInput,
+  RaxCmpBranchFamilyScope,
+  RaxCmpCreateInput,
+  RaxCmpDatabaseConfig,
+  RaxCmpDispatchInput,
+  RaxCmpDispatchScope,
+  RaxCmpExecutionStyle,
+  RaxCmpFallbackPolicy,
+  RaxCmpGitInfraConfig,
+  RaxCmpIngestInput,
+  RaxCmpLineageScope,
+  RaxCmpManualControlInput,
+  RaxCmpManualControlSurface,
+  RaxCmpMode,
+  RaxCmpMqConfig,
+  RaxCmpObjectModelReadinessSummary,
+  RaxCmpReadbackInput,
+  RaxCmpReadbackPriority,
+  RaxCmpReadbackResult,
+  RaxCmpReadbackSummary,
+  RaxCmpReadinessCheck,
+  RaxCmpReadinessStatus,
+  RaxCmpRecoverInput,
+  RaxCmpRecoverResult,
+  RaxCmpRecoveryPreference,
+  RaxCmpRequestHistoryInput,
+  RaxCmpSession,
+  RaxCmpSmokeCheck,
+  RaxCmpSmokeInput,
+  RaxCmpSmokeResult,
+  RaxCmpStatusPanel,
+  RaxCmpTruthLayerSummary,
+  RaxCmpFallbackReadiness,
+  RaxCmpRoleCapabilityAccessInput,
+  RaxCmpRoleCapabilityDispatchInput,
+  RaxCmpCommitInput,
+  RaxCmpResolveInput,
+  RaxCmpMaterializeInput,
+} from "./cmp-types.js";
+export type { RaxCmpStatusPanelSection } from "./cmp-status-panel.js";
 export type {
   CmpRule,
   CmpRuleAction,
@@ -159,6 +206,10 @@ export type {
 } from "./compatibility.js";
 
 export {
+  createRaxCmpConfig,
+  loadRaxCmpConfigFromEnv,
+} from "./cmp-config.js";
+export {
   createCmpSharedGitInfraConnector,
   createCmpPostgresConnector,
   createCmpRedisConnector,
@@ -178,6 +229,29 @@ export {
   createCmpStoredSectionFromSection,
   evaluateCmpRulePack,
 } from "./cmp-domain.js";
+export {
+  createRaxCmpAutomationPolicy,
+  createRaxCmpLineageScope,
+  createRaxCmpManualControlSurface,
+  mergeRaxCmpManualControlSurface,
+  DEFAULT_RAX_CMP_DISPATCH_SCOPE,
+  DEFAULT_RAX_CMP_EXECUTION_STYLE,
+  DEFAULT_RAX_CMP_FALLBACK_POLICY,
+  DEFAULT_RAX_CMP_READBACK_PRIORITY,
+  DEFAULT_RAX_CMP_RECOVERY_PREFERENCE,
+  RAX_CMP_BRANCH_FAMILY_SCOPES,
+  RAX_CMP_DISPATCH_SCOPES,
+  RAX_CMP_EXECUTION_STYLES,
+  RAX_CMP_FALLBACK_POLICIES,
+  RAX_CMP_READBACK_PRIORITIES,
+  RAX_CMP_RECOVERY_PREFERENCES,
+} from "./cmp-types.js";
+export {
+  createCmpStatusPanelRows,
+  createCmpStatusPanelRows as createCmpStatusPanelRenderRows,
+  createRaxCmpStatusPanel,
+  renderCmpStatusPanel,
+} from "./cmp-status-panel.js";
 export {
   CAPABILITY_ACTIONS,
   CAPABILITY_NAMESPACES,
