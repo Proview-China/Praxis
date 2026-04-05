@@ -136,10 +136,26 @@ import {
   executeCmpProjectInfraBootstrap,
 } from "./cmp-runtime/index.js";
 import {
+  type CmpCheckerEvaluateInput,
+  type CmpCheckerLiveOptions,
+  type CmpDbAgentMaterializeInput,
+  type CmpDbAgentMaterializeLiveOptions,
+  type CmpDbAgentPassiveInput,
+  type CmpDbAgentPassiveLiveOptions,
+  type CmpDispatcherDispatchInput,
+  type CmpDispatcherLiveOptions,
+  type CmpDispatcherPassiveLiveOptions,
+  type CmpDispatcherPassiveReturnInput,
+  type CmpFiveAgentActiveLiveRunInput,
+  type CmpFiveAgentPassiveLiveRunInput,
   createCmpFiveAgentRuntime,
   createCmpRoleTapProfile,
   createCmpFiveAgentTapBridgeCompiled,
   createCheckerCheckedSnapshotMetadata,
+  type CmpIcmaIngestInput,
+  type CmpIcmaLiveOptions,
+  type CmpIteratorAdvanceInput,
+  type CmpIteratorLiveOptions,
   type CmpFiveAgentCapabilityAccessResolution,
   type CmpFiveAgentTapBridgeContext,
   type CmpFiveAgentRole,
@@ -2270,6 +2286,54 @@ export class AgentCoreRuntime {
 
   getCmpFiveAgentRuntimeSummary(agentId?: string): CmpFiveAgentSummary {
     return this.#cmpFiveAgentRuntime.createSummary(agentId);
+  }
+
+  async captureCmpIcmaWithLlm(input: CmpIcmaIngestInput, options: CmpIcmaLiveOptions = {}) {
+    return this.#cmpFiveAgentRuntime.captureIcmaWithLlm(input, options);
+  }
+
+  async advanceCmpIteratorWithLlm(input: CmpIteratorAdvanceInput, options: CmpIteratorLiveOptions = {}) {
+    return this.#cmpFiveAgentRuntime.advanceIteratorWithLlm(input, options);
+  }
+
+  async evaluateCmpCheckerWithLlm(input: CmpCheckerEvaluateInput, options: CmpCheckerLiveOptions = {}) {
+    return this.#cmpFiveAgentRuntime.evaluateCheckerWithLlm(input, options);
+  }
+
+  async materializeCmpDbAgentWithLlm(
+    input: CmpDbAgentMaterializeInput,
+    options: CmpDbAgentMaterializeLiveOptions = {},
+  ) {
+    return this.#cmpFiveAgentRuntime.materializeDbAgentWithLlm(input, options);
+  }
+
+  async servePassiveCmpDbAgentWithLlm(
+    input: CmpDbAgentPassiveInput,
+    options: CmpDbAgentPassiveLiveOptions = {},
+  ) {
+    return this.#cmpFiveAgentRuntime.servePassiveDbAgentWithLlm(input, options);
+  }
+
+  async dispatchCmpDispatcherWithLlm(
+    input: CmpDispatcherDispatchInput,
+    options: CmpDispatcherLiveOptions = {},
+  ) {
+    return this.#cmpFiveAgentRuntime.dispatchDispatcherWithLlm(input, options);
+  }
+
+  async deliverPassiveCmpDispatcherWithLlm(
+    input: CmpDispatcherPassiveReturnInput,
+    options: CmpDispatcherPassiveLiveOptions = {},
+  ) {
+    return this.#cmpFiveAgentRuntime.deliverDispatcherPassiveReturnWithLlm(input, options);
+  }
+
+  async runCmpFiveAgentActiveLiveLoop(input: CmpFiveAgentActiveLiveRunInput) {
+    return this.#cmpFiveAgentRuntime.runActiveLoopWithLlm(input);
+  }
+
+  async runCmpFiveAgentPassiveLiveLoop(input: CmpFiveAgentPassiveLiveRunInput) {
+    return this.#cmpFiveAgentRuntime.runPassiveLoopWithLlm(input);
   }
 
   resolveCmpFiveAgentCapabilityAccess(input: {
