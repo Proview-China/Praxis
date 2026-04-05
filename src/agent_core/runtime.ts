@@ -1257,11 +1257,20 @@ export class AgentCoreRuntime {
     summary?: string;
     metadata?: Record<string, unknown>;
   }): void {
+    const runtimeAssembly = isRecord(params.request.metadata?.runtimeAssembly)
+      ? params.request.metadata.runtimeAssembly as Record<string, unknown>
+      : undefined;
+    const sessionId = typeof runtimeAssembly?.sourceSessionId === "string"
+      ? runtimeAssembly.sourceSessionId
+      : `provision:${params.request.provisionId}`;
+    const runId = typeof runtimeAssembly?.sourceRunId === "string"
+      ? runtimeAssembly.sourceRunId
+      : `provision:${params.request.provisionId}`;
     this.#recordTapAgentRecord(createTapAgentRecord({
       recordId: `tma:${params.bundle.bundleId}`,
       actor: "tma",
-      sessionId: `provision:${params.request.provisionId}`,
-      runId: `provision:${params.request.provisionId}`,
+      sessionId,
+      runId,
       requestId: params.request.sourceRequestId,
       provisionId: params.request.provisionId,
       capabilityKey: params.request.requestedCapabilityKey,
@@ -1674,8 +1683,24 @@ export class AgentCoreRuntime {
     }
 
     const latest = this.journal.getLatestEvent(runId);
+    const checkpointId = randomUUID();
+    this.checkpointStore.writeFastCheckpoint({
+      checkpointId,
+      sessionId: run.sessionId,
+      runId,
+      reason,
+      createdAt: new Date().toISOString(),
+      basedOnEventId: latest?.event.eventId,
+      journalCursor: latest?.cursor,
+      pendingIntentId: run.pendingIntentId,
+      snapshot,
+      metadata: {
+        source: "tap-runtime-checkpoint",
+        mirroredFast: true,
+      },
+    });
     return this.checkpointStore.writeDurableCheckpoint({
-      checkpointId: randomUUID(),
+      checkpointId,
       sessionId: run.sessionId,
       runId,
       reason,
@@ -1828,7 +1853,20 @@ export class AgentCoreRuntime {
     }
     this.#taHumanGateContexts.clear();
     for (const [gateId, context] of hydrated.humanGateContexts) {
-      this.#taHumanGateContexts.set(gateId, context);
+      if (!this.sessionManager.loadSessionHeader(context.accessRequest.sessionId)) {
+        this.sessionManager.createSession({
+          sessionId: context.accessRequest.sessionId,
+          activeRunId: context.accessRequest.runId,
+          runIds: [context.accessRequest.runId],
+          status: "active",
+        });
+      }
+      this.#taHumanGateContexts.set(gateId, {
+        intent: context.intent,
+        accessRequest: context.accessRequest,
+        reviewDecision: context.reviewDecision,
+        options: context.options,
+      });
       this.taControlPlaneGateway?.restoreRequest(context.accessRequest);
       this.taControlPlaneGateway?.restoreDecision(context.reviewDecision);
     }
@@ -1846,6 +1884,14 @@ export class AgentCoreRuntime {
     }
     this.#taResumeEnvelopes.clear();
     for (const [envelopeId, envelope] of hydrated.resumeEnvelopes) {
+      if (!this.sessionManager.loadSessionHeader(envelope.sessionId)) {
+        this.sessionManager.createSession({
+          sessionId: envelope.sessionId,
+          activeRunId: envelope.runId,
+          runIds: [envelope.runId],
+          status: "active",
+        });
+      }
       this.#taResumeEnvelopes.set(envelopeId, envelope);
     }
     this.reviewerRuntime?.hydrateDurableSnapshot(hydrated.reviewerDurableSnapshot);
@@ -2081,6 +2127,20 @@ export class AgentCoreRuntime {
     const runId = typeof relatedReplay?.metadata?.runId === "string"
       ? relatedReplay.metadata.runId
       : undefined;
+    await this.#recordToolReviewActivation({
+      provisionId,
+      capabilityKey: currentAsset?.capabilityKey ?? asset.capabilityKey,
+      activationSpec: currentAsset?.activation.spec ?? asset.activation.spec,
+      attempt: activationResult.attempt,
+      receipt: activationResult.status === "activated" ? activationResult.receipt : undefined,
+      failure: activationResult.status === "failed" ? activationResult.failure : undefined,
+      requestId: relatedReplay?.requestId,
+      sessionId,
+      runId,
+      reason: activationResult.status === "activated"
+        ? `Activation completed for ${currentAsset?.capabilityKey ?? asset.capabilityKey}.`
+        : `Activation failed for ${currentAsset?.capabilityKey ?? asset.capabilityKey}.`,
+    });
     if (sessionId && runId) {
       this.#writeTapControlPlaneCheckpoint({
         sessionId,
@@ -4901,6 +4961,7 @@ export class AgentCoreRuntime {
     }
 
     const executionRequestId = consumed.decisionToken?.requestId ?? context.intent.request.requestId;
+    await this.#ensureRunAvailable(context.intent.runId);
     const dispatch = await this.dispatchTaCapabilityGrant({
       grant: consumed.grant,
       decisionToken: consumed.decisionToken,
@@ -5015,13 +5076,22 @@ export class AgentCoreRuntime {
           ...(safety.metadata ?? {}),
         },
       });
+      await this.reviewerRuntime.recordDurableState({
+        request: accessRequest,
+        decision: reviewDecision,
+        source: "review_engine",
+      });
+      this.#recordReviewerAgentRecord({
+        accessRequest,
+        reviewDecision,
+      });
       gateway.consumeReviewDecision(reviewDecision);
       return {
         status: "waiting_human",
         safety,
         accessRequest,
         reviewDecision,
-        humanGate: this.#openHumanGate({
+        humanGate: await this.#openHumanGate({
           accessRequest,
           reviewDecision,
           intent,
@@ -5593,6 +5663,8 @@ export class AgentCoreRuntime {
         ],
         runtimeAssembly: {
           sourceRequestId: params.accessRequest.requestId,
+          sourceSessionId: params.accessRequest.sessionId,
+          sourceRunId: params.accessRequest.runId,
           sourceDecisionId: params.reviewDecision.decisionId,
           sourceMode: params.accessRequest.mode,
         },
@@ -5967,12 +6039,12 @@ export class AgentCoreRuntime {
     };
   }
 
-  #openHumanGate(params: {
+  async #openHumanGate(params: {
     accessRequest: AccessRequest;
     reviewDecision: ReviewDecision;
     intent: CapabilityCallIntent;
     options: DispatchCapabilityIntentViaTaPoolOptions;
-  }): TaCapabilityHumanGateHandoff {
+  }): Promise<TaCapabilityHumanGateHandoff> {
     const gateId = randomUUID();
     const createdAt = new Date().toISOString();
     const plainLanguageRisk = this.#buildHumanGateRiskPayload({
@@ -6011,6 +6083,37 @@ export class AgentCoreRuntime {
         reviewDecisionId: params.reviewDecision.decisionId,
       },
     }));
+    this.#recordResumeEnvelope(createTaResumeEnvelope({
+      envelopeId: `resume:human-gate:${gateId}`,
+      source: "human_gate",
+      requestId: params.accessRequest.requestId,
+      sessionId: params.accessRequest.sessionId,
+      runId: params.accessRequest.runId,
+      capabilityKey: params.accessRequest.requestedCapabilityKey,
+      requestedTier: params.accessRequest.requestedTier,
+      mode: params.accessRequest.mode,
+      reason: params.accessRequest.reason,
+      reviewDecisionId: params.reviewDecision.decisionId,
+      intentRequest: {
+        requestId: params.intent.request.requestId,
+        intentId: params.intent.intentId,
+        capabilityKey: params.intent.request.capabilityKey,
+        input: params.intent.request.input,
+        priority: params.intent.priority,
+        metadata: params.intent.request.metadata,
+      },
+      metadata: {
+        gateId,
+        agentId: params.options.agentId,
+        taskContext: params.options.taskContext,
+      },
+    }));
+    await this.#recordToolReviewHumanGate({
+      gate,
+      accessRequest: params.accessRequest,
+      reviewDecision: params.reviewDecision,
+      reason: params.reviewDecision.reason,
+    });
     this.#writeTapControlPlaneCheckpoint({
       sessionId: params.accessRequest.sessionId,
       runId: params.accessRequest.runId,
@@ -6044,7 +6147,7 @@ export class AgentCoreRuntime {
     return event;
   }
 
-  #stageProvisionReplay(params: {
+  async #stageProvisionReplay(params: {
     accessRequest: AccessRequest;
     provisionBundle: ProvisionArtifactBundle;
     intent: CapabilityCallIntent;
@@ -6052,7 +6155,7 @@ export class AgentCoreRuntime {
     options?: DispatchCapabilityIntentViaTaPoolOptions;
     reviewDecision?: ReviewDecision;
     metadata?: Record<string, unknown>;
-  }): TaCapabilityReplayHandoff {
+  }): Promise<TaCapabilityReplayHandoff> {
     const replay = createTaPendingReplay({
       replayId: `replay:${params.accessRequest.requestId}:${params.provisionBundle.provisionId}`,
       request: params.accessRequest,
@@ -6060,13 +6163,51 @@ export class AgentCoreRuntime {
       createdAt: params.provisionBundle.completedAt ?? new Date().toISOString(),
       metadata: {
         source: params.source,
+        agentId: params.options?.agentId,
         intentId: params.intent.intentId,
         runId: params.intent.runId,
         sessionId: params.intent.sessionId,
+        requestedTier: params.accessRequest.requestedTier,
+        mode: params.accessRequest.mode,
+        taskContext: params.options?.taskContext,
         ...(params.metadata ?? {}),
       },
     });
     this.#taPendingReplays.set(replay.replayId, replay);
+    this.#recordResumeEnvelope(createTaResumeEnvelope({
+      envelopeId: `resume:replay:${replay.replayId}`,
+      source: "replay",
+      requestId: params.accessRequest.requestId,
+      sessionId: params.intent.sessionId,
+      runId: params.intent.runId,
+      capabilityKey: params.accessRequest.requestedCapabilityKey,
+      requestedTier: params.accessRequest.requestedTier,
+      mode: params.accessRequest.mode,
+      reason: params.accessRequest.reason,
+      intentRequest: {
+        requestId: params.intent.request.requestId,
+        intentId: params.intent.intentId,
+        capabilityKey: params.intent.request.capabilityKey,
+        input: params.intent.request.input,
+        priority: params.intent.priority,
+        metadata: params.intent.request.metadata,
+      },
+      metadata: {
+        replayId: replay.replayId,
+        provisionId: params.provisionBundle.provisionId,
+        agentId: params.options?.agentId,
+        taskContext: params.options?.taskContext,
+        tapGovernanceDirective: isRecord(params.options?.metadata?.tapGovernanceDirective)
+          ? params.options?.metadata?.tapGovernanceDirective
+          : undefined,
+      },
+    }));
+    await this.#recordToolReviewReplay({
+      replay,
+      accessRequest: params.accessRequest,
+      reviewDecision: params.reviewDecision,
+      reason: replay.reason,
+    });
     this.#writeTapControlPlaneCheckpoint({
       sessionId: params.intent.sessionId,
       runId: params.intent.runId,
@@ -6778,6 +6919,7 @@ export class AgentCoreRuntime {
           })
           : undefined,
         replay: provisionBundle.status === "ready" ? replay : undefined,
+        continueResult,
         safety: params.safety?.outcome === "allow" ? undefined : params.safety,
       };
     }
@@ -6796,6 +6938,17 @@ export class AgentCoreRuntime {
     const continueResult = provisionAsset
       ? await this.#pickupToolReviewerSessionHandoff(`tool-review:provision:${provisionAsset.provisionId}`)
       : undefined;
+    if (continueResult?.status === "continued" && continueResult.continueResult?.dispatchResult) {
+      return {
+        ...continueResult.continueResult.dispatchResult,
+        accessRequest: params.accessRequest,
+        reviewDecision,
+        activation: continueResult.continueResult.activation ?? continueResult.continueResult.dispatchResult.activation,
+        replay: continueResult.continueResult.dispatchResult.replay ?? replay,
+        continueResult: continueResult.continueResult,
+        safety: params.safety?.outcome === "allow" ? undefined : params.safety,
+      };
+    }
 
     return {
       status: reviewDecision.decision === "escalated_to_human"
@@ -6813,6 +6966,9 @@ export class AgentCoreRuntime {
         })
         : undefined,
       replay,
+      continueResult: continueResult?.status === "continued"
+        ? continueResult.continueResult
+        : undefined,
       humanGate: reviewDecision.decision === "escalated_to_human"
         ? await this.#openHumanGate({
           accessRequest: params.accessRequest,
@@ -6820,6 +6976,22 @@ export class AgentCoreRuntime {
           intent: params.intent,
           options: params.options,
         })
+        : replay?.policy === "manual"
+          ? this.#createHumanGateHandoff({
+            source: "replay_policy",
+            capabilityKey: params.accessRequest.requestedCapabilityKey,
+            requestedTier: params.accessRequest.requestedTier,
+            mode: params.accessRequest.mode,
+            requestedAction: params.accessRequest.requestedAction ?? this.#describeCapabilityIntentAction(params.intent),
+            reason: replay.reason,
+            riskLevel: reviewDecision.riskLevel ?? params.accessRequest.riskLevel,
+            plainLanguageRisk: reviewDecision.plainLanguageRisk ?? params.accessRequest.plainLanguageRisk,
+            metadata: {
+              accessRequestId: params.accessRequest.requestId,
+              reviewDecisionId: reviewDecision.decisionId,
+              replayPolicy: replay.policy,
+            },
+          })
         : undefined,
       safety: params.safety?.outcome === "allow" ? undefined : params.safety,
     };
