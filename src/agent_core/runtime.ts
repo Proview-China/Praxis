@@ -481,7 +481,7 @@ export interface PickupToolReviewerReadyHandoffResult {
   capabilityKey?: string;
   status: "continued" | "skipped";
   continueResult?: ContinueTaProvisioningResult;
-  skippedReason?: "non_provision_session" | "no_follow_up_state";
+  skippedReason?: "non_provision_session" | "no_follow_up_state" | "handoff_not_ready";
 }
 
 interface TaHumanGateContext {
@@ -816,6 +816,15 @@ export class AgentCoreRuntime {
     reviewDecision: ReviewDecision;
     metadata?: Record<string, unknown>;
   }): void {
+    const explanation = isRecord(params.reviewDecision.metadata?.reviewerExplanation)
+      ? params.reviewDecision.metadata.reviewerExplanation as Record<string, unknown>
+      : undefined;
+    const humanSummary = typeof explanation?.humanSummary === "string"
+      ? explanation.humanSummary
+      : undefined;
+    const userFacingExplanation = typeof explanation?.userFacingExplanation === "string"
+      ? explanation.userFacingExplanation
+      : undefined;
     this.#recordTapAgentRecord(createTapAgentRecord({
       recordId: `reviewer:${params.reviewDecision.decisionId}`,
       actor: "reviewer",
@@ -824,7 +833,7 @@ export class AgentCoreRuntime {
       requestId: params.accessRequest.requestId,
       capabilityKey: params.accessRequest.requestedCapabilityKey,
       status: params.reviewDecision.decision,
-      summary: params.reviewDecision.reason,
+      summary: humanSummary ?? userFacingExplanation ?? params.reviewDecision.reason,
       createdAt: params.reviewDecision.createdAt,
       metadata: {
         decisionId: params.reviewDecision.decisionId,
@@ -882,6 +891,12 @@ export class AgentCoreRuntime {
     const runId = typeof runtimeAssembly?.sourceRunId === "string"
       ? runtimeAssembly.sourceRunId
       : `provision:${params.request.provisionId}`;
+    const deliveryReceipt = isRecord(params.bundle.metadata?.tmaDeliveryReceipt)
+      ? params.bundle.metadata.tmaDeliveryReceipt as Record<string, unknown>
+      : undefined;
+    const executionSummary = isRecord(deliveryReceipt?.executionSummary)
+      ? deliveryReceipt.executionSummary as Record<string, unknown>
+      : undefined;
     const buildSummary = typeof params.bundle.metadata?.buildSummary === "string"
       ? params.bundle.metadata.buildSummary
       : undefined;
@@ -895,12 +910,18 @@ export class AgentCoreRuntime {
       provisionId: params.request.provisionId,
       capabilityKey: params.request.requestedCapabilityKey,
       status: params.bundle.status,
-      summary: params.summary ?? buildSummary ?? `TMA produced a ${params.bundle.status} bundle for ${params.request.requestedCapabilityKey}.`,
+      summary: params.summary
+        ?? (typeof executionSummary?.summary === "string" ? executionSummary.summary : undefined)
+        ?? buildSummary
+        ?? `TMA produced a ${params.bundle.status} bundle for ${params.request.requestedCapabilityKey}.`,
       createdAt: params.bundle.completedAt ?? params.request.createdAt,
       metadata: {
         bundleId: params.bundle.bundleId,
         replayPolicy: params.bundle.replayPolicy,
         activationMode: params.bundle.activationSpec?.activationMode,
+        ...(typeof executionSummary?.status === "string"
+          ? { executionStatus: executionSummary.status }
+          : {}),
         ...params.metadata,
       },
     }));
@@ -997,6 +1018,9 @@ export class AgentCoreRuntime {
           summary: "TMA resumed a stored session and returned a ready bundle.",
         });
       }
+      await this.pickupToolReviewerReadyHandoffs({
+        sessionId: `tool-review:provision:${bundle.provisionId}`,
+      });
     }
     return bundle;
   }
@@ -1009,44 +1033,59 @@ export class AgentCoreRuntime {
     return this.provisionerRuntime?.listDeliveryReports() ?? [];
   }
 
-  async pickupToolReviewerReadyHandoffs(): Promise<PickupToolReviewerReadyHandoffResult[]> {
+  async #pickupToolReviewerSessionHandoff(
+    sessionId: string,
+  ): Promise<PickupToolReviewerReadyHandoffResult> {
+    const report = this.toolReviewerRuntime?.createQualityReport(sessionId);
+    if (!report || report.verdict !== "handoff_ready") {
+      return {
+        sessionId,
+        status: "skipped",
+        skippedReason: "handoff_not_ready",
+      };
+    }
+    if (!sessionId.startsWith("tool-review:provision:")) {
+      return {
+        sessionId,
+        status: "skipped",
+        skippedReason: "non_provision_session",
+      };
+    }
+
+    const provisionId = sessionId.slice("tool-review:provision:".length);
+    const asset = this.provisionerRuntime?.assetIndex.getCurrent(provisionId);
+    const pendingReplay = this.#findPendingReplayByProvisionId(provisionId);
+    const replayEnvelope = this.#findReplayEnvelopeByProvisionId(provisionId);
+    const capabilityKey = asset?.capabilityKey ?? pendingReplay?.capabilityKey;
+    if (!asset && !pendingReplay && !replayEnvelope) {
+      return {
+        sessionId,
+        provisionId,
+        capabilityKey,
+        status: "skipped",
+        skippedReason: "no_follow_up_state",
+      };
+    }
+
+    return {
+      sessionId,
+      provisionId,
+      capabilityKey,
+      status: "continued",
+      continueResult: await this.continueTaProvisioning(provisionId),
+    };
+  }
+
+  async pickupToolReviewerReadyHandoffs(options: {
+    sessionId?: string;
+  } = {}): Promise<PickupToolReviewerReadyHandoffResult[]> {
     const results: PickupToolReviewerReadyHandoffResult[] = [];
-    for (const report of this.listToolReviewerQualityReports()) {
+    for (const report of this.listToolReviewerQualityReports()
+      .filter((entry) => !options.sessionId || entry.sessionId === options.sessionId)) {
       if (report.verdict !== "handoff_ready") {
         continue;
       }
-      if (!report.sessionId.startsWith("tool-review:provision:")) {
-        results.push({
-          sessionId: report.sessionId,
-          status: "skipped",
-          skippedReason: "non_provision_session",
-        });
-        continue;
-      }
-
-      const provisionId = report.sessionId.slice("tool-review:provision:".length);
-      const asset = this.provisionerRuntime?.assetIndex.getCurrent(provisionId);
-      const pendingReplay = this.#findPendingReplayByProvisionId(provisionId);
-      const replayEnvelope = this.#findReplayEnvelopeByProvisionId(provisionId);
-      const capabilityKey = asset?.capabilityKey ?? pendingReplay?.capabilityKey;
-      if (!asset && !pendingReplay && !replayEnvelope) {
-        results.push({
-          sessionId: report.sessionId,
-          provisionId,
-          capabilityKey,
-          status: "skipped",
-          skippedReason: "no_follow_up_state",
-        });
-        continue;
-      }
-
-      results.push({
-        sessionId: report.sessionId,
-        provisionId,
-        capabilityKey,
-        status: "continued",
-        continueResult: await this.continueTaProvisioning(provisionId),
-      });
+      results.push(await this.#pickupToolReviewerSessionHandoff(report.sessionId));
     }
 
     return results;
@@ -1190,9 +1229,11 @@ export class AgentCoreRuntime {
       reviewDecision: params.reviewDecision,
       metadata: params.metadata,
     });
-    const autoContinue = await this.#maybeAutoContinueProvisioning(
-      params.provisionRequest.provisionId,
-    );
+    const autoPickup = this.#canAutoContinueProvisioning(params.provisionRequest.provisionId)
+      ? await this.#pickupToolReviewerSessionHandoff(
+        `tool-review:provision:${params.provisionRequest.provisionId}`,
+      )
+      : undefined;
 
     return {
       provisionAsset,
@@ -1204,7 +1245,9 @@ export class AgentCoreRuntime {
         })
         : undefined,
       replay,
-      autoContinue,
+      autoContinue: autoPickup?.status === "continued"
+        ? autoPickup.continueResult
+        : undefined,
     };
   }
 
@@ -1985,6 +2028,19 @@ export class AgentCoreRuntime {
       reviewDecision: approvalDecision,
     });
     if (!capabilityAvailable && (capabilityTracked || existingProvisionAsset)) {
+      const replay = existingProvisionAsset
+        ? await this.#ensureProvisionAssetReplay({
+          accessRequest: context.accessRequest,
+          intent: context.intent,
+          source: "human-gate-approval-existing-asset",
+          asset: existingProvisionAsset,
+          options: context.options,
+          reviewDecision: approvalDecision,
+        })
+        : undefined;
+      const continueResult = existingProvisionAsset
+        ? await this.#pickupToolReviewerSessionHandoff(`tool-review:provision:${existingProvisionAsset.provisionId}`)
+        : undefined;
       this.#writeTapControlPlaneCheckpoint({
         sessionId: context.accessRequest.sessionId,
         runId: context.accessRequest.runId,
@@ -1998,6 +2054,17 @@ export class AgentCoreRuntime {
           reusedProvisionAsset: existingProvisionAsset?.provisionId,
         },
       });
+      if (continueResult?.status === "continued" && continueResult.continueResult?.dispatchResult) {
+        return {
+          ...continueResult.continueResult.dispatchResult,
+          accessRequest: context.accessRequest,
+          reviewDecision: approvalDecision,
+          activation: continueResult.continueResult.activation ?? continueResult.continueResult.dispatchResult.activation,
+          replay: continueResult.continueResult.dispatchResult.replay ?? replay,
+          humanGate,
+          continueResult: continueResult.continueResult,
+        };
+      }
       return {
         status: "deferred",
         accessRequest: context.accessRequest,
@@ -2008,13 +2075,11 @@ export class AgentCoreRuntime {
             asset: existingProvisionAsset,
           })
           : undefined,
-        replay: existingProvisionAsset
-          ? this.#createReplayHandoff({
-            source: "provision_asset",
-            asset: existingProvisionAsset,
-          })
-          : undefined,
+        replay,
         humanGate,
+        continueResult: continueResult?.status === "continued"
+          ? continueResult.continueResult
+          : undefined,
       };
     }
     if (!capabilityAvailable) {
@@ -2991,6 +3056,20 @@ export class AgentCoreRuntime {
         reviewDecision,
       })
       : undefined;
+    const continueResult = provisionAsset
+      ? await this.#pickupToolReviewerSessionHandoff(`tool-review:provision:${provisionAsset.provisionId}`)
+      : undefined;
+    if (continueResult?.status === "continued" && continueResult.continueResult?.dispatchResult) {
+      return {
+        ...continueResult.continueResult.dispatchResult,
+        accessRequest: params.accessRequest,
+        reviewDecision,
+        activation: continueResult.continueResult.activation ?? continueResult.continueResult.dispatchResult.activation,
+        replay: continueResult.continueResult.dispatchResult.replay ?? replay,
+        continueResult: continueResult.continueResult,
+        safety: params.safety?.outcome === "allow" ? undefined : params.safety,
+      };
+    }
 
     return {
       status: reviewDecision.decision === "escalated_to_human"
@@ -3008,6 +3087,9 @@ export class AgentCoreRuntime {
         })
         : undefined,
       replay,
+      continueResult: continueResult?.status === "continued"
+        ? continueResult.continueResult
+        : undefined,
       humanGate: reviewDecision.decision === "escalated_to_human"
         ? await this.#openHumanGate({
           accessRequest: params.accessRequest,
