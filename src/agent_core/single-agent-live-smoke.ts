@@ -24,6 +24,7 @@ import {
 import { createToolReviewGovernanceTrace } from "./ta-pool-tool-review/index.js";
 import { createAgentCoreRuntime } from "./runtime.js";
 import { loadOpenAILiveConfig } from "../rax/live-config.js";
+import type { TapAgentModelRoute } from "./integrations/tap-agent-model.js";
 
 type ProviderTarget = "openai";
 type SmokeLane = "core" | "tap" | "cmp-bridge" | "cmp-live";
@@ -138,7 +139,8 @@ async function smokeCoreViaTap(config: ReturnType<typeof loadOpenAILiveConfig>):
       userInput: "请用一句中文确认 Praxis core TAP single-agent live smoke 已通过，并且包含单词 PASS。",
       metadata: {
         provider: "openai",
-        model: config.model,
+        model: "gpt-5.4",
+        reasoningEffort: "high",
       },
     }),
     maxSteps: 2,
@@ -175,6 +177,13 @@ async function smokeCoreViaTap(config: ReturnType<typeof loadOpenAILiveConfig>):
 }
 
 async function smokeTapThreeAgentWorkers(config: ReturnType<typeof loadOpenAILiveConfig>): Promise<SmokeRow> {
+  const tapRoute: Partial<TapAgentModelRoute> = {
+    provider: "openai",
+    model: "gpt-5.4",
+    layer: "api",
+    reasoningEffort: "medium",
+    maxOutputTokens: 192,
+  };
   const runtime = createAgentCoreRuntime({
     taProfile: createAgentCapabilityProfile({
       profileId: "profile.live-smoke.single-agent.tap",
@@ -182,6 +191,11 @@ async function smokeTapThreeAgentWorkers(config: ReturnType<typeof loadOpenAILiv
       defaultMode: "permissive",
     }),
     modelInferenceExecutor: executeModelInference,
+    tapAgentModelRoutes: {
+      reviewer: tapRoute,
+      toolReviewer: tapRoute,
+      provisioner: tapRoute,
+    },
   });
 
   const reviewerDecision = await runtime.reviewerRuntime?.submit({
@@ -316,12 +330,48 @@ async function smokeCmpTapBridge(config: ReturnType<typeof loadOpenAILiveConfig>
 
 async function smokeCmpLiveLoop(config: ReturnType<typeof loadOpenAILiveConfig>): Promise<SmokeRow> {
   const runtime = createAgentCoreRuntime();
-  const executor = createCmpRoleLiveLlmModelExecutor({
-    provider: "openai",
-    model: config.model,
-    layer: "api",
-    variant: "responses",
-  });
+  const executors = {
+    icma: createCmpRoleLiveLlmModelExecutor({
+      provider: "openai",
+      model: "gpt-5.4",
+      layer: "api",
+      variant: "responses",
+      reasoningEffort: "medium",
+      maxOutputTokens: 256,
+    }),
+    iterator: createCmpRoleLiveLlmModelExecutor({
+      provider: "openai",
+      model: "gpt-5.4",
+      layer: "api",
+      variant: "responses",
+      reasoningEffort: "low",
+      maxOutputTokens: 192,
+    }),
+    checker: createCmpRoleLiveLlmModelExecutor({
+      provider: "openai",
+      model: "gpt-5.4",
+      layer: "api",
+      variant: "responses",
+      reasoningEffort: "medium",
+      maxOutputTokens: 224,
+    }),
+    dbagent: createCmpRoleLiveLlmModelExecutor({
+      provider: "openai",
+      model: "gpt-5.4",
+      layer: "api",
+      variant: "responses",
+      reasoningEffort: "medium",
+      maxOutputTokens: 224,
+    }),
+    dispatcher: createCmpRoleLiveLlmModelExecutor({
+      provider: "openai",
+      model: "gpt-5.4",
+      layer: "api",
+      variant: "responses",
+      reasoningEffort: "high",
+      maxOutputTokens: 96,
+    }),
+  };
 
   const result = await runtime.runCmpFiveAgentActiveLiveLoop({
     icma: {
@@ -348,7 +398,7 @@ async function smokeCmpLiveLoop(config: ReturnType<typeof loadOpenAILiveConfig>)
       },
       options: {
         mode: "llm_assisted",
-        executor,
+        executor: executors.icma,
       },
     },
     iterator: {
@@ -366,7 +416,7 @@ async function smokeCmpLiveLoop(config: ReturnType<typeof loadOpenAILiveConfig>)
       },
       options: {
         mode: "llm_assisted",
-        executor,
+        executor: executors.iterator,
       },
     },
     checker: {
@@ -383,7 +433,7 @@ async function smokeCmpLiveLoop(config: ReturnType<typeof loadOpenAILiveConfig>)
       },
       options: {
         mode: "llm_assisted",
-        executor,
+        executor: executors.checker,
       },
     },
     dbagent: {
@@ -417,7 +467,7 @@ async function smokeCmpLiveLoop(config: ReturnType<typeof loadOpenAILiveConfig>)
       },
       options: {
         mode: "llm_assisted",
-        executor,
+        executor: executors.dbagent,
       },
     },
     dispatcher: {
@@ -455,7 +505,7 @@ async function smokeCmpLiveLoop(config: ReturnType<typeof loadOpenAILiveConfig>)
       },
       options: {
         mode: "llm_assisted",
-        executor,
+        executor: executors.dispatcher,
       },
     },
   });

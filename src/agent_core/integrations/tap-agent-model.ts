@@ -7,6 +7,8 @@ export interface TapAgentModelRoute {
   provider: string;
   model: string;
   layer?: string;
+  reasoningEffort?: "low" | "medium" | "high";
+  maxOutputTokens?: number;
 }
 
 export interface ExecuteTapAgentStructuredOutputInput<TOutput> {
@@ -50,6 +52,8 @@ function buildGoalFrame(params: {
       provider: params.route.provider,
       model: params.route.model,
       layer: params.route.layer ?? DEFAULT_TAP_AGENT_MODEL_ROUTE.layer,
+      reasoningEffort: params.route.reasoningEffort,
+      maxOutputTokens: params.route.maxOutputTokens,
       tapWorkerKind: params.workerKind,
       tapWorkerModel: true,
     },

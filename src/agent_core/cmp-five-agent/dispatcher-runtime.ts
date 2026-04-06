@@ -28,6 +28,55 @@ type CmpDispatcherLiveOutput = {
   scopePolicy?: string;
 };
 
+function createDispatcherActivePromptText(input: {
+  packageMode: CmpDispatcherRecord["packageMode"];
+  targetKind: CmpDispatcherRecord["targetKind"];
+  targetIngress: CmpDispatcherBundleEnvelope["target"]["targetIngress"];
+  packageKind: CmpDispatcherBundleEnvelope["body"]["packageKind"];
+  packageId: string;
+  targetAgentId: string;
+  sourceRequestId?: string;
+  sourceSnapshotId?: string;
+}): string {
+  return [
+    "Dispatcher active routing decision.",
+    "Return strict JSON only.",
+    "Use exactly this schema:",
+    '{"routeRationale":"one short sentence","bodyStrategy":"child_seed_full|peer_exchange_slim|historical_return","scopePolicy":"policy id","slimExchangeFields":["packageId","packageKind","primaryRef"]}',
+    "Rules:",
+    "- child_icma_only -> bodyStrategy must be child_seed_full and scopePolicy must be child_seed_only_enters_child_icma",
+    "- peer_exchange -> bodyStrategy must be peer_exchange_slim and scopePolicy must mention explicit parent approval",
+    "- core_agent_return -> bodyStrategy must be historical_return and scopePolicy must be historical_reply_returns_via_core_path",
+    "- Only include slimExchangeFields for peer_exchange_slim",
+    "- Keep routeRationale to one short sentence",
+    "Input:",
+    JSON.stringify(input, null, 2),
+  ].join("\n");
+}
+
+function createDispatcherPassivePromptText(input: {
+  packageMode: CmpDispatcherRecord["packageMode"];
+  targetIngress: CmpDispatcherBundleEnvelope["target"]["targetIngress"];
+  packageKind: CmpDispatcherBundleEnvelope["body"]["packageKind"];
+  packageId: string;
+  targetAgentId: string;
+  sourceRequestId?: string;
+}): string {
+  return [
+    "Dispatcher passive return decision.",
+    "Return strict JSON only.",
+    "Use exactly this schema:",
+    '{"routeRationale":"one short sentence","bodyStrategy":"historical_return","scopePolicy":"historical_reply_returns_via_core_path"}',
+    "Rules:",
+    "- passive historical replies return only via core_agent_return",
+    "- bodyStrategy must be historical_return",
+    "- scopePolicy must be historical_reply_returns_via_core_path",
+    "- Keep routeRationale to one short sentence",
+    "Input:",
+    JSON.stringify(input, null, 2),
+  ].join("\n");
+}
+
 function isString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
@@ -421,6 +470,17 @@ export class CmpDispatcherRuntime {
       executor: options.executor,
       metadata: {
         loopId: rulesResult.loop.loopId,
+        maxOutputTokens: 96,
+        promptText: createDispatcherActivePromptText({
+          packageId: rulesResult.loop.packageId,
+          packageKind: rulesResult.loop.bundle.body.packageKind,
+          packageMode: rulesResult.loop.packageMode,
+          targetAgentId: rulesResult.loop.targetAgentId,
+          targetKind: rulesResult.loop.targetKind,
+          targetIngress: rulesResult.loop.bundle.target.targetIngress,
+          sourceRequestId: rulesResult.loop.bundle.governance.sourceRequestId,
+          sourceSnapshotId: rulesResult.loop.bundle.governance.sourceSnapshotId,
+        }),
       },
     });
 
@@ -562,6 +622,15 @@ export class CmpDispatcherRuntime {
       executor: options.executor,
       metadata: {
         loopId: loop.loopId,
+        maxOutputTokens: 80,
+        promptText: createDispatcherPassivePromptText({
+          packageId: loop.packageId,
+          packageKind: loop.bundle.body.packageKind,
+          packageMode: loop.packageMode,
+          targetAgentId: loop.targetAgentId,
+          targetIngress: loop.bundle.target.targetIngress,
+          sourceRequestId: loop.bundle.governance.sourceRequestId,
+        }),
       },
     });
 

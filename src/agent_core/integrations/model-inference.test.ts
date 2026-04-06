@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildOpenAIProviderMetadata,
   omitResponsesMetadataForGatewayRetry,
   shouldRetryOpenAIResponsesOnTransientGateway,
   shouldRetryOpenAIResponsesOnRateLimit,
@@ -152,4 +153,26 @@ test("shouldRetryOpenAIResponsesOnTransientGateway returns true only for respons
       status: 503,
     },
   }), false);
+});
+
+test("buildOpenAIProviderMetadata keeps only provider-safe flat metadata fields", () => {
+  const result = buildOpenAIProviderMetadata({
+    provider: "openai",
+    model: "gpt-5.4-mini",
+    cmpRole: "dispatcher",
+    cmpLiveMode: "llm_required",
+    promptText: "very long internal prompt that should not leak to provider metadata",
+    schemaFields: ["routeRationale", "scopePolicy"],
+    maxOutputTokens: 96,
+    nested: {
+      noisy: true,
+    },
+  });
+
+  assert.deepEqual(result, {
+    provider: "openai",
+    model: "gpt-5.4-mini",
+    cmpRole: "dispatcher",
+    cmpLiveMode: "llm_required",
+  });
 });

@@ -70,6 +70,49 @@ function readStringMetadata(
   return typeof value === "string" ? value : undefined;
 }
 
+function readPositiveIntegerMetadata(
+  metadata: Record<string, unknown> | undefined,
+  key: string,
+): number | undefined {
+  const value = metadata?.[key];
+  return Number.isInteger(value) && Number(value) > 0 ? Number(value) : undefined;
+}
+
+export function buildOpenAIProviderMetadata(
+  metadata: Record<string, unknown> | undefined,
+): Record<string, string> | undefined {
+  if (!metadata) {
+    return undefined;
+  }
+
+  const allowedKeys = [
+    "provider",
+    "model",
+    "layer",
+    "variant",
+    "compatibilityProfileId",
+    "cmpRole",
+    "cmpLiveMode",
+    "tapWorkerKind",
+    "tapWorkerModel",
+  ] as const;
+
+  const normalized = Object.fromEntries(
+    allowedKeys.flatMap((key) => {
+      const value = metadata[key];
+      if (typeof value === "string" && value.trim()) {
+        return [[key, value]];
+      }
+      if (typeof value === "number" || typeof value === "boolean") {
+        return [[key, String(value)]];
+      }
+      return [];
+    }),
+  );
+
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
 function parseOpenAITextResponse(raw: unknown): string {
   if (typeof raw === "string") {
     try {
@@ -251,6 +294,8 @@ export async function executeModelInference(
   const layer = (readStringMetadata(metadata, "layer") as SdkLayer | undefined) ?? "api";
   const variant = readStringMetadata(metadata, "variant") ?? "chat_completions_compat";
   const compatibilityProfileId = readStringMetadata(metadata, "compatibilityProfileId");
+  const maxOutputTokens = readPositiveIntegerMetadata(metadata, "maxOutputTokens");
+  const reasoningEffort = readStringMetadata(metadata, "reasoningEffort") as "low" | "medium" | "high" | undefined;
 
   if (provider !== "openai") {
     throw new Error(`Model inference integration currently only supports provider ${"openai"}, received ${provider}.`);
@@ -268,12 +313,13 @@ export async function executeModelInference(
         ? {
             model,
             messages: [{ role: "user", content: params.intent.frame.instructionText }],
-            metadata: params.intent.frame.metadata,
-            reasoningEffort: config.reasoningEffort as "low" | "medium" | "high" | undefined,
+            maxCompletionTokens: maxOutputTokens,
+            reasoningEffort: reasoningEffort ?? config.reasoningEffort as "low" | "medium" | "high" | undefined,
           }
         : {
             input: params.intent.frame.instructionText,
-            metadata: params.intent.frame.metadata,
+            maxOutputTokens,
+            reasoning: reasoningEffort ? { effort: reasoningEffort } : undefined,
           },
   }) as {
     provider: ProviderId;

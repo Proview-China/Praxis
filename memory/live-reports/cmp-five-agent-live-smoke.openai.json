@@ -1,0 +1,24 @@
+{
+  "generatedAt": "2026-04-06T12:32:05.667Z",
+  "provider": "openai",
+  "baseURL": "https://gmn.chuangzuoli.com/v1",
+  "rows": [
+    {
+      "provider": "openai",
+      "role": "dispatcher",
+      "flow": "active",
+      "ok": true,
+      "model": "gpt-5.4-mini",
+      "mode": "llm_required",
+      "status": "live_applied",
+      "summary": "Child seed is restricted to the child ICMA path.",
+      "details": {
+        "targetIngress": "child_icma_only",
+        "packageMode": "child_seed_via_icma",
+        "bodyStrategy": "child_seed_full",
+        "scopePolicy": "child_seed_only_enters_child_icma",
+        "elapsedMs": 3144
+      }
+    }
+  ]
+}

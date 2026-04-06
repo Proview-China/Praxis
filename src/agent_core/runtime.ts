@@ -347,6 +347,12 @@ export interface AgentCoreRuntimeOptions {
   sessionManager?: SessionManager;
   modelInferenceExecutor?: (params: { intent: ModelInferenceIntent }) => Promise<ModelInferenceExecutionResult>;
   cmpInfraBackends?: CmpInfraBackends;
+  cmpFiveAgentRuntime?: CmpFiveAgentRuntime;
+  tapAgentModelRoutes?: {
+    reviewer?: Partial<import("./integrations/tap-agent-model.js").TapAgentModelRoute>;
+    toolReviewer?: Partial<import("./integrations/tap-agent-model.js").TapAgentModelRoute>;
+    provisioner?: Partial<import("./integrations/tap-agent-model.js").TapAgentModelRoute>;
+  };
 }
 
 export interface CreateTapTaskGovernanceInput {
@@ -940,7 +946,7 @@ export class AgentCoreRuntime {
   readonly #cmpRuntimeDispatchReceipts = new Map<string, CmpDispatchReceipt>();
   readonly #cmpSyncEvents = new Map<string, SyncEvent>();
   readonly #cmpProjectInfraBootstrapReceipts = new Map<string, CmpProjectInfraBootstrapReceipt>();
-  readonly #cmpFiveAgentRuntime: CmpFiveAgentRuntime = createCmpFiveAgentRuntime();
+  readonly #cmpFiveAgentRuntime: CmpFiveAgentRuntime;
   #cmpRuntimeInfraState: CmpRuntimeInfraState = createCmpRuntimeInfraState();
 
   constructor(options: AgentCoreRuntimeOptions = {}) {
@@ -954,6 +960,7 @@ export class AgentCoreRuntime {
       pool: this.capabilityPool,
     });
     this.#modelInferenceExecutor = options.modelInferenceExecutor ?? executeModelInference;
+    this.#cmpFiveAgentRuntime = options.cmpFiveAgentRuntime ?? createCmpFiveAgentRuntime();
     this.taControlPlaneGateway = options.taControlPlaneGateway
       ?? (options.taProfile ? new TaControlPlaneGateway({ profile: options.taProfile }) : undefined);
     const enableDefaultTapAgentModels = options.modelInferenceExecutor !== undefined;
@@ -963,6 +970,7 @@ export class AgentCoreRuntime {
           ? {
             llmReviewerHook: createDefaultReviewerLlmHook({
               executor: this.#modelInferenceExecutor,
+              route: options.tapAgentModelRoutes?.reviewer,
             }),
           }
           : {},
@@ -973,6 +981,7 @@ export class AgentCoreRuntime {
           ? {
             llmToolReviewerHook: createDefaultToolReviewerLlmHook({
               executor: this.#modelInferenceExecutor,
+              route: options.tapAgentModelRoutes?.toolReviewer,
             }),
           }
           : {},
@@ -983,6 +992,7 @@ export class AgentCoreRuntime {
           ? {
             workerBridge: createModelBackedProvisionerWorkerBridge({
               executor: this.#modelInferenceExecutor,
+              route: options.tapAgentModelRoutes?.provisioner,
             }),
           }
           : {},

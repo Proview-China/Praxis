@@ -13,6 +13,8 @@ export interface CreateCmpRoleLiveLlmModelExecutorInput {
   model?: string;
   layer?: Exclude<SdkLayer, "auto">;
   variant?: string;
+  reasoningEffort?: "low" | "medium" | "high";
+  maxOutputTokens?: number;
   executor?: (params: { intent: ModelInferenceIntent }) => Promise<ModelInferenceExecutionResult>;
 }
 
@@ -35,6 +37,8 @@ export function createCmpRoleLiveLlmModelExecutor(
   const model = input.model ?? "gpt-5.4";
   const layer = input.layer ?? "api";
   const variant = input.variant ?? "responses";
+  const reasoningEffort = input.reasoningEffort;
+  const maxOutputTokens = input.maxOutputTokens;
   const executor = input.executor ?? ((params: { intent: ModelInferenceIntent }) => executeModelInference(params));
 
   return async function runCmpRoleLiveLlm(request) {
@@ -53,6 +57,8 @@ export function createCmpRoleLiveLlmModelExecutor(
         variant,
         cmpRole: request.role,
         cmpLiveMode: request.mode,
+        reasoningEffort,
+        maxOutputTokens,
         ...(request.metadata ?? {}),
       },
     };

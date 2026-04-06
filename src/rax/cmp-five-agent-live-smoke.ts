@@ -11,21 +11,31 @@ import {
   createCmpFiveAgentRuntime,
   createCmpRoleLiveLlmModelExecutor,
 } from "../agent_core/cmp-five-agent/index.js";
+import type { CmpRoleLiveLlmMode } from "../agent_core/cmp-five-agent/index.js";
 import { loadOpenAILiveConfig } from "./live-config.js";
 
 type ProviderTarget = "openai";
 type CmpLiveRole = "icma" | "iterator" | "checker" | "dbagent" | "dispatcher";
 type CmpLiveRoleTarget = CmpLiveRole | "all";
+type CmpLiveFlowTarget = "active" | "passive" | "both";
 
 interface SmokeRow {
   provider: ProviderTarget;
   role: CmpLiveRole;
   ok: boolean;
   model: string;
+  flow?: "active" | "passive";
   mode?: string;
   status?: string;
   summary: string;
   details?: Record<string, unknown>;
+}
+
+interface SmokeCliOptions {
+  roleTarget: CmpLiveRoleTarget;
+  flowTarget: CmpLiveFlowTarget;
+  retryFallback: boolean;
+  liveMode: CmpRoleLiveLlmMode;
 }
 
 function parseProviderArg(argv: string[]): ProviderTarget {
@@ -59,6 +69,29 @@ function parseRoleArg(argv: string[]): CmpLiveRoleTarget {
     return value;
   }
   throw new Error(`Unsupported cmp five-agent smoke role: ${value}`);
+}
+
+function parseFlowArg(argv: string[]): CmpLiveFlowTarget {
+  const entry = argv.find((item) => item.startsWith("--flow="));
+  const value = entry?.slice("--flow=".length) ?? "both";
+  if (value === "active" || value === "passive" || value === "both") {
+    return value;
+  }
+  throw new Error(`Unsupported cmp five-agent smoke flow: ${value}`);
+}
+
+function parseRetryFallbackArg(argv: string[]): boolean {
+  if (argv.includes("--no-retry")) {
+    return false;
+  }
+  return true;
+}
+
+function parseLiveModeArg(argv: string[]): CmpRoleLiveLlmMode {
+  if (argv.includes("--strict-live")) {
+    return "llm_required";
+  }
+  return "llm_assisted";
 }
 
 function formatError(error: unknown): { summary: string; details: Record<string, unknown> } {
@@ -127,7 +160,35 @@ async function retryFallbackRow(fn: () => Promise<SmokeRow>): Promise<SmokeRow> 
   };
 }
 
-async function smokeOpenAI(roleTarget: CmpLiveRoleTarget): Promise<{ rows: SmokeRow[]; baseURL: string }> {
+async function maybeRetryFallbackRow(
+  fn: () => Promise<SmokeRow>,
+  options: { retryFallback: boolean },
+): Promise<SmokeRow> {
+  if (!options.retryFallback) {
+    return fn();
+  }
+  return retryFallbackRow(fn);
+}
+
+async function withElapsed<T extends SmokeRow>(
+  fn: () => Promise<T>,
+): Promise<T> {
+  const startedAt = Date.now();
+  try {
+    const row = await fn();
+    return {
+      ...row,
+      details: {
+        ...(row.details ?? {}),
+        elapsedMs: Date.now() - startedAt,
+      },
+    };
+  } catch (error) {
+    throw error;
+  }
+}
+
+async function smokeOpenAI(cli: SmokeCliOptions): Promise<{ rows: SmokeRow[]; baseURL: string }> {
   const rows: SmokeRow[] = [];
   const config = loadOpenAILiveConfig();
   const runtime = createCmpFiveAgentRuntime();
@@ -137,10 +198,11 @@ async function smokeOpenAI(roleTarget: CmpLiveRoleTarget): Promise<{ rows: Smoke
     layer: "api",
     variant: "responses",
   });
+  const { roleTarget, flowTarget, retryFallback, liveMode } = cli;
 
   if (roleTarget === "all" || roleTarget === "icma") {
     try {
-      rows.push(await retryFallbackRow(async () => {
+      rows.push(await maybeRetryFallbackRow(() => withElapsed(async () => {
       const result = await runtime.captureIcmaWithLlm({
         ingest: {
           agentId: "cmp-live-main",
@@ -166,7 +228,7 @@ async function smokeOpenAI(roleTarget: CmpLiveRoleTarget): Promise<{ rows: Smoke
         createdAt: "2026-03-31T00:00:00.000Z",
         loopId: "cmp-live-icma-1",
       }, {
-        mode: "llm_assisted",
+        mode: liveMode,
         executor,
       });
       return {
@@ -187,7 +249,7 @@ async function smokeOpenAI(roleTarget: CmpLiveRoleTarget): Promise<{ rows: Smoke
           errorMessage: result.loop.liveTrace?.errorMessage,
         },
       };
-      }));
+      }), { retryFallback }));
     } catch (error) {
       const formatted = formatError(error);
       rows.push({
@@ -203,7 +265,7 @@ async function smokeOpenAI(roleTarget: CmpLiveRoleTarget): Promise<{ rows: Smoke
 
   if (roleTarget === "all" || roleTarget === "iterator") {
     try {
-      rows.push(await retryFallbackRow(async () => {
+      rows.push(await maybeRetryFallbackRow(() => withElapsed(async () => {
       const result = await runtime.advanceIteratorWithLlm({
         agentId: "cmp-live-main",
         deltaId: "delta-cmp-live-1",
@@ -216,7 +278,7 @@ async function smokeOpenAI(roleTarget: CmpLiveRoleTarget): Promise<{ rows: Smoke
           sourceSectionIds: ["section-pre-live-1", "section-pre-live-2"],
         },
       }, {
-        mode: "llm_assisted",
+        mode: liveMode,
         executor,
       });
       return {
@@ -235,7 +297,7 @@ async function smokeOpenAI(roleTarget: CmpLiveRoleTarget): Promise<{ rows: Smoke
           errorMessage: result.liveTrace?.errorMessage,
         },
       };
-      }));
+      }), { retryFallback }));
     } catch (error) {
       const formatted = formatError(error);
       rows.push({
@@ -251,7 +313,7 @@ async function smokeOpenAI(roleTarget: CmpLiveRoleTarget): Promise<{ rows: Smoke
 
   if (roleTarget === "all" || roleTarget === "checker") {
     try {
-      rows.push(await retryFallbackRow(async () => {
+      rows.push(await maybeRetryFallbackRow(() => withElapsed(async () => {
       const result = await runtime.evaluateCheckerWithLlm({
         agentId: "cmp-live-main",
         candidateId: "candidate-cmp-live-1",
@@ -264,7 +326,7 @@ async function smokeOpenAI(roleTarget: CmpLiveRoleTarget): Promise<{ rows: Smoke
           checkedSectionIds: ["section-checked-live-1"],
         },
       }, {
-        mode: "llm_assisted",
+        mode: liveMode,
         executor,
       });
       return {
@@ -283,7 +345,7 @@ async function smokeOpenAI(roleTarget: CmpLiveRoleTarget): Promise<{ rows: Smoke
           errorMessage: result.checkerRecord.liveTrace?.errorMessage,
         },
       };
-      }));
+      }), { retryFallback }));
     } catch (error) {
       const formatted = formatError(error);
       rows.push({
@@ -297,9 +359,9 @@ async function smokeOpenAI(roleTarget: CmpLiveRoleTarget): Promise<{ rows: Smoke
     }
   }
 
-  if (roleTarget === "all" || roleTarget === "dbagent") {
+  if ((roleTarget === "all" || roleTarget === "dbagent") && (flowTarget === "active" || flowTarget === "both")) {
     try {
-      rows.push(await retryFallbackRow(async () => {
+      rows.push(await maybeRetryFallbackRow(() => withElapsed(async () => {
       const result = await runtime.materializeDbAgentWithLlm({
         checkedSnapshot: createCheckedSnapshot({
           snapshotId: "snapshot-cmp-live-1",
@@ -326,12 +388,13 @@ async function smokeOpenAI(roleTarget: CmpLiveRoleTarget): Promise<{ rows: Smoke
           sourceSectionIds: ["section-checked-live-1"],
         },
       }, {
-        mode: "llm_assisted",
+        mode: liveMode,
         executor,
       });
       return {
         provider: "openai",
         role: "dbagent",
+        flow: "active",
         ok: result.loop.liveTrace?.status === "live_applied",
         model: config.model,
         mode: result.loop.liveTrace?.mode,
@@ -346,12 +409,13 @@ async function smokeOpenAI(roleTarget: CmpLiveRoleTarget): Promise<{ rows: Smoke
           errorMessage: result.loop.liveTrace?.errorMessage,
         },
       };
-      }));
+      }), { retryFallback }));
     } catch (error) {
       const formatted = formatError(error);
       rows.push({
         provider: "openai",
         role: "dbagent",
+        flow: "active",
         ok: false,
         model: config.model,
         summary: formatted.summary,
@@ -360,9 +424,9 @@ async function smokeOpenAI(roleTarget: CmpLiveRoleTarget): Promise<{ rows: Smoke
     }
   }
 
-  if (roleTarget === "all" || roleTarget === "dispatcher") {
+  if ((roleTarget === "all" || roleTarget === "dispatcher") && (flowTarget === "active" || flowTarget === "both")) {
     try {
-      rows.push(await retryFallbackRow(async () => {
+      rows.push(await maybeRetryFallbackRow(() => withElapsed(async () => {
       const result = await runtime.dispatchDispatcherWithLlm({
         contextPackage: createContextPackage({
           packageId: "package-cmp-live-dispatch",
@@ -395,12 +459,13 @@ async function smokeOpenAI(roleTarget: CmpLiveRoleTarget): Promise<{ rows: Smoke
         createdAt: "2026-03-31T00:00:04.000Z",
         loopId: "dispatcher-cmp-live-1",
       }, {
-        mode: "llm_assisted",
+        mode: liveMode,
         executor,
       });
       return {
         provider: "openai",
         role: "dispatcher",
+        flow: "active",
         ok: result.loop.liveTrace?.status === "live_applied",
         model: config.model,
         mode: result.loop.liveTrace?.mode,
@@ -414,12 +479,13 @@ async function smokeOpenAI(roleTarget: CmpLiveRoleTarget): Promise<{ rows: Smoke
           errorMessage: result.loop.liveTrace?.errorMessage,
         },
       };
-      }));
+      }), { retryFallback }));
     } catch (error) {
       const formatted = formatError(error);
       rows.push({
         provider: "openai",
         role: "dispatcher",
+        flow: "active",
         ok: false,
         model: config.model,
         summary: formatted.summary,
@@ -428,9 +494,9 @@ async function smokeOpenAI(roleTarget: CmpLiveRoleTarget): Promise<{ rows: Smoke
     }
   }
 
-  if (roleTarget === "all" || roleTarget === "dbagent") {
+  if ((roleTarget === "all" || roleTarget === "dbagent") && (flowTarget === "passive" || flowTarget === "both")) {
     try {
-      rows.push(await retryFallbackRow(async () => {
+      rows.push(await maybeRetryFallbackRow(() => withElapsed(async () => {
       const result = await runtime.servePassiveDbAgentWithLlm({
         request: {
           requesterAgentId: "cmp-live-main",
@@ -464,12 +530,13 @@ async function smokeOpenAI(roleTarget: CmpLiveRoleTarget): Promise<{ rows: Smoke
           sourceSectionIds: ["section-passive-live-1"],
         },
       }, {
-        mode: "llm_assisted",
+        mode: liveMode,
         executor,
       });
       return {
         provider: "openai",
         role: "dbagent",
+        flow: "passive",
         ok: result.loop.liveTrace?.status === "live_applied",
         model: config.model,
         mode: result.loop.liveTrace?.mode,
@@ -483,12 +550,13 @@ async function smokeOpenAI(roleTarget: CmpLiveRoleTarget): Promise<{ rows: Smoke
           errorMessage: result.loop.liveTrace?.errorMessage,
         },
       };
-      }));
+      }), { retryFallback }));
     } catch (error) {
       const formatted = formatError(error);
       rows.push({
         provider: "openai",
         role: "dbagent",
+        flow: "passive",
         ok: false,
         model: config.model,
         summary: `passive: ${formatted.summary}`,
@@ -500,9 +568,9 @@ async function smokeOpenAI(roleTarget: CmpLiveRoleTarget): Promise<{ rows: Smoke
     }
   }
 
-  if (roleTarget === "all" || roleTarget === "dispatcher") {
+  if ((roleTarget === "all" || roleTarget === "dispatcher") && (flowTarget === "passive" || flowTarget === "both")) {
     try {
-      rows.push(await retryFallbackRow(async () => {
+      rows.push(await maybeRetryFallbackRow(() => withElapsed(async () => {
       const result = await runtime.deliverDispatcherPassiveReturnWithLlm({
         request: {
           requesterAgentId: "cmp-live-main",
@@ -524,12 +592,13 @@ async function smokeOpenAI(roleTarget: CmpLiveRoleTarget): Promise<{ rows: Smoke
         createdAt: "2026-03-31T00:00:06.000Z",
         loopId: "dispatcher-cmp-live-passive-1",
       }, {
-        mode: "llm_assisted",
+        mode: liveMode,
         executor,
       });
       return {
         provider: "openai",
         role: "dispatcher",
+        flow: "passive",
         ok: result.liveTrace?.status === "live_applied",
         model: config.model,
         mode: result.liveTrace?.mode,
@@ -544,12 +613,13 @@ async function smokeOpenAI(roleTarget: CmpLiveRoleTarget): Promise<{ rows: Smoke
           errorMessage: result.liveTrace?.errorMessage,
         },
       };
-      }));
+      }), { retryFallback }));
     } catch (error) {
       const formatted = formatError(error);
       rows.push({
         provider: "openai",
         role: "dispatcher",
+        flow: "passive",
         ok: false,
         model: config.model,
         summary: `passive: ${formatted.summary}`,
@@ -569,15 +639,23 @@ async function smokeOpenAI(roleTarget: CmpLiveRoleTarget): Promise<{ rows: Smoke
 
 async function main(argv: string[]): Promise<void> {
   const provider = parseProviderArg(argv);
-  const roleTarget = parseRoleArg(argv);
+  const cli: SmokeCliOptions = {
+    roleTarget: parseRoleArg(argv),
+    flowTarget: parseFlowArg(argv),
+    retryFallback: parseRetryFallbackArg(argv),
+    liveMode: parseLiveModeArg(argv),
+  };
   const reportPath = parseReportPathArg(argv, provider);
-  const { rows, baseURL } = await smokeOpenAI(roleTarget);
+  const { rows, baseURL } = await smokeOpenAI(cli);
   printRows(rows);
   await writeReport(reportPath, provider, rows, baseURL);
   process.stdout.write(`${JSON.stringify({
     generatedAt: new Date().toISOString(),
     provider,
-    roleTarget,
+    roleTarget: cli.roleTarget,
+    flowTarget: cli.flowTarget,
+    retryFallback: cli.retryFallback,
+    liveMode: cli.liveMode,
     baseURL,
     model: rows[0]?.model ?? "unknown",
     rows,
