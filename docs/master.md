@@ -92,8 +92,30 @@
 
 针对消息队列的设计,自然可以想到群聊方法和@agent和文件的方法.
 
+## Current Mainline Baseline
+
+- 当前已经不再是单独维护 `reboot/blank-slate` 或 `cmp/mp` 的阶段。
+- 当前可继续开发的总装主线是：
+  - `integrate/dev-master-cmp`
+- 这条线已经吸收了：
+  - `dev-master`
+  - `reboot/blank-slate`
+  - `cmp/mp`
+  - 后续为 `runtime`、`CMP five-agent live LLM`、`TAP replay/human-gate/provision` 做的一批收口补丁
+- 当前这条线真实通过的验证是：
+  - `npm run typecheck`
+  - `npm run build`
+  - `npm test`
+
+一句白话：
+
+- 当前不是继续讨论“主线该是谁”
+- 而是已经有一条可以继续承托新功能开发的总装线
+
 ## Current Execution Roadmaps
 
+- 当前总装基线的 `CMP` 五角色 live LLM 入口：
+  - [47-cmp-five-agent-live-llm-outline.md](/home/proview/Desktop/Praxis_series/Praxis/docs/ability/47-cmp-five-agent-live-llm-outline.md)
 - `dev-master` 总装分支与主线切换总纲：
   - [52-dev-master-integration-outline.md](/home/proview/Desktop/Praxis_series/Praxis/docs/ability/52-dev-master-integration-outline.md)
 - `cmp/mp` 并入新 `dev` 的执行清单：

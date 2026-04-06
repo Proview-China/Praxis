@@ -1,158 +1,144 @@
 # Current Context
 
-更新时间：2026-04-05
+更新时间：2026-04-06
 
-## 当前主线与总装状态
+## 当前主线一句话
 
-- 当前项目级主线仍以新的 `dev` / `dev-master` 为准。
-- 当前正在做的不是继续分叉开发，而是把 `cmp/mp` 这条高风险实现线并回 `dev-master`，收成新的总装继续线。
-- 当前专门用于这次整合的 worktree / 分支是：
-  - worktree: `.parallel-worktrees/integrate-dev-master-cmp`
-  - branch: `integrate/dev-master-cmp`
+Praxis 当前可继续开发的总装主线已经形成，工作分支是：
+
+- branch: `integrate/dev-master-cmp`
+- worktree: `.parallel-worktrees/integrate-dev-master-cmp`
 
 一句白话：
 
-- `dev-master` 代表 reboot/TAP 基座接回后的新主线
-- `cmp/mp` 代表更深入的 `CMP` runtime / `rax.cmp` / 五角色实现线
-- 现在进入的是“把两边真东西收成一条线”的阶段
+- 这条线已经不是“合并试算线”
+- 它现在就是后续继续联调与开发的实际工作线
 
-## 当前阶段一句话
+## 当前最重要的项目事实
 
-Praxis 现在已经不再停留在：
+### 1. 这条线已经承接住 `core_agent_runtime + TAP + CMP + rax.cmp`
 
-- 只有 reboot/TAP 基座
-- 或只有 `CMP` 的文档 / 支撑层 / low-risk surface
+当前 `integrate/dev-master-cmp` 已经真实吸收：
 
-而是正在进入：
-
-- `dev-master` 的新主线基座
-- 加上 `cmp/mp` 的 `CMP` 高风险 runtime 与五角色实现
-- 做第一次真正的总装合并
+- `dev-master`
+- `reboot/blank-slate`
+- `cmp/mp`
+- 后续为 `runtime.ts`、`runtime.test.ts`、TAP replay / human-gate / provisioning 主链、CMP five-agent live wrapper 做的一批收口补丁
 
 白话：
 
-- `CMP` 和 `TAP` 现在都不是“还没开始”的模块
-- 真正困难的地方已经变成“怎么把两边都保住并装在一起”
+- 当前最重要的三块不再分散在多条主要实现线上
+- 已经进入同一条可继续开发的总装基线
 
-## 当前已经确定的架构事实
+### 2. `core_agent_runtime` 当前已经是总装后的正式运行底座
 
-### 1. `dev-master` 是新的项目主线底座
+当前这条线里的 `src/agent_core/runtime.ts` 已经同时承接：
 
-- 它承接了 reboot/TAP 基座
-- 承接了 `CMP` 的文档、infra、支撑层代码
-- 承接了 `rax` 的 Phase A / low-risk surface
+- reboot/TAP 基座上的 reviewer / tool-reviewer / provisioner / replay / recovery 主链
+- `CMP` 的 readback / recover / dispatch / requestHistory / five-agent TAP bridge
+- `CMP` five-agent live wrapper：
+  - `captureCmpIcmaWithLlm(...)`
+  - `advanceCmpIteratorWithLlm(...)`
+  - `evaluateCmpCheckerWithLlm(...)`
+  - `materializeCmpDbAgentWithLlm(...)`
+  - `servePassiveCmpDbAgentWithLlm(...)`
+  - `dispatchCmpDispatcherWithLlm(...)`
+  - `deliverPassiveCmpDispatcherWithLlm(...)`
+  - `runCmpFiveAgentActiveLiveLoop(...)`
+  - `runCmpFiveAgentPassiveLiveLoop(...)`
 
-当前不要做错的事：
+### 3. `rax.cmp` 当前已经是可继续使用的统一入口
 
-- 不要再把旧 `dev` 当作主要继续线
-- 不要把 `dev-master` 误当成“只是文档分支”
+当前这条线已经真实接好并验证：
 
-### 2. `cmp/mp` 是 `CMP` 高风险实现线
-
-当前 `cmp/mp` 已经不只是：
-
-- `CMP` 的协议
-- `CMP` 的 DB / MQ / git 支撑层
-
-而是已经把下面这些推进到了主链接缝：
-
-- `src/agent_core/runtime.ts` 的 `CMP` workflow 接口
-- `src/rax/cmp-facade.ts`
-- `src/rax/cmp-runtime.ts`
-- `src/agent_core/cmp-five-agent/**`
-
-白话：
-
-- `cmp/mp` 带回来的是真正会和新主线正面相撞的 runtime 总装
-
-### 3. reboot/TAP 基座仍然是保护区
-
-当前必须继续保住：
-
-- `src/agent_core/ta-pool*/**`
-- 第一波 capability package / baseline 相关成果
-- `rax` 当前已经接回的新导出面和 status panel / config / connectors
-
-不要做错的事：
-
-- 不要为了吃进 `cmp/mp`，把 `dev-master` 上后续接回来的 TAP / rax surface 又冲掉
-
-## 当前整合分支已经读到的合并事实
-
-`dev-master <- cmp/mp` 的第一次 merge 试算已经证明：
-
-- 大量文件可以自动合并
-- 这不是全仓库爆炸型冲突
-- 冲突主要集中在总装入口与项目锚点
-
-当前第一次试算的主要冲突口是：
-
-- `memory/current-context.md`
-- `src/agent_core/runtime.ts`
-- `src/agent_core/runtime.test.ts`
-- `src/index.ts`
 - `src/rax/cmp-types.ts`
-- `src/rax/index.ts`
+- `src/rax/cmp-runtime.ts`
+- `src/rax/cmp-facade.ts`
+- `src/rax/cmp-five-agent-live-smoke.ts`
 
 白话：
 
-- 真正冲突的是“谁来定义当前主线的事实”和“谁来定义 runtime / rax 的正式总装入口”
+- `rax.cmp` 不再只是低风险表面层
+- 它已经能对接当前总装后的 `agent_core` runtime
 
-## 当前已经确认应当保留的两侧价值
+## 当前已验证通过的基线
 
-### 一、`dev-master` 侧必须保留的东西
+这条线当前已经真实通过：
 
-- 新 `dev` / `dev-master` 作为项目主线的事实锚点
-- reboot/TAP 基座与第一波 capability package 成果
-- `CMP` 支撑层与 low-risk `rax` surface 的回接成果
-- 后续继续围绕新主线推进的文档入口与 handoff 体系
+- `npm run typecheck`
+- `npm run build`
+- `npm test`
 
-### 二、`cmp/mp` 侧必须保留的东西
+额外已单独回读过的重点验证：
 
-- `CMP` workflow 真正接进 `AgentCoreRuntime`
-- `rax.cmp` 的 facade / runtime 正式入口
-- 五角色 runtime、tap bridge、observability 等真正实现
-- `CMP` 的 readback / recover / dispatch / requestHistory 这套更完整的控制面
+- `npx tsx --test src/agent_core/runtime.test.ts`
+- `npx tsx --test src/agent_core/runtime.cmp-live.test.ts src/agent_core/runtime.cmp-five-agent.test.ts`
+- `npx tsx --test src/agent_core/runtime.recovery.test.ts src/agent_core/runtime.replay.test.ts src/agent_core/runtime.replay-continue.test.ts`
+- `npx tsx --test src/agent_core/runtime.continue-followups.test.ts src/agent_core/runtime.continue-followups.*.test.ts`
+- `npx tsx --test src/rax/cmp-facade.test.ts src/rax/cmp-runtime.test.ts`
 
-## 当前最真实的整合判断
+### 关于 `runtime.continue-followups`
 
-现在最合理的方向不是：
+当前已经不再使用原来的超大单文件直跑方式。
 
-- 保守地把 `cmp/mp` 再后置
-- 也不是只保 `cmp/mp` 而回退 `dev-master`
+当前状态是：
 
-而是：
+- `src/agent_core/runtime.continue-followups.test.ts`
+  - 改成轻量 skip 入口
+- focused tests:
+  - `runtime.continue-followups.pickup-targeted.test.ts`
+  - `runtime.continue-followups.auto-after-verify.test.ts`
+  - `runtime.continue-followups.blocked.test.ts`
+  - `runtime.continue-followups.waiting-human.test.ts`
 
-1. 以 `dev-master` 作为项目主线身份
-2. 以 `cmp/mp` 作为 `CMP` runtime / five-agent 实现主体
-3. 在 `src/agent_core/runtime.ts` 与 `src/rax/index.ts` 这类总装入口做人工 union merge
+原因：
 
-一句白话：
+- 在 Node 25 + `tsx` 下，旧的单文件入口会 OOM
+- 拆分后已可以稳定验证同一批主链场景
 
-- 主线身份归 `dev-master`
-- `CMP` 的高风险实现主体归 `cmp/mp`
+## 当前对“下面能不能继续开发”的判断
 
-## 当前最推荐下一步
+当前最诚实的判断是：
 
-当前最推荐的下一步不是去碰 `main` / `deploy`。
+- 如果目标是继续做 `CMP + TAP + core_agent_runtime` 的联调、收口与新功能开发
+- `integrate/dev-master-cmp` 已经足够承托
 
-而是：
+也就是说：
 
-1. 解完当前总装冲突
-2. 跑：
-   - `npm run typecheck`
-   - `npm run build`
-   - `npx tsx --test src/agent_core/runtime.test.ts`
-   - `npx tsx --test src/rax/cmp-facade.test.ts`
-3. 再决定是否把这条整合线推进成新的正式 `dev-master` 继续线
+- 后面默认直接在这条线继续写
+- 不需要再回到 `reboot/blank-slate`
+- 也不需要再回到 `cmp/mp`
+
+## 当前还需要记住的边界
+
+### 1. 这条线是“当前主线”，不是“删掉所有历史分支也绝对没风险的唯一归档”
+
+白话：
+
+- 当前继续开发，直接用这条线没问题
+- 但仓库里其他历史分支是否全部可删，不是当前这份文档要做的承诺
+
+### 2. 后续新功能默认直接贴当前总装线写
+
+后续新需求默认优先复用：
+
+- `agent_core/runtime.ts`
+- `TAP` control plane / replay / recovery 主链
+- `CMP` workflow / five-agent live wrapper / `rax.cmp`
+
+不要再做错的事：
+
+- 不要把 `reboot/blank-slate` 重新当成主要继续线
+- 不要把 `cmp/mp` 重新当成主要继续线
+- 不要再为“总装”另起新的长期工作分支
 
 ## 给后续 Codex 的一句提示
 
-如果后续 Codex 读到这个文件，默认把当前对象理解为：
+如果后续 Codex 读到这份文件，默认把当前对象理解为：
 
-- “正在把 `cmp/mp` 并回 `dev-master` 的总装阶段”
+- “总装主线已经形成，当前在 `integrate/dev-master-cmp` 上继续开发”
 
 而不是：
 
-- 继续只做 `dev-master` 的 low-risk shell
-- 或继续只做 `cmp/mp` 的单线深挖
+- 仍在大规模分支整合阶段
+- 或仍在等待 `CMP` / `TAP` 的主线接回
