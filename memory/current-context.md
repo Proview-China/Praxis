@@ -1,6 +1,6 @@
 # Current Context
 
-更新时间：2026-04-06
+更新时间：2026-04-07
 
 ## 当前主线一句话
 
@@ -61,6 +61,64 @@ Praxis 当前可继续开发的总装主线已经形成，工作分支是：
 - `rax.cmp` 不再只是低风险表面层
 - 它已经能对接当前总装后的 `agent_core` runtime
 
+### 4. 当前已经完成一轮真实 `core + TAP + CMP` 单 agent 联调
+
+当前已在提供的 OpenAI-compatible 上游 `https://gmn.chuangzuoli.com` 上真实跑通：
+
+- `core -> TAP -> model.infer`
+- TAP 三 agent：
+  - `reviewer`
+  - `tool_reviewer`
+  - `TMA`
+- `CMP role -> TAP bridge`
+- `CMP five-agent live`
+
+白话：
+
+- 当前不只是“代码能编译”
+- 而是关键主链已经在真实模型上跑过一轮
+
+### 5. 这轮联调里，`dispatcher` 的真实问题已经查清并修复
+
+这轮最关键的新事实不是“换了个模型就好了”，而是：
+
+- `dispatcher` 规则层没有坏
+- 真正的问题在：
+  - `model.infer -> OpenAI responses`
+  - 把内部 metadata 一起发到了 provider
+  - 当前 `gmn` 路由会把这类请求拖成 `524 timeout`
+
+已经落地的修复是：
+
+- 对 OpenAI `responses` 不再发送内部 metadata
+- `dispatcher` live prompt 改成更紧凑、更确定的 routing prompt
+- `dispatcher` live 请求增加更小的输出 token 上限
+
+白话：
+
+- 这次不是“CMP 五角色自己废了”
+- 而是 provider request shape 把 `dispatcher` live 拖死了
+- 这个点现在已经修通
+
+### 6. 当前仓库里已经有更适合联调的断点 smoke 入口
+
+当前实际可用的联调入口包括：
+
+- `src/agent_core/single-agent-live-smoke.ts`
+- `src/rax/cmp-five-agent-live-smoke.ts`
+
+这两个入口当前已经支持：
+
+- 角色级别断点
+- `active / passive` 区分
+- `--no-retry`
+- `--strict-live`
+
+白话：
+
+- 后面继续联调时，优先做断点测试
+- 不要再直接黑盒全链乱跑
+
 ## 当前已验证通过的基线
 
 这条线当前已经真实通过：
@@ -76,6 +134,17 @@ Praxis 当前可继续开发的总装主线已经形成，工作分支是：
 - `npx tsx --test src/agent_core/runtime.recovery.test.ts src/agent_core/runtime.replay.test.ts src/agent_core/runtime.replay-continue.test.ts`
 - `npx tsx --test src/agent_core/runtime.continue-followups.test.ts src/agent_core/runtime.continue-followups.*.test.ts`
 - `npx tsx --test src/rax/cmp-facade.test.ts src/rax/cmp-runtime.test.ts`
+- `npx tsx --test src/agent_core/cmp-five-agent/dispatcher-runtime.test.ts src/agent_core/integrations/model-inference.test.ts`
+
+额外已在真实模型上回读过的重点 smoke：
+
+- `single-agent-live-smoke`
+  - `core`
+  - `tap`
+  - `cmp-bridge`
+  - `cmp-live`
+- `cmp-five-agent-live-smoke`
+  - `dispatcher active + strict-live + no-retry`
 
 ### 关于 `runtime.continue-followups`
 
@@ -108,6 +177,7 @@ Praxis 当前可继续开发的总装主线已经形成，工作分支是：
 - 后面默认直接在这条线继续写
 - 不需要再回到 `reboot/blank-slate`
 - 也不需要再回到 `cmp/mp`
+- 如果目标是继续做 `core + TAP + CMP` 的真实模型联调，这条线现在也已经够用
 
 ## 当前还需要记住的边界
 
@@ -125,6 +195,7 @@ Praxis 当前可继续开发的总装主线已经形成，工作分支是：
 - `agent_core/runtime.ts`
 - `TAP` control plane / replay / recovery 主链
 - `CMP` workflow / five-agent live wrapper / `rax.cmp`
+- 当前已接好的 smoke / live routing 策略
 
 不要再做错的事：
 
@@ -132,11 +203,28 @@ Praxis 当前可继续开发的总装主线已经形成，工作分支是：
 - 不要把 `cmp/mp` 重新当成主要继续线
 - 不要再为“总装”另起新的长期工作分支
 
+### 3. 当前联调 smoke 的模型分级已经写进代码入口
+
+这轮接进去的是联调 smoke 层的模型策略，不是全系统全部任务的最终统一调度。
+
+- `core` smoke:
+  - `gpt-5.4`
+  - `high`
+- TAP 三 agent smoke:
+  - `gpt-5.4`
+  - `medium`
+- `CMP five-agent` smoke:
+  - `icma`: `gpt-5.4 + medium`
+  - `iterator`: `gpt-5.4 + low`
+  - `checker`: `gpt-5.4 + medium`
+  - `dbagent`: `gpt-5.4 + medium`
+  - `dispatcher`: `gpt-5.4 + high`
+
 ## 给后续 Codex 的一句提示
 
 如果后续 Codex 读到这份文件，默认把当前对象理解为：
 
-- “总装主线已经形成，当前在 `integrate/dev-master-cmp` 上继续开发”
+- “总装主线已经形成，当前在 `integrate/dev-master-cmp` 上继续开发，并且已经完成一轮 `core + TAP + CMP` 真实联调”
 
 而不是：
 

@@ -112,6 +112,72 @@
 - 当前不是继续讨论“主线该是谁”
 - 而是已经有一条可以继续承托新功能开发的总装线
 
+## Current Live Integration Snapshot
+
+- 2026-04-06 到 2026-04-07 这一轮，已经在 `integrate/dev-master-cmp` 上完成了一轮真实单 agent 联调收口。
+- 使用的实际 OpenAI-compatible 上游是：
+  - `https://gmn.chuangzuoli.com`
+- 当前已确认跑通的主链包括：
+  - `core -> TAP -> model.infer`
+  - TAP 三 agent：
+    - `reviewer`
+    - `tool_reviewer`
+    - `TMA`
+  - `CMP role -> TAP bridge`
+  - `CMP five-agent live`
+
+### 这轮联调最重要的新事实
+
+- `dispatcher` 之前的 live 超时，并不是因为 routing rules 本身坏掉。
+- 真正的问题在：
+  - `model.infer -> OpenAI responses`
+  - 把内部 metadata 一起发到了 provider
+  - 当前 `gmn` 路由会把这类请求拖成 `524 timeout`
+- 这轮已经确认并修复：
+  - 对 OpenAI `responses` 不再发送内部 metadata
+  - `dispatcher` live prompt 改成更紧凑、更确定的 routing prompt
+  - 对 `dispatcher` live 请求增加更小的输出 token 上限
+
+### 当前联调 smoke 的模型分级
+
+这轮落地的是“联调 smoke 策略”，不是全系统任意任务的最终全局调度策略。
+
+- `core` smoke：
+  - `gpt-5.4`
+  - `reasoningEffort=high`
+- TAP 三 agent smoke：
+  - `gpt-5.4`
+  - `reasoningEffort=medium`
+- `CMP five-agent` smoke：
+  - `icma`:
+    - `gpt-5.4`
+    - `reasoningEffort=medium`
+  - `iterator`:
+    - `gpt-5.4`
+    - `reasoningEffort=low`
+  - `checker`:
+    - `gpt-5.4`
+    - `reasoningEffort=medium`
+  - `dbagent`:
+    - `gpt-5.4`
+    - `reasoningEffort=medium`
+  - `dispatcher`:
+    - `gpt-5.4`
+    - `reasoningEffort=high`
+
+### 当前最值得记住的工程判断
+
+- 现在主要的架构问题已经不是“主线有没有接住”
+- 而是后续联调时要继续盯：
+  - provider request shape
+  - role-level live prompt 负载
+  - smoke 入口不要再用黑盒全链替代断点测试
+
+一句白话：
+
+- 当前总装线已经不仅能继续开发
+- 而且已经能对 `core + TAP + CMP` 做真实联调
+
 ## Current Execution Roadmaps
 
 - 当前总装基线的 `CMP` 五角色 live LLM 入口：
