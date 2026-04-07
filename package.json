@@ -18,6 +18,7 @@
     "cmp:infra:down": "docker compose -f infra/cmp/compose.yaml --env-file infra/cmp/.env down",
     "cmp:infra:ps": "docker compose -f infra/cmp/compose.yaml --env-file infra/cmp/.env ps",
     "cmp:infra:status": "node -e \"fetch('http://127.0.0.1:' + (process.env.CMP_STATUS_PORT || '57480') + '/status').then(r=>r.text()).then(t=>process.stdout.write(t + '\\n'))\"",
+    "smoke:cmp:five-agent:live": "tsx src/rax/cmp-five-agent-live-smoke.ts",
     "smoke:thin:live": "tsx src/rax/live-smoke.ts",
     "smoke:websearch:live": "tsx src/rax/websearch-live-smoke.ts",
     "smoke:skill:live": "tsx src/rax/skill-live-smoke.ts",
