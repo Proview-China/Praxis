@@ -140,7 +140,9 @@ async function smokeCoreViaTap(config: ReturnType<typeof loadOpenAILiveConfig>):
       metadata: {
         provider: "openai",
         model: "gpt-5.4",
+        variant: "responses",
         reasoningEffort: "high",
+        maxOutputTokens: 96,
       },
     }),
     maxSteps: 2,
@@ -181,6 +183,7 @@ async function smokeTapThreeAgentWorkers(config: ReturnType<typeof loadOpenAILiv
     provider: "openai",
     model: "gpt-5.4",
     layer: "api",
+    variant: "responses",
     reasoningEffort: "medium",
     maxOutputTokens: 192,
   };

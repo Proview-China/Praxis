@@ -41,6 +41,7 @@ function createDispatcherActivePromptText(input: {
   return [
     "Dispatcher active routing decision.",
     "Return strict JSON only.",
+    "Return one minified JSON object only. No markdown fences. No explanation outside JSON.",
     "Use exactly this schema:",
     '{"routeRationale":"one short sentence","bodyStrategy":"child_seed_full|peer_exchange_slim|historical_return","scopePolicy":"policy id","slimExchangeFields":["packageId","packageKind","primaryRef"]}',
     "Rules:",
@@ -65,6 +66,7 @@ function createDispatcherPassivePromptText(input: {
   return [
     "Dispatcher passive return decision.",
     "Return strict JSON only.",
+    "Return one minified JSON object only. No markdown fences. No explanation outside JSON.",
     "Use exactly this schema:",
     '{"routeRationale":"one short sentence","bodyStrategy":"historical_return","scopePolicy":"historical_reply_returns_via_core_path"}',
     "Rules:",
@@ -470,7 +472,7 @@ export class CmpDispatcherRuntime {
       executor: options.executor,
       metadata: {
         loopId: rulesResult.loop.loopId,
-        maxOutputTokens: 96,
+        maxOutputTokens: 160,
         promptText: createDispatcherActivePromptText({
           packageId: rulesResult.loop.packageId,
           packageKind: rulesResult.loop.bundle.body.packageKind,
@@ -622,7 +624,7 @@ export class CmpDispatcherRuntime {
       executor: options.executor,
       metadata: {
         loopId: loop.loopId,
-        maxOutputTokens: 80,
+        maxOutputTokens: 128,
         promptText: createDispatcherPassivePromptText({
           packageId: loop.packageId,
           packageKind: loop.bundle.body.packageKind,

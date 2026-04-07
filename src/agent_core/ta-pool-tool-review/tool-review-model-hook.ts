@@ -44,29 +44,44 @@ export function createDefaultToolReviewerLlmHook(options: {
   route?: Partial<TapAgentModelRoute>;
 }): ToolReviewerRuntimeLlmHook {
   return async (input) => {
-    return executeTapAgentStructuredOutput({
-      executor: options.executor,
-      sessionId: input.sessionId,
-      runId: input.governanceAction.trace.request?.runId ?? `${input.sessionId}:tool-review`,
-      workerKind: "tap-tool-reviewer",
-      route: options.route,
-      systemPrompt: [
-        "You are the TAP tool reviewer.",
-        "Stay in governance-only mode.",
-        "Do not execute the blocked task, do not mutate files, and do not bypass runtime controls.",
-        "Return one JSON object with a non-empty summary and optional metadata.",
-      ].join(" "),
-      userPrompt: [
-        "Summarize the current governance action for a human-readable but runtime-safe tool reviewer output.",
-        "Do not change the action status, ids, or capability keys.",
-        "",
-        "Governance action:",
-        JSON.stringify(input.governanceAction, null, 2),
-        "",
-        "Current deterministic output:",
-        JSON.stringify(input.defaultOutput, null, 2),
-      ].join("\n"),
-      parse: parseAdvice,
-    });
+    try {
+      return await executeTapAgentStructuredOutput({
+        executor: options.executor,
+        sessionId: input.sessionId,
+        runId: input.governanceAction.trace.request?.runId ?? `${input.sessionId}:tool-review`,
+        workerKind: "tap-tool-reviewer",
+        route: options.route,
+        systemPrompt: [
+          "You are the TAP tool reviewer.",
+          "Stay in governance-only mode.",
+          "Do not execute the blocked task, do not mutate files, and do not bypass runtime controls.",
+          "Return exactly one JSON object with a non-empty summary and optional metadata.",
+        ].join(" "),
+        userPrompt: [
+          "Summarize the current governance action for a human-readable but runtime-safe tool reviewer output.",
+          "Do not change the action status, ids, or capability keys.",
+          "If uncertain, reuse the deterministic summary instead of leaving summary blank.",
+          "",
+          "Governance action:",
+          JSON.stringify(input.governanceAction, null, 2),
+          "",
+          "Current deterministic output:",
+          JSON.stringify(input.defaultOutput, null, 2),
+        ].join("\n"),
+        parse: parseAdvice,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/summary|JSON|text output|plain object|unterminated/u.test(message)) {
+        throw error;
+      }
+      return {
+        summary: input.defaultOutput.summary,
+        metadata: {
+          fallback: "deterministic_summary",
+          fallbackReason: message,
+        },
+      };
+    }
   };
 }

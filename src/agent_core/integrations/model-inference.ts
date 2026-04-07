@@ -26,6 +26,10 @@ type OpenAIModelInvocation = {
   payload: OpenAIInvocationPayload<Record<string, unknown>>;
 };
 
+function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
+  return typeof value === "object" && value !== null && Symbol.asyncIterator in value;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
@@ -113,7 +117,170 @@ export function buildOpenAIProviderMetadata(
   return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
-function parseOpenAITextResponse(raw: unknown): string {
+function readTextFromUnknownRecord(record: Record<string, unknown>): string | undefined {
+  if (typeof record.output_text === "string" && record.output_text.trim()) {
+    return record.output_text;
+  }
+
+  if (Array.isArray(record.output)) {
+    for (const item of record.output) {
+      if (!item || typeof item !== "object") {
+        continue;
+      }
+      const outputRecord = item as Record<string, unknown>;
+      if (!Array.isArray(outputRecord.content)) {
+        continue;
+      }
+      for (const contentItem of outputRecord.content) {
+        if (!contentItem || typeof contentItem !== "object") {
+          continue;
+        }
+        const contentRecord = contentItem as Record<string, unknown>;
+        if (typeof contentRecord.text === "string" && contentRecord.text.trim()) {
+          return contentRecord.text;
+        }
+        if (
+          contentRecord.text &&
+          typeof contentRecord.text === "object" &&
+          "value" in contentRecord.text &&
+          typeof (contentRecord.text as { value?: unknown }).value === "string" &&
+          (contentRecord.text as { value: string }).value.trim()
+        ) {
+          return (contentRecord.text as { value: string }).value;
+        }
+      }
+    }
+  }
+
+  if (Array.isArray(record.choices)) {
+    const firstChoice = record.choices[0];
+    if (firstChoice && typeof firstChoice === "object") {
+      const choiceRecord = firstChoice as Record<string, unknown>;
+      if (typeof choiceRecord.text === "string" && choiceRecord.text.trim()) {
+        return choiceRecord.text;
+      }
+      if (choiceRecord.message && typeof choiceRecord.message === "object") {
+        const message = choiceRecord.message as { content?: string | Array<{ type?: string; text?: string }> };
+        const content = message.content;
+        if (typeof content === "string" && content.trim()) {
+          return content;
+        }
+        if (Array.isArray(content)) {
+          const textPart = content.find((item) => item?.type === "text" && typeof item.text === "string" && item.text.trim());
+          if (textPart?.text) {
+            return textPart.text;
+          }
+        }
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function isOpenAIResponseEnvelope(record: Record<string, unknown>): boolean {
+  return typeof record.object === "string"
+    && ("usage" in record || "output" in record || "choices" in record);
+}
+
+export function isOpenAITextResponseEmpty(raw: unknown): boolean {
+  if (!raw || typeof raw !== "object") {
+    return false;
+  }
+
+  const record = raw as Record<string, unknown>;
+  if (!isOpenAIResponseEnvelope(record)) {
+    return false;
+  }
+
+  return readTextFromUnknownRecord(record) === undefined;
+}
+
+export async function collectOpenAIResponsesStreamText(stream: AsyncIterable<unknown>): Promise<Record<string, unknown>> {
+  let text = "";
+  let completedResponse: Record<string, unknown> | undefined;
+
+  for await (const event of stream) {
+    if (!event || typeof event !== "object") {
+      continue;
+    }
+    const record = event as Record<string, unknown>;
+    if (record.type === "response.output_text.delta" && typeof record.delta === "string") {
+      text += record.delta;
+      continue;
+    }
+    if (record.type === "response.output_text.done" && typeof record.text === "string") {
+      text = record.text;
+      continue;
+    }
+    if (record.type === "response.completed" && record.response && typeof record.response === "object") {
+      completedResponse = record.response as Record<string, unknown>;
+    }
+  }
+
+  return {
+    ...(completedResponse ?? {}),
+    output_text: text,
+    output: text
+      ? [
+          {
+            type: "message",
+            status: "completed",
+            role: "assistant",
+            content: [
+              {
+                type: "output_text",
+                text,
+              },
+            ],
+          },
+        ]
+      : (completedResponse?.output as unknown[] | undefined) ?? [],
+  };
+}
+
+export async function collectOpenAIChatCompletionsStreamText(stream: AsyncIterable<unknown>): Promise<Record<string, unknown>> {
+  let text = "";
+  let lastChunk: Record<string, unknown> | undefined;
+
+  for await (const event of stream) {
+    if (!event || typeof event !== "object") {
+      continue;
+    }
+    lastChunk = event as Record<string, unknown>;
+    const choices = Array.isArray(lastChunk.choices) ? lastChunk.choices : [];
+    const firstChoice = choices[0];
+    if (!firstChoice || typeof firstChoice !== "object") {
+      continue;
+    }
+    const delta = (firstChoice as Record<string, unknown>).delta;
+    if (!delta || typeof delta !== "object") {
+      continue;
+    }
+    const content = (delta as Record<string, unknown>).content;
+    if (typeof content === "string") {
+      text += content;
+    }
+  }
+
+  return {
+    id: lastChunk?.id,
+    object: "chat.completion",
+    model: lastChunk?.model,
+    choices: [
+      {
+        index: 0,
+        message: {
+          role: "assistant",
+          content: text,
+        },
+        finish_reason: "stop",
+      },
+    ],
+  };
+}
+
+export function parseOpenAITextResponse(raw: unknown): string {
   if (typeof raw === "string") {
     try {
       return parseOpenAITextResponse(JSON.parse(raw));
@@ -122,28 +289,10 @@ function parseOpenAITextResponse(raw: unknown): string {
     }
   }
 
-  if (raw && typeof raw === "object" && "output_text" in raw && typeof (raw as { output_text?: unknown }).output_text === "string") {
-    return (raw as { output_text: string }).output_text;
-  }
-
-  if (
-    raw &&
-    typeof raw === "object" &&
-    "choices" in raw &&
-    Array.isArray((raw as { choices?: unknown[] }).choices)
-  ) {
-    const firstChoice = (raw as {
-      choices: Array<{ message?: { content?: string | Array<{ type?: string; text?: string }> } }>;
-    }).choices[0];
-    const content = firstChoice?.message?.content;
-    if (typeof content === "string") {
-      return content;
-    }
-    if (Array.isArray(content)) {
-      const textPart = content.find((item) => item?.type === "text" && typeof item.text === "string");
-      if (textPart?.text) {
-        return textPart.text;
-      }
+  if (raw && typeof raw === "object") {
+    const text = readTextFromUnknownRecord(raw as Record<string, unknown>);
+    if (typeof text === "string") {
+      return text;
     }
   }
 
@@ -230,7 +379,19 @@ async function executeOpenAIInvocation(
         let metadataStripped = false;
         for (let attempt = 0; attempt < 5; attempt += 1) {
           try {
-            return await client.responses.create(params as never);
+            const response = await client.responses.create(params as never);
+            if (!isOpenAITextResponseEmpty(response)) {
+              return response;
+            }
+
+            const streamed = await client.responses.create({
+              ...params,
+              stream: true,
+            } as never);
+            if (isAsyncIterable(streamed)) {
+              return collectOpenAIResponsesStreamText(streamed);
+            }
+            return response;
           } catch (error) {
             if (
               !metadataStripped
@@ -278,7 +439,20 @@ async function executeOpenAIInvocation(
         throw new Error("OpenAI responses invocation exhausted retry policy unexpectedly.");
       }
     case "chat_completions":
-      return client.chat.completions.create(invocation.payload.params as never);
+      {
+        const response = await client.chat.completions.create(invocation.payload.params as never);
+        if (!isOpenAITextResponseEmpty(response)) {
+          return response;
+        }
+        const streamed = await client.chat.completions.create({
+          ...invocation.payload.params,
+          stream: true,
+        } as never);
+        if (isAsyncIterable(streamed)) {
+          return collectOpenAIChatCompletionsStreamText(streamed);
+        }
+        return response;
+      }
     default:
       throw new Error(`Unsupported OpenAI generation surface for model inference: ${invocation.payload.surface}`);
   }
@@ -329,6 +503,11 @@ export async function executeModelInference(
   };
 
   const raw = await executeOpenAIInvocation(invocation);
+  if (isOpenAITextResponseEmpty(raw)) {
+    throw new Error(
+      `OpenAI ${invocation.payload.surface} invocation returned completed metadata but no text output.`,
+    );
+  }
   const text = parseOpenAITextResponse(raw);
 
   return {

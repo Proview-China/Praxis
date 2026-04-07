@@ -7,6 +7,7 @@ export interface TapAgentModelRoute {
   provider: string;
   model: string;
   layer?: string;
+  variant?: string;
   reasoningEffort?: "low" | "medium" | "high";
   maxOutputTokens?: number;
 }
@@ -26,6 +27,7 @@ export const DEFAULT_TAP_AGENT_MODEL_ROUTE: TapAgentModelRoute = {
   provider: "openai",
   model: "gpt-5.4",
   layer: "api",
+  variant: "responses",
 };
 
 function buildGoalFrame(params: {
@@ -52,6 +54,7 @@ function buildGoalFrame(params: {
       provider: params.route.provider,
       model: params.route.model,
       layer: params.route.layer ?? DEFAULT_TAP_AGENT_MODEL_ROUTE.layer,
+      variant: params.route.variant ?? DEFAULT_TAP_AGENT_MODEL_ROUTE.variant,
       reasoningEffort: params.route.reasoningEffort,
       maxOutputTokens: params.route.maxOutputTokens,
       tapWorkerKind: params.workerKind,
@@ -162,6 +165,7 @@ export async function executeTapAgentStructuredOutput<TOutput>(
       provider: route.provider,
       model: route.model,
       layer: route.layer ?? DEFAULT_TAP_AGENT_MODEL_ROUTE.layer,
+      variant: route.variant ?? DEFAULT_TAP_AGENT_MODEL_ROUTE.variant,
       tapWorkerKind: input.workerKind,
     },
   };

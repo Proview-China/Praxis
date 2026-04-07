@@ -274,6 +274,55 @@ test("provisioner runtime can use the model-backed worker bridge for build summa
   assert.equal(bundle.metadata?.workerBridge, true);
 });
 
+test("provisioner runtime falls back to deterministic output when model-backed summary is malformed", async () => {
+  let counter = 0;
+  const runtime = createProvisionerRuntime({
+    workerBridge: createModelBackedProvisionerWorkerBridge({
+      executor: async ({ intent }) => ({
+        provider: "openai",
+        model: "gpt-5.4",
+        layer: "api",
+        raw: { text: "ok" },
+        result: {
+          resultId: `${intent.intentId}:result`,
+          sessionId: intent.sessionId,
+          runId: intent.runId,
+          source: "model",
+          status: "success",
+          output: {
+            text: "{\"buildSummary\":\"",
+          },
+          emittedAt: "2026-03-30T10:21:00.000Z",
+        },
+      }),
+    }),
+    clock: () => new Date("2026-03-30T10:21:00.000Z"),
+    idFactory: () => `bundle-model-fallback-${++counter}`,
+  });
+
+  const request = createProvisionRequest({
+    provisionId: "provision-model-fallback-1",
+    sourceRequestId: "request-model-fallback-1",
+    requestedCapabilityKey: "repo.write",
+    reason: "Need deterministic fallback bundle narrative.",
+    createdAt: "2026-03-30T10:21:00.000Z",
+  });
+
+  const bundle = await runtime.submit(request);
+  const provisionerModelMetadata = bundle.metadata?.provisionerModelMetadata as
+    | { fallback?: string }
+    | undefined;
+
+  assert.equal(bundle.status, "ready");
+  assert.equal(bundle.metadata?.modelBacked, true);
+  assert.match(
+    typeof bundle.metadata?.buildSummary === "string" ? bundle.metadata.buildSummary : "",
+    /ready for tool-review quality checks|generic staged package contract/i,
+  );
+  assert.equal(provisionerModelMetadata?.fallback, "deterministic_summary");
+  assert.equal(bundle.metadata?.workerBridge, true);
+});
+
 test("provisioner delivery report highlights failed verification evidence from the ready receipt", async () => {
   let counter = 0;
   const runtime = createProvisionerRuntime({

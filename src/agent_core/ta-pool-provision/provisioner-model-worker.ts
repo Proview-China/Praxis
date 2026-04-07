@@ -45,33 +45,50 @@ export function createModelBackedProvisionerWorkerBridge(options: {
 }): ProvisionerWorkerBridge {
   return async (input: ProvisionerWorkerBridgeInput): Promise<ProvisionerWorkerOutput> => {
     const defaultOutput = createDefaultProvisionerWorkerOutput(input);
-    const advice = await executeTapAgentStructuredOutput({
-      executor: options.executor,
-      sessionId: `tma-model:${input.request.provisionId}`,
-      runId: `tma-model:${input.request.provisionId}`,
-      workerKind: "tap-tma",
-      route: options.route,
-      systemPrompt: [
-        "You are the TAP TMA builder agent.",
-        "Stay inside capability_build_only boundaries.",
-        "Do not execute the blocked user task, do not approve activation, and do not widen side effects.",
-        "Return one JSON object with buildSummary, replayRecommendationReason, and optional metadata.",
-      ].join(" "),
-      userPrompt: [
-        "Refine the package-building summary and replay rationale for this provision job.",
-        "Do not invent artifacts, ids, policies, or activation changes.",
-        "",
-        "Prompt pack:",
-        JSON.stringify(input.promptPack, null, 2),
-        "",
-        "Worker envelope:",
-        JSON.stringify(input.envelope, null, 2),
-        "",
-        "Current deterministic output:",
-        JSON.stringify(defaultOutput, null, 2),
-      ].join("\n"),
-      parse: parseAdvice,
-    });
+    let advice: ProvisionerWorkerModelAdvice;
+    try {
+      advice = await executeTapAgentStructuredOutput({
+        executor: options.executor,
+        sessionId: `tma-model:${input.request.provisionId}`,
+        runId: `tma-model:${input.request.provisionId}`,
+        workerKind: "tap-tma",
+        route: options.route,
+        systemPrompt: [
+          "You are the TAP TMA builder agent.",
+          "Stay inside capability_build_only boundaries.",
+          "Do not execute the blocked user task, do not approve activation, and do not widen side effects.",
+          "Return exactly one JSON object with buildSummary, replayRecommendationReason, and optional metadata.",
+        ].join(" "),
+        userPrompt: [
+          "Refine the package-building summary and replay rationale for this provision job.",
+          "Do not invent artifacts, ids, policies, or activation changes.",
+          "If uncertain, reuse the deterministic buildSummary and replay reason instead of leaving fields blank.",
+          "",
+          "Prompt pack:",
+          JSON.stringify(input.promptPack, null, 2),
+          "",
+          "Worker envelope:",
+          JSON.stringify(input.envelope, null, 2),
+          "",
+          "Current deterministic output:",
+          JSON.stringify(defaultOutput, null, 2),
+        ].join("\n"),
+        parse: parseAdvice,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/buildSummary|replayRecommendationReason|JSON|text output|plain object|unterminated/u.test(message)) {
+        throw error;
+      }
+      advice = {
+        buildSummary: defaultOutput.buildSummary,
+        replayRecommendationReason: defaultOutput.replayRecommendation.reason,
+        metadata: {
+          fallback: "deterministic_summary",
+          fallbackReason: message,
+        },
+      };
+    }
 
     return {
       ...defaultOutput,

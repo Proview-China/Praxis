@@ -308,6 +308,151 @@ test("tool reviewer runtime can refine governance summaries through the default 
   );
 });
 
+test("tool reviewer runtime falls back to deterministic summary when model output is malformed", async () => {
+  const runtime = createToolReviewerRuntime({
+    llmToolReviewerHook: createDefaultToolReviewerLlmHook({
+      executor: async ({ intent }) => ({
+        provider: "openai",
+        model: "gpt-5.4",
+        layer: "api",
+        raw: { text: "ok" },
+        result: {
+          resultId: `${intent.intentId}:result`,
+          sessionId: intent.sessionId,
+          runId: intent.runId,
+          source: "model",
+          status: "success",
+          output: {
+            text: "{\"summary\":\"",
+          },
+          emittedAt: "2026-03-30T10:12:00.000Z",
+        },
+      }),
+    }),
+  });
+
+  const result = await runtime.submit({
+    governanceAction: {
+      kind: "lifecycle",
+      trace: createToolReviewGovernanceTrace({
+        actionId: "action-lifecycle-model-fallback-1",
+        actorId: "tool-reviewer",
+        reason: "Model-backed lifecycle summary fallback.",
+        createdAt: "2026-03-30T10:12:00.000Z",
+      }),
+      capabilityKey: "mcp.playwright",
+      lifecycleAction: "register",
+      targetPool: "ta-capability-pool",
+    },
+  });
+
+  assert.equal(result.output.summary, "Lifecycle register is staged for mcp.playwright in ta-capability-pool.");
+  assert.equal(result.output.metadata?.modelBacked, true);
+  assert.equal(
+    (result.output.metadata?.toolReviewerModelMetadata as { fallback?: string } | undefined)?.fallback,
+    "deterministic_summary",
+  );
+});
+
+test("tool reviewer runtime falls back to deterministic summary when model output is malformed", async () => {
+  const runtime = createToolReviewerRuntime({
+    llmToolReviewerHook: createDefaultToolReviewerLlmHook({
+      executor: async ({ intent }) => ({
+        provider: "openai",
+        model: "gpt-5.4",
+        layer: "api",
+        raw: { text: "not-json" },
+        result: {
+          resultId: `${intent.intentId}:result`,
+          sessionId: intent.sessionId,
+          runId: intent.runId,
+          source: "model",
+          status: "success",
+          output: {
+            text: "summary: definitely not valid json",
+          },
+          emittedAt: "2026-04-07T03:20:00.000Z",
+        },
+      }),
+    }),
+  });
+
+  const result = await runtime.submit({
+    governanceAction: {
+      kind: "lifecycle",
+      trace: createToolReviewGovernanceTrace({
+        actionId: "action-lifecycle-model-fallback-1",
+        actorId: "tool-reviewer",
+        reason: "Malformed model output should fall back cleanly.",
+        createdAt: "2026-04-07T03:20:00.000Z",
+      }),
+      capabilityKey: "mcp.playwright",
+      lifecycleAction: "register",
+      targetPool: "ta-capability-pool",
+    },
+  });
+
+  assert.match(result.output.summary, /Lifecycle register is staged/i);
+  assert.equal(result.output.metadata?.modelBacked, true);
+  assert.deepEqual(
+    result.output.metadata?.toolReviewerModelMetadata,
+    {
+      fallback: "deterministic_summary",
+      fallbackReason: "Tap agent model output did not contain a JSON object.",
+    },
+  );
+});
+
+test("tool reviewer runtime falls back to deterministic summary when the model returns invalid structured output", async () => {
+  const runtime = createToolReviewerRuntime({
+    llmToolReviewerHook: createDefaultToolReviewerLlmHook({
+      executor: async ({ intent }) => ({
+        provider: "openai",
+        model: "gpt-5.4",
+        layer: "api",
+        raw: { text: "ok" },
+        result: {
+          resultId: `${intent.intentId}:result`,
+          sessionId: intent.sessionId,
+          runId: intent.runId,
+          source: "model",
+          status: "success",
+          output: {
+            text: JSON.stringify({
+              metadata: {
+                rationale: "summary was omitted",
+              },
+            }),
+          },
+          emittedAt: "2026-03-30T10:11:00.000Z",
+        },
+      }),
+    }),
+  });
+
+  const result = await runtime.submit({
+    governanceAction: {
+      kind: "lifecycle",
+      trace: createToolReviewGovernanceTrace({
+        actionId: "action-lifecycle-model-fallback-1",
+        actorId: "tool-reviewer",
+        reason: "Model-backed lifecycle summary fallback.",
+        createdAt: "2026-03-30T10:11:00.000Z",
+      }),
+      capabilityKey: "mcp.playwright",
+      lifecycleAction: "register",
+      targetPool: "ta-capability-pool",
+    },
+  });
+
+  assert.equal(result.output.summary, "Lifecycle register is staged for mcp.playwright in ta-capability-pool.");
+  assert.equal(result.output.metadata?.modelBacked, true);
+  assert.deepEqual(result.output.metadata?.toolReviewerModelMetadata, {
+    fallback: "deterministic_summary",
+    fallbackReason: "Tool reviewer model output requires a non-empty summary.",
+  });
+});
+
 test("tool reviewer runtime preserves human gate waiting status and replay re-review status", async () => {
   const runtime = createToolReviewerRuntime();
   const request = {
