@@ -8,8 +8,8 @@ import {
   executeModelInference,
 } from "./integrations/model-inference.js";
 import {
-  registerFirstClassToolingBaselineCapabilities,
-} from "./integrations/workspace-read-adapter.js";
+  registerTapCapabilityFamilyAssembly,
+} from "./integrations/tap-capability-family-assembly.js";
 import {
   createGoalSource,
 } from "./goal/index.js";
@@ -283,9 +283,18 @@ async function smokeCmpTapBridge(config: ReturnType<typeof loadOpenAILiveConfig>
     }),
     modelInferenceExecutor: executeModelInference,
   });
-  registerFirstClassToolingBaselineCapabilities({
+  registerTapCapabilityFamilyAssembly({
     runtime,
-    workspaceRoot: process.cwd(),
+    foundation: {
+      workspaceRoot: process.cwd(),
+    },
+    includeFamilies: {
+      foundation: true,
+      websearch: false,
+      skill: false,
+      mcp: false,
+      userio: false,
+    },
   });
 
   const session = runtime.createSession();

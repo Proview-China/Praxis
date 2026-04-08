@@ -2,21 +2,23 @@ import type { CapabilityAdapter, CapabilityManifest } from "../capability-types/
 import type { CapabilityPackage } from "../capability-package/index.js";
 import type { ActivationAdapterFactory } from "../ta-pool-runtime/index.js";
 import type { WorkspaceReadActivationFactoryOptions } from "./workspace-read-adapter.js";
-import { registerFirstClassToolingBaselineCapabilities } from "./workspace-read-adapter.js";
 import type { TapToolingAdapterOptions } from "./tap-tooling-adapter.js";
+import { registerFirstClassToolingBaselineCapabilities } from "./workspace-read-adapter.js";
 import { registerTapToolingBaseline } from "./tap-tooling-adapter.js";
-import type { RaxWebsearchAdapterOptions } from "./rax-websearch-adapter.js";
-import { registerRaxWebsearchCapability } from "./rax-websearch-adapter.js";
+import type { TapVendorNetworkAdapterOptions } from "./tap-vendor-network-adapter.js";
+import { registerTapVendorNetworkCapabilityFamily } from "./tap-vendor-network-adapter.js";
 import type { RegisterRaxSkillCapabilityFamilyInput } from "./rax-skill-adapter.js";
 import { registerRaxSkillCapabilityFamily } from "./rax-skill-adapter.js";
 import type { RegisterRaxMcpCapabilitiesInput } from "./rax-mcp-adapter.js";
 import { registerRaxMcpCapabilities } from "./rax-mcp-adapter.js";
+import { registerTapVendorUserIoFamily } from "./tap-vendor-user-io-adapter.js";
 
 export const TAP_FORMAL_CAPABILITY_FAMILY_KEYS = [
   "foundation",
   "websearch",
   "skill",
   "mcp",
+  "userio",
 ] as const;
 export type TapFormalCapabilityFamilyKey =
   (typeof TAP_FORMAL_CAPABILITY_FAMILY_KEYS)[number];
@@ -39,9 +41,12 @@ export interface RegisterTapCapabilityFamilyAssemblyInput {
     read?: Partial<Omit<WorkspaceReadActivationFactoryOptions, "workspaceRoot" | "capabilityKey">>;
     tooling?: Omit<TapToolingAdapterOptions, "workspaceRoot">;
   };
-  websearch?: Omit<RaxWebsearchAdapterOptions, "capabilityKey">;
+  websearch?: Omit<TapVendorNetworkAdapterOptions, "capabilityKey">;
   skill?: Omit<RegisterRaxSkillCapabilityFamilyInput, "runtime">;
   mcp?: Omit<RegisterRaxMcpCapabilitiesInput, "runtime">;
+  userio?: {
+    capabilityKeys?: readonly ("request_user_input" | "request_permissions")[];
+  };
   includeFamilies?: Partial<Record<TapFormalCapabilityFamilyKey, boolean>>;
 }
 
@@ -78,6 +83,7 @@ function createEmptyFamilyKeys(): Record<TapFormalCapabilityFamilyKey, string[]>
     websearch: [],
     skill: [],
     mcp: [],
+    userio: [],
   };
 }
 
@@ -103,6 +109,7 @@ export function registerTapCapabilityFamilyAssembly(
     websearch: input.includeFamilies?.websearch ?? true,
     skill: input.includeFamilies?.skill ?? true,
     mcp: input.includeFamilies?.mcp ?? true,
+    userio: input.includeFamilies?.userio ?? true,
   };
   const runtime: TapCapabilityFamilyAssemblyTarget = {
     registerCapabilityAdapter(manifest, adapter) {
@@ -149,14 +156,17 @@ export function registerTapCapabilityFamilyAssembly(
   }
 
   if (includeFamilies.websearch) {
-    const registration = registerRaxWebsearchCapability({
+    const registration = registerTapVendorNetworkCapabilityFamily({
       runtime,
       facade: input.websearch?.facade,
+      fetcher: input.websearch?.fetcher,
     });
-    packages.push(registration.capabilityPackage);
-    bindings.push(registration.binding);
-    familyKeys.websearch.push(registration.manifest.capabilityKey);
-    activationFactoryRefs.add(registration.activationFactoryRef);
+    packages.push(...registration.packages);
+    bindings.push(...registration.bindings);
+    familyKeys.websearch.push(...registration.capabilityKeys);
+    for (const ref of registration.activationFactoryRefs) {
+      activationFactoryRefs.add(ref);
+    }
   }
 
   if (includeFamilies.skill) {
@@ -180,6 +190,19 @@ export function registerTapCapabilityFamilyAssembly(
     packages.push(...registration.packages);
     bindings.push(...registration.bindings);
     familyKeys.mcp.push(...registration.capabilityKeys);
+    for (const ref of registration.activationFactoryRefs) {
+      activationFactoryRefs.add(ref);
+    }
+  }
+
+  if (includeFamilies.userio) {
+    const registration = registerTapVendorUserIoFamily({
+      runtime,
+      capabilityKeys: input.userio?.capabilityKeys,
+    });
+    packages.push(...registration.packages);
+    bindings.push(...registration.bindings);
+    familyKeys.userio.push(...registration.capabilityKeys);
     for (const ref of registration.activationFactoryRefs) {
       activationFactoryRefs.add(ref);
     }

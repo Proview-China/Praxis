@@ -33,7 +33,11 @@ test("registerTapCapabilityFamilyAssembly wires foundation, search, skill, and M
     "test.run",
     "skill.doc.generate",
   ]);
-  assert.deepEqual(result.familyKeys.websearch, ["search.ground"]);
+  assert.deepEqual(result.familyKeys.websearch, [
+    "search.web",
+    "search.fetch",
+    "search.ground",
+  ]);
   assert.deepEqual(result.familyKeys.skill, [
     "skill.use",
     "skill.mount",
@@ -45,14 +49,21 @@ test("registerTapCapabilityFamilyAssembly wires foundation, search, skill, and M
     "mcp.call",
     "mcp.native.execute",
   ]);
-  assert.equal(result.packages.length, 14);
-  assert.equal(result.bindings.length, 14);
+  assert.deepEqual(result.familyKeys.userio, [
+    "request_user_input",
+    "request_permissions",
+  ]);
+  assert.equal(result.packages.length, 18);
+  assert.equal(result.bindings.length, 18);
   assert.equal(result.activationFactoryRefs.length, activationFactories.size);
-  assert.equal(result.registrationAudit.length, 14);
+  assert.equal(result.registrationAudit.length, 18);
   assert.equal(result.activationFactoryAudit.length, activationFactories.size);
+  assert.equal(registeredCapabilityKeys.includes("search.web"), true);
+  assert.equal(registeredCapabilityKeys.includes("search.fetch"), true);
   assert.equal(registeredCapabilityKeys.includes("search.ground"), true);
   assert.equal(registeredCapabilityKeys.includes("skill.use"), true);
   assert.equal(registeredCapabilityKeys.includes("mcp.native.execute"), true);
+  assert.equal(registeredCapabilityKeys.includes("request_user_input"), true);
 
   const codeReadAudit = result.registrationAudit.find(
     (entry) => entry.capabilityKey === "code.read",
@@ -70,9 +81,23 @@ test("registerTapCapabilityFamilyAssembly wires foundation, search, skill, and M
   assert.equal(searchAudit.familyKey, "websearch");
   assert.equal(searchAudit.hasHealthCheck, true);
 
+  const searchFetchAudit = result.registrationAudit.find(
+    (entry) => entry.capabilityKey === "search.fetch",
+  );
+  assert.ok(searchFetchAudit);
+  assert.equal(searchFetchAudit.familyKey, "websearch");
+  assert.equal(searchFetchAudit.hasHealthCheck, true);
+
   const nativeExecuteFactory = result.activationFactoryAudit.find(
     (entry) => entry.capabilityKey === "mcp.native.execute",
   );
   assert.ok(nativeExecuteFactory);
   assert.equal(nativeExecuteFactory.familyKey, "mcp");
+
+  const requestPermissionsAudit = result.registrationAudit.find(
+    (entry) => entry.capabilityKey === "request_permissions",
+  );
+  assert.ok(requestPermissionsAudit);
+  assert.equal(requestPermissionsAudit.familyKey, "userio");
+  assert.equal(requestPermissionsAudit.hasHealthCheck, true);
 });

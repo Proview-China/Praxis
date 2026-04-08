@@ -2,8 +2,9 @@ import {
   createCapabilityManifestFromPackage,
   createMcpCapabilityPackage,
   createMcpReadCapabilityPackage,
+  createTapVendorNetworkCapabilityPackageCatalog,
   createRaxSkillCapabilityPackageCatalog,
-  createRaxWebsearchCapabilityPackage,
+  createTapVendorUserIoCapabilityPackageCatalog,
   createTapToolingBaselineCapabilityPackages,
   listFirstClassToolingBaselineCapabilityPackages,
   type CapabilityPackage,
@@ -38,43 +39,35 @@ function createEntry(params: {
 }
 
 function buildFoundationEntries(): TapFormalFamilyInventoryEntry[] {
-  const firstClassSource =
-    "capability-package/first-class-tooling-baseline#listFirstClassToolingBaselineCapabilityPackages";
-  const firstClassRegisterHelper =
-    "integrations/workspace-read-adapter#registerFirstClassToolingBaselineCapabilities";
-  const tapToolingSource =
-    "capability-package/tap-tooling-baseline#createTapToolingBaselineCapabilityPackages";
-  const tapToolingRegisterHelper =
-    "integrations/tap-tooling-adapter#registerTapToolingBaseline";
-
   return [
     ...listFirstClassToolingBaselineCapabilityPackages().map((capabilityPackage) =>
       createEntry({
         familyKey: "foundation",
         capabilityPackage,
-        packageSourceRef: firstClassSource,
-        registerHelperRef: firstClassRegisterHelper,
+        packageSourceRef:
+          "capability-package/first-class-tooling-baseline#listFirstClassToolingBaselineCapabilityPackages",
+        registerHelperRef: "integrations/workspace-read-adapter#registerFirstClassToolingBaselineCapabilities",
       })),
     ...createTapToolingBaselineCapabilityPackages().map((capabilityPackage) =>
       createEntry({
         familyKey: "foundation",
         capabilityPackage,
-        packageSourceRef: tapToolingSource,
-        registerHelperRef: tapToolingRegisterHelper,
+        packageSourceRef:
+          "capability-package/tap-tooling-baseline#createTapToolingBaselineCapabilityPackages",
+        registerHelperRef: "integrations/tap-tooling-adapter#registerTapToolingBaseline",
       })),
   ];
 }
 
 function buildWebsearchEntries(): TapFormalFamilyInventoryEntry[] {
-  return [
+  return createTapVendorNetworkCapabilityPackageCatalog().map((capabilityPackage) =>
     createEntry({
       familyKey: "websearch",
-      capabilityPackage: createRaxWebsearchCapabilityPackage(),
+      capabilityPackage,
       packageSourceRef:
-        "capability-package/search-ground-capability-package#createRaxWebsearchCapabilityPackage",
-      registerHelperRef: "integrations/rax-websearch-adapter#registerRaxWebsearchCapability",
-    }),
-  ];
+        "capability-package/vendor-network-capability-package#createTapVendorNetworkCapabilityPackageCatalog",
+      registerHelperRef: "integrations/tap-vendor-network-adapter#registerTapVendorNetworkCapabilityFamily",
+    }));
 }
 
 function buildSkillEntries(): TapFormalFamilyInventoryEntry[] {
@@ -89,37 +82,47 @@ function buildSkillEntries(): TapFormalFamilyInventoryEntry[] {
 }
 
 function buildMcpEntries(): TapFormalFamilyInventoryEntry[] {
-  const readSource =
-    "capability-package/mcp-read-family-package#createMcpReadCapabilityPackage";
-  const mcpRegisterHelper = "integrations/rax-mcp-adapter#registerRaxMcpCapabilities";
-  const invokeSource = "capability-package/capability-package#createMcpCapabilityPackage";
-
   return [
     createEntry({
       familyKey: "mcp",
       capabilityPackage: createMcpReadCapabilityPackage({ capabilityKey: "mcp.listTools" }),
-      packageSourceRef: readSource,
-      registerHelperRef: mcpRegisterHelper,
+      packageSourceRef:
+        "capability-package/mcp-read-family-package#createMcpReadCapabilityPackage",
+      registerHelperRef: "integrations/rax-mcp-adapter#registerRaxMcpCapabilities",
     }),
     createEntry({
       familyKey: "mcp",
       capabilityPackage: createMcpReadCapabilityPackage({ capabilityKey: "mcp.readResource" }),
-      packageSourceRef: readSource,
-      registerHelperRef: mcpRegisterHelper,
+      packageSourceRef:
+        "capability-package/mcp-read-family-package#createMcpReadCapabilityPackage",
+      registerHelperRef: "integrations/rax-mcp-adapter#registerRaxMcpCapabilities",
     }),
     createEntry({
       familyKey: "mcp",
       capabilityPackage: createMcpCapabilityPackage({ capabilityKey: "mcp.call" }),
-      packageSourceRef: invokeSource,
-      registerHelperRef: mcpRegisterHelper,
+      packageSourceRef:
+        "capability-package/capability-package#createMcpCapabilityPackage",
+      registerHelperRef: "integrations/rax-mcp-adapter#registerRaxMcpCapabilities",
     }),
     createEntry({
       familyKey: "mcp",
       capabilityPackage: createMcpCapabilityPackage({ capabilityKey: "mcp.native.execute" }),
-      packageSourceRef: invokeSource,
-      registerHelperRef: mcpRegisterHelper,
+      packageSourceRef:
+        "capability-package/capability-package#createMcpCapabilityPackage",
+      registerHelperRef: "integrations/rax-mcp-adapter#registerRaxMcpCapabilities",
     }),
   ];
+}
+
+function buildUserIoEntries(): TapFormalFamilyInventoryEntry[] {
+  return createTapVendorUserIoCapabilityPackageCatalog().map((capabilityPackage) =>
+    createEntry({
+      familyKey: "userio",
+      capabilityPackage,
+      packageSourceRef:
+        "capability-package/vendor-user-io-capability-package#createTapVendorUserIoCapabilityPackageCatalog",
+      registerHelperRef: "integrations/tap-vendor-user-io-adapter#registerTapVendorUserIoFamily",
+    }));
 }
 
 export function listTapFormalFamilyInventoryEntries(): TapFormalFamilyInventoryEntry[] {
@@ -128,12 +131,13 @@ export function listTapFormalFamilyInventoryEntries(): TapFormalFamilyInventoryE
     ...buildWebsearchEntries(),
     ...buildSkillEntries(),
     ...buildMcpEntries(),
+    ...buildUserIoEntries(),
   ];
 }
 
 export function createTapFormalFamilyInventory(): TapFormalFamilyInventory {
   const entries = listTapFormalFamilyInventoryEntries();
-  const familyKeys = ["foundation", "websearch", "skill", "mcp"] as const;
+  const familyKeys = ["foundation", "websearch", "skill", "mcp", "userio"] as const;
   const families = familyKeys.map((familyKey) => {
     const familyEntries = entries.filter((entry) => entry.familyKey === familyKey);
     return {

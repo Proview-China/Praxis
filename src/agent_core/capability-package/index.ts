@@ -49,6 +49,14 @@ export type {
   CreateRaxWebsearchCapabilityPackageOptions,
 } from "./search-ground-capability-package.js";
 export type {
+  CreateTapVendorNetworkCapabilityPackageInput,
+  TapVendorNetworkCapabilityKey,
+} from "./vendor-network-capability-package.js";
+export type {
+  CreateTapVendorUserIoCapabilityPackageInput,
+  TapVendorUserIoCapabilityKey,
+} from "./vendor-user-io-capability-package.js";
+export type {
   FirstClassToolingAllowedOperation,
   FirstClassToolingCapabilityBaselineDescriptor,
   FirstClassToolingBaselineCapabilityKey,
@@ -119,6 +127,18 @@ export {
   RAX_WEBSEARCH_ACTIVATION_FACTORY_REF,
   SEARCH_GROUND_CAPABILITY_KEY,
 } from "./search-ground-capability-package.js";
+export {
+  createTapVendorNetworkCapabilityPackage,
+  createTapVendorNetworkCapabilityPackageCatalog,
+  TAP_VENDOR_NETWORK_ACTIVATION_FACTORY_REFS,
+  TAP_VENDOR_NETWORK_CAPABILITY_KEYS,
+} from "./vendor-network-capability-package.js";
+export {
+  createTapVendorUserIoCapabilityPackage,
+  createTapVendorUserIoCapabilityPackageCatalog,
+  TAP_VENDOR_USER_IO_ACTIVATION_FACTORY_REFS,
+  TAP_VENDOR_USER_IO_CAPABILITY_KEYS,
+} from "./vendor-user-io-capability-package.js";
 export {
   createCapabilityManifestFromPackage,
   createCodeReadCapabilityPackage,
