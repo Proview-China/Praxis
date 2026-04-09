@@ -18,6 +18,7 @@ export const FIRST_CLASS_TOOLING_BASELINE_CAPABILITY_KEYS = [
   "code.lsp",
   "read_pdf",
   "read_notebook",
+  "view_image",
   "docs.read",
 ] as const;
 export type FirstClassToolingBaselineCapabilityKey =
@@ -38,6 +39,7 @@ export const FIRST_CLASS_TOOLING_ALLOWED_OPERATIONS = [
   "hover",
   "read_pdf",
   "read_notebook",
+  "view_image",
 ] as const;
 export type FirstClassToolingAllowedOperation =
   (typeof FIRST_CLASS_TOOLING_ALLOWED_OPERATIONS)[number];
@@ -391,6 +393,50 @@ const FIRST_CLASS_TOOLING_BASELINE_DESCRIPTORS: Record<
     ],
     workerConsumers: ["reviewer", "bootstrap_tma", "extended_tma"],
   },
+  "view_image": {
+    capabilityKey: "view_image",
+    scopeKind: "workspace-code",
+    scopeSummary:
+      "Repo-local image assets and screenshots that can be attached into multimodal model context through a bounded local-image bridge.",
+    description:
+      "Read a repo-local image file and expose it as a bounded local-image input for multimodal model passes.",
+    reviewerSummary:
+      "Core or reviewer can inspect repo-local images through a local-image bridge, but cannot edit the image or write files through this capability.",
+    pathPatterns: [
+      "src",
+      "src/**",
+      "docs",
+      "docs/**",
+      "assets",
+      "assets/**",
+      "*.png",
+      "*.jpg",
+      "*.jpeg",
+      "*.webp",
+      "*.gif",
+      "**/*.png",
+      "**/*.jpg",
+      "**/*.jpeg",
+      "**/*.webp",
+      "**/*.gif",
+    ],
+    allowedOperations: ["view_image"],
+    usageDocRef: "docs/ability/01-basic-implementation.md",
+    examplePath: "assets/mockup.png",
+    exampleOperation: "view_image",
+    routeHints: [
+      { key: "scope", value: "workspace-code" },
+      { key: "baseline", value: "reviewer-tma" },
+      { key: "toolKind", value: "local-image-view" },
+    ],
+    tags: ["tap", "baseline", "read", "image", "multimodal", "reviewer", "tma"],
+    knownLimits: [
+      "Read-only capability; it attaches supported local raster images only.",
+      "Current implementation is intended for model-visible local images, not arbitrary binary assets.",
+      "Unsupported MIME types are rejected rather than being coerced into fake image inputs.",
+    ],
+    workerConsumers: ["reviewer", "bootstrap_tma", "extended_tma"],
+  },
   "docs.read": {
     capabilityKey: "docs.read",
     scopeKind: "workspace-docs",
@@ -666,6 +712,10 @@ export function createReadPdfCapabilityPackage(): CapabilityPackage {
 
 export function createReadNotebookCapabilityPackage(): CapabilityPackage {
   return createFirstClassToolingCapabilityPackage("read_notebook");
+}
+
+export function createViewImageCapabilityPackage(): CapabilityPackage {
+  return createFirstClassToolingCapabilityPackage("view_image");
 }
 
 export function createDocsReadCapabilityPackage(): CapabilityPackage {

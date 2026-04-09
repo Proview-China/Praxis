@@ -178,6 +178,20 @@ function readTextFromUnknownRecord(record: Record<string, unknown>): string | un
   return undefined;
 }
 
+function readStringArrayMetadata(
+  metadata: Record<string, unknown> | undefined,
+  key: string,
+): string[] | undefined {
+  const value = metadata?.[key];
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const normalized = value.filter(
+    (entry): entry is string => typeof entry === "string" && entry.trim().length > 0,
+  );
+  return normalized.length > 0 ? normalized : undefined;
+}
+
 function isOpenAIResponseEnvelope(record: Record<string, unknown>): boolean {
   return typeof record.object === "string"
     && ("usage" in record || "output" in record || "choices" in record);
@@ -470,6 +484,7 @@ export async function executeModelInference(
   const compatibilityProfileId = readStringMetadata(metadata, "compatibilityProfileId");
   const maxOutputTokens = readPositiveIntegerMetadata(metadata, "maxOutputTokens");
   const reasoningEffort = readStringMetadata(metadata, "reasoningEffort") as "low" | "medium" | "high" | undefined;
+  const inputImageUrls = readStringArrayMetadata(metadata, "inputImageUrls");
 
   if (provider !== "openai") {
     throw new Error(`Model inference integration currently only supports provider ${"openai"}, received ${provider}.`);
@@ -486,12 +501,38 @@ export async function executeModelInference(
       variant === "chat_completions_compat"
         ? {
             model,
-            messages: [{ role: "user", content: params.intent.frame.instructionText }],
+            messages: [
+              {
+                role: "user",
+                content: inputImageUrls?.length
+                  ? [
+                    { type: "text", text: params.intent.frame.instructionText },
+                    ...inputImageUrls.map((imageUrl) => ({
+                      type: "image_url" as const,
+                      image_url: { url: imageUrl },
+                    })),
+                  ]
+                  : params.intent.frame.instructionText,
+              },
+            ],
             maxCompletionTokens: maxOutputTokens,
             reasoningEffort: reasoningEffort ?? config.reasoningEffort as "low" | "medium" | "high" | undefined,
           }
         : {
-            input: params.intent.frame.instructionText,
+            input: inputImageUrls?.length
+              ? [
+                {
+                  role: "user",
+                  content: [
+                    { type: "input_text" as const, text: params.intent.frame.instructionText },
+                    ...inputImageUrls.map((imageUrl) => ({
+                      type: "input_image" as const,
+                      image_url: imageUrl,
+                    })),
+                  ],
+                },
+              ]
+              : params.intent.frame.instructionText,
             maxOutputTokens,
             reasoning: reasoningEffort ? { effort: reasoningEffort } : undefined,
           },

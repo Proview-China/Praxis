@@ -15,6 +15,7 @@ import {
   createCodeLspCapabilityPackage,
   createReadPdfCapabilityPackage,
   createReadNotebookCapabilityPackage,
+  createViewImageCapabilityPackage,
   createDocsReadCapabilityPackage,
   FIRST_CLASS_TOOLING_ALLOWED_OPERATIONS,
   FIRST_CLASS_TOOLING_BASELINE_CAPABILITY_KEYS,
@@ -85,6 +86,7 @@ interface PreparedWorkspaceReadInput {
   query?: string;
   pages?: string;
   cellId?: string;
+  detail?: string;
   include?: string[];
   exclude?: string[];
   lineStart?: number;
@@ -246,6 +248,8 @@ function parsePreparedWorkspaceReadInput(
                   ? "read_pdf"
                   : capabilityKey === "read_notebook"
                     ? "read_notebook"
+                    : capabilityKey === "view_image"
+                      ? "view_image"
             : "read_file");
   const requestedPath = asString(input.path)
     ?? asString(input.file_path)
@@ -263,6 +267,7 @@ function parsePreparedWorkspaceReadInput(
     ?? pattern;
   const pages = asString(input.pages);
   const cellId = asString(input.cellId) ?? asString(input.cell_id);
+  const detail = asString(input.detail);
   const include = asStringArray(input.include);
   const exclude = asStringArray(input.exclude);
   const requiresPath = !(
@@ -292,6 +297,7 @@ function parsePreparedWorkspaceReadInput(
     query,
     pages,
     cellId,
+    detail,
     include,
     exclude,
     lineStart: asPositiveInteger(input.lineStart),
@@ -816,6 +822,31 @@ async function readNotebookSummary(params: {
   };
 }
 
+async function readImageSummary(params: {
+  absolutePath: string;
+  relativePath: string;
+  detail?: string;
+}) {
+  const buffer = await readFile(params.absolutePath);
+  const mimeInfo = await runWorkspaceCommand({
+    command: "file",
+    args: ["--mime-type", "-b", params.absolutePath],
+  });
+  const mimeType = mimeInfo.stdout.trim();
+  if (!mimeType.startsWith("image/")) {
+    throw new Error(`Unsupported image MIME type for view_image: ${mimeType || "unknown"}.`);
+  }
+  return {
+    capabilityKey: "view_image",
+    operation: "view_image",
+    path: params.relativePath,
+    mimeType,
+    detail: params.detail,
+    byteLength: buffer.length,
+    imageUrl: `data:${mimeType};base64,${buffer.toString("base64")}`,
+  };
+}
+
 export class WorkspaceReadCapabilityAdapter implements CapabilityAdapter {
   readonly id: string;
   readonly runtimeKind = "workspace-read";
@@ -1190,6 +1221,27 @@ export class WorkspaceReadCapabilityAdapter implements CapabilityAdapter {
           return createCapabilityResultEnvelope({
             executionId: prepared.preparedId,
             status: summary.truncated ? "partial" : "success",
+            output: summary,
+            metadata: this.#createResultMetadata(),
+          });
+        }
+        case "view_image": {
+          if (!target) {
+            return createFailureEnvelope({
+              prepared,
+              status: "failed",
+              code: "workspace_read_missing_path",
+              message: `${this.#capabilityKey} requires a non-empty file path.`,
+            });
+          }
+          const summary = await readImageSummary({
+            absolutePath: target.absolutePath,
+            relativePath: target.relativePath,
+            detail: parsed.detail,
+          });
+          return createCapabilityResultEnvelope({
+            executionId: prepared.preparedId,
+            status: "success",
             output: summary,
             metadata: this.#createResultMetadata(),
           });
@@ -1590,7 +1642,9 @@ export function registerFirstClassToolingBaselineCapabilities(
                   ? createReadPdfCapabilityPackage()
                   : capabilityKey === "read_notebook"
                     ? createReadNotebookCapabilityPackage()
-                  : createDocsReadCapabilityPackage(),
+                    : capabilityKey === "view_image"
+                      ? createViewImageCapabilityPackage()
+                    : createDocsReadCapabilityPackage(),
   );
   const manifests = packages.map((capabilityPackage) =>
     createCapabilityManifestFromPackage(capabilityPackage),

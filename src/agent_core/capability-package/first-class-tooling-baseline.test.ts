@@ -27,6 +27,7 @@ test("first-class tooling baseline exposes the frozen A-group capability keys", 
     "code.lsp",
     "read_pdf",
     "read_notebook",
+    "view_image",
     "docs.read",
   ]);
   assert.deepEqual(FIRST_CLASS_TOOLING_ALLOWED_OPERATIONS, [
@@ -44,6 +45,7 @@ test("first-class tooling baseline exposes the frozen A-group capability keys", 
     "hover",
     "read_pdf",
     "read_notebook",
+    "view_image",
   ]);
 });
 
@@ -92,10 +94,10 @@ test("docs.read package carries docs-oriented scope and activation metadata", ()
 
 test("first-class tooling baseline package listing stays stable and complete", () => {
   const packages = listFirstClassToolingBaselineCapabilityPackages();
-  assert.equal(packages.length, 10);
+  assert.equal(packages.length, 11);
   assert.deepEqual(
     packages.map((entry) => entry.manifest.capabilityKey),
-    ["code.read", "code.ls", "code.glob", "code.grep", "code.read_many", "code.symbol_search", "code.lsp", "read_pdf", "read_notebook", "docs.read"],
+    ["code.read", "code.ls", "code.glob", "code.grep", "code.read_many", "code.symbol_search", "code.lsp", "read_pdf", "read_notebook", "view_image", "docs.read"],
   );
 });
 
@@ -103,7 +105,7 @@ test("first-class tooling capability descriptors expose reviewer-readable scope 
   const descriptors = listFirstClassToolingCapabilityBaselineDescriptors();
   assert.deepEqual(
     descriptors.map((entry) => entry.capabilityKey),
-    ["code.read", "code.ls", "code.glob", "code.grep", "code.read_many", "code.symbol_search", "code.lsp", "read_pdf", "read_notebook", "docs.read"],
+    ["code.read", "code.ls", "code.glob", "code.grep", "code.read_many", "code.symbol_search", "code.lsp", "read_pdf", "read_notebook", "view_image", "docs.read"],
   );
 
   const codeRead =
@@ -147,6 +149,10 @@ test("new first-class code discovery packages expose the expected operation fami
   assert.deepEqual(
     getFirstClassToolingCapabilityBaselineDescriptor("read_notebook").allowedOperations,
     ["read_notebook"],
+  );
+  assert.deepEqual(
+    getFirstClassToolingCapabilityBaselineDescriptor("view_image").allowedOperations,
+    ["view_image"],
   );
 });
 

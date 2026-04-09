@@ -150,6 +150,7 @@ export {
   createCodeLspCapabilityPackage,
   createReadPdfCapabilityPackage,
   createReadNotebookCapabilityPackage,
+  createViewImageCapabilityPackage,
   createDocsReadCapabilityPackage,
   FIRST_CLASS_TOOLING_ALLOWED_OPERATIONS,
   FIRST_CLASS_TOOLING_BASELINE_CAPABILITY_KEYS,

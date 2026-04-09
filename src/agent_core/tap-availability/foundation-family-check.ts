@@ -15,6 +15,7 @@ export const FOUNDATION_FAMILY_CAPABILITY_KEYS = [
   "code.lsp",
   "read_pdf",
   "read_notebook",
+  "view_image",
   "docs.read",
   "repo.write",
   "code.edit",

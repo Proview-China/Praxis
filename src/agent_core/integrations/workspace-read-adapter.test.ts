@@ -40,6 +40,9 @@ function createMinimalPdfBuffer(text: string): Buffer {
   return Buffer.from(pdf, "utf8");
 }
 
+const TINY_PNG_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jX1cAAAAASUVORK5CYII=";
+
 async function createWorkspaceFixture() {
   const root = await mkdtemp(path.join(tmpdir(), "praxis-workspace-read-"));
   await mkdir(path.join(root, "src"), { recursive: true });
@@ -82,6 +85,10 @@ async function createWorkspaceFixture() {
   await writeFile(
     path.join(root, "docs", "sample.pdf"),
     createMinimalPdfBuffer("Hello PDF from Praxis tests"),
+  );
+  await writeFile(
+    path.join(root, "docs", "tiny.png"),
+    Buffer.from(TINY_PNG_BASE64, "base64"),
   );
   await writeFile(
     path.join(root, "notebooks", "demo.ipynb"),
@@ -511,6 +518,43 @@ test("workspace read adapter supports read_notebook via structured cell summarie
   assert.equal((envelope.output as { cells?: Array<{ outputs?: string[] }> }).cells?.[1]?.outputs?.[0], "42");
 });
 
+test("workspace read adapter supports view_image via data-url output", async () => {
+  const workspaceRoot = await createWorkspaceFixture();
+  const adapter = createWorkspaceReadCapabilityAdapter({
+    workspaceRoot,
+    capabilityKey: "view_image",
+    allowedPathPatterns: ["docs", "docs/**", "*.png", "**/*.png"],
+  });
+  const plan = createCapabilityInvocationPlan(
+    {
+      intentId: "intent-view-image-1",
+      sessionId: "session-view-image-1",
+      runId: "run-view-image-1",
+      capabilityKey: "view_image",
+      input: {
+        path: "docs/tiny.png",
+      },
+      priority: "normal",
+    },
+    {
+      idFactory: () => "plan-view-image-1",
+    },
+  );
+  const prepared = await adapter.prepare(plan, createCapabilityLease({
+    capabilityId: "cap-view-image-1",
+    bindingId: "binding-view-image-1",
+    generation: 1,
+    plan,
+  }, {
+    idFactory: () => "lease-view-image-1",
+    clock: { now: () => new Date("2026-04-09T00:04:50.000Z") },
+  }));
+  const envelope = await adapter.execute(prepared);
+  assert.equal(envelope.status, "success");
+  assert.equal((envelope.output as { mimeType?: string }).mimeType, "image/png");
+  assert.match(String((envelope.output as { imageUrl?: string }).imageUrl), /^data:image\/png;base64,/);
+});
+
 test("workspace read adapter supports code.symbol_search via TypeScript workspace symbol search", async () => {
   const workspaceRoot = await createWorkspaceFixture();
   const adapter = createWorkspaceReadCapabilityAdapter({
@@ -719,11 +763,11 @@ test("workspace read baseline registration lets TAP dispatch docs.read through t
   assert.equal(result.grant?.capabilityKey, "docs.read");
   assert.deepEqual(
     registration.capabilityKeys,
-    ["code.read", "code.ls", "code.glob", "code.grep", "code.read_many", "code.symbol_search", "code.lsp", "read_pdf", "read_notebook", "docs.read"],
+    ["code.read", "code.ls", "code.glob", "code.grep", "code.read_many", "code.symbol_search", "code.lsp", "read_pdf", "read_notebook", "view_image", "docs.read"],
   );
   assert.deepEqual(
     registration.descriptors.map((entry) => entry.capabilityKey),
-    ["code.read", "code.ls", "code.glob", "code.grep", "code.read_many", "code.symbol_search", "code.lsp", "read_pdf", "read_notebook", "docs.read"],
+    ["code.read", "code.ls", "code.glob", "code.grep", "code.read_many", "code.symbol_search", "code.lsp", "read_pdf", "read_notebook", "view_image", "docs.read"],
   );
   assert.equal(
     registration.descriptors.find((entry) => entry.capabilityKey === "docs.read")?.scopeKind,

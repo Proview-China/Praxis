@@ -453,6 +453,16 @@ function summarizeToolOutputForCore(
     }, null, 2);
   }
 
+  if (capabilityKey === "view_image") {
+    return JSON.stringify({
+      capabilityKey,
+      path: normalized?.path,
+      mimeType: normalized?.mimeType,
+      byteLength: normalized?.byteLength,
+      detail: normalized?.detail,
+    }, null, 2);
+  }
+
   if (capabilityKey === "write_todos") {
     return JSON.stringify({
       capabilityKey,
@@ -1043,6 +1053,7 @@ function summarizeCapabilityRequestForLog(request: CoreCapabilityRequest): strin
     || request.capabilityKey === "code.lsp"
     || request.capabilityKey === "read_pdf"
     || request.capabilityKey === "read_notebook"
+    || request.capabilityKey === "view_image"
     || request.capabilityKey === "code.edit"
     || request.capabilityKey === "code.patch"
     || request.capabilityKey === "code.diff"
@@ -1742,13 +1753,13 @@ function buildCoreUserInput(input: {
       : "If the user asks to inspect or operate the local workspace/system, or asks for current online information, emit a structured action envelope immediately whenever a fitting capability exists.",
     input.forceFinalAnswer
       ? "Summarize the actual tool result and continue the task."
-      : "Exact JSON schema: {\"action\":\"reply|capability_call\",\"responseText\":\"短中文句子\",\"capabilityRequest\":{\"capabilityKey\":\"shell.restricted|shell.session|test.run|repo.write|code.edit|code.patch|code.diff|git.status|git.diff|git.commit|git.push|write_todos|code.read|code.ls|code.glob|code.grep|code.read_many|code.symbol_search|code.lsp|read_pdf|read_notebook|docs.read|search.web|search.fetch|search.ground|skill.use|skill.mount|skill.prepare|mcp.listTools|mcp.listResources|mcp.readResource|mcp.call|mcp.native.execute\",\"reason\":\"为什么要用\",\"requestedTier\":\"B0|B1|B2|B3\",\"timeoutMs\":15000,\"input\":{}}}",
+      : "Exact JSON schema: {\"action\":\"reply|capability_call\",\"responseText\":\"短中文句子\",\"capabilityRequest\":{\"capabilityKey\":\"shell.restricted|shell.session|test.run|repo.write|code.edit|code.patch|code.diff|git.status|git.diff|git.commit|git.push|write_todos|code.read|code.ls|code.glob|code.grep|code.read_many|code.symbol_search|code.lsp|read_pdf|read_notebook|view_image|docs.read|search.web|search.fetch|search.ground|skill.use|skill.mount|skill.prepare|mcp.listTools|mcp.listResources|mcp.readResource|mcp.call|mcp.native.execute\",\"reason\":\"为什么要用\",\"requestedTier\":\"B0|B1|B2|B3\",\"timeoutMs\":15000,\"input\":{}}}",
     input.forceFinalAnswer
       ? "Do not return JSON in the final answer."
       : "Return strict JSON only. No markdown fences. No prose outside JSON.",
     input.forceFinalAnswer
       ? ""
-      : "For shell.restricted/test.run, use structured input like {\"command\":\"zsh\",\"args\":[\"--version\"],\"cwd\":\".\",\"timeoutMs\":15000}. For shell.session, use {\"action\":\"start\",\"command\":\"python3\",\"args\":[\"-i\"],\"cwd\":\".\",\"yield_time_ms\":500} and later {\"action\":\"write\",\"sessionId\":\"...\",\"chars\":\"print(1)\\n\"}. For code.edit, use {\"path\":\"src/file.ts\",\"old_string\":\"旧文本\",\"new_string\":\"新文本\",\"allow_multiple\":false}. For code.patch, use {\"patch\":\"*** Begin Patch\\n*** Update File: path\\n@@\\n-旧\\n+新\\n*** End Patch\\n\"}. For git.status/git.diff use bounded cwd/path inputs. For git.commit, use explicit paths like {\"cwd\":\".\",\"paths\":[\"src/file.ts\"],\"message\":\"Clear commit reason\"} and avoid sweeping unrelated dirty files. For git.push, use normal push input like {\"cwd\":\".\",\"remote\":\"origin\",\"branch\":\"feature-name\"} and never request force semantics. For code.symbol_search, use {\"query\":\"SymbolName\",\"path\":\".\"}. For code.lsp, use {\"path\":\"src/file.ts\",\"operation\":\"document_symbol|definition|references|hover\",\"line\":1,\"character\":1}. For read_pdf, use {\"path\":\"docs/file.pdf\",\"pages\":\"1-3\"}. For read_notebook, use {\"path\":\"notebooks/demo.ipynb\",\"maxEntries\":20}. For write_todos use {\"todos\":[{\"description\":\"...\",\"status\":\"pending|in_progress|completed|blocked|cancelled\"}]}. Do not use shell operators like ||, &&, pipes, redirects, or inline shell strings. For code.glob/code.grep/code.read_many, prefer bounded path/pattern inputs instead of huge raw dumps.",
+      : "For shell.restricted/test.run, use structured input like {\"command\":\"zsh\",\"args\":[\"--version\"],\"cwd\":\".\",\"timeoutMs\":15000}. For shell.session, use {\"action\":\"start\",\"command\":\"python3\",\"args\":[\"-i\"],\"cwd\":\".\",\"yield_time_ms\":500} and later {\"action\":\"write\",\"sessionId\":\"...\",\"chars\":\"print(1)\\n\"}. For code.edit, use {\"path\":\"src/file.ts\",\"old_string\":\"旧文本\",\"new_string\":\"新文本\",\"allow_multiple\":false}. For code.patch, use {\"patch\":\"*** Begin Patch\\n*** Update File: path\\n@@\\n-旧\\n+新\\n*** End Patch\\n\"}. For git.status/git.diff use bounded cwd/path inputs. For git.commit, use explicit paths like {\"cwd\":\".\",\"paths\":[\"src/file.ts\"],\"message\":\"Clear commit reason\"} and avoid sweeping unrelated dirty files. For git.push, use normal push input like {\"cwd\":\".\",\"remote\":\"origin\",\"branch\":\"feature-name\"} and never request force semantics. For code.symbol_search, use {\"query\":\"SymbolName\",\"path\":\".\"}. For code.lsp, use {\"path\":\"src/file.ts\",\"operation\":\"document_symbol|definition|references|hover\",\"line\":1,\"character\":1}. For read_pdf, use {\"path\":\"docs/file.pdf\",\"pages\":\"1-3\"}. For read_notebook, use {\"path\":\"notebooks/demo.ipynb\",\"maxEntries\":20}. For view_image, use {\"path\":\"assets/mockup.png\",\"detail\":\"original\"} when the user wants you to inspect a local image. For write_todos use {\"todos\":[{\"description\":\"...\",\"status\":\"pending|in_progress|completed|blocked|cancelled\"}]}. Do not use shell operators like ||, &&, pipes, redirects, or inline shell strings. For code.glob/code.grep/code.read_many, prefer bounded path/pattern inputs instead of huge raw dumps.",
     input.forceFinalAnswer
       ? ""
       : "If the user asks for latest/current web information, browsing, live situation, or anything explicitly requiring the internet, prefer search.ground; use search.web for broad discovery and search.fetch for targeted page retrieval.",
@@ -1766,7 +1777,7 @@ function buildCoreUserInput(input: {
       : "For MCP capabilities, provide route.provider, route.model, and structured input. Examples: mcp.listTools => {\"route\":{...},\"input\":{\"connectionId\":\"...\"}}, mcp.listResources => {\"route\":{...},\"input\":{\"connectionId\":\"...\"}}, mcp.call => {\"route\":{...},\"input\":{\"connectionId\":\"...\",\"toolName\":\"...\",\"arguments\":{}}}.",
     input.forceFinalAnswer
       ? ""
-      : "If shell.restricted, shell.session, test.run, repo.write, code.edit, code.patch, code.diff, git.status, git.diff, git.commit, git.push, write_todos, code.symbol_search, code.lsp, read_pdf, read_notebook, search.web, search.fetch, or search.ground is already registered, treat it as ready-to-use TAP inventory rather than something that still needs user approval.",
+      : "If shell.restricted, shell.session, test.run, repo.write, code.edit, code.patch, code.diff, git.status, git.diff, git.commit, git.push, write_todos, code.symbol_search, code.lsp, read_pdf, read_notebook, view_image, search.web, search.fetch, or search.ground is already registered, treat it as ready-to-use TAP inventory rather than something that still needs user approval.",
     `Currently registered TAP capabilities: ${availableCapabilities || "(none)"}.`,
     "",
     "Latest user message:",
@@ -1809,6 +1820,7 @@ async function runCoreModelPass(input: {
   userInput: string;
   cmp?: CmpTurnArtifacts;
   config: ReturnType<typeof loadOpenAILiveConfig>;
+  inputImageUrls?: string[];
 }): Promise<{
   runId: string;
   answer: string;
@@ -1830,6 +1842,9 @@ async function runCoreModelPass(input: {
         cliLogger: input.state.logger,
         cliTurnIndex: input.state.turnIndex,
         cliUiMode: input.state.uiMode,
+        ...(input.inputImageUrls?.length
+          ? { inputImageUrls: input.inputImageUrls }
+          : {}),
         ...(input.cmp ? {
           cmpPackageId: input.cmp.packageId,
           cmpPackageRef: input.cmp.packageRef,
@@ -1969,7 +1984,7 @@ async function runCoreActionPlanner(
         "If the user asks for current, latest, online, web, or live information and search.ground is available, choose capability_call with search.ground instead of saying you cannot browse. Use search.web for broad discovery and search.fetch for targeted page reads.",
         "For shell.restricted and test.run, prefer bounded output and avoid commands likely to dump an entire large repository or massive raw result in one step.",
         "Schema:",
-        '{"action":"reply|capability_call","responseText":"user-facing text","capabilityRequest":{"capabilityKey":"shell.restricted|shell.session|test.run|repo.write|code.edit|code.patch|code.diff|git.status|git.diff|git.commit|git.push|write_todos|code.read|code.ls|code.glob|code.grep|code.read_many|code.symbol_search|code.lsp|read_pdf|read_notebook|search.web|search.fetch|search.ground|skill.use|skill.mount|skill.prepare|mcp.listTools|mcp.listResources|mcp.readResource|mcp.call|mcp.native.execute|...","reason":"short reason","input":{"command":"...","args":["..."],"cwd":"."},"requestedTier":"B0|B1|B2|B3","timeoutMs":20000}}',
+        '{"action":"reply|capability_call","responseText":"user-facing text","capabilityRequest":{"capabilityKey":"shell.restricted|shell.session|test.run|repo.write|code.edit|code.patch|code.diff|git.status|git.diff|git.commit|git.push|write_todos|code.read|code.ls|code.glob|code.grep|code.read_many|code.symbol_search|code.lsp|read_pdf|read_notebook|view_image|search.web|search.fetch|search.ground|skill.use|skill.mount|skill.prepare|mcp.listTools|mcp.listResources|mcp.readResource|mcp.call|mcp.native.execute|...","reason":"short reason","input":{"command":"...","args":["..."],"cwd":"."},"requestedTier":"B0|B1|B2|B3","timeoutMs":20000}}',
         "If action=reply, omit capabilityRequest.",
         "If action=capability_call, responseText should briefly tell the user what tool you are using and then proceed.",
         "For search.web/search.ground, emit input like {\"query\":\"...\",\"freshness\":\"day\",\"citations\":\"preferred|required\"}. The CLI will supply provider/model defaults. For search.fetch, emit input like {\"url\":\"https://...\",\"prompt\":\"extract the needed facts\"}.",
@@ -2521,6 +2536,12 @@ async function runCoreTurn(
     const toolResultText = resolvedToolExecution.error
       ? JSON.stringify({ error: resolvedToolExecution.error }, null, 2)
       : summarizeToolOutputForCore(toolResultCapabilityKey, resolvedToolExecution.output ?? {});
+    const inputImageUrls = toolResultCapabilityKey === "view_image"
+      && resolvedToolExecution.output
+      && typeof resolvedToolExecution.output === "object"
+      && typeof (resolvedToolExecution.output as { imageUrl?: unknown }).imageUrl === "string"
+      ? [(resolvedToolExecution.output as { imageUrl: string }).imageUrl]
+      : undefined;
 
     const followup = await runCoreModelPass({
       state,
@@ -2534,6 +2555,7 @@ async function runCoreTurn(
       }),
       cmp,
       config,
+      inputImageUrls,
     });
     const followupAnswer = extractResponseTextMaybe(followup.answer?.trim() ?? "")
       || actionEnvelope.responseText
@@ -2709,6 +2731,7 @@ function createRuntime(config: ReturnType<typeof loadOpenAILiveConfig>) {
         "code.lsp",
         "read_pdf",
         "read_notebook",
+        "view_image",
         "docs.read",
         "repo.write",
         "code.edit",
