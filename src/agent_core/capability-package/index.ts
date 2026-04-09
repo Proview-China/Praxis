@@ -159,6 +159,7 @@ export {
   createCodeSymbolSearchCapabilityPackage,
   createCodeLspCapabilityPackage,
   createSpreadsheetReadCapabilityPackage,
+  createDocReadCapabilityPackage,
   createReadPdfCapabilityPackage,
   createReadNotebookCapabilityPackage,
   createViewImageCapabilityPackage,

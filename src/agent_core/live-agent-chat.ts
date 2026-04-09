@@ -31,6 +31,7 @@ import type { DialogueTurn } from "./live-agent-chat/shared.js";
 import {
   applyCliDefaultsToCapabilityRequest,
   createLiveChatLogPath,
+  type CoreTaskStatus,
   extractResponseTextMaybe,
   extractTextFromResponseLike,
   formatElapsed,
@@ -45,6 +46,7 @@ import {
   LiveChatLogger,
   type LiveCliState,
   LIVE_CHAT_TAP_OVERRIDE,
+  normalizeCoreTaskStatus,
   type ParsedTapRequest,
   parseCliOptions,
   parseCoreActionEnvelope,
@@ -52,6 +54,7 @@ import {
   readPositiveInteger,
   readString,
   resolveReasoningEffort,
+  shouldStopCoreCapabilityLoop,
   shouldPrintStreamLabel,
   summarizeCapabilityRequestForLog,
   summarizeToolOutputForCore,
@@ -389,6 +392,10 @@ function buildCoreUserInput(input: {
   runtime: LiveCliState["runtime"];
   toolResultText?: string;
   forceFinalAnswer?: boolean;
+  capabilityLoopIndex?: number;
+  maxCapabilityLoops?: number;
+  previousTaskStatus?: CoreTaskStatus;
+  previousReplyText?: string;
 }): string {
   const recentTurns = input.transcript.slice(-6);
   const availableCapabilities = input.runtime.capabilityPool
@@ -421,20 +428,38 @@ function buildCoreUserInput(input: {
     "The registered TAP capability window below is already available for direct use.",
     "Do not ask the user to manually approve, manually run commands, or paste local command output when a matching registered capability already exists.",
     "Do not describe yourself as unable to act when the capability window already contains a fitting tool.",
+    "Your job is to finish the user task, not merely to make one tool call.",
+    "If the task is not yet complete and another registered capability can move it forward, keep issuing capability_call steps until the task is actually done.",
+    "Only stop and ask the user for help when you have determined that both your own reasoning and the currently registered TAP capability window cannot make further safe progress.",
+    !input.forceFinalAnswer
+      ? "Always set taskStatus in your JSON: completed, incomplete, blocked, or exhausted."
+      : "",
+    !input.forceFinalAnswer
+      ? "Use taskStatus=completed only when the user's actual request has been fulfilled. Use taskStatus=incomplete when more tool work is still needed. Use blocked or exhausted only when you truly cannot continue safely."
+      : "",
+    !input.forceFinalAnswer
+      ? "If taskStatus would be incomplete and another registered capability can still advance the task, emit action=capability_call instead of stopping with action=reply."
+      : "",
     "If the user asks what you can do, what abilities are in the TAP pool, or asks for a capability introduction, answer directly from the registered capability inventory below instead of calling a tool.",
     "Do not use MCP capabilities merely to inspect your own already-registered TAP inventory.",
+    input.toolResultText && !input.forceFinalAnswer
+      ? `You are inside an active agent loop after tool step ${input.capabilityLoopIndex ?? 0}/${input.maxCapabilityLoops ?? 0}. If the latest tool result does not yet fully complete the user's task and another registered capability can advance the task, emit another capability_call instead of stopping early.`
+      : "",
+    input.previousTaskStatus === "incomplete" && !input.forceFinalAnswer
+      ? `Your previous follow-up reply still marked the task as incomplete${input.previousReplyText ? `: ${truncate(input.previousReplyText, 180)}` : ""}. Do not stop there. Emit the next capability_call unless the task is now truly completed, blocked, or exhausted.`
+      : "",
     input.forceFinalAnswer
       ? "A TAP tool result is already available. Do not emit another tool request. Answer the user directly."
       : "If the user asks to inspect or operate the local workspace/system, or asks for current online information, emit a structured action envelope immediately whenever a fitting capability exists.",
     input.forceFinalAnswer
       ? "Summarize the actual tool result and continue the task."
-      : "Exact JSON schema: {\"action\":\"reply|capability_call\",\"responseText\":\"短中文句子\",\"capabilityRequest\":{\"capabilityKey\":\"shell.restricted|shell.session|test.run|repo.write|code.edit|code.patch|code.diff|git.status|git.diff|git.commit|git.push|browser.playwright|write_todos|code.read|code.ls|code.glob|code.grep|code.read_many|code.symbol_search|code.lsp|spreadsheet.read|read_pdf|read_notebook|view_image|docs.read|search.web|search.fetch|search.ground|skill.use|skill.mount|skill.prepare|mcp.listTools|mcp.listResources|mcp.readResource|mcp.call|mcp.native.execute\",\"reason\":\"为什么要用\",\"requestedTier\":\"B0|B1|B2|B3\",\"timeoutMs\":15000,\"input\":{}}}",
+      : "Exact JSON schema: {\"action\":\"reply|capability_call\",\"taskStatus\":\"completed|incomplete|blocked|exhausted\",\"responseText\":\"短中文句子\",\"capabilityRequest\":{\"capabilityKey\":\"shell.restricted|shell.session|test.run|repo.write|code.edit|code.patch|code.diff|git.status|git.diff|git.commit|git.push|browser.playwright|write_todos|code.read|code.ls|code.glob|code.grep|code.read_many|code.symbol_search|code.lsp|spreadsheet.read|doc.read|read_pdf|read_notebook|view_image|docs.read|search.web|search.fetch|search.ground|skill.use|skill.mount|skill.prepare|mcp.listTools|mcp.listResources|mcp.readResource|mcp.call|mcp.native.execute\",\"reason\":\"为什么要用\",\"requestedTier\":\"B0|B1|B2|B3\",\"timeoutMs\":15000,\"input\":{}}}",
     input.forceFinalAnswer
       ? "Do not return JSON in the final answer."
       : "Return strict JSON only. No markdown fences. No prose outside JSON.",
     input.forceFinalAnswer
       ? ""
-      : "For shell.restricted/test.run, use structured input like {\"command\":\"zsh\",\"args\":[\"--version\"],\"cwd\":\".\",\"timeoutMs\":15000}. For shell.session, use {\"action\":\"start\",\"command\":\"python3\",\"args\":[\"-i\"],\"cwd\":\".\",\"yield_time_ms\":500} and later {\"action\":\"write\",\"sessionId\":\"...\",\"chars\":\"print(1)\\n\"}. For code.edit, use {\"path\":\"src/file.ts\",\"old_string\":\"旧文本\",\"new_string\":\"新文本\",\"allow_multiple\":false}. For code.patch, use {\"patch\":\"*** Begin Patch\\n*** Update File: path\\n@@\\n-旧\\n+新\\n*** End Patch\\n\"}. For git.status/git.diff use bounded cwd/path inputs. For git.commit, use explicit paths like {\"cwd\":\".\",\"paths\":[\"src/file.ts\"],\"message\":\"Clear commit reason\"} and avoid sweeping unrelated dirty files. For git.push, use normal push input like {\"cwd\":\".\",\"remote\":\"origin\",\"branch\":\"feature-name\"} and never request force semantics. For browser.playwright, use actions like {\"action\":\"navigate\",\"url\":\"https://example.com\",\"allowedDomains\":[\"example.com\"],\"headless\":true}, then {\"action\":\"snapshot\"} or {\"action\":\"screenshot\"}; file uploads stay blocked unless allowFileUploads=true. For spreadsheet.read, use {\"path\":\"data/report.xlsx\",\"maxEntries\":20} or {\"path\":\"data/table.csv\",\"maxEntries\":20}; optional sheet can narrow one workbook tab. For code.symbol_search, use {\"query\":\"SymbolName\",\"path\":\".\"}. For code.lsp, use {\"path\":\"src/file.ts\",\"operation\":\"document_symbol|definition|references|hover\",\"line\":1,\"character\":1}. For read_pdf, use {\"path\":\"docs/file.pdf\",\"pages\":\"1-3\"}. For read_notebook, use {\"path\":\"notebooks/demo.ipynb\",\"maxEntries\":20}. For view_image, use {\"path\":\"assets/mockup.png\",\"detail\":\"original\"} when the user wants you to inspect a local image. For write_todos use {\"todos\":[{\"description\":\"...\",\"status\":\"pending|in_progress|completed|blocked|cancelled\"}]}. Do not use shell operators like ||, &&, pipes, redirects, or inline shell strings. For code.glob/code.grep/code.read_many, prefer bounded path/pattern inputs instead of huge raw dumps.",
+      : "For shell.restricted/test.run, use structured input like {\"command\":\"zsh\",\"args\":[\"--version\"],\"cwd\":\".\",\"timeoutMs\":15000}. For shell.session, use {\"action\":\"start\",\"command\":\"python3\",\"args\":[\"-i\"],\"cwd\":\".\",\"yield_time_ms\":500} and later {\"action\":\"write\",\"sessionId\":\"...\",\"chars\":\"print(1)\\n\"}. For code.edit, use {\"path\":\"src/file.ts\",\"old_string\":\"旧文本\",\"new_string\":\"新文本\",\"allow_multiple\":false}. For code.patch, use {\"patch\":\"*** Begin Patch\\n*** Update File: path\\n@@\\n-旧\\n+新\\n*** End Patch\\n\"}. For git.status/git.diff use bounded cwd/path inputs. For git.commit, use explicit paths like {\"cwd\":\".\",\"paths\":[\"src/file.ts\"],\"message\":\"Clear commit reason\"} and avoid sweeping unrelated dirty files. For git.push, use normal push input like {\"cwd\":\".\",\"remote\":\"origin\",\"branch\":\"feature-name\"} and never request force semantics. For browser.playwright, use actions like {\"action\":\"navigate\",\"url\":\"https://example.com\",\"allowedDomains\":[\"example.com\"],\"headless\":true}, then {\"action\":\"snapshot\"} or {\"action\":\"screenshot\"}; file uploads stay blocked unless allowFileUploads=true. For spreadsheet.read, use {\"path\":\"data/report.xlsx\",\"maxEntries\":20} or {\"path\":\"data/table.csv\",\"maxEntries\":20}; optional sheet can narrow one workbook tab. For doc.read, use {\"path\":\"docs/file.docx\",\"maxEntries\":20,\"maxBytes\":12000}. For code.symbol_search, use {\"query\":\"SymbolName\",\"path\":\".\"}. For code.lsp, use {\"path\":\"src/file.ts\",\"operation\":\"document_symbol|definition|references|hover\",\"line\":1,\"character\":1}. For read_pdf, use {\"path\":\"docs/file.pdf\",\"pages\":\"1-3\"}. For read_notebook, use {\"path\":\"notebooks/demo.ipynb\",\"maxEntries\":20}. For view_image, use {\"path\":\"assets/mockup.png\",\"detail\":\"original\"} when the user wants you to inspect a local image. For write_todos use {\"todos\":[{\"description\":\"...\",\"status\":\"pending|in_progress|completed|blocked|cancelled\"}]}. Do not use shell operators like ||, &&, pipes, redirects, or inline shell strings. For code.glob/code.grep/code.read_many, prefer bounded path/pattern inputs instead of huge raw dumps.",
     input.forceFinalAnswer
       ? ""
       : "If the user asks for latest/current web information, browsing, live situation, or anything explicitly requiring the internet, prefer search.ground; use search.web for broad discovery and search.fetch for targeted page retrieval.",
@@ -452,7 +477,7 @@ function buildCoreUserInput(input: {
       : "For MCP capabilities, provide route.provider, route.model, and structured input. Examples: mcp.listTools => {\"route\":{...},\"input\":{\"connectionId\":\"...\"}}, mcp.listResources => {\"route\":{...},\"input\":{\"connectionId\":\"...\"}}, mcp.call => {\"route\":{...},\"input\":{\"connectionId\":\"...\",\"toolName\":\"...\",\"arguments\":{}}}.",
     input.forceFinalAnswer
       ? ""
-      : "If shell.restricted, shell.session, test.run, repo.write, code.edit, code.patch, code.diff, git.status, git.diff, git.commit, git.push, browser.playwright, write_todos, code.symbol_search, code.lsp, spreadsheet.read, read_pdf, read_notebook, view_image, search.web, search.fetch, or search.ground is already registered, treat it as ready-to-use TAP inventory rather than something that still needs user approval.",
+      : "If shell.restricted, shell.session, test.run, repo.write, code.edit, code.patch, code.diff, git.status, git.diff, git.commit, git.push, browser.playwright, write_todos, code.symbol_search, code.lsp, spreadsheet.read, doc.read, read_pdf, read_notebook, view_image, search.web, search.fetch, or search.ground is already registered, treat it as ready-to-use TAP inventory rather than something that still needs user approval.",
     `Currently registered TAP capabilities: ${availableCapabilities || "(none)"}.`,
     "",
     "Latest user message:",
@@ -635,6 +660,12 @@ async function runCoreActionPlanner(
         "TAP governance is bapr + prefer_auto for this CLI.",
         `Available capabilities: ${availableCapabilities.join(", ") || "(none)"}`,
         "These registered capabilities are already available for direct use in this CLI.",
+        "Your goal is to actually finish the user task, not just to emit a single tool call.",
+        "If the current task is still incomplete and another available capability can advance it, keep emitting capability_call actions until the task is genuinely done.",
+        "Only fall back to a direct reply that asks the user for help after you have determined that neither core reasoning nor the currently registered TAP capability window can safely make further progress.",
+        "Always set taskStatus in your JSON: completed, incomplete, blocked, or exhausted.",
+        "Use taskStatus=completed only when the user's actual request has been fulfilled. Use taskStatus=incomplete when more tool work is still needed. Use blocked or exhausted only when you truly cannot continue safely.",
+        "If taskStatus would be incomplete and another available capability can still advance the task, choose action=capability_call instead of action=reply.",
         "If a fitting capability exists, choose capability_call instead of reply.",
         "Do not ask the user to approve, to run local commands themselves, or to paste command output when a fitting capability already exists.",
         "Do not say you cannot act if the capability window already contains a matching tool.",
@@ -643,7 +674,7 @@ async function runCoreActionPlanner(
         "If the user asks for current, latest, online, web, or live information and search.ground is available, choose capability_call with search.ground instead of saying you cannot browse. Use search.web for broad discovery and search.fetch for targeted page reads.",
         "For shell.restricted and test.run, prefer bounded output and avoid commands likely to dump an entire large repository or massive raw result in one step.",
         "Schema:",
-        '{"action":"reply|capability_call","responseText":"user-facing text","capabilityRequest":{"capabilityKey":"shell.restricted|shell.session|test.run|repo.write|code.edit|code.patch|code.diff|git.status|git.diff|git.commit|git.push|browser.playwright|write_todos|code.read|code.ls|code.glob|code.grep|code.read_many|code.symbol_search|code.lsp|spreadsheet.read|read_pdf|read_notebook|view_image|search.web|search.fetch|search.ground|skill.use|skill.mount|skill.prepare|mcp.listTools|mcp.listResources|mcp.readResource|mcp.call|mcp.native.execute|...","reason":"short reason","input":{"command":"...","args":["..."],"cwd":"."},"requestedTier":"B0|B1|B2|B3","timeoutMs":20000}}',
+        '{"action":"reply|capability_call","taskStatus":"completed|incomplete|blocked|exhausted","responseText":"user-facing text","capabilityRequest":{"capabilityKey":"shell.restricted|shell.session|test.run|repo.write|code.edit|code.patch|code.diff|git.status|git.diff|git.commit|git.push|browser.playwright|write_todos|code.read|code.ls|code.glob|code.grep|code.read_many|code.symbol_search|code.lsp|spreadsheet.read|doc.read|read_pdf|read_notebook|view_image|search.web|search.fetch|search.ground|skill.use|skill.mount|skill.prepare|mcp.listTools|mcp.listResources|mcp.readResource|mcp.call|mcp.native.execute|...","reason":"short reason","input":{"command":"...","args":["..."],"cwd":"."},"requestedTier":"B0|B1|B2|B3","timeoutMs":20000}}',
         "If action=reply, omit capabilityRequest.",
         "If action=capability_call, responseText should briefly tell the user what tool you are using and then proceed.",
         "For search.web/search.ground, emit input like {\"query\":\"...\",\"freshness\":\"day\",\"citations\":\"preferred|required\"}. The CLI will supply provider/model defaults. For search.fetch, emit input like {\"url\":\"https://...\",\"prompt\":\"extract the needed facts\"}.",
@@ -1276,14 +1307,93 @@ function synthesizeUserFacingToolAnswer(
   ].filter((line): line is string => Boolean(line)).join("\n");
 }
 
+function deriveTerminalCoreTaskStatus(params: {
+  toolExecutionStatus?: string;
+  forceFinalAnswer?: boolean;
+  envelope?: CoreActionEnvelope;
+}): CoreTaskStatus {
+  if (params.envelope) {
+    return normalizeCoreTaskStatus(params.envelope);
+  }
+  const status = (params.toolExecutionStatus ?? "").trim().toLowerCase();
+  if (
+    status === "blocked"
+    || status === "review_required"
+    || status === "waiting_human"
+    || status === "waiting_human_approval"
+    || status === "baseline_missing"
+  ) {
+    return "blocked";
+  }
+  if (params.forceFinalAnswer || status === "failed") {
+    return "exhausted";
+  }
+  return "completed";
+}
+
 async function runCoreTurn(
   state: LiveCliState,
   userMessage: string,
   cmp: CmpTurnArtifacts | undefined,
   config: ReturnType<typeof loadOpenAILiveConfig>,
 ): Promise<CoreTurnArtifacts> {
+  const maxCapabilityLoops = 4;
+  const maxIncompleteReplyRecoveries = 2;
   let actionEnvelope: CoreActionEnvelope | undefined;
   let rawAnswer = "";
+  let latestRunId = `${state.sessionId}:core-reply:${state.turnIndex}`;
+  let latestEventTypes: string[] = [];
+  let latestTaskStatus: CoreTaskStatus = "completed";
+  let latestToolExecution: NonNullable<CoreTurnArtifacts["toolExecution"]> | undefined;
+  let completedCapabilityLoops = 0;
+  let pendingToolResultText: string | undefined;
+  let pendingInputImageUrls: string[] | undefined;
+  let pendingIncompleteReplyText: string | undefined;
+  let incompleteReplyRecoveries = 0;
+
+  const finalizeReply = (params: {
+    runId: string;
+    answer: string;
+    plannerRawAnswer: string;
+    eventTypes: string[];
+    taskStatus?: CoreTaskStatus;
+  }): CoreTurnArtifacts => ({
+    runId: params.runId,
+    answer: params.answer,
+    dispatchStatus: "reply_only",
+    taskStatus: params.taskStatus ?? latestTaskStatus,
+    capabilityResultStatus: latestToolExecution?.status ?? "success",
+    plannerRawAnswer: params.plannerRawAnswer,
+    toolExecution: latestToolExecution,
+    eventTypes: params.eventTypes,
+  });
+
+  const deriveActionEnvelopeFromRaw = (text: string): CoreActionEnvelope | undefined => {
+    try {
+      return parseCoreActionEnvelope(text);
+    } catch {
+      return undefined;
+    }
+  };
+
+  const deriveCapabilityEnvelopeFromTapRequest = (text: string): CoreActionEnvelope | undefined => {
+    const tapRequest = parseTapRequest(text);
+    if (!tapRequest) {
+      return undefined;
+    }
+    return {
+      action: "capability_call",
+      responseText: text,
+      capabilityRequest: {
+        capabilityKey: tapRequest.capabilityKey,
+        reason: `Core requested ${tapRequest.capabilityKey} from live CLI bridge.`,
+        input: tapRequest.input,
+        requestedTier: "B0",
+        timeoutMs: readPositiveInteger(tapRequest.input.timeoutMs),
+      },
+    };
+  };
+
   try {
     actionEnvelope = await runCoreActionPlanner(state, userMessage);
     rawAnswer = JSON.stringify(actionEnvelope);
@@ -1291,61 +1401,81 @@ async function runCoreTurn(
     actionEnvelope = inferDeterministicCoreActionEnvelope(state, userMessage);
     rawAnswer = actionEnvelope ? JSON.stringify(actionEnvelope) : "";
   }
-  if (!actionEnvelope) {
-    const fallback = await runCoreModelPass({
-      state,
-      userInput: buildCoreUserInput({
-        userMessage,
-        transcript: state.transcript,
+
+  while (true) {
+    if (!actionEnvelope) {
+      const fallback = await runCoreModelPass({
+        state,
+        userInput: buildCoreUserInput({
+          userMessage,
+          transcript: state.transcript,
+          cmp,
+          runtime: state.runtime,
+          toolResultText: pendingToolResultText,
+          capabilityLoopIndex: completedCapabilityLoops,
+          maxCapabilityLoops,
+          previousTaskStatus: pendingIncompleteReplyText ? "incomplete" : undefined,
+          previousReplyText: pendingIncompleteReplyText,
+        }),
         cmp,
-        runtime: state.runtime,
-      }),
-      cmp,
-      config,
-    });
-    rawAnswer = fallback.answer;
-    try {
-      actionEnvelope = parseCoreActionEnvelope(rawAnswer);
-    } catch {
-      actionEnvelope = inferDeterministicCoreActionEnvelope(state, userMessage);
-    }
-    if (actionEnvelope?.action === "reply") {
-      return {
-        runId: fallback.runId,
-        answer: extractResponseTextMaybe(actionEnvelope.responseText),
-        dispatchStatus: "reply_only",
-        capabilityResultStatus: "success",
-        plannerRawAnswer: rawAnswer,
-        eventTypes: [
-          ...fallback.eventTypes,
-          "core.action_planner.reply",
-        ],
-      };
-    }
-    if (!(actionEnvelope?.action === "capability_call" && actionEnvelope.capabilityRequest)) {
-      const tapRequest = parseTapRequest(rawAnswer);
-      if (!tapRequest) {
-        return {
-          ...fallback,
+        config,
+        inputImageUrls: pendingInputImageUrls,
+      });
+      latestRunId = fallback.runId;
+      latestEventTypes = fallback.eventTypes;
+      rawAnswer = fallback.answer;
+      actionEnvelope = deriveActionEnvelopeFromRaw(rawAnswer)
+        ?? inferDeterministicCoreActionEnvelope(state, userMessage)
+        ?? deriveCapabilityEnvelopeFromTapRequest(rawAnswer);
+
+      if (actionEnvelope?.action === "reply") {
+        latestTaskStatus = normalizeCoreTaskStatus(actionEnvelope);
+        if (
+          latestTaskStatus === "incomplete"
+          && pendingToolResultText
+          && incompleteReplyRecoveries < maxIncompleteReplyRecoveries
+        ) {
+          incompleteReplyRecoveries += 1;
+          pendingIncompleteReplyText = extractResponseTextMaybe(actionEnvelope.responseText);
+          actionEnvelope = undefined;
+          continue;
+        }
+        return finalizeReply({
+          runId: fallback.runId,
+          answer: extractResponseTextMaybe(actionEnvelope.responseText),
+          plannerRawAnswer: rawAnswer,
+          eventTypes: [
+            ...fallback.eventTypes,
+            "core.action_planner.reply",
+          ],
+          taskStatus: latestTaskStatus,
+        });
+      }
+
+      if (!(actionEnvelope?.action === "capability_call" && actionEnvelope.capabilityRequest)) {
+        return finalizeReply({
+          runId: fallback.runId,
           answer: extractResponseTextMaybe(rawAnswer),
           plannerRawAnswer: rawAnswer || (actionEnvelope ? JSON.stringify(actionEnvelope) : rawAnswer),
-        };
+          eventTypes: fallback.eventTypes,
+          taskStatus: latestTaskStatus,
+        });
       }
-      actionEnvelope = {
-        action: "capability_call",
-        responseText: rawAnswer,
-        capabilityRequest: {
-          capabilityKey: tapRequest.capabilityKey,
-          reason: `Core requested ${tapRequest.capabilityKey} from live CLI bridge.`,
-          input: tapRequest.input,
-          requestedTier: "B0",
-          timeoutMs: readPositiveInteger(tapRequest.input.timeoutMs),
-        },
-      };
     }
-  }
 
-  if (actionEnvelope?.action === "capability_call" && actionEnvelope.capabilityRequest) {
+    if (!(actionEnvelope?.action === "capability_call" && actionEnvelope.capabilityRequest)) {
+      if (state.uiMode === "direct") {
+        printDirectSub("直接回答，不调用额外能力");
+      }
+      return finalizeReply({
+        runId: latestRunId,
+        answer: extractResponseTextMaybe(actionEnvelope?.responseText ?? rawAnswer),
+        plannerRawAnswer: rawAnswer,
+        eventTypes: latestEventTypes.length > 0 ? latestEventTypes : ["core.action_planner.reply"],
+        taskStatus: actionEnvelope ? normalizeCoreTaskStatus(actionEnvelope) : latestTaskStatus,
+      });
+    }
+
     const capabilityRequest = await applyCliDefaultsToCapabilityRequest(
       actionEnvelope.capabilityRequest,
       config,
@@ -1393,7 +1523,20 @@ async function runCoreTurn(
         && Array.isArray((resolvedToolExecution.output as { imageUrls?: unknown }).imageUrls)
         ? (resolvedToolExecution.output as { imageUrls: unknown[] }).imageUrls
           .filter((entry): entry is string => typeof entry === "string" && entry.startsWith("data:image/"))
-      : undefined;
+        : undefined;
+
+    latestToolExecution = resolvedToolExecution;
+    latestTaskStatus = "incomplete";
+    completedCapabilityLoops += 1;
+    pendingToolResultText = toolResultText;
+    pendingInputImageUrls = inputImageUrls;
+    pendingIncompleteReplyText = undefined;
+    incompleteReplyRecoveries = 0;
+    const forceFinalAnswer = shouldStopCoreCapabilityLoop({
+      capabilityResultStatus: resolvedToolExecution.status,
+      completedLoops: completedCapabilityLoops,
+      maxLoops: maxCapabilityLoops,
+    });
 
     const followup = await runCoreModelPass({
       state,
@@ -1403,13 +1546,58 @@ async function runCoreTurn(
         cmp,
         runtime: state.runtime,
         toolResultText,
-        forceFinalAnswer: true,
+        forceFinalAnswer,
+        capabilityLoopIndex: completedCapabilityLoops,
+        maxCapabilityLoops,
       }),
       cmp,
       config,
       inputImageUrls,
     });
-    const modelFollowupAnswer = extractResponseTextMaybe(followup.answer?.trim() ?? "");
+    latestRunId = followup.runId;
+    latestEventTypes = [
+      ...followup.eventTypes,
+      "core.action_planner.capability_call",
+      "core.capability_bridge.executed",
+    ];
+    const followupRawAnswer = followup.answer?.trim() ?? "";
+    const followupEnvelope = !forceFinalAnswer
+      ? (deriveActionEnvelopeFromRaw(followupRawAnswer) ?? deriveCapabilityEnvelopeFromTapRequest(followupRawAnswer))
+      : undefined;
+
+    if (!forceFinalAnswer && followupEnvelope?.action === "capability_call" && followupEnvelope.capabilityRequest) {
+      latestTaskStatus = normalizeCoreTaskStatus(followupEnvelope);
+      actionEnvelope = followupEnvelope;
+      rawAnswer = followupRawAnswer;
+      pendingToolResultText = undefined;
+      pendingInputImageUrls = undefined;
+      pendingIncompleteReplyText = undefined;
+      continue;
+    }
+
+    if (!forceFinalAnswer && followupEnvelope?.action === "reply") {
+      latestTaskStatus = normalizeCoreTaskStatus(followupEnvelope);
+      if (latestTaskStatus === "incomplete" && incompleteReplyRecoveries < maxIncompleteReplyRecoveries) {
+        incompleteReplyRecoveries += 1;
+        pendingIncompleteReplyText = extractResponseTextMaybe(followupEnvelope.responseText);
+        actionEnvelope = undefined;
+        rawAnswer = followupRawAnswer;
+        continue;
+      }
+      return {
+        runId: followup.runId,
+        answer: extractResponseTextMaybe(followupEnvelope.responseText),
+        dispatchStatus: "capability_executed",
+        taskStatus: latestTaskStatus,
+        capabilityKey: capabilityRequest.capabilityKey,
+        capabilityResultStatus: resolvedToolExecution.status,
+        plannerRawAnswer: rawAnswer,
+        toolExecution: resolvedToolExecution,
+        eventTypes: latestEventTypes,
+      };
+    }
+
+    const modelFollowupAnswer = extractResponseTextMaybe(followupRawAnswer);
     const synthesizedToolAnswer = synthesizeUserFacingToolAnswer(
       toolResultCapabilityKey,
       resolvedToolExecution.output,
@@ -1421,34 +1609,23 @@ async function runCoreTurn(
       : synthesizedToolAnswer
         || actionEnvelope.responseText
         || rawAnswer;
-      return {
-        runId: followup.runId,
-        answer: followupAnswer,
-        dispatchStatus: "capability_executed",
-        capabilityKey: capabilityRequest.capabilityKey,
-        capabilityResultStatus: resolvedToolExecution.status,
-        plannerRawAnswer: rawAnswer,
-        toolExecution: resolvedToolExecution,
-      eventTypes: [
-        ...followup.eventTypes,
-        "core.action_planner.capability_call",
-        "core.capability_bridge.executed",
-      ],
+    latestTaskStatus = deriveTerminalCoreTaskStatus({
+      toolExecutionStatus: resolvedToolExecution.status,
+      forceFinalAnswer,
+      envelope: followupEnvelope,
+    });
+    return {
+      runId: followup.runId,
+      answer: followupAnswer,
+      dispatchStatus: completedCapabilityLoops > 1 ? "capability_loop_completed" : "capability_executed",
+      taskStatus: latestTaskStatus,
+      capabilityKey: capabilityRequest.capabilityKey,
+      capabilityResultStatus: resolvedToolExecution.status,
+      plannerRawAnswer: rawAnswer,
+      toolExecution: resolvedToolExecution,
+      eventTypes: latestEventTypes,
     };
   }
-
-  if (state.uiMode === "direct") {
-    printDirectSub("直接回答，不调用额外能力");
-  }
-
-  return {
-    runId: `${state.sessionId}:core-reply:${state.turnIndex}`,
-    answer: extractResponseTextMaybe(actionEnvelope?.responseText ?? rawAnswer),
-    dispatchStatus: "reply_only",
-    capabilityResultStatus: "success",
-    plannerRawAnswer: rawAnswer,
-    eventTypes: ["core.action_planner.reply"],
-  };
 }
 
 async function handleUserTurn(
@@ -1505,6 +1682,7 @@ async function handleUserTurn(
     status: "success",
     runId: core.runId,
     dispatchStatus: core.dispatchStatus,
+    taskStatus: core.taskStatus ?? null,
     capabilityKey: core.capabilityKey ?? null,
   });
   if (state.uiMode === "direct") {
@@ -1570,6 +1748,7 @@ function createRuntime() {
         "code.symbol_search",
         "code.lsp",
         "spreadsheet.read",
+        "doc.read",
         "read_pdf",
         "read_notebook",
         "view_image",
@@ -1586,7 +1765,6 @@ function createRuntime() {
         "git.diff",
         "git.commit",
         "git.push",
-        "browser.playwright",
         "write_todos",
         "skill.doc.generate",
         "search.web",

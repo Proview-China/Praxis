@@ -49,6 +49,7 @@ export interface CoreTurnArtifacts {
   runId: string;
   answer: string;
   dispatchStatus: string;
+  taskStatus?: CoreTaskStatus;
   capabilityKey?: string;
   capabilityResultStatus?: string;
   eventTypes: string[];
@@ -150,7 +151,36 @@ export interface CoreCapabilityRequest {
 export interface CoreActionEnvelope {
   action: "reply" | "capability_call";
   responseText: string;
+  taskStatus?: CoreTaskStatus;
   capabilityRequest?: CoreCapabilityRequest;
+}
+
+export type CoreTaskStatus = "completed" | "incomplete" | "blocked" | "exhausted";
+
+export function normalizeCoreTaskStatus(envelope: Pick<CoreActionEnvelope, "action" | "taskStatus">): CoreTaskStatus {
+  if (envelope.taskStatus === "completed"
+    || envelope.taskStatus === "incomplete"
+    || envelope.taskStatus === "blocked"
+    || envelope.taskStatus === "exhausted") {
+    return envelope.taskStatus;
+  }
+  return envelope.action === "capability_call" ? "incomplete" : "completed";
+}
+
+export function shouldStopCoreCapabilityLoop(params: {
+  capabilityResultStatus?: string;
+  completedLoops: number;
+  maxLoops: number;
+}): boolean {
+  if (params.completedLoops >= params.maxLoops) {
+    return true;
+  }
+  const status = (params.capabilityResultStatus ?? "").trim().toLowerCase();
+  return status === "blocked"
+    || status === "review_required"
+    || status === "waiting_human"
+    || status === "waiting_human_approval"
+    || status === "baseline_missing";
 }
 
 export const LIVE_CHAT_MODEL_PLAN = {
@@ -772,6 +802,16 @@ export function parseCoreActionEnvelope(text: string): CoreActionEnvelope {
   if ((action !== "reply" && action !== "capability_call") || typeof responseText !== "string") {
     throw new Error("Core action envelope requires action and responseText.");
   }
+  const taskStatus = parsed.taskStatus;
+  if (
+    taskStatus !== undefined
+    && taskStatus !== "completed"
+    && taskStatus !== "incomplete"
+    && taskStatus !== "blocked"
+    && taskStatus !== "exhausted"
+  ) {
+    throw new Error("Core action envelope taskStatus must be completed, incomplete, blocked, or exhausted.");
+  }
   const capabilityRequest = parsed.capabilityRequest;
   if (action === "capability_call") {
     if (!capabilityRequest || typeof capabilityRequest !== "object") {
@@ -784,6 +824,7 @@ export function parseCoreActionEnvelope(text: string): CoreActionEnvelope {
     return {
       action,
       responseText,
+      taskStatus,
       capabilityRequest: {
         capabilityKey: request.capabilityKey,
         reason: request.reason,
@@ -798,6 +839,7 @@ export function parseCoreActionEnvelope(text: string): CoreActionEnvelope {
   return {
     action,
     responseText,
+    taskStatus,
   };
 }
 

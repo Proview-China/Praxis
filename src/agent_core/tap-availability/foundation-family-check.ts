@@ -14,6 +14,7 @@ export const FOUNDATION_FAMILY_CAPABILITY_KEYS = [
   "code.symbol_search",
   "code.lsp",
   "spreadsheet.read",
+  "doc.read",
   "read_pdf",
   "read_notebook",
   "view_image",

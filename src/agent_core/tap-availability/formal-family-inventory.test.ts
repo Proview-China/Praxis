@@ -28,6 +28,7 @@ test("createTapFormalFamilyInventory freezes the six formal TAP families and cap
     "code.symbol_search",
     "code.lsp",
     "spreadsheet.read",
+    "doc.read",
     "read_pdf",
     "read_notebook",
     "view_image",
