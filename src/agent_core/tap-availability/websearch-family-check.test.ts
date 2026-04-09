@@ -93,13 +93,10 @@ test("createWebsearchFamilyAvailabilityReport degrades to review_required when p
   assert.equal(familyReport.checks.register, false);
   assert.equal(familyReport.failureTaxonomy.status, "ready");
   assert.equal(familyReport.truthfulness.status, "ready");
-  assert.equal(familyReport.providerCoverage.status, "blocked");
+  assert.equal(familyReport.providerCoverage.status, "ready");
   assert.equal(
     familyReport.blockers.includes("search.ground is not registered in the observed TAP runtime."),
     true,
   );
-  assert.equal(
-    familyReport.warnings.some((entry) => entry.includes("provider/support-route")),
-    true,
-  );
+  assert.equal(familyReport.warnings.some((entry) => entry.includes("provider/support-route")), false);
 });

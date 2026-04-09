@@ -45,7 +45,54 @@ test("shell.restricted package stays formal but keeps risky policy metadata", ()
 
 test("test.run package is recognized as part of the B-group tooling baseline", () => {
   assert.equal(isTapToolingBaselineCapabilityKey("test.run"), true);
+  assert.equal(isTapToolingBaselineCapabilityKey("browser.playwright"), true);
   assert.equal(isTapToolingBaselineCapabilityKey("docs.read"), false);
+});
+
+test("git.commit package carries new-commit safety metadata", () => {
+  const capabilityPackage = createTapToolingCapabilityPackage("git.commit");
+
+  assert.equal(capabilityPackage.policy.riskLevel, "risky");
+  assert.equal(
+    capabilityPackage.activationSpec?.adapterFactoryRef,
+    "factory:tap-tooling:git.commit",
+  );
+  assert.equal(
+    capabilityPackage.policy.defaultBaseline.scope?.allowedOperations?.includes("git.commit"),
+    true,
+  );
+  assert.match(
+    capabilityPackage.policy.safetyFlags.join(" "),
+    /no_amend/i,
+  );
+});
+
+test("git.push package carries non-force remote safety metadata", () => {
+  const capabilityPackage = createTapToolingCapabilityPackage("git.push");
+
+  assert.equal(capabilityPackage.policy.riskLevel, "risky");
+  assert.equal(
+    capabilityPackage.activationSpec?.adapterFactoryRef,
+    "factory:tap-tooling:git.push",
+  );
+  assert.match(
+    capabilityPackage.policy.safetyFlags.join(" "),
+    /no_force_push/i,
+  );
+});
+
+test("browser.playwright package carries risky browser-automation metadata", () => {
+  const capabilityPackage = createTapToolingCapabilityPackage("browser.playwright");
+
+  assert.equal(capabilityPackage.policy.riskLevel, "risky");
+  assert.equal(
+    capabilityPackage.activationSpec?.adapterFactoryRef,
+    "factory:tap-tooling:browser.playwright",
+  );
+  assert.match(
+    capabilityPackage.policy.safetyFlags.join(" "),
+    /file_upload_blocked_by_default/i,
+  );
 });
 
 test("skill.doc.generate package carries formal doc-generation metadata", () => {

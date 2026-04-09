@@ -31,7 +31,7 @@ import {
   buildOpenAISkillVersionCreatePlan
 } from "../integrations/openai/api/tools/skills/managed.js";
 import { createRaxCmpFacade } from "./cmp-facade.js";
-import type { RaxCmpFacade, RaxCmpRuntimeLike } from "./cmp-types.js";
+import type { RaxCmpApi, RaxCmpPort } from "./cmp-types.js";
 import type { RaxCmpConfig } from "./cmp-config.js";
 import { createRaxMpFacade } from "./mp-facade.js";
 import type { RaxMpFacade } from "./mp-types.js";
@@ -211,11 +211,11 @@ export interface RaxFacade {
     removeVersion(options: FacadeCallOptions<SkillVersionRemoveInput>): PreparedInvocation<Record<string, unknown>>;
     setDefaultVersion(options: FacadeCallOptions<SkillSetDefaultVersionInput>): PreparedInvocation<Record<string, unknown>>;
   };
-  cmp: RaxCmpFacade;
+  cmp: RaxCmpApi;
   mp: RaxMpFacade;
 }
 
-type RaxCmpRuntimeFactory = (config: RaxCmpConfig) => RaxCmpRuntimeLike;
+type RaxCmpRuntimeFactory = (config: RaxCmpConfig) => RaxCmpPort;
 
 export function createRaxFacade(
   router: CapabilityRouter,

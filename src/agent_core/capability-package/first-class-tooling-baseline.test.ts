@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  createCodeGlobCapabilityPackage,
+  createCodeGrepCapabilityPackage,
+  createCodeLsCapabilityPackage,
+  createCodeReadManyCapabilityPackage,
   createCodeReadCapabilityPackage,
   createDocsReadCapabilityPackage,
   FIRST_CLASS_TOOLING_ALLOWED_OPERATIONS,
@@ -15,6 +19,16 @@ import { FIRST_CLASS_TOOLING_BASELINE_CONSUMERS } from "../ta-pool-model/index.j
 test("first-class tooling baseline exposes the frozen A-group capability keys", () => {
   assert.deepEqual(FIRST_CLASS_TOOLING_BASELINE_CAPABILITY_KEYS, [
     "code.read",
+    "code.ls",
+    "code.glob",
+    "code.grep",
+    "code.read_many",
+    "code.symbol_search",
+    "code.lsp",
+    "spreadsheet.read",
+    "read_pdf",
+    "read_notebook",
+    "view_image",
     "docs.read",
   ]);
   assert.deepEqual(FIRST_CLASS_TOOLING_ALLOWED_OPERATIONS, [
@@ -22,6 +36,18 @@ test("first-class tooling baseline exposes the frozen A-group capability keys", 
     "read_lines",
     "list_dir",
     "stat_path",
+    "glob",
+    "grep",
+    "read_many",
+    "workspace_symbol",
+    "document_symbol",
+    "definition",
+    "references",
+    "hover",
+    "read_spreadsheet",
+    "read_pdf",
+    "read_notebook",
+    "view_image",
   ]);
 });
 
@@ -70,10 +96,10 @@ test("docs.read package carries docs-oriented scope and activation metadata", ()
 
 test("first-class tooling baseline package listing stays stable and complete", () => {
   const packages = listFirstClassToolingBaselineCapabilityPackages();
-  assert.equal(packages.length, 2);
+  assert.equal(packages.length, 12);
   assert.deepEqual(
     packages.map((entry) => entry.manifest.capabilityKey),
-    ["code.read", "docs.read"],
+    ["code.read", "code.ls", "code.glob", "code.grep", "code.read_many", "code.symbol_search", "code.lsp", "spreadsheet.read", "read_pdf", "read_notebook", "view_image", "docs.read"],
   );
 });
 
@@ -81,7 +107,7 @@ test("first-class tooling capability descriptors expose reviewer-readable scope 
   const descriptors = listFirstClassToolingCapabilityBaselineDescriptors();
   assert.deepEqual(
     descriptors.map((entry) => entry.capabilityKey),
-    ["code.read", "docs.read"],
+    ["code.read", "code.ls", "code.glob", "code.grep", "code.read_many", "code.symbol_search", "code.lsp", "spreadsheet.read", "read_pdf", "read_notebook", "view_image", "docs.read"],
   );
 
   const codeRead =
@@ -91,6 +117,49 @@ test("first-class tooling capability descriptors expose reviewer-readable scope 
   assert.deepEqual(codeRead.allowedOperations, [
     ...FIRST_CLASS_TOOLING_ALLOWED_OPERATIONS,
   ]);
+});
+
+test("new first-class code discovery packages expose the expected operation families", () => {
+  assert.deepEqual(
+    createCodeLsCapabilityPackage().adapter.supports,
+    ["list_dir", "stat_path"],
+  );
+  assert.deepEqual(
+    createCodeGlobCapabilityPackage().adapter.supports,
+    ["glob"],
+  );
+  assert.deepEqual(
+    createCodeGrepCapabilityPackage().adapter.supports,
+    ["grep"],
+  );
+  assert.deepEqual(
+    createCodeReadManyCapabilityPackage().adapter.supports,
+    ["read_many"],
+  );
+  assert.deepEqual(
+    getFirstClassToolingCapabilityBaselineDescriptor("code.symbol_search").allowedOperations,
+    ["workspace_symbol"],
+  );
+  assert.deepEqual(
+    getFirstClassToolingCapabilityBaselineDescriptor("code.lsp").allowedOperations,
+    ["workspace_symbol", "document_symbol", "definition", "references", "hover"],
+  );
+  assert.deepEqual(
+    getFirstClassToolingCapabilityBaselineDescriptor("spreadsheet.read").allowedOperations,
+    ["read_spreadsheet"],
+  );
+  assert.deepEqual(
+    getFirstClassToolingCapabilityBaselineDescriptor("read_pdf").allowedOperations,
+    ["read_pdf"],
+  );
+  assert.deepEqual(
+    getFirstClassToolingCapabilityBaselineDescriptor("read_notebook").allowedOperations,
+    ["read_notebook"],
+  );
+  assert.deepEqual(
+    getFirstClassToolingCapabilityBaselineDescriptor("view_image").allowedOperations,
+    ["view_image"],
+  );
 });
 
 test("capability package worker consumers stay aligned with ta-pool baseline consumer names", () => {

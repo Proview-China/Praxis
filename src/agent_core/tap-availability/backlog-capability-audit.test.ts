@@ -18,6 +18,7 @@ test("createBacklogCapabilityAudit builds the Wave 3 backlog matrix without mixi
     "skill",
     "mcp",
     "mp",
+    "userio",
   ]);
   assert.equal(audit.entries.some((entry) => entry.capabilityKey === "dependency.install"), true);
   assert.equal(audit.entries.some((entry) => entry.capabilityKey === "mcp.configure"), true);

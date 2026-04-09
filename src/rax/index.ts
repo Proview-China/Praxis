@@ -1,4 +1,5 @@
 export type {
+  RaxCmpApi,
   RaxCmpBootstrapInput,
   RaxCmpBootstrapResult,
   RaxCmpAcceptanceReadiness,
@@ -10,9 +11,11 @@ export type {
   RaxCmpDispatchInput,
   RaxCmpDispatchScope,
   RaxCmpExecutionStyle,
-  RaxCmpFacade,
   RaxCmpFallbackPolicy,
   RaxCmpFallbackReadiness,
+  RaxCmpFiveAgentPort,
+  RaxCmpFlowApi,
+  RaxCmpFlowPort,
   RaxCmpGitInfraConfig,
   RaxCmpIngestInput,
   RaxCmpLineageScope,
@@ -31,10 +34,15 @@ export type {
   RaxCmpRecoverResult,
   RaxCmpRecoveryPreference,
   RaxCmpRequestHistoryInput,
+  RaxCmpPort,
+  RaxCmpProjectApi,
+  RaxCmpProjectPort,
   RaxCmpRoleCapabilityAccessInput,
   RaxCmpRoleCapabilityDispatchInput,
-  RaxCmpRuntimeLike,
+  RaxCmpRolesApi,
+  RaxCmpRolesPort,
   RaxCmpSession,
+  RaxCmpSessionApi,
   RaxCmpSmokeInput,
   RaxCmpSmokeResult,
   RaxCmpSmokeCheck,
@@ -279,6 +287,10 @@ export {
 export {
   createRaxCmpFacade,
 } from "./cmp-facade.js";
+export type {
+  RaxCmpApi as RaxCmpFacade,
+  RaxCmpPort as RaxCmpRuntimeLike,
+} from "./cmp-types.js";
 export {
   createRaxMpFacade,
 } from "./mp-facade.js";

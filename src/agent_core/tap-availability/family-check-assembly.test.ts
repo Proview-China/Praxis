@@ -10,15 +10,16 @@ test("createTapLiveAvailabilityReport builds a registered formal-family availabi
     },
   });
 
-  assert.equal(report.summary.totalCapabilities, 26);
-  assert.equal(report.summary.registeredCapabilities, 26);
-  assert.equal(report.summary.executeReadyCapabilities, 26);
+  assert.equal(report.summary.totalCapabilities, 51);
+  assert.equal(report.summary.registeredCapabilities, 51);
+  assert.equal(report.summary.executeReadyCapabilities, 51);
   assert.equal(report.rows.some((row) => row.familyKey === "foundation"), true);
   assert.equal(report.rows.some((row) => row.familyKey === "mcp"), true);
   assert.equal(report.rows.some((row) => row.familyKey === "mp"), true);
+  assert.equal(report.rows.some((row) => row.familyKey === "userio"), true);
 });
 
-test("createTapFormalFamilyCheckReports assembles all five family reports from one live report", () => {
+test("createTapFormalFamilyCheckReports assembles all six family reports from one live report", () => {
   const report = createTapLiveAvailabilityReport({
     foundation: {
       workspaceRoot: "/tmp/praxis-tap-family-checks",
@@ -32,10 +33,12 @@ test("createTapFormalFamilyCheckReports assembles all five family reports from o
     "skill",
     "mcp",
     "mp",
+    "userio",
   ]);
   assert.equal(familyReports.foundation.familyKey, "foundation");
   assert.equal(familyReports.websearch.familyKey, "websearch");
   assert.equal(familyReports.skill.familyKey, "skill");
   assert.equal(familyReports.mcp.familyKey, "mcp");
   assert.equal(familyReports.mp.familyKey, "mp");
+  assert.equal(familyReports.userio.familyKey, "userio");
 });

@@ -7,11 +7,31 @@ import type { TapFamilyCheckReport, TapFamilyCheckSeverity } from "./family-chec
 
 export const FOUNDATION_FAMILY_CAPABILITY_KEYS = [
   "code.read",
+  "code.ls",
+  "code.glob",
+  "code.grep",
+  "code.read_many",
+  "code.symbol_search",
+  "code.lsp",
+  "spreadsheet.read",
+  "read_pdf",
+  "read_notebook",
+  "view_image",
   "docs.read",
   "repo.write",
+  "code.edit",
+  "code.patch",
   "shell.restricted",
+  "shell.session",
   "test.run",
+  "git.status",
+  "git.diff",
+  "git.commit",
+  "git.push",
+  "code.diff",
+  "browser.playwright",
   "skill.doc.generate",
+  "write_todos",
 ] as const;
 
 export type FoundationFamilyCapabilityKey =

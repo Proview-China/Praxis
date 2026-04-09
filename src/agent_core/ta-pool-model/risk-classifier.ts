@@ -44,6 +44,7 @@ const DEFAULT_RISKY_PATTERNS = [
   "mcp.native.execute",
   "mcp.browser.control",
   "mcp.playwright",
+  "browser.playwright",
   "computer_use.*",
   "code.exec.*",
   "shell.exec",

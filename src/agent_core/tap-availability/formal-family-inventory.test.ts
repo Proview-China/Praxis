@@ -7,7 +7,7 @@ import {
   listTapFormalFamilyInventoryEntries,
 } from "./formal-family-inventory.js";
 
-test("createTapFormalFamilyInventory freezes the five formal TAP families and capability keys", () => {
+test("createTapFormalFamilyInventory freezes the six formal TAP families and capability keys", () => {
   const inventory = createTapFormalFamilyInventory();
 
   assert.deepEqual(inventory.familyKeys, [
@@ -16,9 +16,42 @@ test("createTapFormalFamilyInventory freezes the five formal TAP families and ca
     "skill",
     "mcp",
     "mp",
+    "userio",
   ]);
-  assert.equal(inventory.entries.length, 26);
-  assert.deepEqual(getTapFormalFamilyInventoryFamily("websearch")?.capabilityKeys, ["search.ground"]);
+  assert.equal(inventory.entries.length, 51);
+  assert.deepEqual(getTapFormalFamilyInventoryFamily("foundation")?.capabilityKeys, [
+    "code.read",
+    "code.ls",
+    "code.glob",
+    "code.grep",
+    "code.read_many",
+    "code.symbol_search",
+    "code.lsp",
+    "spreadsheet.read",
+    "read_pdf",
+    "read_notebook",
+    "view_image",
+    "docs.read",
+    "repo.write",
+    "code.edit",
+    "code.patch",
+    "shell.restricted",
+    "shell.session",
+    "test.run",
+    "git.status",
+    "git.diff",
+    "git.commit",
+    "git.push",
+    "code.diff",
+    "browser.playwright",
+    "skill.doc.generate",
+    "write_todos",
+  ]);
+  assert.deepEqual(getTapFormalFamilyInventoryFamily("websearch")?.capabilityKeys, [
+    "search.web",
+    "search.fetch",
+    "search.ground",
+  ]);
   assert.deepEqual(getTapFormalFamilyInventoryFamily("skill")?.capabilityKeys, [
     "skill.use",
     "skill.mount",
@@ -26,6 +59,7 @@ test("createTapFormalFamilyInventory freezes the five formal TAP families and ca
   ]);
   assert.deepEqual(getTapFormalFamilyInventoryFamily("mcp")?.capabilityKeys, [
     "mcp.listTools",
+    "mcp.listResources",
     "mcp.readResource",
     "mcp.call",
     "mcp.native.execute",
@@ -43,6 +77,10 @@ test("createTapFormalFamilyInventory freezes the five formal TAP families and ca
     "mp.merge",
     "mp.reindex",
     "mp.compact",
+  ]);
+  assert.deepEqual(getTapFormalFamilyInventoryFamily("userio")?.capabilityKeys, [
+    "request_user_input",
+    "request_permissions",
   ]);
 });
 
@@ -66,14 +104,14 @@ test("inventory entries keep package source refs, register helpers, and activati
   assert.ok(searchGround);
   assert.equal(
     searchGround?.registerHelperRef,
-    "integrations/rax-websearch-adapter#registerRaxWebsearchCapability",
+    "integrations/tap-vendor-network-adapter#registerTapVendorNetworkCapabilityFamily",
   );
   assert.equal(
     searchGround?.assemblyRef,
     "integrations/tap-capability-family-assembly#registerTapCapabilityFamilyAssembly",
   );
   assert.deepEqual(searchGround?.activationFactoryRefs, [
-    "factory:search.ground.rax-websearch",
+    "factory:tap.vendor-network:search.ground",
   ]);
 
   assert.ok(mpSearch);
@@ -88,4 +126,34 @@ test("inventory entries keep package source refs, register helpers, and activati
   assert.deepEqual(mpSearch?.activationFactoryRefs, [
     "factory:rax.mp:search",
   ]);
+  const mcpCall = entries.find((entry) => entry.capabilityKey === "mcp.call");
+  const skillUse = entries.find((entry) => entry.capabilityKey === "skill.use");
+  const requestUserInput = entries.find((entry) => entry.capabilityKey === "request_user_input");
+  assert.ok(mcpCall);
+  assert.ok(skillUse);
+  assert.ok(requestUserInput);
+  assert.equal(
+    skillUse?.registerHelperRef,
+    "integrations/rax-skill-adapter#registerRaxSkillCapabilityFamily",
+  );
+  assert.equal(
+    skillUse?.packageSourceRef,
+    "capability-package/skill-family-capability-package#createRaxSkillCapabilityPackageCatalog",
+  );
+  assert.equal(
+    mcpCall?.registerHelperRef,
+    "integrations/rax-mcp-adapter#registerRaxMcpCapabilities",
+  );
+  assert.equal(
+    mcpCall?.packageSourceRef,
+    "capability-package/capability-package#createMcpCapabilityPackage",
+  );
+  assert.equal(
+    requestUserInput?.registerHelperRef,
+    "integrations/tap-vendor-user-io-adapter#registerTapVendorUserIoFamily",
+  );
+  assert.equal(
+    requestUserInput?.packageSourceRef,
+    "capability-package/vendor-user-io-capability-package#createTapVendorUserIoCapabilityPackageCatalog",
+  );
 });

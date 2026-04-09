@@ -10,6 +10,16 @@ import {
 
 export const FIRST_CLASS_TOOLING_BASELINE_CAPABILITY_KEYS = [
   "code.read",
+  "code.ls",
+  "code.glob",
+  "code.grep",
+  "code.read_many",
+  "code.symbol_search",
+  "code.lsp",
+  "spreadsheet.read",
+  "read_pdf",
+  "read_notebook",
+  "view_image",
   "docs.read",
 ] as const;
 export type FirstClassToolingBaselineCapabilityKey =
@@ -20,6 +30,18 @@ export const FIRST_CLASS_TOOLING_ALLOWED_OPERATIONS = [
   "read_lines",
   "list_dir",
   "stat_path",
+  "glob",
+  "grep",
+  "read_many",
+  "workspace_symbol",
+  "document_symbol",
+  "definition",
+  "references",
+  "hover",
+  "read_spreadsheet",
+  "read_pdf",
+  "read_notebook",
+  "view_image",
 ] as const;
 export type FirstClassToolingAllowedOperation =
   (typeof FIRST_CLASS_TOOLING_ALLOWED_OPERATIONS)[number];
@@ -77,6 +99,383 @@ const FIRST_CLASS_TOOLING_BASELINE_DESCRIPTORS: Record<
       "Read-only capability; it never writes or patches files.",
       "Scope stays inside repo-local code and build files only.",
       "Binary or oversized files may be truncated for safe context transfer.",
+    ],
+    workerConsumers: ["reviewer", "bootstrap_tma", "extended_tma"],
+  },
+  "code.ls": {
+    capabilityKey: "code.ls",
+    scopeKind: "workspace-code",
+    scopeSummary:
+      "Repo-local source trees and build-support directories that core can list safely for structure discovery.",
+    description:
+      "List repo-local code and build directories without mutating the workspace.",
+    reviewerSummary:
+      "Core or reviewer can inspect directory structure inside the repo, but cannot read file bodies or write changes through this capability alone.",
+    pathPatterns: [
+      "src",
+      "src/**",
+      "scripts",
+      "scripts/**",
+      "package.json",
+      "package-lock.json",
+      "pnpm-lock.yaml",
+      "tsconfig.json",
+    ],
+    allowedOperations: ["list_dir", "stat_path"],
+    usageDocRef: "docs/ability/01-basic-implementation.md",
+    examplePath: "src",
+    exampleOperation: "list_dir",
+    routeHints: [
+      { key: "scope", value: "workspace-code" },
+      { key: "baseline", value: "reviewer-tma" },
+      { key: "toolKind", value: "directory-discovery" },
+    ],
+    tags: ["tap", "baseline", "read", "code", "list", "reviewer", "tma"],
+    knownLimits: [
+      "Read-only capability; it never reads full file bodies.",
+      "Large directories may be truncated to a bounded entry count.",
+      "Scope stays inside repo-local code and build directories only.",
+    ],
+    workerConsumers: ["reviewer", "bootstrap_tma", "extended_tma"],
+  },
+  "code.glob": {
+    capabilityKey: "code.glob",
+    scopeKind: "workspace-code",
+    scopeSummary:
+      "Repo-local source and build files that can be discovered by glob pattern for planning or targeted follow-up reads.",
+    description:
+      "Find repo-local code and build files by glob pattern inside the allowed workspace scope.",
+    reviewerSummary:
+      "Core or reviewer can discover candidate files by glob pattern, but cannot read or write file bodies through this capability alone.",
+    pathPatterns: [
+      "src",
+      "src/**",
+      "scripts",
+      "scripts/**",
+      "package.json",
+      "package-lock.json",
+      "pnpm-lock.yaml",
+      "tsconfig.json",
+    ],
+    allowedOperations: ["glob"],
+    usageDocRef: "docs/ability/01-basic-implementation.md",
+    examplePath: "src/**/*.ts",
+    exampleOperation: "glob",
+    routeHints: [
+      { key: "scope", value: "workspace-code" },
+      { key: "baseline", value: "reviewer-tma" },
+      { key: "toolKind", value: "glob-search" },
+    ],
+    tags: ["tap", "baseline", "read", "code", "glob", "reviewer", "tma"],
+    knownLimits: [
+      "Read-only capability; it returns path matches only.",
+      "Pattern matching stays inside the configured workspace scope.",
+      "Result sets may be truncated for bounded context transfer.",
+    ],
+    workerConsumers: ["reviewer", "bootstrap_tma", "extended_tma"],
+  },
+  "code.grep": {
+    capabilityKey: "code.grep",
+    scopeKind: "workspace-code",
+    scopeSummary:
+      "Repo-local source and build files that can be searched by content pattern for codebase investigation.",
+    description:
+      "Search repo-local code and build files by textual or regex-like pattern inside the allowed workspace scope.",
+    reviewerSummary:
+      "Core or reviewer can search code content for symbols, strings, or patterns, but cannot mutate files through this capability.",
+    pathPatterns: [
+      "src",
+      "src/**",
+      "scripts",
+      "scripts/**",
+      "package.json",
+      "package-lock.json",
+      "pnpm-lock.yaml",
+      "tsconfig.json",
+    ],
+    allowedOperations: ["grep"],
+    usageDocRef: "docs/ability/01-basic-implementation.md",
+    examplePath: "src",
+    exampleOperation: "grep",
+    routeHints: [
+      { key: "scope", value: "workspace-code" },
+      { key: "baseline", value: "reviewer-tma" },
+      { key: "toolKind", value: "content-search" },
+    ],
+    tags: ["tap", "baseline", "read", "code", "grep", "reviewer", "tma"],
+    knownLimits: [
+      "Read-only capability; it returns bounded search hits rather than full project dumps.",
+      "Binary files and oversized files may be skipped.",
+      "Result sets may be truncated for bounded context transfer.",
+    ],
+    workerConsumers: ["reviewer", "bootstrap_tma", "extended_tma"],
+  },
+  "code.read_many": {
+    capabilityKey: "code.read_many",
+    scopeKind: "workspace-code",
+    scopeSummary:
+      "Repo-local source and build files that can be batch-read by explicit paths or glob patterns for higher-signal codebase context.",
+    description:
+      "Batch-read multiple repo-local code or build files inside the allowed workspace scope.",
+    reviewerSummary:
+      "Core or reviewer can collect bounded multi-file context, but still cannot write or patch files through this capability.",
+    pathPatterns: [
+      "src",
+      "src/**",
+      "scripts",
+      "scripts/**",
+      "package.json",
+      "package-lock.json",
+      "pnpm-lock.yaml",
+      "tsconfig.json",
+    ],
+    allowedOperations: ["read_many"],
+    usageDocRef: "docs/ability/01-basic-implementation.md",
+    examplePath: "src/**/*.ts",
+    exampleOperation: "read_many",
+    routeHints: [
+      { key: "scope", value: "workspace-code" },
+      { key: "baseline", value: "reviewer-tma" },
+      { key: "toolKind", value: "batch-read" },
+    ],
+    tags: ["tap", "baseline", "read", "code", "batch", "reviewer", "tma"],
+    knownLimits: [
+      "Read-only capability; each file body is still bounded.",
+      "Result sets may be truncated by file count or byte budget.",
+      "Binary files and unsupported assets may be skipped.",
+    ],
+    workerConsumers: ["reviewer", "bootstrap_tma", "extended_tma"],
+  },
+  "code.symbol_search": {
+    capabilityKey: "code.symbol_search",
+    scopeKind: "workspace-code",
+    scopeSummary:
+      "Repo-local source trees that can be searched by symbol name using code-intelligence-first semantics, with text fallback when language services are unavailable.",
+    description:
+      "Search repo-local code symbols across the workspace using TypeScript-aware navigation first, then bounded textual fallback when needed.",
+    reviewerSummary:
+      "Core or reviewer can search for symbol definitions and likely declaration points, but cannot mutate files through this capability.",
+    pathPatterns: [
+      "src",
+      "src/**",
+      "scripts",
+      "scripts/**",
+      "package.json",
+      "package-lock.json",
+      "pnpm-lock.yaml",
+      "tsconfig.json",
+    ],
+    allowedOperations: ["workspace_symbol"],
+    usageDocRef: "docs/ability/01-basic-implementation.md",
+    examplePath: "src",
+    exampleOperation: "workspace_symbol",
+    routeHints: [
+      { key: "scope", value: "workspace-code" },
+      { key: "baseline", value: "reviewer-tma" },
+      { key: "toolKind", value: "symbol-search" },
+    ],
+    tags: ["tap", "baseline", "read", "code", "symbol", "reviewer", "tma"],
+    knownLimits: [
+      "Read-only capability; it returns bounded symbol matches only.",
+      "Semantic symbol search is strongest for TypeScript and JavaScript workspaces.",
+      "When language-service data is unavailable, results may degrade to textual fallback matches.",
+    ],
+    workerConsumers: ["reviewer", "bootstrap_tma", "extended_tma"],
+  },
+  "code.lsp": {
+    capabilityKey: "code.lsp",
+    scopeKind: "workspace-code",
+    scopeSummary:
+      "Repo-local source files that can be inspected with language-intelligence style queries such as document symbols, definitions, references, and hover.",
+    description:
+      "Run bounded language-intelligence queries against repo-local code using TypeScript-aware semantics where available.",
+    reviewerSummary:
+      "Core or reviewer can inspect symbol structure and jump-like metadata, but cannot change files or execute code through this capability.",
+    pathPatterns: [
+      "src",
+      "src/**",
+      "scripts",
+      "scripts/**",
+      "package.json",
+      "package-lock.json",
+      "pnpm-lock.yaml",
+      "tsconfig.json",
+    ],
+    allowedOperations: [
+      "workspace_symbol",
+      "document_symbol",
+      "definition",
+      "references",
+      "hover",
+    ],
+    usageDocRef: "docs/ability/01-basic-implementation.md",
+    examplePath: "src/agent_core/runtime.ts",
+    exampleOperation: "document_symbol",
+    routeHints: [
+      { key: "scope", value: "workspace-code" },
+      { key: "baseline", value: "reviewer-tma" },
+      { key: "toolKind", value: "language-intelligence" },
+    ],
+    tags: ["tap", "baseline", "read", "code", "lsp", "reviewer", "tma"],
+    knownLimits: [
+      "Read-only capability; it only returns bounded semantic metadata.",
+      "Current implementation is strongest on TypeScript and JavaScript source files.",
+      "Cross-language project-wide LSP coverage may still require future provider-specific backends.",
+    ],
+    workerConsumers: ["reviewer", "bootstrap_tma", "extended_tma"],
+  },
+  "spreadsheet.read": {
+    capabilityKey: "spreadsheet.read",
+    scopeKind: "workspace-docs",
+    scopeSummary:
+      "Repo-local spreadsheet and tabular data files that core can inspect safely without mutating formulas or workbook state.",
+    description:
+      "Read repo-local CSV, TSV, and XLSX files as bounded structured tables instead of raw binary blobs.",
+    reviewerSummary:
+      "Core or reviewer can inspect spreadsheet structure and sample rows, but cannot modify workbook contents through this capability.",
+    pathPatterns: [
+      "data",
+      "data/**",
+      "docs",
+      "docs/**",
+      "output",
+      "output/**",
+      "*.csv",
+      "**/*.csv",
+      "*.tsv",
+      "**/*.tsv",
+      "*.xlsx",
+      "**/*.xlsx",
+    ],
+    allowedOperations: ["read_spreadsheet"],
+    usageDocRef: "docs/ability/25-tap-capability-package-template.md",
+    examplePath: "data/report.xlsx",
+    exampleOperation: "read_spreadsheet",
+    routeHints: [
+      { key: "scope", value: "workspace-docs" },
+      { key: "baseline", value: "reviewer-tma" },
+      { key: "toolKind", value: "spreadsheet-read" },
+    ],
+    tags: ["tap", "baseline", "read", "spreadsheet", "data", "reviewer", "tma"],
+    knownLimits: [
+      "Reads table structure and bounded sample rows; it does not preserve workbook formatting.",
+      "Formula cells return cached values or textual formulas rather than recalculating the workbook.",
+      "Large sheets are truncated by row count and byte budget for safe context transfer.",
+    ],
+    workerConsumers: ["reviewer", "bootstrap_tma", "extended_tma"],
+  },
+  "read_pdf": {
+    capabilityKey: "read_pdf",
+    scopeKind: "workspace-docs",
+    scopeSummary:
+      "Repo-local PDF documents that can be read through bounded text extraction with page-aware semantics.",
+    description:
+      "Read repo-local PDF documents through bounded extracted text instead of raw binary dumps.",
+    reviewerSummary:
+      "Core or reviewer can inspect PDF content and page metadata, but cannot edit the file or execute document-side effects through this capability.",
+    pathPatterns: [
+      "docs",
+      "docs/**",
+      "*.pdf",
+      "**/*.pdf",
+      "memory",
+      "memory/**",
+    ],
+    allowedOperations: ["read_pdf"],
+    usageDocRef:
+      "docs/ability/tap-runtime-completion-task-pack/11-first-class-tooling-baseline-for-reviewer-and-tma.md",
+    examplePath: "docs/spec.pdf",
+    exampleOperation: "read_pdf",
+    routeHints: [
+      { key: "scope", value: "workspace-docs" },
+      { key: "baseline", value: "reviewer-tma" },
+      { key: "toolKind", value: "pdf-read" },
+    ],
+    tags: ["tap", "baseline", "read", "pdf", "docs", "reviewer", "tma"],
+    knownLimits: [
+      "Read-only capability; it returns extracted text and metadata rather than raw PDF bytes.",
+      "Extraction quality depends on the PDF containing selectable text.",
+      "Large PDFs are bounded by page ranges and byte budgets to keep context transfer stable.",
+    ],
+    workerConsumers: ["reviewer", "bootstrap_tma", "extended_tma"],
+  },
+  "read_notebook": {
+    capabilityKey: "read_notebook",
+    scopeKind: "workspace-code",
+    scopeSummary:
+      "Repo-local Jupyter notebooks that can be read as bounded structured cells instead of raw JSON blobs.",
+    description:
+      "Read repo-local notebooks with cell-aware structure, bounded outputs, and lightweight execution metadata.",
+    reviewerSummary:
+      "Core or reviewer can inspect notebook cells and selected outputs, but cannot execute or edit notebook cells through this capability.",
+    pathPatterns: [
+      "src",
+      "src/**",
+      "*.ipynb",
+      "**/*.ipynb",
+      "notebooks",
+      "notebooks/**",
+      "docs",
+      "docs/**",
+    ],
+    allowedOperations: ["read_notebook"],
+    usageDocRef: "docs/ability/01-basic-implementation.md",
+    examplePath: "notebooks/demo.ipynb",
+    exampleOperation: "read_notebook",
+    routeHints: [
+      { key: "scope", value: "workspace-code" },
+      { key: "baseline", value: "reviewer-tma" },
+      { key: "toolKind", value: "notebook-read" },
+    ],
+    tags: ["tap", "baseline", "read", "notebook", "code", "reviewer", "tma"],
+    knownLimits: [
+      "Read-only capability; it returns bounded cell structure instead of the full raw notebook JSON.",
+      "Large notebook outputs are summarized rather than fully expanded.",
+      "Notebook binary attachments are not inlined as full multimodal payloads here.",
+    ],
+    workerConsumers: ["reviewer", "bootstrap_tma", "extended_tma"],
+  },
+  "view_image": {
+    capabilityKey: "view_image",
+    scopeKind: "workspace-code",
+    scopeSummary:
+      "Repo-local image assets and screenshots that can be attached into multimodal model context through a bounded local-image bridge.",
+    description:
+      "Read a repo-local image file and expose it as a bounded local-image input for multimodal model passes.",
+    reviewerSummary:
+      "Core or reviewer can inspect repo-local images through a local-image bridge, but cannot edit the image or write files through this capability.",
+    pathPatterns: [
+      "src",
+      "src/**",
+      "docs",
+      "docs/**",
+      "assets",
+      "assets/**",
+      "*.png",
+      "*.jpg",
+      "*.jpeg",
+      "*.webp",
+      "*.gif",
+      "**/*.png",
+      "**/*.jpg",
+      "**/*.jpeg",
+      "**/*.webp",
+      "**/*.gif",
+    ],
+    allowedOperations: ["view_image"],
+    usageDocRef: "docs/ability/01-basic-implementation.md",
+    examplePath: "assets/mockup.png",
+    exampleOperation: "view_image",
+    routeHints: [
+      { key: "scope", value: "workspace-code" },
+      { key: "baseline", value: "reviewer-tma" },
+      { key: "toolKind", value: "local-image-view" },
+    ],
+    tags: ["tap", "baseline", "read", "image", "multimodal", "reviewer", "tma"],
+    knownLimits: [
+      "Read-only capability; it attaches supported local raster images only.",
+      "Current implementation is intended for model-visible local images, not arbitrary binary assets.",
+      "Unsupported MIME types are rejected rather than being coerced into fake image inputs.",
     ],
     workerConsumers: ["reviewer", "bootstrap_tma", "extended_tma"],
   },
@@ -323,6 +722,46 @@ function createFirstClassToolingCapabilityPackage(
 
 export function createCodeReadCapabilityPackage(): CapabilityPackage {
   return createFirstClassToolingCapabilityPackage("code.read");
+}
+
+export function createCodeLsCapabilityPackage(): CapabilityPackage {
+  return createFirstClassToolingCapabilityPackage("code.ls");
+}
+
+export function createCodeGlobCapabilityPackage(): CapabilityPackage {
+  return createFirstClassToolingCapabilityPackage("code.glob");
+}
+
+export function createCodeGrepCapabilityPackage(): CapabilityPackage {
+  return createFirstClassToolingCapabilityPackage("code.grep");
+}
+
+export function createCodeReadManyCapabilityPackage(): CapabilityPackage {
+  return createFirstClassToolingCapabilityPackage("code.read_many");
+}
+
+export function createCodeSymbolSearchCapabilityPackage(): CapabilityPackage {
+  return createFirstClassToolingCapabilityPackage("code.symbol_search");
+}
+
+export function createCodeLspCapabilityPackage(): CapabilityPackage {
+  return createFirstClassToolingCapabilityPackage("code.lsp");
+}
+
+export function createSpreadsheetReadCapabilityPackage(): CapabilityPackage {
+  return createFirstClassToolingCapabilityPackage("spreadsheet.read");
+}
+
+export function createReadPdfCapabilityPackage(): CapabilityPackage {
+  return createFirstClassToolingCapabilityPackage("read_pdf");
+}
+
+export function createReadNotebookCapabilityPackage(): CapabilityPackage {
+  return createFirstClassToolingCapabilityPackage("read_notebook");
+}
+
+export function createViewImageCapabilityPackage(): CapabilityPackage {
+  return createFirstClassToolingCapabilityPackage("view_image");
 }
 
 export function createDocsReadCapabilityPackage(): CapabilityPackage {
