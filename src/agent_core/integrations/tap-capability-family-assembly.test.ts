@@ -46,6 +46,10 @@ test("registerTapCapabilityFamilyAssembly wires foundation, search, skill, MCP, 
     "mcp.native.execute",
   ]);
   assert.deepEqual(result.familyKeys.mp, [
+    "mp.ingest",
+    "mp.align",
+    "mp.resolve",
+    "mp.history.request",
     "mp.search",
     "mp.materialize",
     "mp.promote",
@@ -55,10 +59,10 @@ test("registerTapCapabilityFamilyAssembly wires foundation, search, skill, MCP, 
     "mp.reindex",
     "mp.compact",
   ]);
-  assert.equal(result.packages.length, 22);
-  assert.equal(result.bindings.length, 22);
+  assert.equal(result.packages.length, 26);
+  assert.equal(result.bindings.length, 26);
   assert.equal(result.activationFactoryRefs.length, activationFactories.size);
-  assert.equal(result.registrationAudit.length, 22);
+  assert.equal(result.registrationAudit.length, 26);
   assert.equal(result.activationFactoryAudit.length, activationFactories.size);
   assert.equal(registeredCapabilityKeys.includes("search.ground"), true);
   assert.equal(registeredCapabilityKeys.includes("skill.use"), true);

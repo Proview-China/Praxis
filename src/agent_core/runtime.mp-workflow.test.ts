@@ -102,7 +102,7 @@ async function createSearchFacadeSession(input: {
       projectId: input.projectId,
       lance: {
         rootPath: input.rootPath,
-        liveExecutionPreferred: true,
+        liveExecutionPreferred: false,
       },
     },
   });
@@ -477,4 +477,92 @@ test("mp workflow archive removes a project-scoped record from subsequent search
   });
 
   assert.equal(afterArchive.hits.length, 0);
+});
+
+test("mp workflow can ingest through TAP workflow capability and resolve fresher memory through rax.mp", async () => {
+  const projectId = "project.mp.workflow.ingest";
+  const rootPath = await mkdtemp(join(tmpdir(), "praxis-mp-workflow-ingest-"));
+  const { runtime, session, runId } = await createMpRuntimeFixture({
+    baselineCapabilities: ["mp.ingest", "mp.resolve"],
+    goalId: "goal-mp-ingest-workflow",
+    userInput: "Ingest and resolve MP memory through the workflow entry.",
+  });
+
+  const section = createCmpSection({
+    id: "section-ingest",
+    projectId,
+    agentId: "main",
+    lineagePath: ["main"],
+    source: "core_agent",
+    kind: "runtime_context",
+    fidelity: "checked",
+    payloadRefs: ["payload-ingest"],
+    tags: ["sync", "status"],
+    createdAt: "2026-04-09T00:00:00.000Z",
+  });
+  const storedSection = createCmpStoredSectionFromSection({
+    storedSectionId: "stored-ingest",
+    section,
+    plane: "postgresql",
+    storageRef: "postgresql:stored-ingest",
+    state: "promoted",
+    visibility: "parent",
+    persistedAt: "2026-04-09T00:00:01.000Z",
+    metadata: {
+      semanticGroupId: "semantic:ingest:sync",
+      tags: ["sync", "status"],
+    },
+  });
+
+  await dispatchMpCapability({
+    runtime,
+    sessionId: session.sessionId,
+    runId,
+    capabilityKey: "mp.ingest",
+    requestId: "request-mp-ingest-1",
+    payload: {
+      projectId,
+      rootPath,
+      agentIds: ["main"],
+      storedSection,
+      checkedSnapshotRef: "snapshot-ingest",
+      branchRef: "mp/main",
+      sourceRefs: ["source:sync-status"],
+      scope: createMpScopeDescriptor({
+        projectId,
+        agentId: "main",
+        scopeLevel: "project",
+        sessionMode: "shared",
+      }),
+    },
+  });
+
+  await sleep(50);
+
+  const { facade, session: searchSession } = await createSearchFacadeSession({
+    projectId,
+    rootPath,
+    agentIds: ["main"],
+  });
+  const resolved = await facade.resolve({
+    session: searchSession,
+    payload: {
+      queryText: "sync status",
+      requesterLineage: createMpLineageNode({
+        projectId,
+        agentId: "main",
+        depth: 0,
+      }),
+      sourceLineages: [
+        createMpLineageNode({
+          projectId,
+          agentId: "main",
+          depth: 0,
+        }),
+      ],
+    },
+  });
+
+  assert.equal(resolved.bundle.primary.length, 1);
+  assert.equal(resolved.bundle.primary[0]?.sourceStoredSectionId, "stored-ingest");
 });

@@ -10,6 +10,10 @@ import {
 
 test("mp family capability package catalog exposes the frozen capability key set", () => {
   assert.deepEqual(MP_FAMILY_CAPABILITY_KEYS, [
+    "mp.ingest",
+    "mp.align",
+    "mp.resolve",
+    "mp.history.request",
     "mp.search",
     "mp.materialize",
     "mp.promote",
@@ -21,7 +25,7 @@ test("mp family capability package catalog exposes the frozen capability key set
   ]);
 
   const catalog = createRaxMpCapabilityPackageCatalog();
-  assert.equal(catalog.length, 8);
+  assert.equal(catalog.length, 12);
   assert.deepEqual(catalog.map((item) => item.manifest.capabilityKey), [...MP_FAMILY_CAPABILITY_KEYS]);
 });
 

@@ -12,6 +12,10 @@ import {
 } from "./capability-package.js";
 
 export const MP_FAMILY_CAPABILITY_KEYS = [
+  "mp.ingest",
+  "mp.align",
+  "mp.resolve",
+  "mp.history.request",
   "mp.search",
   "mp.materialize",
   "mp.promote",
@@ -25,6 +29,10 @@ export const MP_FAMILY_CAPABILITY_KEYS = [
 export type MpFamilyCapabilityKey = (typeof MP_FAMILY_CAPABILITY_KEYS)[number];
 
 export const RAX_MP_ACTIVATION_FACTORY_REFS: Readonly<Record<MpFamilyCapabilityKey, string>> = {
+  "mp.ingest": "factory:rax.mp:ingest",
+  "mp.align": "factory:rax.mp:align",
+  "mp.resolve": "factory:rax.mp:resolve",
+  "mp.history.request": "factory:rax.mp:history.request",
   "mp.search": "factory:rax.mp:search",
   "mp.materialize": "factory:rax.mp:materialize",
   "mp.promote": "factory:rax.mp:promote",
@@ -58,6 +66,118 @@ interface MpCapabilityDefaults {
 const MP_USAGE_DOC_REF = "docs/ability/29-cmp-context-management-pool-outline.md";
 
 const MP_CAPABILITY_DEFAULTS: Record<MpFamilyCapabilityKey, MpCapabilityDefaults> = {
+  "mp.ingest": {
+    description: "Run the MP five-agent ingest workflow and materialize aligned memory into LanceDB.",
+    tags: ["mp", "workflow", "ingest", "memory", "rax"],
+    allowedOperations: ["memory.capture", "memory.align", "memory.write"],
+    successCriteria: [
+      "produces aligned MP memory records through the five-agent workflow",
+      "records freshness, confidence, and alignment metadata",
+    ],
+    failureSignals: [
+      "storedSection or checkedSnapshotRef is missing",
+      "scope is missing",
+    ],
+    evidenceOutput: ["capability-result-envelope", "mp-five-agent-summary", "mp-memory-record"],
+    usageDocRef: MP_USAGE_DOC_REF,
+    exampleInput: {
+      projectId: "project.praxis",
+      rootPath: "/tmp/praxis/mp/project.praxis",
+      agentIds: ["main"],
+      storedSection: {
+        id: "stored-1",
+      },
+      checkedSnapshotRef: "snapshot-1",
+      branchRef: "mp/main",
+    },
+  },
+  "mp.align": {
+    description: "Run the MP checker and dbagent alignment workflow for one memory record.",
+    tags: ["mp", "workflow", "align", "memory", "rax"],
+    allowedOperations: ["memory.align", "memory.supersede"],
+    successCriteria: [
+      "updates freshness and alignment metadata",
+      "supersedes or stales older related memories when needed",
+    ],
+    failureSignals: [
+      "record is missing",
+      "alignedAt is missing",
+    ],
+    evidenceOutput: ["capability-result-envelope", "mp-five-agent-summary", "mp-memory-record"],
+    usageDocRef: MP_USAGE_DOC_REF,
+    exampleInput: {
+      projectId: "project.praxis",
+      rootPath: "/tmp/praxis/mp/project.praxis",
+      record: {
+        memoryId: "memory-1",
+      },
+      alignedAt: "2026-04-09T00:00:00.000Z",
+    },
+  },
+  "mp.resolve": {
+    description: "Run the MP dispatcher workflow to resolve a high-signal memory bundle.",
+    tags: ["mp", "workflow", "resolve", "memory", "rax"],
+    allowedOperations: ["memory.search", "memory.route_bundle"],
+    successCriteria: [
+      "returns a primary/supporting memory bundle",
+      "prefers fresh and aligned memories over stale ones",
+    ],
+    failureSignals: [
+      "queryText is missing",
+      "requesterLineage is missing",
+    ],
+    evidenceOutput: ["capability-result-envelope", "mp-workflow-bundle"],
+    usageDocRef: MP_USAGE_DOC_REF,
+    exampleInput: {
+      projectId: "project.praxis",
+      rootPath: "/tmp/praxis/mp/project.praxis",
+      queryText: "current decision history",
+      requesterLineage: {
+        projectId: "project.praxis",
+        agentId: "main",
+        depth: 0,
+      },
+      sourceLineages: [
+        {
+          projectId: "project.praxis",
+          agentId: "main",
+          depth: 0,
+        },
+      ],
+    },
+  },
+  "mp.history.request": {
+    description: "Run the MP passive history workflow and return a bundle for context replay.",
+    tags: ["mp", "workflow", "history", "memory", "rax"],
+    allowedOperations: ["memory.search", "memory.route_bundle"],
+    successCriteria: [
+      "returns a passive history bundle",
+      "tracks passive return count in MP summary",
+    ],
+    failureSignals: [
+      "queryText is missing",
+      "requesterLineage is missing",
+    ],
+    evidenceOutput: ["capability-result-envelope", "mp-workflow-bundle"],
+    usageDocRef: MP_USAGE_DOC_REF,
+    exampleInput: {
+      projectId: "project.praxis",
+      rootPath: "/tmp/praxis/mp/project.praxis",
+      queryText: "history replay",
+      requesterLineage: {
+        projectId: "project.praxis",
+        agentId: "main",
+        depth: 0,
+      },
+      sourceLineages: [
+        {
+          projectId: "project.praxis",
+          agentId: "main",
+          depth: 0,
+        },
+      ],
+    },
+  },
   "mp.search": {
     description: "Search MP memory scopes through the RAX MP runtime.",
     tags: ["mp", "memory", "search", "rax"],

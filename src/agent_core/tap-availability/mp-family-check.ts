@@ -5,6 +5,10 @@ import type {
 import type { TapFamilyCheckReport, TapFamilyCheckSeverity } from "./family-check-types.js";
 
 export const MP_FAMILY_CHECK_CAPABILITY_KEYS = [
+  "mp.ingest",
+  "mp.align",
+  "mp.resolve",
+  "mp.history.request",
   "mp.search",
   "mp.materialize",
   "mp.promote",
@@ -46,7 +50,7 @@ export function createMpFamilyCheckReport(
   const presentKeys = new Set(rows.map((row) => row.capabilityKey));
 
   if (!MP_FAMILY_CHECK_CAPABILITY_KEYS.every((key) => presentKeys.has(key))) {
-    blockers.push("mp family is missing one of mp.search / mp.materialize / mp.promote / mp.archive.");
+    blockers.push("mp family is missing one of the workflow or atomic MP capabilities.");
   }
 
   for (const row of rows) {

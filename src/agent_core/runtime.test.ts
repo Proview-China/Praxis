@@ -15,6 +15,7 @@ import { createRaxSearchGroundCapabilityDefinition } from "./integrations/rax-po
 import { createRaxMcpCapabilityAdapter } from "./integrations/rax-mcp-adapter.js";
 import { createRaxMpActivationFactory } from "./integrations/rax-mp-adapter.js";
 import { createRaxWebsearchActivationFactory } from "./integrations/rax-websearch-adapter.js";
+import { createMpMemoryRecord } from "./mp-types/index.js";
 import { createAgentCoreRuntime } from "./runtime.js";
 import type { CapabilityAdapter, CapabilityCallIntent, CapabilityPackage } from "./index.js";
 import { createAgentCapabilityProfile, createProvisionArtifactBundle, createProvisionRequest } from "./ta-pool-types/index.js";
@@ -116,6 +117,29 @@ function createFakeMpFacade() {
               scopeLevels: ["agent_isolated", "project", "global"] as const,
               preferSameAgent: true,
             },
+            workflow: {
+              enabled: true,
+              roleModes: {
+                icma: "llm_assisted" as const,
+                iterator: "llm_assisted" as const,
+                checker: "llm_assisted" as const,
+                dbagent: "llm_assisted" as const,
+                dispatcher: "llm_assisted" as const,
+              },
+              freshnessPolicy: {
+                preferFresh: true,
+                allowStaleFallback: true,
+              },
+              alignmentPolicy: {
+                autoSupersede: true,
+                markOlderAsStale: true,
+              },
+              retrievalPolicy: {
+                primaryBundleLimit: 3,
+                supportingBundleLimit: 5,
+                omitSupersededFromPrimary: true,
+              },
+            },
           },
           runtime: {} as never,
         };
@@ -132,6 +156,110 @@ function createFakeMpFacade() {
       async materialize() {
         return [];
       },
+      async readback() {
+        return {
+          status: "found" as const,
+          summary: {} as never,
+        };
+      },
+      async smoke() {
+        return {
+          status: "ready" as const,
+          checks: [],
+        };
+      },
+      async ingest() {
+        return {
+          status: "ingested" as const,
+          records: [],
+          supersededMemoryIds: [],
+          staleMemoryIds: [],
+          summary: {} as never,
+        };
+      },
+      async align() {
+        return {
+          status: "aligned" as const,
+          primary: createMpMemoryRecord({
+            memoryId: "memory-1",
+            projectId: "project.praxis",
+            agentId: "main",
+            scopeLevel: "project",
+            sessionMode: "shared",
+            visibilityState: "project_shared",
+            promotionState: "promoted_to_project",
+            lineagePath: ["main"],
+            payloadRefs: ["payload-1"],
+            tags: ["history"],
+            createdAt: "2026-04-08T00:00:00.000Z",
+            updatedAt: "2026-04-08T00:00:01.000Z",
+          }),
+          updatedRecords: [],
+          supersededMemoryIds: [],
+          staleMemoryIds: [],
+          summary: {} as never,
+        };
+      },
+      async resolve() {
+        return {
+          status: "resolved" as const,
+          bundle: {
+            scope: {
+              projectId: "project.praxis",
+              agentId: "main",
+              scopeLevel: "project",
+              sessionMode: "shared",
+              visibilityState: "project_shared",
+              promotionState: "promoted_to_project",
+            },
+            primary: [],
+            supporting: [],
+            diagnostics: {
+              omittedSupersededMemoryIds: [],
+              rerankComposition: {
+                fresh: 0,
+                aging: 0,
+                stale: 0,
+                superseded: 0,
+                aligned: 0,
+                unreviewed: 0,
+                drifted: 0,
+              },
+            },
+          },
+          summary: {} as never,
+        };
+      },
+      async requestHistory() {
+        return {
+          status: "history_returned" as const,
+          bundle: {
+            scope: {
+              projectId: "project.praxis",
+              agentId: "main",
+              scopeLevel: "project",
+              sessionMode: "shared",
+              visibilityState: "project_shared",
+              promotionState: "promoted_to_project",
+            },
+            primary: [],
+            supporting: [],
+            diagnostics: {
+              omittedSupersededMemoryIds: [],
+              rerankComposition: {
+                fresh: 0,
+                aging: 0,
+                stale: 0,
+                superseded: 0,
+                aligned: 0,
+                unreviewed: 0,
+                drifted: 0,
+              },
+            },
+          },
+          summary: {} as never,
+        };
+      },
       async materializeBatch() {
         return [];
       },
@@ -143,7 +271,7 @@ function createFakeMpFacade() {
             memoryId: "memory-1",
             tableName: "mp_project_project_praxis_memories",
             score: 1,
-            record: {
+            record: createMpMemoryRecord({
               memoryId: "memory-1",
               projectId: "project.praxis",
               agentId: "main",
@@ -156,7 +284,7 @@ function createFakeMpFacade() {
               tags: ["history"],
               createdAt: "2026-04-08T00:00:00.000Z",
               updatedAt: "2026-04-08T00:00:01.000Z",
-            },
+            }),
           }],
         };
       },
@@ -291,6 +419,10 @@ test("AgentCoreRuntime registers the MP capability family by default and can opt
   const runtime = createAgentCoreRuntime();
   const capabilityKeys = new Set(runtime.capabilityPool.listCapabilities().map((entry) => entry.capabilityKey));
 
+  assert.equal(capabilityKeys.has("mp.ingest"), true);
+  assert.equal(capabilityKeys.has("mp.align"), true);
+  assert.equal(capabilityKeys.has("mp.resolve"), true);
+  assert.equal(capabilityKeys.has("mp.history.request"), true);
   assert.equal(capabilityKeys.has("mp.search"), true);
   assert.equal(capabilityKeys.has("mp.materialize"), true);
   assert.equal(capabilityKeys.has("mp.promote"), true);

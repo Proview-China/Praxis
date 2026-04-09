@@ -42,6 +42,29 @@ const facade: Pick<RaxFacade, "mp"> = {
             scopeLevels: ["agent_isolated", "project", "global"],
             preferSameAgent: true,
           },
+          workflow: {
+            enabled: true,
+            roleModes: {
+              icma: "llm_assisted" as const,
+              iterator: "llm_assisted" as const,
+              checker: "llm_assisted" as const,
+              dbagent: "llm_assisted" as const,
+              dispatcher: "llm_assisted" as const,
+            },
+            freshnessPolicy: {
+              preferFresh: true,
+              allowStaleFallback: true,
+            },
+            alignmentPolicy: {
+              autoSupersede: true,
+              markOlderAsStale: true,
+            },
+            retrievalPolicy: {
+              primaryBundleLimit: 3,
+              supportingBundleLimit: 5,
+              omitSupersededFromPrimary: true,
+            },
+          },
         },
         runtime: {} as never,
       };
@@ -63,7 +86,7 @@ const facade: Pick<RaxFacade, "mp"> = {
           memoryId: "memory-1",
           tableName: "mp_project_project_praxis_memories",
           score: 1,
-          record: {
+          record: createMpMemoryRecord({
             memoryId: "memory-1",
             projectId: "project.praxis",
             agentId: "main",
@@ -76,8 +99,114 @@ const facade: Pick<RaxFacade, "mp"> = {
             tags: ["history"],
             createdAt: "2026-04-08T00:00:00.000Z",
             updatedAt: "2026-04-08T00:00:01.000Z",
-          },
+          }),
         }],
+      };
+    },
+    async readback() {
+      return {
+        status: "found" as const,
+        summary: {
+          projectId: "project.praxis",
+        },
+      } as never;
+    },
+    async smoke() {
+      return {
+        status: "ready" as const,
+        checks: [],
+      };
+    },
+    async ingest() {
+      return {
+        status: "ingested" as const,
+        records: [],
+        supersededMemoryIds: [],
+        staleMemoryIds: [],
+        summary: {} as never,
+      };
+    },
+    async align() {
+      return {
+        status: "aligned" as const,
+        primary: createMpMemoryRecord({
+          memoryId: "memory-1",
+          projectId: "project.praxis",
+          agentId: "main",
+          scopeLevel: "project",
+          sessionMode: "shared",
+          visibilityState: "project_shared",
+          promotionState: "promoted_to_project",
+          lineagePath: ["main"],
+          payloadRefs: ["payload-1"],
+          tags: ["history"],
+          createdAt: "2026-04-08T00:00:00.000Z",
+          updatedAt: "2026-04-08T00:00:01.000Z",
+        }),
+        updatedRecords: [],
+        supersededMemoryIds: [],
+        staleMemoryIds: [],
+        summary: {} as never,
+      };
+    },
+    async resolve() {
+      return {
+        status: "resolved" as const,
+        bundle: {
+          scope: {
+            projectId: "project.praxis",
+            agentId: "main",
+            scopeLevel: "project",
+            sessionMode: "shared",
+            visibilityState: "project_shared",
+            promotionState: "promoted_to_project",
+          },
+          primary: [],
+          supporting: [],
+          diagnostics: {
+            omittedSupersededMemoryIds: [],
+            rerankComposition: {
+              fresh: 0,
+              aging: 0,
+              stale: 0,
+              superseded: 0,
+              aligned: 0,
+              unreviewed: 0,
+              drifted: 0,
+            },
+          },
+        },
+        summary: {} as never,
+      };
+    },
+    async requestHistory() {
+      return {
+        status: "history_returned" as const,
+        bundle: {
+          scope: {
+            projectId: "project.praxis",
+            agentId: "main",
+            scopeLevel: "project",
+            sessionMode: "shared",
+            visibilityState: "project_shared",
+            promotionState: "promoted_to_project",
+          },
+          primary: [],
+          supporting: [],
+          diagnostics: {
+            omittedSupersededMemoryIds: [],
+            rerankComposition: {
+              fresh: 0,
+              aging: 0,
+              stale: 0,
+              superseded: 0,
+              aligned: 0,
+              unreviewed: 0,
+              drifted: 0,
+            },
+          },
+        },
+        summary: {} as never,
       };
     },
     async materialize() {
@@ -319,6 +448,10 @@ test("registerRaxMpCapabilityFamily registers package-backed adapters and activa
   });
 
   assert.deepEqual(registration.capabilityKeys, [
+    "mp.ingest",
+    "mp.align",
+    "mp.resolve",
+    "mp.history.request",
     "mp.search",
     "mp.materialize",
     "mp.promote",
@@ -328,7 +461,7 @@ test("registerRaxMpCapabilityFamily registers package-backed adapters and activa
     "mp.reindex",
     "mp.compact",
   ]);
-  assert.equal(registration.bindings.length, 8);
-  assert.equal(registration.activationFactoryRefs.length, 8);
+  assert.equal(registration.bindings.length, 12);
+  assert.equal(registration.activationFactoryRefs.length, 12);
   assert.deepEqual(capabilityKeys, registration.capabilityKeys);
 });

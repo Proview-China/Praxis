@@ -17,7 +17,7 @@ test("createTapFormalFamilyInventory freezes the five formal TAP families and ca
     "mcp",
     "mp",
   ]);
-  assert.equal(inventory.entries.length, 22);
+  assert.equal(inventory.entries.length, 26);
   assert.deepEqual(getTapFormalFamilyInventoryFamily("websearch")?.capabilityKeys, ["search.ground"]);
   assert.deepEqual(getTapFormalFamilyInventoryFamily("skill")?.capabilityKeys, [
     "skill.use",
@@ -31,6 +31,10 @@ test("createTapFormalFamilyInventory freezes the five formal TAP families and ca
     "mcp.native.execute",
   ]);
   assert.deepEqual(getTapFormalFamilyInventoryFamily("mp")?.capabilityKeys, [
+    "mp.ingest",
+    "mp.align",
+    "mp.resolve",
+    "mp.history.request",
     "mp.search",
     "mp.materialize",
     "mp.promote",

@@ -12,12 +12,16 @@ import type { ActivationAdapterFactory } from "../ta-pool-runtime/index.js";
 import { createCapabilityResultEnvelope } from "../capability-result/index.js";
 import type { RaxFacade } from "../../rax/facade.js";
 import type {
+  RaxMpAlignInput,
   RaxMpArchiveInput,
   RaxMpCompactInput,
+  RaxMpIngestInput,
   RaxMpMergeInput,
   RaxMpMaterializeInput,
   RaxMpPromoteInput,
   RaxMpReindexInput,
+  RaxMpRequestHistoryInput,
+  RaxMpResolveInput,
   RaxMpSearchInput,
   RaxMpSplitInput,
 } from "../../rax/index.js";
@@ -25,6 +29,10 @@ import { rax } from "../../rax/index.js";
 import type { MpLineageNode, MpMemoryRecord, MpScopeLevel } from "../index.js";
 
 export const RAX_MP_ADAPTER_CAPABILITY_KEYS = [
+  "mp.ingest",
+  "mp.align",
+  "mp.resolve",
+  "mp.history.request",
   "mp.search",
   "mp.materialize",
   "mp.promote",
@@ -66,6 +74,34 @@ export interface RegisterRaxMpCapabilityFamilyResult {
 }
 
 type PreparedMpExecutionState =
+  | {
+    action: "mp.ingest";
+    projectId: string;
+    rootPath: string;
+    agentIds: string[];
+    payload: RaxMpIngestInput["payload"];
+  }
+  | {
+    action: "mp.align";
+    projectId: string;
+    rootPath: string;
+    agentIds: string[];
+    payload: RaxMpAlignInput["payload"];
+  }
+  | {
+    action: "mp.resolve";
+    projectId: string;
+    rootPath: string;
+    agentIds: string[];
+    payload: RaxMpResolveInput["payload"];
+  }
+  | {
+    action: "mp.history.request";
+    projectId: string;
+    rootPath: string;
+    agentIds: string[];
+    payload: RaxMpRequestHistoryInput["payload"];
+  }
   | {
     action: "mp.search";
     projectId: string;
@@ -127,6 +163,12 @@ interface MpFacadeLike {
   mp: Pick<RaxFacade["mp"],
     "create"
     | "bootstrap"
+    | "readback"
+    | "smoke"
+    | "ingest"
+    | "align"
+    | "resolve"
+    | "requestHistory"
     | "search"
     | "materialize"
     | "promote"
@@ -253,6 +295,93 @@ function parseSearchInput(plan: CapabilityInvocationPlan): PreparedMpExecutionSt
       limit: typeof input.limit === "number" ? input.limit : undefined,
       metadata: asObject(input.metadata),
     },
+  };
+}
+
+function parseIngestInput(plan: CapabilityInvocationPlan): PreparedMpExecutionState {
+  const input = plan.input;
+  const common = parseCommonConfig(input);
+  const storedSection = asObject(input.storedSection);
+  const scope = asObject(input.scope);
+  const checkedSnapshotRef = asString(input.checkedSnapshotRef);
+  const branchRef = asString(input.branchRef);
+  if (!storedSection || !scope || !checkedSnapshotRef || !branchRef) {
+    throw new Error("mp.ingest invocation requires storedSection, checkedSnapshotRef, branchRef, and scope.");
+  }
+  return {
+    action: "mp.ingest",
+    projectId: common.projectId,
+    rootPath: common.rootPath,
+    agentIds: deriveAgentIds({
+      base: common.agentIds,
+      payload: { agentId: asString(storedSection.agentId) },
+    }),
+    payload: {
+      storedSection: storedSection as unknown as RaxMpIngestInput["payload"]["storedSection"],
+      checkedSnapshotRef,
+      branchRef,
+      scope: scope as unknown as RaxMpIngestInput["payload"]["scope"],
+      observedAt: asString(input.observedAt),
+      capturedAt: asString(input.capturedAt),
+      sourceRefs: asStringArray(input.sourceRefs),
+      memoryKind: asString(input.memoryKind) as RaxMpIngestInput["payload"]["memoryKind"],
+      confidence: asString(input.confidence) as RaxMpIngestInput["payload"]["confidence"],
+      metadata: asObject(input.metadata),
+    },
+  };
+}
+
+function parseAlignInput(plan: CapabilityInvocationPlan): PreparedMpExecutionState {
+  const input = plan.input;
+  const common = parseCommonConfig(input);
+  const record = asMemoryRecord(input.record);
+  const alignedAt = asString(input.alignedAt);
+  if (!alignedAt) {
+    throw new Error("mp.align invocation requires alignedAt.");
+  }
+  return {
+    action: "mp.align",
+    projectId: common.projectId,
+    rootPath: common.rootPath,
+    agentIds: deriveAgentIds({
+      base: common.agentIds,
+      memory: record,
+    }),
+    payload: {
+      record,
+      alignedAt,
+      tableName: asString(input.tableName),
+      queryText: asString(input.queryText),
+      metadata: asObject(input.metadata),
+    },
+  };
+}
+
+function parseResolveInput(plan: CapabilityInvocationPlan): PreparedMpExecutionState {
+  const search = parseSearchInput(plan);
+  if (search.action !== "mp.search") {
+    throw new Error("mp.resolve invocation could not be normalized from search input.");
+  }
+  return {
+    action: "mp.resolve",
+    projectId: search.projectId,
+    rootPath: search.rootPath,
+    agentIds: search.agentIds,
+    payload: search.payload,
+  };
+}
+
+function parseHistoryInput(plan: CapabilityInvocationPlan): PreparedMpExecutionState {
+  const search = parseSearchInput(plan);
+  if (search.action !== "mp.search") {
+    throw new Error("mp.history.request invocation could not be normalized from search input.");
+  }
+  return {
+    action: "mp.history.request",
+    projectId: search.projectId,
+    rootPath: search.rootPath,
+    agentIds: search.agentIds,
+    payload: search.payload,
   };
 }
 
@@ -456,6 +585,14 @@ function parseCompactInput(plan: CapabilityInvocationPlan): PreparedMpExecutionS
 
 function parsePreparedMpInput(plan: CapabilityInvocationPlan): PreparedMpExecutionState {
   switch (plan.capabilityKey as RaxMpAdapterCapabilityKey) {
+    case "mp.ingest":
+      return parseIngestInput(plan);
+    case "mp.align":
+      return parseAlignInput(plan);
+    case "mp.resolve":
+      return parseResolveInput(plan);
+    case "mp.history.request":
+      return parseHistoryInput(plan);
     case "mp.search":
       return parseSearchInput(plan);
     case "mp.materialize":
@@ -528,7 +665,7 @@ export class RaxMpCapabilityAdapter implements CapabilityAdapter {
           projectId: input.projectId,
           lance: {
             rootPath: input.rootPath,
-            liveExecutionPreferred: true,
+            liveExecutionPreferred: false,
           },
         },
       });
@@ -543,6 +680,30 @@ export class RaxMpCapabilityAdapter implements CapabilityAdapter {
 
       let output: unknown;
       switch (input.action) {
+        case "mp.ingest":
+          output = await this.#facade.mp.ingest({
+            session,
+            payload: input.payload,
+          });
+          break;
+        case "mp.align":
+          output = await this.#facade.mp.align({
+            session,
+            payload: input.payload,
+          });
+          break;
+        case "mp.resolve":
+          output = await this.#facade.mp.resolve({
+            session,
+            payload: input.payload,
+          });
+          break;
+        case "mp.history.request":
+          output = await this.#facade.mp.requestHistory({
+            session,
+            payload: input.payload,
+          });
+          break;
         case "mp.search":
           output = await this.#facade.mp.search({
             session,
