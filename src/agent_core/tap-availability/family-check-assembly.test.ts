@@ -10,9 +10,9 @@ test("createTapLiveAvailabilityReport builds a registered formal-family availabi
     },
   });
 
-  assert.equal(report.summary.totalCapabilities, 14);
-  assert.equal(report.summary.registeredCapabilities, 14);
-  assert.equal(report.summary.executeReadyCapabilities, 14);
+  assert.equal(report.summary.totalCapabilities, 39);
+  assert.equal(report.summary.registeredCapabilities, 39);
+  assert.equal(report.summary.executeReadyCapabilities, 39);
   assert.equal(report.rows.some((row) => row.familyKey === "foundation"), true);
   assert.equal(report.rows.some((row) => row.familyKey === "mcp"), true);
 });

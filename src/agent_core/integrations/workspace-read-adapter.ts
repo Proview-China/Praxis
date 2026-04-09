@@ -13,6 +13,7 @@ import {
   createCodeReadManyCapabilityPackage,
   createCodeSymbolSearchCapabilityPackage,
   createCodeLspCapabilityPackage,
+  createSpreadsheetReadCapabilityPackage,
   createReadPdfCapabilityPackage,
   createReadNotebookCapabilityPackage,
   createViewImageCapabilityPackage,
@@ -85,6 +86,7 @@ interface PreparedWorkspaceReadInput {
   pattern?: string;
   query?: string;
   pages?: string;
+  sheet?: string;
   cellId?: string;
   detail?: string;
   include?: string[];
@@ -244,6 +246,8 @@ function parsePreparedWorkspaceReadInput(
               ? "workspace_symbol"
               : capabilityKey === "code.lsp"
                 ? "document_symbol"
+                : capabilityKey === "spreadsheet.read"
+                  ? "read_spreadsheet"
                 : capabilityKey === "read_pdf"
                   ? "read_pdf"
                   : capabilityKey === "read_notebook"
@@ -266,6 +270,7 @@ function parsePreparedWorkspaceReadInput(
     ?? asString(input.name)
     ?? pattern;
   const pages = asString(input.pages);
+  const sheet = asString(input.sheet) ?? asString(input.sheetName) ?? asString(input.sheet_name);
   const cellId = asString(input.cellId) ?? asString(input.cell_id);
   const detail = asString(input.detail);
   const include = asStringArray(input.include);
@@ -296,6 +301,7 @@ function parsePreparedWorkspaceReadInput(
     pattern,
     query,
     pages,
+    sheet,
     cellId,
     detail,
     include,
@@ -676,6 +682,70 @@ function parsePageRange(
   throw new Error(`Invalid PDF page range: ${value}`);
 }
 
+function parseDelimitedRow(line: string, delimiter: string): string[] {
+  const cells: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index]!;
+    if (char === "\"") {
+      const next = line[index + 1];
+      if (inQuotes && next === "\"") {
+        current += "\"";
+        index += 1;
+        continue;
+      }
+      inQuotes = !inQuotes;
+      continue;
+    }
+    if (char === delimiter && !inQuotes) {
+      cells.push(current);
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+
+  cells.push(current);
+  return cells;
+}
+
+function summarizeDelimitedSpreadsheet(params: {
+  text: string;
+  relativePath: string;
+  format: "csv" | "tsv";
+  maxRows: number;
+  maxBytes: number;
+}) {
+  const lines = params.text.split(/\r?\n/u).filter((line) => line.length > 0);
+  const delimiter = params.format === "tsv" ? "\t" : ",";
+  const parsedRows = lines.map((line) => parseDelimitedRow(line, delimiter));
+  const header = parsedRows[0] ?? [];
+  const dataRows = parsedRows.slice(1);
+  const sampleRows = dataRows.slice(0, params.maxRows);
+  const payload = {
+    capabilityKey: "spreadsheet.read",
+    operation: "read_spreadsheet",
+    path: params.relativePath,
+    format: params.format,
+    sheetCount: 1,
+    sheets: [
+      {
+        name: path.basename(params.relativePath),
+        rowCount: dataRows.length,
+        columnCount: Math.max(0, ...parsedRows.map((row) => row.length)),
+        headers: header,
+        rows: sampleRows,
+      },
+    ],
+    truncated:
+      dataRows.length > params.maxRows
+      || Buffer.byteLength(params.text, "utf8") > params.maxBytes,
+  };
+  return payload;
+}
+
 async function runWorkspaceCommand(params: {
   command: string;
   args: string[];
@@ -737,6 +807,137 @@ async function readPdfSummary(params: {
     content,
     truncated: Buffer.byteLength(text, "utf8") > params.maxBytes,
     extractedBytes: Buffer.byteLength(text, "utf8"),
+  };
+}
+
+async function readSpreadsheetSummary(params: {
+  absolutePath: string;
+  relativePath: string;
+  maxBytes: number;
+  maxEntries: number;
+  sheet?: string;
+}) {
+  const extension = path.extname(params.relativePath).toLowerCase();
+  if (extension === ".csv" || extension === ".tsv") {
+    const raw = await readFile(params.absolutePath, "utf8");
+    return summarizeDelimitedSpreadsheet({
+      text: raw,
+      relativePath: params.relativePath,
+      format: extension === ".tsv" ? "tsv" : "csv",
+      maxRows: params.maxEntries,
+      maxBytes: params.maxBytes,
+    });
+  }
+
+  if (extension !== ".xlsx") {
+    throw new Error(`Unsupported spreadsheet format for spreadsheet.read: ${extension || "unknown"}.`);
+  }
+
+  const pythonScript = [
+    "import json, sys, zipfile, xml.etree.ElementTree as ET",
+    "path = sys.argv[1]",
+    "max_rows = int(sys.argv[2])",
+    "requested_sheet = sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] else None",
+    "NS_MAIN = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}'",
+    "NS_REL = '{http://schemas.openxmlformats.org/officeDocument/2006/relationships}'",
+    "PKG_REL = '{http://schemas.openxmlformats.org/package/2006/relationships}'",
+    "def cell_index(ref):",
+    "    letters = ''.join(ch for ch in ref if ch.isalpha())",
+    "    value = 0",
+    "    for ch in letters:",
+    "        value = value * 26 + (ord(ch.upper()) - 64)",
+    "    return max(0, value - 1)",
+    "with zipfile.ZipFile(path) as zf:",
+    "    shared = []",
+    "    if 'xl/sharedStrings.xml' in zf.namelist():",
+    "        root = ET.fromstring(zf.read('xl/sharedStrings.xml'))",
+    "        for si in root.findall(f'{NS_MAIN}si'):",
+    "            texts = []",
+    "            for node in si.iter():",
+    "                if node.tag == f'{NS_MAIN}t' and node.text:",
+    "                    texts.append(node.text)",
+    "            shared.append(''.join(texts))",
+    "    workbook = ET.fromstring(zf.read('xl/workbook.xml'))",
+    "    rels = ET.fromstring(zf.read('xl/_rels/workbook.xml.rels'))",
+    "    rel_map = {rel.attrib['Id']: rel.attrib['Target'] for rel in rels.findall(f'{PKG_REL}Relationship')}",
+    "    sheets = []",
+    "    for sheet in workbook.findall(f'{NS_MAIN}sheets/{NS_MAIN}sheet'):",
+    "        name = sheet.attrib.get('name', 'Sheet')",
+    "        rid = sheet.attrib.get(f'{NS_REL}id')",
+    "        target = rel_map.get(rid, '')",
+    "        normalized = target if target.startswith('xl/') else f'xl/{target}'",
+    "        sheets.append((name, normalized))",
+    "    if requested_sheet:",
+    "        sheets = [entry for entry in sheets if entry[0] == requested_sheet]",
+    "    out = []",
+    "    for name, target in sheets:",
+    "        root = ET.fromstring(zf.read(target))",
+    "        rows = []",
+        "        max_cols = 0",
+    "        for row in root.findall(f'{NS_MAIN}sheetData/{NS_MAIN}row'):",
+    "            values = []",
+    "            for cell in row.findall(f'{NS_MAIN}c'):",
+    "                ref = cell.attrib.get('r', 'A1')",
+    "                index = cell_index(ref)",
+    "                while len(values) <= index:",
+    "                    values.append('')",
+    "                cell_type = cell.attrib.get('t')",
+    "                value_node = cell.find(f'{NS_MAIN}v')",
+    "                inline_node = cell.find(f'{NS_MAIN}is/{NS_MAIN}t')",
+    "                formula_node = cell.find(f'{NS_MAIN}f')",
+    "                value = ''",
+    "                if cell_type == 'inlineStr' and inline_node is not None and inline_node.text is not None:",
+    "                    value = inline_node.text",
+    "                elif cell_type == 's' and value_node is not None and value_node.text is not None:",
+    "                    idx = int(value_node.text)",
+    "                    value = shared[idx] if 0 <= idx < len(shared) else ''",
+    "                elif formula_node is not None and formula_node.text is not None:",
+    "                    value = '=' + formula_node.text",
+    "                elif value_node is not None and value_node.text is not None:",
+    "                    value = value_node.text",
+    "                values[index] = value",
+    "            max_cols = max(max_cols, len(values))",
+    "            rows.append(values)",
+    "        header = rows[0] if rows else []",
+    "        data_rows = rows[1:] if len(rows) > 1 else []",
+    "        out.append({",
+    "            'name': name,",
+    "            'rowCount': len(data_rows),",
+    "            'columnCount': max_cols,",
+    "            'headers': header,",
+    "            'rows': data_rows[:max_rows],",
+    "            'truncated': len(data_rows) > max_rows,",
+    "        })",
+    "    print(json.dumps({'sheetCount': len(out), 'sheets': out}, ensure_ascii=False))",
+  ].join("\n");
+
+  const extraction = await runWorkspaceCommand({
+    command: "python3",
+    args: ["-c", pythonScript, params.absolutePath, String(params.maxEntries), params.sheet ?? ""],
+  });
+  const parsed = JSON.parse(extraction.stdout) as {
+    sheetCount?: number;
+    sheets?: Array<{
+      name?: string;
+      rowCount?: number;
+      columnCount?: number;
+      headers?: string[];
+      rows?: string[][];
+      truncated?: boolean;
+    }>;
+  };
+  const serialized = JSON.stringify(parsed);
+
+  return {
+    capabilityKey: "spreadsheet.read",
+    operation: "read_spreadsheet",
+    path: params.relativePath,
+    format: "xlsx",
+    sheetCount: parsed.sheetCount ?? (Array.isArray(parsed.sheets) ? parsed.sheets.length : 0),
+    sheets: Array.isArray(parsed.sheets) ? parsed.sheets : [],
+    sheet: params.sheet,
+    truncated: Buffer.byteLength(serialized, "utf8") > params.maxBytes
+      || (Array.isArray(parsed.sheets) && parsed.sheets.some((entry) => entry.truncated)),
   };
 }
 
@@ -1177,6 +1378,29 @@ export class WorkspaceReadCapabilityAdapter implements CapabilityAdapter {
               documents,
               count: documents.length,
             },
+            metadata: this.#createResultMetadata(),
+          });
+        }
+        case "read_spreadsheet": {
+          if (!target) {
+            return createFailureEnvelope({
+              prepared,
+              status: "failed",
+              code: "workspace_read_missing_path",
+              message: `${this.#capabilityKey} requires a non-empty file path.`,
+            });
+          }
+          const summary = await readSpreadsheetSummary({
+            absolutePath: target.absolutePath,
+            relativePath: target.relativePath,
+            maxBytes: parsed.maxBytes,
+            maxEntries: parsed.maxEntries,
+            sheet: parsed.sheet,
+          });
+          return createCapabilityResultEnvelope({
+            executionId: prepared.preparedId,
+            status: summary.truncated ? "partial" : "success",
+            output: summary,
             metadata: this.#createResultMetadata(),
           });
         }
@@ -1635,12 +1859,14 @@ export function registerFirstClassToolingBaselineCapabilities(
             : capabilityKey === "code.read_many"
             ? createCodeReadManyCapabilityPackage()
             : capabilityKey === "code.symbol_search"
-              ? createCodeSymbolSearchCapabilityPackage()
-              : capabilityKey === "code.lsp"
-                ? createCodeLspCapabilityPackage()
-                : capabilityKey === "read_pdf"
-                  ? createReadPdfCapabilityPackage()
-                  : capabilityKey === "read_notebook"
+                ? createCodeSymbolSearchCapabilityPackage()
+                : capabilityKey === "code.lsp"
+                  ? createCodeLspCapabilityPackage()
+                  : capabilityKey === "spreadsheet.read"
+                    ? createSpreadsheetReadCapabilityPackage()
+                  : capabilityKey === "read_pdf"
+                    ? createReadPdfCapabilityPackage()
+                    : capabilityKey === "read_notebook"
                     ? createReadNotebookCapabilityPackage()
                     : capabilityKey === "view_image"
                       ? createViewImageCapabilityPackage()

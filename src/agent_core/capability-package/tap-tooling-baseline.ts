@@ -16,6 +16,7 @@ export const TAP_TOOLING_BASELINE_CAPABILITY_KEYS = [
   "git.commit",
   "git.push",
   "code.diff",
+  "browser.playwright",
   "skill.doc.generate",
   "write_todos",
 ] as const;
@@ -1416,6 +1417,151 @@ export function createTapToolingCapabilityPackage(
           rollbackStrategy: "restore prior binding or disable capability key",
           deprecateStrategy: "freeze new code diff dispatch before removal",
           cleanupStrategy: "drain in-flight code diff calls before replacement",
+          generationPolicy: "create_next_generation",
+        },
+        activationSpec,
+        replayPolicy: "re_review_then_dispatch",
+        metadata: {
+          packageKind: "tap-tooling-baseline",
+        },
+      });
+    }
+    case "browser.playwright": {
+      const activationSpec = {
+        targetPool: "ta-capability-pool",
+        activationMode: "activate_after_verify" as const,
+        registerOrReplace: "register_or_replace" as const,
+        generationStrategy: "create_next_generation" as const,
+        drainStrategy: "graceful" as const,
+        manifestPayload: {
+          capabilityKey,
+          capabilityId: "capability:browser.playwright:1",
+          version: "1.0.0",
+          generation: 1,
+          kind: "tool",
+          description: "Local browser automation capability that adapts Codex, Claude Code, and Gemini CLI browser semantics onto a shared Playwright MCP substrate.",
+          tags: ["tap", "bootstrap", "browser", "playwright"],
+          routeHints: [
+            { key: "runtime", value: "local-tooling" },
+            { key: "toolKind", value: "browser-automation" },
+          ],
+          metadata: {
+            baselineFamily: "tap-bootstrap-tma",
+            formalPackage: true,
+          },
+        },
+        bindingPayload: {
+          adapterId: "adapter.browser.playwright",
+          runtimeKind: "local-tooling",
+          browserRuntime: "playwright-mcp-shared",
+          workspaceScope: "workspace-only",
+        },
+        adapterFactoryRef: "factory:tap-tooling:browser.playwright",
+      };
+
+      return createCapabilityPackage({
+        manifest: {
+          capabilityKey,
+          capabilityKind: "tool",
+          tier: "B1",
+          version: "1.0.0",
+          generation: 1,
+          description: "Local browser automation capability that adapts Codex, Claude Code, and Gemini CLI browser semantics onto a shared Playwright MCP substrate.",
+          dependencies: [],
+          tags: ["tap", "bootstrap", "browser", "playwright"],
+          routeHints: [
+            { key: "runtime", value: "local-tooling" },
+            { key: "toolKind", value: "browser-automation" },
+          ],
+          supportedPlatforms: ["linux", "macos", "windows"],
+          metadata: {
+            baselineFamily: "tap-bootstrap-tma",
+            formalPackage: true,
+          },
+        },
+        adapter: {
+          adapterId: "adapter.browser.playwright",
+          runtimeKind: "local-tooling",
+          supports: ["connect", "list_tools", "browser_call", "disconnect"],
+          prepare: { ref: "adapter.prepare:browser.playwright" },
+          execute: { ref: "adapter.execute:browser.playwright" },
+          cancel: { ref: "adapter.cancel:browser.playwright" },
+          resultMapping: {
+            successStatuses: ["success", "partial"],
+            artifactKinds: ["verification", "usage"],
+          },
+        },
+        policy: {
+          defaultBaseline: {
+            grantedTier: "B1",
+            mode: "balanced",
+            scope: createWorkspaceScope(["read", "exec", "browser.playwright"]),
+          },
+          recommendedMode: "standard",
+          riskLevel: "risky",
+          defaultScope: createWorkspaceScope(["read", "exec", "browser.playwright"]),
+          reviewRequirements: ["allow"],
+          safetyFlags: [
+            "browser_automation_side_effects",
+            "allowed_domains_optional_guard",
+            "file_upload_blocked_by_default",
+          ],
+          humanGateRequirements: ["browser_navigation_or_form_actions_require_review"],
+        },
+        builder: {
+          builderId: "builder.browser.playwright",
+          buildStrategy: "builtin-bootstrap-tooling",
+          requiresNetwork: true,
+          requiresInstall: false,
+          requiresSystemWrite: false,
+          allowedWorkdirScope: ["workspace/**"],
+          activationSpecRef: createCapabilityPackageActivationSpecRef(activationSpec),
+          replayCapability: "re_review_then_dispatch",
+        },
+        verification: {
+          smokeEntry: "smoke:browser.playwright",
+          healthEntry: "health:browser.playwright",
+          successCriteria: [
+            "browser session can connect and list browser_* tools",
+            "navigate and snapshot flows stay bounded and structured",
+          ],
+          failureSignals: [
+            "playwright MCP launch fails",
+            "blocked domain navigation requested",
+            "file upload attempted without explicit opt-in",
+          ],
+          evidenceOutput: ["browser-tool-result", "browser-tool-text", "browser-tool-images"],
+        },
+        usage: {
+          usageDocRef: "docs/ability/25-tap-capability-package-template.md",
+          bestPractices: [
+            "Prefer bounded actions like navigate, snapshot, screenshot, click, type, and wait_for over arbitrary raw tool calls.",
+            "Pass allowedDomains when the task should stay inside a known site or product surface.",
+          ],
+          knownLimits: [
+            "Uses a shared local Playwright MCP substrate even when the selected behavior style follows Codex, Claude Code, or Gemini CLI semantics.",
+            "File uploads stay blocked unless allowFileUploads=true is passed explicitly.",
+          ],
+          exampleInvocations: [
+            {
+              exampleId: "browser.playwright.navigate-example",
+              capabilityKey,
+              operation: "navigate",
+              input: {
+                action: "navigate",
+                url: "https://example.com",
+                headless: true,
+                allowedDomains: ["example.com"],
+              },
+            },
+          ],
+        },
+        lifecycle: {
+          installStrategy: "built-in bootstrap registration",
+          replaceStrategy: "register_or_replace",
+          rollbackStrategy: "restore prior binding or disconnect browser session",
+          deprecateStrategy: "freeze new browser automation dispatch before removal",
+          cleanupStrategy: "drain in-flight browser sessions before replacement",
           generationPolicy: "create_next_generation",
         },
         activationSpec,

@@ -16,6 +16,7 @@ export const FIRST_CLASS_TOOLING_BASELINE_CAPABILITY_KEYS = [
   "code.read_many",
   "code.symbol_search",
   "code.lsp",
+  "spreadsheet.read",
   "read_pdf",
   "read_notebook",
   "view_image",
@@ -37,6 +38,7 @@ export const FIRST_CLASS_TOOLING_ALLOWED_OPERATIONS = [
   "definition",
   "references",
   "hover",
+  "read_spreadsheet",
   "read_pdf",
   "read_notebook",
   "view_image",
@@ -319,6 +321,46 @@ const FIRST_CLASS_TOOLING_BASELINE_DESCRIPTORS: Record<
       "Read-only capability; it only returns bounded semantic metadata.",
       "Current implementation is strongest on TypeScript and JavaScript source files.",
       "Cross-language project-wide LSP coverage may still require future provider-specific backends.",
+    ],
+    workerConsumers: ["reviewer", "bootstrap_tma", "extended_tma"],
+  },
+  "spreadsheet.read": {
+    capabilityKey: "spreadsheet.read",
+    scopeKind: "workspace-docs",
+    scopeSummary:
+      "Repo-local spreadsheet and tabular data files that core can inspect safely without mutating formulas or workbook state.",
+    description:
+      "Read repo-local CSV, TSV, and XLSX files as bounded structured tables instead of raw binary blobs.",
+    reviewerSummary:
+      "Core or reviewer can inspect spreadsheet structure and sample rows, but cannot modify workbook contents through this capability.",
+    pathPatterns: [
+      "data",
+      "data/**",
+      "docs",
+      "docs/**",
+      "output",
+      "output/**",
+      "*.csv",
+      "**/*.csv",
+      "*.tsv",
+      "**/*.tsv",
+      "*.xlsx",
+      "**/*.xlsx",
+    ],
+    allowedOperations: ["read_spreadsheet"],
+    usageDocRef: "docs/ability/25-tap-capability-package-template.md",
+    examplePath: "data/report.xlsx",
+    exampleOperation: "read_spreadsheet",
+    routeHints: [
+      { key: "scope", value: "workspace-docs" },
+      { key: "baseline", value: "reviewer-tma" },
+      { key: "toolKind", value: "spreadsheet-read" },
+    ],
+    tags: ["tap", "baseline", "read", "spreadsheet", "data", "reviewer", "tma"],
+    knownLimits: [
+      "Reads table structure and bounded sample rows; it does not preserve workbook formatting.",
+      "Formula cells return cached values or textual formulas rather than recalculating the workbook.",
+      "Large sheets are truncated by row count and byte budget for safe context transfer.",
     ],
     workerConsumers: ["reviewer", "bootstrap_tma", "extended_tma"],
   },
@@ -704,6 +746,10 @@ export function createCodeSymbolSearchCapabilityPackage(): CapabilityPackage {
 
 export function createCodeLspCapabilityPackage(): CapabilityPackage {
   return createFirstClassToolingCapabilityPackage("code.lsp");
+}
+
+export function createSpreadsheetReadCapabilityPackage(): CapabilityPackage {
+  return createFirstClassToolingCapabilityPackage("spreadsheet.read");
 }
 
 export function createReadPdfCapabilityPackage(): CapabilityPackage {

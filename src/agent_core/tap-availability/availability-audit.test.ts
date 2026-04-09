@@ -10,13 +10,13 @@ test("createTapCapabilityAvailabilityReport shows declared gaps when nothing is 
   });
 
   assert.equal(report.generatedAt, "2026-03-25T00:00:00.000Z");
-  assert.equal(report.summary.totalCapabilities, 14);
+  assert.equal(report.summary.totalCapabilities, 39);
   assert.equal(report.summary.registeredCapabilities, 0);
   assert.equal(report.summary.executeReadyCapabilities, 0);
   assert.equal(report.summary.healthyCapabilities, 0);
   assert.equal(report.summary.readyCapabilities, 0);
   assert.equal(report.summary.reviewRequiredCapabilities, 0);
-  assert.equal(report.summary.blockedCapabilities, 14);
+  assert.equal(report.summary.blockedCapabilities, 39);
 
   const searchGround = report.rows.find((row) => row.capabilityKey === "search.ground");
   assert.ok(searchGround);
@@ -75,12 +75,12 @@ test("createTapCapabilityAvailabilityReport marks capabilities ready when regist
   const websearchFamily = report.families.find((family) => family.familyKey === "websearch");
   assert.deepEqual(websearchFamily, {
     familyKey: "websearch",
-    total: 1,
+    total: 3,
     registered: 1,
     executeReady: 1,
     healthy: 1,
     ready: 1,
     reviewRequired: 0,
-    blocked: 0,
+    blocked: 2,
   });
 });

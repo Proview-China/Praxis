@@ -48,6 +48,58 @@ function createPlan(overrides: Partial<CapabilityInvocationPlan>): CapabilityInv
   };
 }
 
+function createFakeBrowserPlaywrightRuntime() {
+  const calls: Array<{ toolName: string; arguments?: Record<string, unknown> }> = [];
+  const uses: unknown[] = [];
+
+  return {
+    calls,
+    uses,
+    runtime: {
+      async use(input: unknown) {
+        uses.push(input);
+        return {
+          connectionId: "browser-playwright-test",
+          async tools() {
+            return {
+              tools: [
+                { name: "browser_navigate", description: "Navigate to a page" },
+                { name: "browser_snapshot", description: "Take a textual snapshot" },
+                { name: "browser_take_screenshot", description: "Capture screenshot" },
+              ],
+            };
+          },
+          async call(toolInput: { toolName: string; arguments?: Record<string, unknown> }) {
+            calls.push(toolInput);
+            if (toolInput.toolName === "browser_take_screenshot") {
+              return {
+                content: [
+                  {
+                    type: "image",
+                    mimeType: "image/png",
+                    data: "cG5n",
+                  },
+                ],
+              };
+            }
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `tool:${toolInput.toolName}`,
+                },
+              ],
+            };
+          },
+          async disconnect() {
+            return;
+          },
+        };
+      },
+    },
+  };
+}
+
 test("repo.write adapter writes inside the configured workspace root", async () => {
   const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "praxis-tap-tooling-"));
   const adapter = createTapToolingCapabilityAdapter("repo.write", {
@@ -671,6 +723,117 @@ test("code.diff adapter returns unified diff for before/after text and write_tod
   assert.equal((todos.output as { count?: number }).count, 2);
 });
 
+test("browser.playwright adapter normalizes navigate and screenshot actions through a shared Playwright runtime", async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "praxis-tap-tooling-browser-"));
+  const fake = createFakeBrowserPlaywrightRuntime();
+  const adapter = createTapToolingCapabilityAdapter("browser.playwright", {
+    workspaceRoot,
+    browserPlaywrightRuntime: fake.runtime,
+  });
+
+  const navigated = await adapter.execute(await adapter.prepare(
+    createPlan({
+      capabilityKey: "browser.playwright",
+      operation: "navigate",
+      input: {
+        action: "navigate",
+        url: "https://example.com",
+        allowedDomains: ["example.com"],
+        provider: "openai",
+        model: "gpt-5",
+      },
+      metadata: {
+        grantedScope: {
+          pathPatterns: ["workspace/**"],
+          allowedOperations: ["read", "exec", "browser.playwright"],
+        },
+      },
+    }),
+    createLease("binding.browser.playwright"),
+  ));
+  assert.equal(navigated.status, "success");
+  assert.equal((navigated.output as { toolName?: string }).toolName, "browser_navigate");
+  assert.equal((navigated.output as { selectedBackend?: string }).selectedBackend, "openai-codex-browser-mcp-style");
+  assert.equal(fake.calls[0]?.toolName, "browser_navigate");
+
+  const screenshot = await adapter.execute(await adapter.prepare(
+    createPlan({
+      planId: "plan-browser-playwright-screenshot",
+      capabilityKey: "browser.playwright",
+      operation: "screenshot",
+      input: {
+        action: "screenshot",
+        fullPage: true,
+      },
+      metadata: {
+        grantedScope: {
+          pathPatterns: ["workspace/**"],
+          allowedOperations: ["read", "exec", "browser.playwright"],
+        },
+      },
+    }),
+    createLease("binding.browser.playwright.screenshot"),
+  ));
+  assert.equal(screenshot.status, "success");
+  assert.match(String((screenshot.output as { imageUrls?: string[] }).imageUrls?.[0]), /^data:image\/png;base64,/);
+  assert.equal(fake.calls[1]?.toolName, "browser_take_screenshot");
+});
+
+test("browser.playwright adapter blocks disallowed domains and file uploads by default", async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "praxis-tap-tooling-browser-guard-"));
+  const fake = createFakeBrowserPlaywrightRuntime();
+  const adapter = createTapToolingCapabilityAdapter("browser.playwright", {
+    workspaceRoot,
+    browserPlaywrightRuntime: fake.runtime,
+  });
+
+  await assert.rejects(
+    () => adapter.prepare(
+      createPlan({
+        capabilityKey: "browser.playwright",
+        operation: "navigate",
+        input: {
+          action: "navigate",
+          url: "https://example.com",
+          allowedDomains: ["praxis.dev"],
+        },
+        metadata: {
+          grantedScope: {
+            pathPatterns: ["workspace/**"],
+            allowedOperations: ["read", "exec", "browser.playwright"],
+          },
+        },
+      }),
+      createLease("binding.browser.playwright.blocked-domain"),
+    ),
+    /blocked navigation/i,
+  );
+
+  await assert.rejects(
+    () => adapter.prepare(
+      createPlan({
+        capabilityKey: "browser.playwright",
+        operation: "raw",
+        input: {
+          action: "raw",
+          toolName: "browser_file_upload",
+          arguments: {
+            paths: ["/tmp/file.txt"],
+          },
+        },
+        metadata: {
+          grantedScope: {
+            pathPatterns: ["workspace/**"],
+            allowedOperations: ["read", "exec", "browser.playwright"],
+          },
+        },
+      }),
+      createLease("binding.browser.playwright.blocked-upload"),
+    ),
+    /blocks file uploads/i,
+  );
+});
+
 test("skill.doc.generate adapter writes repo-local markdown content", async () => {
   const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "praxis-tap-tooling-"));
   const adapter = createTapToolingCapabilityAdapter("skill.doc.generate", {
@@ -859,13 +1022,14 @@ test("registerTapToolingBaseline makes B-group capabilities available to bootstr
     "git.commit",
     "git.push",
     "code.diff",
+    "browser.playwright",
     "skill.doc.generate",
     "write_todos",
   ]);
-  assert.equal(result.packages.length, 13);
-  assert.equal(result.manifests.length, 13);
-  assert.equal(result.bindings.length, 13);
-  assert.equal(result.activationFactoryRefs.length, 13);
+  assert.equal(result.packages.length, 14);
+  assert.equal(result.manifests.length, 14);
+  assert.equal(result.bindings.length, 14);
+  assert.equal(result.activationFactoryRefs.length, 14);
 
   const reviewer = createTapReviewerProfile();
   assert.equal(reviewer.baselineCapabilities?.includes("repo.write"), false);

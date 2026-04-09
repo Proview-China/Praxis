@@ -2,6 +2,12 @@ import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/pro
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { rax } from "../../rax/index.js";
+import type {
+  McpCallResult,
+  ProviderId,
+  SdkLayer,
+} from "../../rax/index.js";
 
 import type {
   CapabilityAdapter,
@@ -179,6 +185,52 @@ export interface CodeDiffInput {
   maxOutputChars?: number;
 }
 
+export interface BrowserPlaywrightInput {
+  action?: string;
+  toolName?: string;
+  name?: string;
+  arguments?: Record<string, unknown>;
+  args?: Record<string, unknown>;
+  route?: Record<string, unknown>;
+  provider?: string;
+  model?: string;
+  layer?: string;
+  url?: string;
+  allowedDomains?: string[];
+  allowed_domains?: string[];
+  headless?: boolean;
+  browser?: string;
+  isolated?: boolean;
+  allowFileUploads?: boolean;
+  allow_file_uploads?: boolean;
+  maxOutputChars?: number;
+  ref?: string;
+  element?: string;
+  button?: string;
+  doubleClick?: boolean;
+  double_click?: boolean;
+  modifiers?: string[];
+  text?: string;
+  slowly?: boolean;
+  submit?: boolean;
+  fullPage?: boolean;
+  full_page?: boolean;
+  filename?: string;
+  type?: string;
+  time?: number;
+  textGone?: string;
+  text_gone?: string;
+  level?: string;
+  all?: boolean;
+  filter?: string;
+  requestBody?: boolean;
+  requestHeaders?: boolean;
+  static?: boolean;
+  index?: number;
+  tabAction?: string;
+  tab_action?: string;
+}
+
 export interface WriteTodosInput {
   todos?: Array<{
     description?: string;
@@ -218,8 +270,58 @@ export interface TapToolingAdapterOptions {
   commandRunner?: (
     input: NormalizedCommandInput,
   ) => Promise<CommandExecutionResult>;
+  browserPlaywrightRuntime?: BrowserPlaywrightRuntimeLike;
   defaultShellTimeoutMs?: number;
   defaultTestTimeoutMs?: number;
+}
+
+type BrowserPlaywrightBackendKind =
+  | "openai-codex-browser-mcp-style"
+  | "anthropic-claude-code-browser-mcp-style"
+  | "gemini-cli-browser-agent-style"
+  | "playwright-shared-runtime";
+
+interface BrowserPlaywrightRouteContext {
+  provider?: ProviderId;
+  model?: string;
+  layer?: SdkLayer;
+}
+
+interface BrowserPlaywrightConnectInput {
+  connectionId?: string;
+  headless: boolean;
+  browser: "chrome" | "chromium" | "firefox" | "webkit";
+  isolated: boolean;
+}
+
+interface BrowserPlaywrightToolSummary {
+  name: string;
+  description?: string;
+  inputSchema?: Record<string, unknown>;
+  annotations?: Record<string, unknown>;
+}
+
+interface BrowserPlaywrightToolCallResult {
+  content?: unknown[];
+  structuredContent?: Record<string, unknown>;
+  _meta?: Record<string, unknown>;
+  isError?: boolean;
+  errorMessage?: string;
+  raw?: unknown;
+}
+
+interface BrowserPlaywrightSessionLike {
+  connectionId: string;
+  tools(): Promise<{ tools: BrowserPlaywrightToolSummary[] }>;
+  call(input: {
+    toolName: string;
+    arguments?: Record<string, unknown>;
+  }): Promise<BrowserPlaywrightToolCallResult>;
+  disconnect(): Promise<void>;
+}
+
+interface BrowserPlaywrightRuntimeLike {
+  use(input: BrowserPlaywrightConnectInput): Promise<BrowserPlaywrightSessionLike>;
 }
 
 interface PreparedRepoWriteState {
@@ -336,6 +438,40 @@ interface PreparedCodeDiffState {
   after?: string;
   base?: string;
   maxOutputChars: number;
+  scope?: AccessRequestScope;
+}
+
+interface NormalizedBrowserPlaywrightInput {
+  action:
+    | "connect"
+    | "list_tools"
+    | "disconnect"
+    | "navigate"
+    | "snapshot"
+    | "screenshot"
+    | "click"
+    | "type"
+    | "wait_for"
+    | "console_messages"
+    | "network_requests"
+    | "tabs"
+    | "close"
+    | "raw";
+  toolName?: string;
+  arguments?: Record<string, unknown>;
+  route?: BrowserPlaywrightRouteContext;
+  selectedBackend: BrowserPlaywrightBackendKind;
+  resolvedBackend: "playwright-shared-runtime";
+  allowedDomains?: string[];
+  headless: boolean;
+  browser: "chrome" | "chromium" | "firefox" | "webkit";
+  isolated: boolean;
+  allowFileUploads: boolean;
+  maxOutputChars: number;
+}
+
+interface PreparedBrowserPlaywrightState {
+  input: NormalizedBrowserPlaywrightInput;
   scope?: AccessRequestScope;
 }
 
@@ -722,6 +858,518 @@ function trimCommandOutput(value: string, maxChars: number): { text: string; tru
     truncated: true,
     originalChars: value.length,
   };
+}
+
+const PLAYWRIGHT_MCP_NPX_ARGS = [
+  "-y",
+  "@playwright/mcp@latest",
+  "--output-mode",
+  "stdout",
+];
+
+const BROWSER_PLAYWRIGHT_TOOL_ALIASES: Record<string, string> = {
+  browser_navigate: "browser_navigate",
+  navigate: "browser_navigate",
+  navigate_page: "browser_navigate",
+  new_page: "browser_navigate",
+  browser_snapshot: "browser_snapshot",
+  snapshot: "browser_snapshot",
+  take_snapshot: "browser_snapshot",
+  browser_take_screenshot: "browser_take_screenshot",
+  screenshot: "browser_take_screenshot",
+  take_screenshot: "browser_take_screenshot",
+  browser_click: "browser_click",
+  click: "browser_click",
+  browser_type: "browser_type",
+  type: "browser_type",
+  type_text: "browser_type",
+  fill: "browser_type",
+  browser_wait_for: "browser_wait_for",
+  wait_for: "browser_wait_for",
+  browser_console_messages: "browser_console_messages",
+  console_messages: "browser_console_messages",
+  browser_network_requests: "browser_network_requests",
+  network_requests: "browser_network_requests",
+  browser_tabs: "browser_tabs",
+  tabs: "browser_tabs",
+  browser_close: "browser_close",
+  close: "browser_close",
+  browser_file_upload: "browser_file_upload",
+  upload_file: "browser_file_upload",
+};
+
+function isProviderId(value: unknown): value is ProviderId {
+  return value === "openai" || value === "anthropic" || value === "deepmind";
+}
+
+function isSdkLayer(value: unknown): value is SdkLayer {
+  return value === "api" || value === "agent" || value === "auto";
+}
+
+function inferProviderFromModel(model: string | undefined): ProviderId | undefined {
+  if (!model) {
+    return undefined;
+  }
+  if (/claude/iu.test(model)) {
+    return "anthropic";
+  }
+  if (/gemini/iu.test(model)) {
+    return "deepmind";
+  }
+  if (/^gpt|^o[13-9]|codex/iu.test(model)) {
+    return "openai";
+  }
+  return undefined;
+}
+
+function normalizeOptionalBrowserRoute(
+  input: Record<string, unknown>,
+): BrowserPlaywrightRouteContext | undefined {
+  const route = asRecord(input.route);
+  const model = asString(route?.model ?? input.model);
+  const provider = route?.provider ?? input.provider ?? inferProviderFromModel(model);
+  const layerCandidate = route?.layer ?? input.layer;
+  const layer = isSdkLayer(layerCandidate) ? layerCandidate : undefined;
+  if (!isProviderId(provider) && !model && !layer) {
+    return undefined;
+  }
+  return {
+    provider: isProviderId(provider) ? provider : undefined,
+    model,
+    layer,
+  };
+}
+
+function selectBrowserPlaywrightBackend(
+  route: BrowserPlaywrightRouteContext | undefined,
+): BrowserPlaywrightBackendKind {
+  if (route?.provider === "openai") {
+    return "openai-codex-browser-mcp-style";
+  }
+  if (route?.provider === "anthropic") {
+    return "anthropic-claude-code-browser-mcp-style";
+  }
+  if (route?.provider === "deepmind") {
+    return "gemini-cli-browser-agent-style";
+  }
+  return "playwright-shared-runtime";
+}
+
+function normalizeBrowserPlaywrightAction(value: string | undefined): NormalizedBrowserPlaywrightInput["action"] {
+  switch ((value ?? "").trim().toLowerCase()) {
+    case "connect":
+      return "connect";
+    case "list_tools":
+    case "list-tools":
+    case "tools":
+      return "list_tools";
+    case "disconnect":
+    case "terminate":
+      return "disconnect";
+    case "navigate":
+    case "navigate_page":
+    case "new_page":
+      return "navigate";
+    case "snapshot":
+    case "take_snapshot":
+      return "snapshot";
+    case "screenshot":
+    case "take_screenshot":
+      return "screenshot";
+    case "click":
+      return "click";
+    case "type":
+    case "type_text":
+    case "fill":
+      return "type";
+    case "wait_for":
+      return "wait_for";
+    case "console_messages":
+      return "console_messages";
+    case "network_requests":
+      return "network_requests";
+    case "tabs":
+      return "tabs";
+    case "close":
+      return "close";
+    case "raw":
+      return "raw";
+    default:
+      return "raw";
+  }
+}
+
+function normalizeBrowserPlaywrightToolName(toolName: string): string {
+  const normalized = toolName.trim();
+  return BROWSER_PLAYWRIGHT_TOOL_ALIASES[normalized] ?? normalized;
+}
+
+function matchesAllowedBrowserDomain(hostname: string, allowedDomains: readonly string[]): boolean {
+  const normalizedHost = hostname.toLowerCase();
+  return allowedDomains.some((entry) => {
+    const normalizedEntry = entry.toLowerCase();
+    if (normalizedEntry.startsWith("*.")) {
+      const suffix = normalizedEntry.slice(2);
+      return normalizedHost === suffix || normalizedHost.endsWith(`.${suffix}`);
+    }
+    return normalizedHost === normalizedEntry;
+  });
+}
+
+function assertBrowserUrlAllowed(urlValue: string, allowedDomains: readonly string[] | undefined): void {
+  if (!allowedDomains || allowedDomains.length === 0) {
+    return;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(urlValue);
+  } catch (error) {
+    throw new Error(`browser.playwright received an invalid URL: ${urlValue}.`, {
+      cause: error,
+    });
+  }
+  if (!matchesAllowedBrowserDomain(parsed.hostname, allowedDomains)) {
+    throw new Error(`browser.playwright blocked navigation to ${parsed.hostname}; allowedDomains=${allowedDomains.join(", ")}.`);
+  }
+}
+
+function readBrowserPlaywrightArgs(
+  input: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  return asRecord(input.arguments) ?? asRecord(input.args);
+}
+
+function normalizeBrowserPlaywrightInput(
+  plan: CapabilityInvocationPlan,
+): NormalizedBrowserPlaywrightInput {
+  const input = asRecord(plan.input) ?? {};
+  const action = normalizeBrowserPlaywrightAction(
+    asString(input.action) ?? asString(input.toolName) ?? asString(input.name),
+  );
+  const allowedDomains = asStringArray(input.allowedDomains)
+    ?? asStringArray(input.allowed_domains);
+  const headless = asBoolean(input.headless) ?? true;
+  const browserCandidate = asString(input.browser)?.toLowerCase();
+  const browser =
+    browserCandidate === "chromium"
+    || browserCandidate === "firefox"
+    || browserCandidate === "webkit"
+    || browserCandidate === "chrome"
+      ? browserCandidate
+      : "chrome";
+  const isolated = asBoolean(input.isolated) ?? true;
+  const allowFileUploads = asBoolean(input.allowFileUploads)
+    ?? asBoolean(input.allow_file_uploads)
+    ?? false;
+  const maxOutputChars = asNumber(input.maxOutputChars) ?? 12_000;
+  const route = normalizeOptionalBrowserRoute(input);
+  const selectedBackend = selectBrowserPlaywrightBackend(route);
+
+  if (action === "connect" || action === "list_tools" || action === "disconnect") {
+    return {
+      action,
+      route,
+      selectedBackend,
+      resolvedBackend: "playwright-shared-runtime",
+      allowedDomains,
+      headless,
+      browser,
+      isolated,
+      allowFileUploads,
+      maxOutputChars,
+    };
+  }
+
+  let toolName: string | undefined;
+  let argumentsRecord: Record<string, unknown> | undefined;
+  switch (action) {
+    case "navigate": {
+      const url = asString(input.url);
+      if (!url) {
+        throw new Error("browser.playwright navigate requires url.");
+      }
+      assertBrowserUrlAllowed(url, allowedDomains);
+      toolName = "browser_navigate";
+      argumentsRecord = { url };
+      break;
+    }
+    case "snapshot":
+      toolName = "browser_snapshot";
+      argumentsRecord = {};
+      break;
+    case "screenshot":
+      toolName = "browser_take_screenshot";
+      argumentsRecord = {
+        type: asString(input.type) ?? "png",
+      };
+      if (asBoolean(input.fullPage) ?? asBoolean(input.full_page)) {
+        argumentsRecord.fullPage = true;
+      }
+      if (asString(input.filename)) {
+        argumentsRecord.filename = asString(input.filename);
+      }
+      if (asString(input.ref)) {
+        argumentsRecord.ref = asString(input.ref);
+      }
+      if (asString(input.element)) {
+        argumentsRecord.element = asString(input.element);
+      }
+      break;
+    case "click":
+      toolName = "browser_click";
+      argumentsRecord = {
+        ref: asString(input.ref),
+      };
+      if (!argumentsRecord.ref) {
+        throw new Error("browser.playwright click requires ref.");
+      }
+      if (asString(input.element)) {
+        argumentsRecord.element = asString(input.element);
+      }
+      if (asString(input.button)) {
+        argumentsRecord.button = asString(input.button);
+      }
+      if (asBoolean(input.doubleClick) ?? asBoolean(input.double_click)) {
+        argumentsRecord.doubleClick = true;
+      }
+      if (asStringArray(input.modifiers)) {
+        argumentsRecord.modifiers = asStringArray(input.modifiers);
+      }
+      break;
+    case "type":
+      toolName = "browser_type";
+      argumentsRecord = {
+        ref: asString(input.ref),
+        text: asString(input.text),
+      };
+      if (!argumentsRecord.ref || typeof argumentsRecord.text !== "string") {
+        throw new Error("browser.playwright type requires ref and text.");
+      }
+      if (asString(input.element)) {
+        argumentsRecord.element = asString(input.element);
+      }
+      if (asBoolean(input.slowly)) {
+        argumentsRecord.slowly = true;
+      }
+      if (asBoolean(input.submit)) {
+        argumentsRecord.submit = true;
+      }
+      break;
+    case "wait_for":
+      toolName = "browser_wait_for";
+      argumentsRecord = {};
+      if (asString(input.text)) {
+        argumentsRecord.text = asString(input.text);
+      }
+      if (asString(input.textGone) ?? asString(input.text_gone)) {
+        argumentsRecord.textGone = asString(input.textGone) ?? asString(input.text_gone);
+      }
+      if (asNumber(input.time)) {
+        argumentsRecord.time = asNumber(input.time);
+      }
+      if (Object.keys(argumentsRecord).length === 0) {
+        throw new Error("browser.playwright wait_for requires text, textGone, or time.");
+      }
+      break;
+    case "console_messages":
+      toolName = "browser_console_messages";
+      argumentsRecord = {
+        level: asString(input.level) ?? "info",
+      };
+      if (asBoolean(input.all)) {
+        argumentsRecord.all = true;
+      }
+      if (asString(input.filename)) {
+        argumentsRecord.filename = asString(input.filename);
+      }
+      break;
+    case "network_requests":
+      toolName = "browser_network_requests";
+      argumentsRecord = {
+        requestBody: asBoolean(input.requestBody) ?? false,
+        requestHeaders: asBoolean(input.requestHeaders) ?? false,
+        static: asBoolean(input.static) ?? false,
+      };
+      if (asString(input.filter)) {
+        argumentsRecord.filter = asString(input.filter);
+      }
+      if (asString(input.filename)) {
+        argumentsRecord.filename = asString(input.filename);
+      }
+      break;
+    case "tabs":
+      toolName = "browser_tabs";
+      argumentsRecord = {
+        action: asString(input.tabAction) ?? asString(input.tab_action) ?? "list",
+      };
+      if (asNumber(input.index) !== undefined) {
+        argumentsRecord.index = asNumber(input.index);
+      }
+      break;
+    case "close":
+      toolName = "browser_close";
+      argumentsRecord = {};
+      break;
+    case "raw": {
+      const rawToolName = asString(input.toolName) ?? asString(input.name);
+      if (!rawToolName) {
+        throw new Error("browser.playwright raw action requires toolName.");
+      }
+      toolName = normalizeBrowserPlaywrightToolName(rawToolName);
+      argumentsRecord = readBrowserPlaywrightArgs(input) ?? {};
+      const rawUrl = asString(argumentsRecord.url);
+      if (toolName === "browser_navigate" && rawUrl) {
+        assertBrowserUrlAllowed(rawUrl, allowedDomains);
+      }
+      break;
+    }
+    default:
+      throw new Error(`Unsupported browser.playwright action ${action}.`);
+  }
+
+  if (toolName === "browser_file_upload" && !allowFileUploads) {
+    throw new Error("browser.playwright blocks file uploads unless allowFileUploads=true is provided.");
+  }
+
+  return {
+    action,
+    toolName,
+    arguments: argumentsRecord,
+    route,
+    selectedBackend,
+    resolvedBackend: "playwright-shared-runtime",
+    allowedDomains,
+    headless,
+    browser,
+    isolated,
+    allowFileUploads,
+    maxOutputChars,
+  };
+}
+
+function buildPlaywrightMcpArgs(
+  input: BrowserPlaywrightConnectInput,
+): string[] {
+  const args = [...PLAYWRIGHT_MCP_NPX_ARGS];
+  if (input.headless) {
+    args.push("--headless");
+  }
+  if (input.isolated) {
+    args.push("--isolated");
+  }
+  args.push("--browser", input.browser);
+  return args;
+}
+
+class SharedBrowserPlaywrightRuntime implements BrowserPlaywrightRuntimeLike {
+  async use(input: BrowserPlaywrightConnectInput): Promise<BrowserPlaywrightSessionLike> {
+    const session = await rax.mcp.use({
+      provider: "openai",
+      model: "gpt-5",
+      input: {
+        connectionId: input.connectionId,
+        transport: {
+          kind: "stdio",
+          command: "npx",
+          args: buildPlaywrightMcpArgs(input),
+        },
+        metadata: {
+          capabilityKey: "browser.playwright",
+          browser: input.browser,
+          headless: input.headless,
+          isolated: input.isolated,
+        },
+      },
+    });
+
+    return {
+      connectionId: session.connection.connectionId,
+      tools: async () => {
+        const result = await session.tools();
+        return {
+          tools: result.tools.map((tool) => ({
+            name: tool.name,
+            description: tool.description,
+            inputSchema: tool.inputSchema,
+            annotations: tool.annotations,
+          })),
+        };
+      },
+      call: async (toolInput) => {
+        const result: McpCallResult = await session.call({
+          toolName: toolInput.toolName,
+          arguments: toolInput.arguments,
+        });
+        return {
+          content: result.content,
+          structuredContent: result.structuredContent,
+          _meta: result._meta,
+          isError: result.isError,
+          errorMessage: result.errorMessage,
+          raw: result.raw,
+        };
+      },
+      disconnect: async () => {
+        await session.disconnect();
+      },
+    };
+  }
+}
+
+function normalizeBrowserPlaywrightToolResult(
+  result: BrowserPlaywrightToolCallResult,
+  maxOutputChars: number,
+): {
+  text?: string;
+  truncated: boolean;
+  imageUrls: string[];
+  imageCount: number;
+} {
+  const textParts: string[] = [];
+  const imageUrls: string[] = [];
+  if (Array.isArray(result.content)) {
+    for (const item of result.content) {
+      const record = asRecord(item);
+      if (!record) {
+        continue;
+      }
+      const type = asString(record.type);
+      if (type === "text" && typeof record.text === "string") {
+        textParts.push(record.text);
+        continue;
+      }
+      if (type === "image" && typeof record.data === "string") {
+        const mimeType = asString(record.mimeType) ?? "image/png";
+        imageUrls.push(`data:${mimeType};base64,${record.data}`);
+      }
+    }
+  }
+  if (textParts.length === 0 && result.structuredContent) {
+    textParts.push(JSON.stringify(result.structuredContent, null, 2));
+  }
+  if (textParts.length === 0 && result.errorMessage) {
+    textParts.push(result.errorMessage);
+  }
+  const mergedText = textParts.join("\n\n").trim();
+  const trimmed = mergedText
+    ? trimCommandOutput(mergedText, maxOutputChars)
+    : { text: "", truncated: false, originalChars: 0 };
+  return {
+    text: trimmed.text || undefined,
+    truncated: trimmed.truncated,
+    imageUrls,
+    imageCount: imageUrls.length,
+  };
+}
+
+function buildBrowserPlaywrightSessionFingerprint(
+  input: NormalizedBrowserPlaywrightInput,
+): string {
+  return JSON.stringify({
+    headless: input.headless,
+    browser: input.browser,
+    isolated: input.isolated,
+  });
 }
 
 function normalizeCommandInput(params: {
@@ -3469,6 +4117,202 @@ class CodeDiffCapabilityAdapter implements CapabilityAdapter {
   }
 }
 
+class BrowserPlaywrightCapabilityAdapter implements CapabilityAdapter {
+  readonly id = "adapter.browser.playwright";
+  readonly runtimeKind = "local-tooling";
+
+  #runtime: BrowserPlaywrightRuntimeLike;
+  #session?: BrowserPlaywrightSessionLike;
+  #sessionFingerprint?: string;
+  readonly #prepared = new Map<string, PreparedBrowserPlaywrightState>();
+
+  constructor(
+    private readonly options: TapToolingAdapterOptions,
+  ) {
+    this.#runtime = options.browserPlaywrightRuntime ?? new SharedBrowserPlaywrightRuntime();
+  }
+
+  supports(plan: CapabilityInvocationPlan): boolean {
+    if (plan.capabilityKey !== "browser.playwright") {
+      return false;
+    }
+    try {
+      normalizeBrowserPlaywrightInput(plan);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async prepare(
+    plan: CapabilityInvocationPlan,
+    lease: CapabilityLease,
+  ): Promise<PreparedCapabilityCall> {
+    if (plan.capabilityKey !== "browser.playwright") {
+      throw new Error("BrowserPlaywrightCapabilityAdapter received a mismatched capability key.");
+    }
+
+    const normalized = normalizeBrowserPlaywrightInput(plan);
+    const prepared = createPreparedCapabilityCall({
+      lease,
+      plan,
+      executionMode: "direct",
+      preparedPayloadRef: `browser-playwright:${plan.planId}`,
+      metadata: {
+        planId: plan.planId,
+        action: normalized.action,
+      },
+    });
+    this.#prepared.set(prepared.preparedId, {
+      input: normalized,
+      scope: getGrantedScope(plan),
+    });
+    return prepared;
+  }
+
+  async execute(prepared: PreparedCapabilityCall) {
+    const state = this.#prepared.get(prepared.preparedId);
+    if (!state) {
+      return createCapabilityResultEnvelope({
+        executionId: prepared.preparedId,
+        status: "failed",
+        error: {
+          code: "browser_playwright_prepared_state_missing",
+          message: `Prepared browser.playwright state for ${prepared.preparedId} was not found.`,
+        },
+      });
+    }
+    this.#prepared.delete(prepared.preparedId);
+
+    const sessionFingerprint = buildBrowserPlaywrightSessionFingerprint(state.input);
+
+    if (state.input.action === "disconnect") {
+      if (this.#session) {
+        await this.#session.disconnect().catch(() => undefined);
+        this.#session = undefined;
+        this.#sessionFingerprint = undefined;
+      }
+      return createCapabilityResultEnvelope({
+        executionId: prepared.preparedId,
+        status: "success",
+        output: {
+          action: "disconnect",
+          disconnected: true,
+        },
+        metadata: {
+          capabilityKey: "browser.playwright",
+          runtimeKind: this.runtimeKind,
+          selectedBackend: state.input.selectedBackend,
+          resolvedBackend: state.input.resolvedBackend,
+        },
+      });
+    }
+
+    if (!this.#session || this.#sessionFingerprint !== sessionFingerprint) {
+      if (this.#session) {
+        await this.#session.disconnect().catch(() => undefined);
+      }
+      this.#session = await this.#runtime.use({
+        connectionId: "browser-playwright-shared",
+        headless: state.input.headless,
+        browser: state.input.browser,
+        isolated: state.input.isolated,
+      });
+      this.#sessionFingerprint = sessionFingerprint;
+    }
+
+    const session = this.#session;
+
+    if (state.input.action === "connect" || state.input.action === "list_tools") {
+      const tools = await session.tools();
+      return createCapabilityResultEnvelope({
+        executionId: prepared.preparedId,
+        status: "success",
+        output: {
+          action: state.input.action,
+          connectionId: session.connectionId,
+          toolCount: tools.tools.length,
+          tools: tools.tools.slice(0, 24),
+          selectedBackend: state.input.selectedBackend,
+          resolvedBackend: state.input.resolvedBackend,
+          headless: state.input.headless,
+          browser: state.input.browser,
+          isolated: state.input.isolated,
+        },
+        metadata: {
+          capabilityKey: "browser.playwright",
+          runtimeKind: this.runtimeKind,
+          selectedBackend: state.input.selectedBackend,
+          resolvedBackend: state.input.resolvedBackend,
+        },
+      });
+    }
+
+    const toolName = state.input.toolName;
+    if (!toolName) {
+      throw new Error("browser.playwright is missing toolName after normalization.");
+    }
+
+    const result = await session.call({
+      toolName,
+      arguments: state.input.arguments,
+    });
+    const normalizedResult = normalizeBrowserPlaywrightToolResult(
+      result,
+      state.input.maxOutputChars,
+    );
+
+    if (result.isError) {
+      return createCapabilityResultEnvelope({
+        executionId: prepared.preparedId,
+        status: "failed",
+        output: {
+          action: state.input.action,
+          toolName,
+          connectionId: session.connectionId,
+          text: normalizedResult.text,
+          imageUrls: normalizedResult.imageUrls,
+        },
+        error: {
+          code: "browser_playwright_tool_error",
+          message: normalizedResult.text ?? result.errorMessage ?? `${toolName} failed.`,
+        },
+        metadata: {
+          capabilityKey: "browser.playwright",
+          runtimeKind: this.runtimeKind,
+          selectedBackend: state.input.selectedBackend,
+          resolvedBackend: state.input.resolvedBackend,
+        },
+      });
+    }
+
+    return createCapabilityResultEnvelope({
+      executionId: prepared.preparedId,
+      status: normalizedResult.truncated ? "partial" : "success",
+      output: {
+        action: state.input.action,
+        toolName,
+        connectionId: session.connectionId,
+        arguments: state.input.arguments,
+        text: normalizedResult.text,
+        imageUrls: normalizedResult.imageUrls,
+        imageCount: normalizedResult.imageCount,
+        selectedBackend: state.input.selectedBackend,
+        resolvedBackend: state.input.resolvedBackend,
+        headless: state.input.headless,
+        browser: state.input.browser,
+        isolated: state.input.isolated,
+      },
+      metadata: {
+        capabilityKey: "browser.playwright",
+        runtimeKind: this.runtimeKind,
+        selectedBackend: state.input.selectedBackend,
+        resolvedBackend: state.input.resolvedBackend,
+      },
+    });
+  }
+}
+
 export function createTapToolingCapabilityAdapter(
   capabilityKey: TapToolingBaselineCapabilityKey,
   options: TapToolingAdapterOptions,
@@ -3492,6 +4336,8 @@ export function createTapToolingCapabilityAdapter(
       return new GitPushCapabilityAdapter(options);
     case "code.diff":
       return new CodeDiffCapabilityAdapter(options);
+    case "browser.playwright":
+      return new BrowserPlaywrightCapabilityAdapter(options);
     case "write_todos":
       return new WriteTodosCapabilityAdapter();
     case "skill.doc.generate":

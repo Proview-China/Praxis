@@ -13,6 +13,7 @@ export const FOUNDATION_FAMILY_CAPABILITY_KEYS = [
   "code.read_many",
   "code.symbol_search",
   "code.lsp",
+  "spreadsheet.read",
   "read_pdf",
   "read_notebook",
   "view_image",
@@ -28,6 +29,7 @@ export const FOUNDATION_FAMILY_CAPABILITY_KEYS = [
   "git.commit",
   "git.push",
   "code.diff",
+  "browser.playwright",
   "skill.doc.generate",
   "write_todos",
 ] as const;

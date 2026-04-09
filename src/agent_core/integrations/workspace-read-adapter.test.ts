@@ -42,11 +42,14 @@ function createMinimalPdfBuffer(text: string): Buffer {
 
 const TINY_PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jX1cAAAAASUVORK5CYII=";
+const SIMPLE_XLSX_BASE64 =
+  "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";
 
 async function createWorkspaceFixture() {
   const root = await mkdtemp(path.join(tmpdir(), "praxis-workspace-read-"));
   await mkdir(path.join(root, "src"), { recursive: true });
   await mkdir(path.join(root, "docs"), { recursive: true });
+  await mkdir(path.join(root, "data"), { recursive: true });
   await mkdir(path.join(root, "notebooks"), { recursive: true });
   await writeFile(
     path.join(root, "src", "sample.ts"),
@@ -89,6 +92,20 @@ async function createWorkspaceFixture() {
   await writeFile(
     path.join(root, "docs", "tiny.png"),
     Buffer.from(TINY_PNG_BASE64, "base64"),
+  );
+  await writeFile(
+    path.join(root, "data", "sample.csv"),
+    "Name,Value\nAlpha,42\nBeta,7\n",
+    "utf8",
+  );
+  await writeFile(
+    path.join(root, "data", "sample.tsv"),
+    "Name\tValue\nGamma\t8\nDelta\t9\n",
+    "utf8",
+  );
+  await writeFile(
+    path.join(root, "data", "sample.xlsx"),
+    Buffer.from(SIMPLE_XLSX_BASE64, "base64"),
   );
   await writeFile(
     path.join(root, "notebooks", "demo.ipynb"),
@@ -480,6 +497,78 @@ test("workspace read adapter supports read_pdf via bounded text extraction", asy
   assert.equal((envelope.output as { pageCount?: number }).pageCount, 1);
 });
 
+test("workspace read adapter supports spreadsheet.read for csv and xlsx summaries", async () => {
+  const workspaceRoot = await createWorkspaceFixture();
+  const adapter = createWorkspaceReadCapabilityAdapter({
+    workspaceRoot,
+    capabilityKey: "spreadsheet.read",
+    allowedPathPatterns: ["data", "data/**", "*.csv", "**/*.csv", "*.tsv", "**/*.tsv", "*.xlsx", "**/*.xlsx"],
+  });
+
+  const csvPlan = createCapabilityInvocationPlan(
+    {
+      intentId: "intent-spreadsheet-read-csv-1",
+      sessionId: "session-spreadsheet-read-csv-1",
+      runId: "run-spreadsheet-read-csv-1",
+      capabilityKey: "spreadsheet.read",
+      input: {
+        path: "data/sample.csv",
+        maxEntries: 1,
+      },
+      priority: "normal",
+    },
+    {
+      idFactory: () => "plan-spreadsheet-read-csv-1",
+    },
+  );
+  const csvPrepared = await adapter.prepare(csvPlan, createCapabilityLease({
+    capabilityId: "cap-spreadsheet-read-csv-1",
+    bindingId: "binding-spreadsheet-read-csv-1",
+    generation: 1,
+    plan: csvPlan,
+  }, {
+    idFactory: () => "lease-spreadsheet-read-csv-1",
+    clock: { now: () => new Date("2026-04-09T00:04:40.000Z") },
+  }));
+  const csvEnvelope = await adapter.execute(csvPrepared);
+  assert.equal(csvEnvelope.status, "partial");
+  assert.equal((csvEnvelope.output as { format?: string }).format, "csv");
+  assert.equal((csvEnvelope.output as { sheetCount?: number }).sheetCount, 1);
+  assert.deepEqual((csvEnvelope.output as { sheets?: Array<{ headers?: string[] }> }).sheets?.[0]?.headers, ["Name", "Value"]);
+  assert.deepEqual((csvEnvelope.output as { sheets?: Array<{ rows?: string[][] }> }).sheets?.[0]?.rows?.[0], ["Alpha", "42"]);
+
+  const xlsxPlan = createCapabilityInvocationPlan(
+    {
+      intentId: "intent-spreadsheet-read-xlsx-1",
+      sessionId: "session-spreadsheet-read-xlsx-1",
+      runId: "run-spreadsheet-read-xlsx-1",
+      capabilityKey: "spreadsheet.read",
+      input: {
+        path: "data/sample.xlsx",
+      },
+      priority: "normal",
+    },
+    {
+      idFactory: () => "plan-spreadsheet-read-xlsx-1",
+    },
+  );
+  const xlsxPrepared = await adapter.prepare(xlsxPlan, createCapabilityLease({
+    capabilityId: "cap-spreadsheet-read-xlsx-1",
+    bindingId: "binding-spreadsheet-read-xlsx-1",
+    generation: 1,
+    plan: xlsxPlan,
+  }, {
+    idFactory: () => "lease-spreadsheet-read-xlsx-1",
+    clock: { now: () => new Date("2026-04-09T00:04:41.000Z") },
+  }));
+  const xlsxEnvelope = await adapter.execute(xlsxPrepared);
+  assert.equal(xlsxEnvelope.status, "success");
+  assert.equal((xlsxEnvelope.output as { format?: string }).format, "xlsx");
+  assert.equal((xlsxEnvelope.output as { sheetCount?: number }).sheetCount, 1);
+  assert.equal((xlsxEnvelope.output as { sheets?: Array<{ name?: string }> }).sheets?.[0]?.name, "Sheet1");
+  assert.deepEqual((xlsxEnvelope.output as { sheets?: Array<{ rows?: string[][] }> }).sheets?.[0]?.rows?.[0], ["Alpha", "42"]);
+});
+
 test("workspace read adapter supports read_notebook via structured cell summaries", async () => {
   const workspaceRoot = await createWorkspaceFixture();
   const adapter = createWorkspaceReadCapabilityAdapter({
@@ -763,11 +852,11 @@ test("workspace read baseline registration lets TAP dispatch docs.read through t
   assert.equal(result.grant?.capabilityKey, "docs.read");
   assert.deepEqual(
     registration.capabilityKeys,
-    ["code.read", "code.ls", "code.glob", "code.grep", "code.read_many", "code.symbol_search", "code.lsp", "read_pdf", "read_notebook", "view_image", "docs.read"],
+    ["code.read", "code.ls", "code.glob", "code.grep", "code.read_many", "code.symbol_search", "code.lsp", "spreadsheet.read", "read_pdf", "read_notebook", "view_image", "docs.read"],
   );
   assert.deepEqual(
     registration.descriptors.map((entry) => entry.capabilityKey),
-    ["code.read", "code.ls", "code.glob", "code.grep", "code.read_many", "code.symbol_search", "code.lsp", "read_pdf", "read_notebook", "view_image", "docs.read"],
+    ["code.read", "code.ls", "code.glob", "code.grep", "code.read_many", "code.symbol_search", "code.lsp", "spreadsheet.read", "read_pdf", "read_notebook", "view_image", "docs.read"],
   );
   assert.equal(
     registration.descriptors.find((entry) => entry.capabilityKey === "docs.read")?.scopeKind,

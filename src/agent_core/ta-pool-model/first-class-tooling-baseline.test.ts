@@ -20,14 +20,15 @@ test("tooling baseline helper returns the same A-group read capabilities for rev
     "code.read_many",
     "code.symbol_search",
     "code.lsp",
+    "spreadsheet.read",
     "read_pdf",
     "read_notebook",
     "view_image",
     "docs.read",
   ]);
   assert.deepEqual(
-    getFirstClassToolingBaselineCapabilities("bootstrap_tma").slice(0, 11),
-    ["code.read", "code.ls", "code.glob", "code.grep", "code.read_many", "code.symbol_search", "code.lsp", "read_pdf", "read_notebook", "view_image", "docs.read"],
+    getFirstClassToolingBaselineCapabilities("bootstrap_tma").slice(0, 12),
+    ["code.read", "code.ls", "code.glob", "code.grep", "code.read_many", "code.symbol_search", "code.lsp", "spreadsheet.read", "read_pdf", "read_notebook", "view_image", "docs.read"],
   );
   assert.equal(
     getFirstClassToolingBaselineCapabilities("bootstrap_tma").includes(
@@ -42,8 +43,8 @@ test("tooling baseline helper returns the same A-group read capabilities for rev
     true,
   );
   assert.deepEqual(
-    getFirstClassToolingBaselineCapabilities("extended_tma").slice(0, 11),
-    ["code.read", "code.ls", "code.glob", "code.grep", "code.read_many", "code.symbol_search", "code.lsp", "read_pdf", "read_notebook", "view_image", "docs.read"],
+    getFirstClassToolingBaselineCapabilities("extended_tma").slice(0, 12),
+    ["code.read", "code.ls", "code.glob", "code.grep", "code.read_many", "code.symbol_search", "code.lsp", "spreadsheet.read", "read_pdf", "read_notebook", "view_image", "docs.read"],
   );
   assert.equal(
     getFirstClassToolingBaselineCapabilities("extended_tma").includes(
@@ -83,6 +84,7 @@ test("tooling baseline descriptors explain reviewer vs TMA scope in plain terms"
     "code.read_many",
     "code.symbol_search",
     "code.lsp",
+    "spreadsheet.read",
     "read_pdf",
     "read_notebook",
     "view_image",
@@ -115,6 +117,7 @@ test("tooling baseline helper can build and extend capability profiles without d
     "code.read_many",
     "code.symbol_search",
     "code.lsp",
+    "spreadsheet.read",
     "read_pdf",
     "read_notebook",
     "view_image",
