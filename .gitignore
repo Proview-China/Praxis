@@ -32,6 +32,9 @@ venv/
 build/
 out/
 tmp/
+.build/
+.swiftpm/
+Package.resolved
 
 # Logs
 *.log
