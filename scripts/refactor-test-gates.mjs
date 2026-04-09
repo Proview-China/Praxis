@@ -61,9 +61,19 @@ const gateDefinitions = {
           "src/agent_core/tap-availability/formal-family-inventory.test.ts",
         ],
       },
+      {
+        label: "tap-tooling internals",
+        files: [
+          "src/agent_core/integrations/tap-tooling/git-parsers.test.ts",
+          "src/agent_core/integrations/tap-tooling/browser-playwright.test.ts",
+          "src/agent_core/integrations/tap-tooling/command-runtime.test.ts",
+          "src/agent_core/integrations/tap-tooling/normalizers.test.ts",
+        ],
+      },
     ],
     notes: [
       "不允许改公开导出路径、函数名或 helper ref 字符串。",
+      "新抽出的 pure/helper 模块需要独立 focused tests，方便拆分后快速定位回归。",
     ],
   },
   "capability-package": {

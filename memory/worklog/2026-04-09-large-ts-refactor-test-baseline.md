@@ -86,3 +86,42 @@
   - `npm run test:refactor:gate -- <gate>`
 - 第一轮拆分只做内部重组，不改公开导出路径、函数名、helper ref 字符串。
 - 如果后续新增新的大文件拆分对象，同步把 gate 补进 `scripts/refactor-test-gates.mjs`。
+
+## tap-tooling-adapter 第一轮拆分
+
+- 已把 `src/agent_core/integrations/tap-tooling-adapter.ts` 从 4414 行瘦身到 117 行，保留旧导出路径与公开函数名不变：
+  - `createTapToolingCapabilityAdapter`
+  - `createTapToolingActivationFactory`
+  - `registerTapToolingBaseline`
+  - `createTapToolingProvisioningPackage`
+- 新增内部模块目录 `src/agent_core/integrations/tap-tooling/`，本轮边界如下：
+  - `shared.ts`
+  - `paths-and-permissions.ts`
+  - `command-runtime.ts`
+  - `git-parsers.ts`
+  - `browser-playwright.ts`
+  - `normalizers.ts`
+  - `adapters.ts`
+- 这次拆分仍然只做内部重组，没有改：
+  - capability key
+  - package 生成路径
+  - `integrations/tap-tooling-adapter#registerTapToolingBaseline` helper ref
+- 新增 focused tests：
+  - `src/agent_core/integrations/tap-tooling/git-parsers.test.ts`
+  - `src/agent_core/integrations/tap-tooling/browser-playwright.test.ts`
+  - `src/agent_core/integrations/tap-tooling/command-runtime.test.ts`
+  - `src/agent_core/integrations/tap-tooling/normalizers.test.ts`
+- `tap-tooling-adapter` gate 现在除了原有 baseline + inventory 套件，还会补跑这些内部 focused tests，方便把回归定位到 parser / normalizer / browser backend / shell session helper 层。
+
+## 本轮验证结果
+
+- `npm run typecheck`
+- `npm run test:refactor:gate -- tap-tooling-adapter`
+
+结果：
+
+- `typecheck`：通过
+- `tap-tooling-adapter gate`：通过
+  - baseline：通过
+  - focused suite `tap-tooling baseline + inventory`：26 通过、0 失败
+  - focused suite `tap-tooling internals`：11 通过、0 失败
