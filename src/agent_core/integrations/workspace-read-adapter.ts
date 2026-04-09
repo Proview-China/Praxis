@@ -1,4 +1,5 @@
 import path from "node:path";
+import { createRequire } from "node:module";
 import { readFile, readdir, realpath, stat } from "node:fs/promises";
 
 import {
@@ -8,6 +9,8 @@ import {
   createCodeGlobCapabilityPackage,
   createCodeGrepCapabilityPackage,
   createCodeReadManyCapabilityPackage,
+  createCodeSymbolSearchCapabilityPackage,
+  createCodeLspCapabilityPackage,
   createDocsReadCapabilityPackage,
   FIRST_CLASS_TOOLING_ALLOWED_OPERATIONS,
   FIRST_CLASS_TOOLING_BASELINE_CAPABILITY_KEYS,
@@ -27,6 +30,9 @@ import type {
 import { createPreparedCapabilityCall } from "../capability-invocation/index.js";
 import { createCapabilityResultEnvelope } from "../capability-result/index.js";
 import type { ActivationAdapterFactory } from "../ta-pool-runtime/index.js";
+
+const require = createRequire(import.meta.url);
+const ts: typeof import("typescript") = require("typescript");
 
 export interface WorkspaceReadAdapterOptions {
   workspaceRoot: string;
@@ -71,10 +77,13 @@ interface PreparedWorkspaceReadInput {
   path?: string;
   paths?: string[];
   pattern?: string;
+  query?: string;
   include?: string[];
   exclude?: string[];
   lineStart?: number;
   lineEnd?: number;
+  line?: number;
+  character?: number;
   maxBytes: number;
   maxEntries: number;
   namesOnly?: boolean;
@@ -222,17 +231,32 @@ function parsePreparedWorkspaceReadInput(
           ? "grep"
           : capabilityKey === "code.read_many"
             ? "read_many"
+            : capabilityKey === "code.symbol_search"
+              ? "workspace_symbol"
+              : capabilityKey === "code.lsp"
+                ? "document_symbol"
             : "read_file");
   const requestedPath = asString(input.path)
+    ?? asString(input.file_path)
+    ?? asString(input.filePath)
     ?? asString(input.dir_path)
     ?? asString(input.cwd)
     ?? (capabilityKey === "code.ls" || capabilityKey === "code.glob" || capabilityKey === "code.grep" || capabilityKey === "code.read_many"
+      || capabilityKey === "code.symbol_search"
       ? "."
       : undefined);
   const pattern = asString(input.pattern) ?? asString(input.glob);
+  const query = asString(input.query)
+    ?? asString(input.symbol)
+    ?? asString(input.name)
+    ?? pattern;
   const include = asStringArray(input.include);
   const exclude = asStringArray(input.exclude);
-  if (!requestedPath) {
+  const requiresPath = !(
+    capabilityKey === "code.symbol_search"
+    || (capabilityKey === "code.lsp" && operation === "workspace_symbol")
+  );
+  if (!requestedPath && requiresPath) {
     return {
       capabilityKey,
       operation,
@@ -252,10 +276,13 @@ function parsePreparedWorkspaceReadInput(
     path: requestedPath,
     paths: asStringArray(input.paths),
     pattern,
+    query,
     include,
     exclude,
     lineStart: asPositiveInteger(input.lineStart),
     lineEnd: asPositiveInteger(input.lineEnd),
+    line: asPositiveInteger(input.line),
+    character: asPositiveInteger(input.character) ?? asPositiveInteger(input.column),
     maxBytes: asPositiveInteger(input.maxBytes) ?? 64 * 1024,
     maxEntries: asPositiveInteger(input.maxEntries) ?? 100,
     namesOnly: input.namesOnly === true,
@@ -389,6 +416,219 @@ function buildGrepRegex(pattern: string): RegExp {
   }
 }
 
+const TYPESCRIPT_SOURCE_EXTENSIONS = new Set([
+  ".ts",
+  ".tsx",
+  ".mts",
+  ".cts",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+]);
+
+function isTypeScriptSourceFile(filePath: string): boolean {
+  return TYPESCRIPT_SOURCE_EXTENSIONS.has(path.extname(filePath).toLowerCase());
+}
+
+interface TypeScriptWorkspaceContext {
+  service: import("typescript").LanguageService;
+  compilerOptions: import("typescript").CompilerOptions;
+  fileNames: string[];
+}
+
+function loadTypeScriptCompilerOptions(
+  workspaceRoot: string,
+): import("typescript").CompilerOptions {
+  const tsConfigPath = ts.findConfigFile(
+    workspaceRoot,
+    ts.sys.fileExists,
+    "tsconfig.json",
+  );
+  if (!tsConfigPath) {
+    return {
+      allowJs: true,
+      target: ts.ScriptTarget.ESNext,
+      module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.NodeNext,
+      jsx: ts.JsxEmit.Preserve,
+    };
+  }
+
+  const configFile = ts.readConfigFile(tsConfigPath, ts.sys.readFile);
+  if (configFile.error) {
+    return {
+      allowJs: true,
+      target: ts.ScriptTarget.ESNext,
+      module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.NodeNext,
+      jsx: ts.JsxEmit.Preserve,
+    };
+  }
+
+  const parsed = ts.parseJsonConfigFileContent(
+    configFile.config,
+    ts.sys,
+    path.dirname(tsConfigPath),
+  );
+  return {
+    ...parsed.options,
+    allowJs: parsed.options.allowJs ?? true,
+  };
+}
+
+function createTypeScriptWorkspaceContext(params: {
+  workspaceRoot: string;
+  files: Array<{ absolutePath: string; relativePath: string }>;
+  extraFiles?: string[];
+}): TypeScriptWorkspaceContext | undefined {
+  const baseFileNames = params.files
+    .map((entry) => entry.absolutePath)
+    .filter(isTypeScriptSourceFile);
+  const extraFileNames = (params.extraFiles ?? [])
+    .map((filePath) => path.resolve(params.workspaceRoot, filePath))
+    .filter(isTypeScriptSourceFile);
+  const fileNames = [...new Set([...baseFileNames, ...extraFileNames])];
+  if (fileNames.length === 0) {
+    return undefined;
+  }
+
+  const compilerOptions = loadTypeScriptCompilerOptions(params.workspaceRoot);
+  const versions = new Map<string, string>();
+  const host: import("typescript").LanguageServiceHost = {
+    getCompilationSettings: () => compilerOptions,
+    getScriptFileNames: () => fileNames,
+    getScriptVersion: (fileName) => versions.get(fileName) ?? "0",
+    getScriptSnapshot: (fileName) => {
+      const content = ts.sys.readFile(fileName);
+      return typeof content === "string"
+        ? ts.ScriptSnapshot.fromString(content)
+        : undefined;
+    },
+    getCurrentDirectory: () => params.workspaceRoot,
+    getDefaultLibFileName: (options) => ts.getDefaultLibFilePath(options),
+    fileExists: ts.sys.fileExists,
+    readFile: ts.sys.readFile,
+    readDirectory: ts.sys.readDirectory,
+    directoryExists: ts.sys.directoryExists,
+    getDirectories: ts.sys.getDirectories,
+    useCaseSensitiveFileNames: () => ts.sys.useCaseSensitiveFileNames,
+  };
+
+  return {
+    service: ts.createLanguageService(host, ts.createDocumentRegistry()),
+    compilerOptions,
+    fileNames,
+  };
+}
+
+function getSourceFileFromContext(
+  context: TypeScriptWorkspaceContext,
+  absolutePath: string,
+): import("typescript").SourceFile | undefined {
+  return context.service.getProgram()?.getSourceFile(absolutePath);
+}
+
+function toLineCharacter(
+  sourceFile: import("typescript").SourceFile,
+  position: number,
+) {
+  const location = ts.getLineAndCharacterOfPosition(sourceFile, position);
+  return {
+    line: location.line + 1,
+    character: location.character + 1,
+  };
+}
+
+function toOffset(
+  sourceFile: import("typescript").SourceFile,
+  line: number,
+  character: number,
+): number {
+  return ts.getPositionOfLineAndCharacter(
+    sourceFile,
+    Math.max(line - 1, 0),
+    Math.max(character - 1, 0),
+  );
+}
+
+function flattenNavigationTree(
+  tree: import("typescript").NavigationTree,
+  sourceFile: import("typescript").SourceFile,
+  relativePath: string,
+  depth = 0,
+  containerName?: string,
+): Array<Record<string, unknown>> {
+  const results: Array<Record<string, unknown>> = [];
+  const shouldSkipSyntheticRootModule = depth === 0
+    && tree.kind === "module"
+    && /^".+"$/u.test(tree.text);
+  if (tree.text && tree.text !== "<global>" && !shouldSkipSyntheticRootModule) {
+    const primarySpan = tree.nameSpan ?? tree.spans[0];
+    const location = primarySpan
+      ? toLineCharacter(sourceFile, primarySpan.start)
+      : { line: 1, character: 1 };
+    results.push({
+      name: tree.text,
+      kind: tree.kind,
+      path: relativePath,
+      line: location.line,
+      character: location.character,
+      depth,
+      containerName,
+    });
+  }
+
+  for (const child of tree.childItems ?? []) {
+    results.push(
+      ...flattenNavigationTree(
+        child,
+        sourceFile,
+        relativePath,
+        depth + 1,
+        tree.text === "<global>" ? containerName : tree.text,
+      ),
+    );
+  }
+
+  return results;
+}
+
+async function fallbackTextSymbolSearch(params: {
+  files: Array<{ absolutePath: string; relativePath: string }>;
+  query: string;
+  maxEntries: number;
+}): Promise<Array<Record<string, unknown>>> {
+  const escaped = escapeRegex(params.query);
+  const regex = new RegExp(`\\b${escaped}\\b`);
+  const results: Array<Record<string, unknown>> = [];
+
+  for (const file of params.files) {
+    const content = await readFile(file.absolutePath, "utf8");
+    const lines = content.split(/\r?\n/u);
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index]!;
+      const matchIndex = line.search(regex);
+      if (matchIndex < 0) {
+        continue;
+      }
+      results.push({
+        name: params.query,
+        kind: "text",
+        path: file.relativePath,
+        line: index + 1,
+        character: matchIndex + 1,
+        preview: line.trim(),
+      });
+      if (results.length >= params.maxEntries) {
+        return results;
+      }
+    }
+  }
+
+  return results;
+}
+
 export class WorkspaceReadCapabilityAdapter implements CapabilityAdapter {
   readonly id: string;
   readonly runtimeKind = "workspace-read";
@@ -494,11 +734,24 @@ export class WorkspaceReadCapabilityAdapter implements CapabilityAdapter {
         });
       }
 
-      const target = await resolveWorkspaceTarget(
-        this.#workspaceRoot,
-        parsed.path!,
-      );
-      if (!matchesPathPattern(target.relativePath, this.#allowedPathPatterns)) {
+      const target = parsed.path
+        ? await resolveWorkspaceTarget(
+          this.#workspaceRoot,
+          parsed.path,
+        )
+        : undefined;
+      const allowRootScopedDiscovery = target?.relativePath === ""
+        && (
+          parsed.operation === "glob"
+          || parsed.operation === "grep"
+          || parsed.operation === "read_many"
+          || parsed.operation === "workspace_symbol"
+        );
+      if (
+        target
+        && !allowRootScopedDiscovery
+        && !matchesPathPattern(target.relativePath, this.#allowedPathPatterns)
+      ) {
         return createFailureEnvelope({
           prepared,
           status: "blocked",
@@ -512,7 +765,7 @@ export class WorkspaceReadCapabilityAdapter implements CapabilityAdapter {
 
       switch (parsed.operation) {
         case "list_dir": {
-          const directory = await readdir(target.absolutePath, {
+          const directory = await readdir(target!.absolutePath, {
             withFileTypes: true,
           });
           const entries = directory
@@ -520,7 +773,7 @@ export class WorkspaceReadCapabilityAdapter implements CapabilityAdapter {
             .map((entry) => ({
               name: entry.name,
               path: normalizePathForMatch(
-                path.posix.join(target.relativePath, entry.name),
+                path.posix.join(target!.relativePath, entry.name),
               ),
               kind: entry.isDirectory()
                 ? "directory"
@@ -535,7 +788,7 @@ export class WorkspaceReadCapabilityAdapter implements CapabilityAdapter {
             output: {
               capabilityKey: this.#capabilityKey,
               operation: parsed.operation,
-              path: target.relativePath,
+              path: target!.relativePath,
               entries,
               truncated: partial,
               totalEntries: directory.length,
@@ -544,14 +797,14 @@ export class WorkspaceReadCapabilityAdapter implements CapabilityAdapter {
           });
         }
         case "stat_path": {
-          const stats = await stat(target.absolutePath);
+          const stats = await stat(target!.absolutePath);
           return createCapabilityResultEnvelope({
             executionId: prepared.preparedId,
             status: "success",
             output: {
               capabilityKey: this.#capabilityKey,
               operation: parsed.operation,
-              path: target.relativePath,
+              path: target!.relativePath,
               kind: stats.isDirectory()
                 ? "directory"
                 : stats.isFile()
@@ -709,9 +962,270 @@ export class WorkspaceReadCapabilityAdapter implements CapabilityAdapter {
             metadata: this.#createResultMetadata(),
           });
         }
+        case "workspace_symbol": {
+          const query = parsed.query?.trim();
+          if (!query) {
+            return createFailureEnvelope({
+              prepared,
+              status: "failed",
+              code: "workspace_read_missing_query",
+              message: `${this.#capabilityKey} requires a non-empty query or symbol.`,
+            });
+          }
+          const scopedFiles = await collectScopedFiles({
+            workspaceRoot: this.#workspaceRoot,
+            basePath: parsed.path ?? ".",
+            allowedPathPatterns: this.#allowedPathPatterns,
+          });
+          const typeScriptContext = createTypeScriptWorkspaceContext({
+            workspaceRoot: this.#workspaceRoot,
+            files: scopedFiles,
+          });
+
+          let backend = "text-grep-fallback";
+          let matches: Array<Record<string, unknown>> = [];
+          if (typeScriptContext) {
+            matches = typeScriptContext.service
+              .getNavigateToItems(query, parsed.maxEntries)
+              .map((item) => {
+                const sourceFile = getSourceFileFromContext(
+                  typeScriptContext,
+                  item.fileName,
+                );
+                const relativePath = normalizePathForMatch(
+                  path.relative(this.#workspaceRoot, item.fileName),
+                );
+                const location = sourceFile
+                  ? toLineCharacter(sourceFile, item.textSpan.start)
+                  : { line: 1, character: 1 };
+                return {
+                  name: item.name,
+                  kind: item.kind,
+                  path: relativePath,
+                  line: location.line,
+                  character: location.character,
+                  containerName: item.containerName,
+                  matchKind: item.matchKind,
+                };
+              })
+              .filter((entry) =>
+                typeof entry.path === "string"
+                && matchesPathPattern(entry.path, this.#allowedPathPatterns))
+              .slice(0, parsed.maxEntries);
+            if (matches.length > 0) {
+              backend = "typescript-language-service";
+            }
+          }
+
+          if (matches.length === 0) {
+            matches = await fallbackTextSymbolSearch({
+              files: scopedFiles,
+              query,
+              maxEntries: parsed.maxEntries,
+            });
+          }
+
+          return createCapabilityResultEnvelope({
+            executionId: prepared.preparedId,
+            status: "success",
+            output: {
+              capabilityKey: this.#capabilityKey,
+              operation: parsed.operation,
+              path: normalizePathForMatch(parsed.path ?? "."),
+              query,
+              backend,
+              matches,
+              resultCount: matches.length,
+            },
+            metadata: this.#createResultMetadata(),
+          });
+        }
+        case "document_symbol":
+        case "definition":
+        case "references":
+        case "hover": {
+          if (!target) {
+            return createFailureEnvelope({
+              prepared,
+              status: "failed",
+              code: "workspace_read_missing_path",
+              message: `${this.#capabilityKey} requires a non-empty file path.`,
+            });
+          }
+          const scopedFiles = await collectScopedFiles({
+            workspaceRoot: this.#workspaceRoot,
+            basePath: ".",
+            allowedPathPatterns: this.#allowedPathPatterns,
+          });
+          const typeScriptContext = createTypeScriptWorkspaceContext({
+            workspaceRoot: this.#workspaceRoot,
+            files: scopedFiles,
+            extraFiles: [target.absolutePath],
+          });
+          if (!typeScriptContext || !isTypeScriptSourceFile(target.absolutePath)) {
+            return createFailureEnvelope({
+              prepared,
+              status: "failed",
+              code: "workspace_read_lsp_unsupported_file",
+              message: `${this.#capabilityKey} currently supports TypeScript and JavaScript source files only.`,
+            });
+          }
+
+          const sourceFile = getSourceFileFromContext(
+            typeScriptContext,
+            target.absolutePath,
+          );
+          if (!sourceFile) {
+            return createFailureEnvelope({
+              prepared,
+              status: "failed",
+              code: "workspace_read_lsp_source_missing",
+              message: `Unable to load ${target.relativePath} into the TypeScript language service.`,
+            });
+          }
+
+          const service = typeScriptContext.service;
+          if (parsed.operation === "document_symbol") {
+            const tree = service.getNavigationTree(target.absolutePath);
+            const symbols = flattenNavigationTree(
+              tree,
+              sourceFile,
+              target.relativePath,
+            ).slice(0, parsed.maxEntries);
+            return createCapabilityResultEnvelope({
+              executionId: prepared.preparedId,
+              status: "success",
+              output: {
+                capabilityKey: this.#capabilityKey,
+                operation: parsed.operation,
+                path: target.relativePath,
+                backend: "typescript-language-service",
+                symbols,
+                resultCount: symbols.length,
+              },
+              metadata: this.#createResultMetadata(),
+            });
+          }
+
+          if (!parsed.line || !parsed.character) {
+            return createFailureEnvelope({
+              prepared,
+              status: "failed",
+              code: "workspace_read_missing_position",
+              message: `${this.#capabilityKey} requires line and character for ${parsed.operation}.`,
+            });
+          }
+          const offset = toOffset(sourceFile, parsed.line, parsed.character);
+
+          if (parsed.operation === "definition") {
+            const definitions = (service
+              .getDefinitionAtPosition(target.absolutePath, offset) ?? [])
+              .map((entry) => {
+                const definitionSource = getSourceFileFromContext(
+                  typeScriptContext,
+                  entry.fileName,
+                );
+                const relativePath = normalizePathForMatch(
+                  path.relative(this.#workspaceRoot, entry.fileName),
+                );
+                const location = definitionSource
+                  ? toLineCharacter(definitionSource, entry.textSpan.start)
+                  : { line: 1, character: 1 };
+                return {
+                  path: relativePath,
+                  line: location.line,
+                  character: location.character,
+                  kind: entry.kind,
+                  name: entry.name,
+                  containerName: entry.containerName,
+                };
+              })
+              .filter((entry) => matchesPathPattern(entry.path, this.#allowedPathPatterns))
+              .slice(0, parsed.maxEntries);
+            return createCapabilityResultEnvelope({
+              executionId: prepared.preparedId,
+              status: "success",
+              output: {
+                capabilityKey: this.#capabilityKey,
+                operation: parsed.operation,
+                path: target.relativePath,
+                line: parsed.line,
+                character: parsed.character,
+                backend: "typescript-language-service",
+                definitions,
+                resultCount: definitions.length,
+              },
+              metadata: this.#createResultMetadata(),
+            });
+          }
+
+          if (parsed.operation === "references") {
+            const references = (service.getReferencesAtPosition(target.absolutePath, offset) ?? [])
+              .map((entry) => {
+                const referenceSource = getSourceFileFromContext(
+                  typeScriptContext,
+                  entry.fileName,
+                );
+                const relativePath = normalizePathForMatch(
+                  path.relative(this.#workspaceRoot, entry.fileName),
+                );
+                const location = referenceSource
+                  ? toLineCharacter(referenceSource, entry.textSpan.start)
+                  : { line: 1, character: 1 };
+                return {
+                  path: relativePath,
+                  line: location.line,
+                  character: location.character,
+                  isWriteAccess: entry.isWriteAccess,
+                };
+              })
+              .filter((entry) => matchesPathPattern(entry.path, this.#allowedPathPatterns))
+              .slice(0, parsed.maxEntries);
+            return createCapabilityResultEnvelope({
+              executionId: prepared.preparedId,
+              status: "success",
+              output: {
+                capabilityKey: this.#capabilityKey,
+                operation: parsed.operation,
+                path: target.relativePath,
+                line: parsed.line,
+                character: parsed.character,
+                backend: "typescript-language-service",
+                references,
+                resultCount: references.length,
+              },
+              metadata: this.#createResultMetadata(),
+            });
+          }
+
+          const quickInfo = service.getQuickInfoAtPosition(
+            target.absolutePath,
+            offset,
+          );
+          return createCapabilityResultEnvelope({
+            executionId: prepared.preparedId,
+            status: "success",
+            output: {
+              capabilityKey: this.#capabilityKey,
+              operation: parsed.operation,
+              path: target!.relativePath,
+              line: parsed.line,
+              character: parsed.character,
+              backend: "typescript-language-service",
+              hoverText: quickInfo
+                ? ts.displayPartsToString(quickInfo.displayParts ?? [])
+                : "",
+              documentation: quickInfo
+                ? ts.displayPartsToString(quickInfo.documentation ?? [])
+                : "",
+              resultCount: quickInfo ? 1 : 0,
+            },
+            metadata: this.#createResultMetadata(),
+          });
+        }
         case "read_lines":
         case "read_file": {
-          const raw = await readFile(target.absolutePath, "utf8");
+          const raw = await readFile(target!.absolutePath, "utf8");
           const lines = raw.split(/\r?\n/u);
           const lineStart =
             parsed.operation === "read_lines"
@@ -737,7 +1251,7 @@ export class WorkspaceReadCapabilityAdapter implements CapabilityAdapter {
             output: {
               capabilityKey: this.#capabilityKey,
               operation: parsed.operation,
-              path: target.relativePath,
+              path: target!.relativePath,
               content,
               lineStart,
               lineEnd,
@@ -836,7 +1350,11 @@ export function registerFirstClassToolingBaselineCapabilities(
             ? createCodeGrepCapabilityPackage()
             : capabilityKey === "code.read_many"
               ? createCodeReadManyCapabilityPackage()
-              : createDocsReadCapabilityPackage(),
+              : capabilityKey === "code.symbol_search"
+                ? createCodeSymbolSearchCapabilityPackage()
+                : capabilityKey === "code.lsp"
+                  ? createCodeLspCapabilityPackage()
+                  : createDocsReadCapabilityPackage(),
   );
   const manifests = packages.map((capabilityPackage) =>
     createCapabilityManifestFromPackage(capabilityPackage),

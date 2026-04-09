@@ -14,6 +14,8 @@ export const FIRST_CLASS_TOOLING_BASELINE_CAPABILITY_KEYS = [
   "code.glob",
   "code.grep",
   "code.read_many",
+  "code.symbol_search",
+  "code.lsp",
   "docs.read",
 ] as const;
 export type FirstClassToolingBaselineCapabilityKey =
@@ -27,6 +29,11 @@ export const FIRST_CLASS_TOOLING_ALLOWED_OPERATIONS = [
   "glob",
   "grep",
   "read_many",
+  "workspace_symbol",
+  "document_symbol",
+  "definition",
+  "references",
+  "hover",
 ] as const;
 export type FirstClassToolingAllowedOperation =
   (typeof FIRST_CLASS_TOOLING_ALLOWED_OPERATIONS)[number];
@@ -228,6 +235,84 @@ const FIRST_CLASS_TOOLING_BASELINE_DESCRIPTORS: Record<
       "Read-only capability; each file body is still bounded.",
       "Result sets may be truncated by file count or byte budget.",
       "Binary files and unsupported assets may be skipped.",
+    ],
+    workerConsumers: ["reviewer", "bootstrap_tma", "extended_tma"],
+  },
+  "code.symbol_search": {
+    capabilityKey: "code.symbol_search",
+    scopeKind: "workspace-code",
+    scopeSummary:
+      "Repo-local source trees that can be searched by symbol name using code-intelligence-first semantics, with text fallback when language services are unavailable.",
+    description:
+      "Search repo-local code symbols across the workspace using TypeScript-aware navigation first, then bounded textual fallback when needed.",
+    reviewerSummary:
+      "Core or reviewer can search for symbol definitions and likely declaration points, but cannot mutate files through this capability.",
+    pathPatterns: [
+      "src",
+      "src/**",
+      "scripts",
+      "scripts/**",
+      "package.json",
+      "package-lock.json",
+      "pnpm-lock.yaml",
+      "tsconfig.json",
+    ],
+    allowedOperations: ["workspace_symbol"],
+    usageDocRef: "docs/ability/01-basic-implementation.md",
+    examplePath: "src",
+    exampleOperation: "workspace_symbol",
+    routeHints: [
+      { key: "scope", value: "workspace-code" },
+      { key: "baseline", value: "reviewer-tma" },
+      { key: "toolKind", value: "symbol-search" },
+    ],
+    tags: ["tap", "baseline", "read", "code", "symbol", "reviewer", "tma"],
+    knownLimits: [
+      "Read-only capability; it returns bounded symbol matches only.",
+      "Semantic symbol search is strongest for TypeScript and JavaScript workspaces.",
+      "When language-service data is unavailable, results may degrade to textual fallback matches.",
+    ],
+    workerConsumers: ["reviewer", "bootstrap_tma", "extended_tma"],
+  },
+  "code.lsp": {
+    capabilityKey: "code.lsp",
+    scopeKind: "workspace-code",
+    scopeSummary:
+      "Repo-local source files that can be inspected with language-intelligence style queries such as document symbols, definitions, references, and hover.",
+    description:
+      "Run bounded language-intelligence queries against repo-local code using TypeScript-aware semantics where available.",
+    reviewerSummary:
+      "Core or reviewer can inspect symbol structure and jump-like metadata, but cannot change files or execute code through this capability.",
+    pathPatterns: [
+      "src",
+      "src/**",
+      "scripts",
+      "scripts/**",
+      "package.json",
+      "package-lock.json",
+      "pnpm-lock.yaml",
+      "tsconfig.json",
+    ],
+    allowedOperations: [
+      "workspace_symbol",
+      "document_symbol",
+      "definition",
+      "references",
+      "hover",
+    ],
+    usageDocRef: "docs/ability/01-basic-implementation.md",
+    examplePath: "src/agent_core/runtime.ts",
+    exampleOperation: "document_symbol",
+    routeHints: [
+      { key: "scope", value: "workspace-code" },
+      { key: "baseline", value: "reviewer-tma" },
+      { key: "toolKind", value: "language-intelligence" },
+    ],
+    tags: ["tap", "baseline", "read", "code", "lsp", "reviewer", "tma"],
+    knownLimits: [
+      "Read-only capability; it only returns bounded semantic metadata.",
+      "Current implementation is strongest on TypeScript and JavaScript source files.",
+      "Cross-language project-wide LSP coverage may still require future provider-specific backends.",
     ],
     workerConsumers: ["reviewer", "bootstrap_tma", "extended_tma"],
   },
@@ -490,6 +575,14 @@ export function createCodeGrepCapabilityPackage(): CapabilityPackage {
 
 export function createCodeReadManyCapabilityPackage(): CapabilityPackage {
   return createFirstClassToolingCapabilityPackage("code.read_many");
+}
+
+export function createCodeSymbolSearchCapabilityPackage(): CapabilityPackage {
+  return createFirstClassToolingCapabilityPackage("code.symbol_search");
+}
+
+export function createCodeLspCapabilityPackage(): CapabilityPackage {
+  return createFirstClassToolingCapabilityPackage("code.lsp");
 }
 
 export function createDocsReadCapabilityPackage(): CapabilityPackage {

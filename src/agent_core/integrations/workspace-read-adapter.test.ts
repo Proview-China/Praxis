@@ -21,7 +21,26 @@ async function createWorkspaceFixture() {
   await mkdir(path.join(root, "docs"), { recursive: true });
   await writeFile(
     path.join(root, "src", "sample.ts"),
-    ["export function answer() {", "  return 42;", "}", ""].join("\n"),
+    [
+      "export function answer() {",
+      "  return 42;",
+      "}",
+      "",
+      "export const meaning = answer();",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await writeFile(
+    path.join(root, "src", "consumer.ts"),
+    [
+      "import { answer } from './sample.js';",
+      "",
+      "export function ask() {",
+      "  return answer();",
+      "}",
+      "",
+    ].join("\n"),
     "utf8",
   );
   await writeFile(
@@ -225,7 +244,10 @@ test("workspace read adapter supports code.ls for bounded directory listing", as
   const envelope = await adapter.execute(prepared);
   assert.equal(envelope.status, "success");
   assert.equal((envelope.output as { operation?: string }).operation, "list_dir");
-  assert.equal((envelope.output as { entries?: Array<{ name: string }> }).entries?.[0]?.name, "sample.ts");
+  assert.equal(
+    (envelope.output as { entries?: Array<{ name: string }> }).entries?.some((entry) => entry.name === "sample.ts"),
+    true,
+  );
 });
 
 test("workspace read adapter supports code.glob pattern discovery", async () => {
@@ -262,7 +284,7 @@ test("workspace read adapter supports code.glob pattern discovery", async () => 
   }));
   const envelope = await adapter.execute(prepared);
   assert.equal(envelope.status, "success");
-  assert.deepEqual((envelope.output as { matches?: string[] }).matches, ["src/sample.ts"]);
+  assert.deepEqual((envelope.output as { matches?: string[] }).matches, ["src/consumer.ts", "src/sample.ts"]);
 });
 
 test("workspace read adapter supports code.grep with bounded content hits", async () => {
@@ -299,7 +321,10 @@ test("workspace read adapter supports code.grep with bounded content hits", asyn
   }));
   const envelope = await adapter.execute(prepared);
   assert.equal(envelope.status, "success");
-  assert.equal((envelope.output as { matches?: Array<{ path: string }> }).matches?.[0]?.path, "src/sample.ts");
+  assert.equal(
+    (envelope.output as { matches?: Array<{ path: string }> }).matches?.some((entry) => entry.path === "src/sample.ts"),
+    true,
+  );
 });
 
 test("workspace read adapter supports code.read_many via include globs", async () => {
@@ -336,8 +361,160 @@ test("workspace read adapter supports code.read_many via include globs", async (
   }));
   const envelope = await adapter.execute(prepared);
   assert.equal(envelope.status, "success");
-  assert.equal((envelope.output as { count?: number }).count, 1);
-  assert.equal((envelope.output as { documents?: Array<{ path: string }> }).documents?.[0]?.path, "src/sample.ts");
+  assert.equal((envelope.output as { count?: number }).count, 2);
+  assert.equal(
+    (envelope.output as { documents?: Array<{ path: string }> }).documents?.some((entry) => entry.path === "src/sample.ts"),
+    true,
+  );
+});
+
+test("workspace read adapter supports code.symbol_search via TypeScript workspace symbol search", async () => {
+  const workspaceRoot = await createWorkspaceFixture();
+  const adapter = createWorkspaceReadCapabilityAdapter({
+    workspaceRoot,
+    capabilityKey: "code.symbol_search",
+    allowedPathPatterns: ["src", "src/**"],
+  });
+  const plan = createCapabilityInvocationPlan(
+    {
+      intentId: "intent-code-symbol-search-1",
+      sessionId: "session-code-symbol-search-1",
+      runId: "run-code-symbol-search-1",
+      capabilityKey: "code.symbol_search",
+      input: {
+        path: ".",
+        query: "answer",
+      },
+      priority: "normal",
+    },
+    {
+      idFactory: () => "plan-code-symbol-search-1",
+    },
+  );
+  const prepared = await adapter.prepare(plan, createCapabilityLease({
+    capabilityId: "cap-code-symbol-search-1",
+    bindingId: "binding-code-symbol-search-1",
+    generation: 1,
+    plan,
+  }, {
+    idFactory: () => "lease-code-symbol-search-1",
+    clock: { now: () => new Date("2026-04-09T00:04:00.000Z") },
+  }));
+  const envelope = await adapter.execute(prepared);
+  assert.equal(envelope.status, "success");
+  assert.equal((envelope.output as { backend?: string }).backend, "typescript-language-service");
+  assert.equal((envelope.output as { matches?: Array<{ name: string }> }).matches?.[0]?.name, "answer");
+});
+
+test("workspace read adapter supports code.lsp document symbols", async () => {
+  const workspaceRoot = await createWorkspaceFixture();
+  const adapter = createWorkspaceReadCapabilityAdapter({
+    workspaceRoot,
+    capabilityKey: "code.lsp",
+    allowedPathPatterns: ["src", "src/**"],
+  });
+  const plan = createCapabilityInvocationPlan(
+    {
+      intentId: "intent-code-lsp-doc-1",
+      sessionId: "session-code-lsp-doc-1",
+      runId: "run-code-lsp-doc-1",
+      capabilityKey: "code.lsp",
+      input: {
+        path: "src/sample.ts",
+        operation: "document_symbol",
+      },
+      priority: "normal",
+    },
+    {
+      idFactory: () => "plan-code-lsp-doc-1",
+    },
+  );
+  const prepared = await adapter.prepare(plan, createCapabilityLease({
+    capabilityId: "cap-code-lsp-doc-1",
+    bindingId: "binding-code-lsp-doc-1",
+    generation: 1,
+    plan,
+  }, {
+    idFactory: () => "lease-code-lsp-doc-1",
+    clock: { now: () => new Date("2026-04-09T00:05:00.000Z") },
+  }));
+  const envelope = await adapter.execute(prepared);
+  assert.equal(envelope.status, "success");
+  assert.equal((envelope.output as { symbols?: Array<{ name: string }> }).symbols?.[0]?.name, "answer");
+});
+
+test("workspace read adapter supports code.lsp definitions and references", async () => {
+  const workspaceRoot = await createWorkspaceFixture();
+  const adapter = createWorkspaceReadCapabilityAdapter({
+    workspaceRoot,
+    capabilityKey: "code.lsp",
+    allowedPathPatterns: ["src", "src/**"],
+  });
+
+  const definitionPlan = createCapabilityInvocationPlan(
+    {
+      intentId: "intent-code-lsp-def-1",
+      sessionId: "session-code-lsp-def-1",
+      runId: "run-code-lsp-def-1",
+      capabilityKey: "code.lsp",
+      input: {
+        path: "src/consumer.ts",
+        operation: "definition",
+        line: 4,
+        character: 10,
+      },
+      priority: "normal",
+    },
+    {
+      idFactory: () => "plan-code-lsp-def-1",
+    },
+  );
+  const definitionPrepared = await adapter.prepare(definitionPlan, createCapabilityLease({
+    capabilityId: "cap-code-lsp-def-1",
+    bindingId: "binding-code-lsp-def-1",
+    generation: 1,
+    plan: definitionPlan,
+  }, {
+    idFactory: () => "lease-code-lsp-def-1",
+    clock: { now: () => new Date("2026-04-09T00:06:00.000Z") },
+  }));
+  const definitionEnvelope = await adapter.execute(definitionPrepared);
+  assert.equal(definitionEnvelope.status, "success");
+  assert.equal((definitionEnvelope.output as { definitions?: Array<{ path: string }> }).definitions?.[0]?.path, "src/sample.ts");
+
+  const referencesPlan = createCapabilityInvocationPlan(
+    {
+      intentId: "intent-code-lsp-refs-1",
+      sessionId: "session-code-lsp-refs-1",
+      runId: "run-code-lsp-refs-1",
+      capabilityKey: "code.lsp",
+      input: {
+        path: "src/sample.ts",
+        operation: "references",
+        line: 1,
+        character: 17,
+      },
+      priority: "normal",
+    },
+    {
+      idFactory: () => "plan-code-lsp-refs-1",
+    },
+  );
+  const referencesPrepared = await adapter.prepare(referencesPlan, createCapabilityLease({
+    capabilityId: "cap-code-lsp-refs-1",
+    bindingId: "binding-code-lsp-refs-1",
+    generation: 1,
+    plan: referencesPlan,
+  }, {
+    idFactory: () => "lease-code-lsp-refs-1",
+    clock: { now: () => new Date("2026-04-09T00:07:00.000Z") },
+  }));
+  const referencesEnvelope = await adapter.execute(referencesPrepared);
+  assert.equal(referencesEnvelope.status, "success");
+  assert.equal(
+    (referencesEnvelope.output as { references?: Array<{ path: string }> }).references?.some((entry) => entry.path === "src/consumer.ts"),
+    true,
+  );
 });
 
 test("workspace read baseline registration lets TAP dispatch docs.read through the pooled baseline path", async () => {
@@ -399,11 +576,11 @@ test("workspace read baseline registration lets TAP dispatch docs.read through t
   assert.equal(result.grant?.capabilityKey, "docs.read");
   assert.deepEqual(
     registration.capabilityKeys,
-    ["code.read", "code.ls", "code.glob", "code.grep", "code.read_many", "docs.read"],
+    ["code.read", "code.ls", "code.glob", "code.grep", "code.read_many", "code.symbol_search", "code.lsp", "docs.read"],
   );
   assert.deepEqual(
     registration.descriptors.map((entry) => entry.capabilityKey),
-    ["code.read", "code.ls", "code.glob", "code.grep", "code.read_many", "docs.read"],
+    ["code.read", "code.ls", "code.glob", "code.grep", "code.read_many", "code.symbol_search", "code.lsp", "docs.read"],
   );
   assert.equal(
     registration.descriptors.find((entry) => entry.capabilityKey === "docs.read")?.scopeKind,

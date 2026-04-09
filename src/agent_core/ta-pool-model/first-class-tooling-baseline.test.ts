@@ -14,11 +14,17 @@ import {
 test("tooling baseline helper returns the same A-group read capabilities for reviewer and TMA lanes", () => {
   assert.deepEqual(getFirstClassToolingBaselineCapabilities("reviewer"), [
     "code.read",
+    "code.ls",
+    "code.glob",
+    "code.grep",
+    "code.read_many",
+    "code.symbol_search",
+    "code.lsp",
     "docs.read",
   ]);
   assert.deepEqual(
-    getFirstClassToolingBaselineCapabilities("bootstrap_tma").slice(0, 2),
-    ["code.read", "docs.read"],
+    getFirstClassToolingBaselineCapabilities("bootstrap_tma").slice(0, 8),
+    ["code.read", "code.ls", "code.glob", "code.grep", "code.read_many", "code.symbol_search", "code.lsp", "docs.read"],
   );
   assert.equal(
     getFirstClassToolingBaselineCapabilities("bootstrap_tma").includes(
@@ -33,8 +39,8 @@ test("tooling baseline helper returns the same A-group read capabilities for rev
     true,
   );
   assert.deepEqual(
-    getFirstClassToolingBaselineCapabilities("extended_tma").slice(0, 2),
-    ["code.read", "docs.read"],
+    getFirstClassToolingBaselineCapabilities("extended_tma").slice(0, 8),
+    ["code.read", "code.ls", "code.glob", "code.grep", "code.read_many", "code.symbol_search", "code.lsp", "docs.read"],
   );
   assert.equal(
     getFirstClassToolingBaselineCapabilities("extended_tma").includes(
@@ -66,7 +72,16 @@ test("tooling baseline descriptors explain reviewer vs TMA scope in plain terms"
   const reviewer = getFirstClassToolingBaselineDescriptor("reviewer");
   assert.equal(reviewer.readOnly, true);
   assert.equal(reviewer.mayProvision, false);
-  assert.deepEqual(reviewer.capabilityKeys, ["code.read", "docs.read"]);
+  assert.deepEqual(reviewer.capabilityKeys, [
+    "code.read",
+    "code.ls",
+    "code.glob",
+    "code.grep",
+    "code.read_many",
+    "code.symbol_search",
+    "code.lsp",
+    "docs.read",
+  ]);
 
   const extended = getFirstClassToolingBaselineDescriptor("extended_tma");
   assert.equal(extended.mayPerformExternalSideEffects, true);
@@ -85,7 +100,16 @@ test("tooling baseline helper can build and extend capability profiles without d
     "reviewer",
   );
 
-  assert.deepEqual(created.baselineCapabilities, ["docs.read", "code.read"]);
+  assert.deepEqual(created.baselineCapabilities, [
+    "docs.read",
+    "code.read",
+    "code.ls",
+    "code.glob",
+    "code.grep",
+    "code.read_many",
+    "code.symbol_search",
+    "code.lsp",
+  ]);
   assert.deepEqual(created.allowedCapabilityPatterns, ["search.*"]);
 
   const extended = extendProfileWithFirstClassToolingBaseline(

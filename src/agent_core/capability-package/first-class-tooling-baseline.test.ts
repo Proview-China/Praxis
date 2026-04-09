@@ -23,6 +23,8 @@ test("first-class tooling baseline exposes the frozen A-group capability keys", 
     "code.glob",
     "code.grep",
     "code.read_many",
+    "code.symbol_search",
+    "code.lsp",
     "docs.read",
   ]);
   assert.deepEqual(FIRST_CLASS_TOOLING_ALLOWED_OPERATIONS, [
@@ -33,6 +35,11 @@ test("first-class tooling baseline exposes the frozen A-group capability keys", 
     "glob",
     "grep",
     "read_many",
+    "workspace_symbol",
+    "document_symbol",
+    "definition",
+    "references",
+    "hover",
   ]);
 });
 
@@ -81,10 +88,10 @@ test("docs.read package carries docs-oriented scope and activation metadata", ()
 
 test("first-class tooling baseline package listing stays stable and complete", () => {
   const packages = listFirstClassToolingBaselineCapabilityPackages();
-  assert.equal(packages.length, 6);
+  assert.equal(packages.length, 8);
   assert.deepEqual(
     packages.map((entry) => entry.manifest.capabilityKey),
-    ["code.read", "code.ls", "code.glob", "code.grep", "code.read_many", "docs.read"],
+    ["code.read", "code.ls", "code.glob", "code.grep", "code.read_many", "code.symbol_search", "code.lsp", "docs.read"],
   );
 });
 
@@ -92,7 +99,7 @@ test("first-class tooling capability descriptors expose reviewer-readable scope 
   const descriptors = listFirstClassToolingCapabilityBaselineDescriptors();
   assert.deepEqual(
     descriptors.map((entry) => entry.capabilityKey),
-    ["code.read", "code.ls", "code.glob", "code.grep", "code.read_many", "docs.read"],
+    ["code.read", "code.ls", "code.glob", "code.grep", "code.read_many", "code.symbol_search", "code.lsp", "docs.read"],
   );
 
   const codeRead =
@@ -120,6 +127,14 @@ test("new first-class code discovery packages expose the expected operation fami
   assert.deepEqual(
     createCodeReadManyCapabilityPackage().adapter.supports,
     ["read_many"],
+  );
+  assert.deepEqual(
+    getFirstClassToolingCapabilityBaselineDescriptor("code.symbol_search").allowedOperations,
+    ["workspace_symbol"],
+  );
+  assert.deepEqual(
+    getFirstClassToolingCapabilityBaselineDescriptor("code.lsp").allowedOperations,
+    ["workspace_symbol", "document_symbol", "definition", "references", "hover"],
   );
 });
 

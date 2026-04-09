@@ -11,6 +11,8 @@ export const FOUNDATION_FAMILY_CAPABILITY_KEYS = [
   "code.glob",
   "code.grep",
   "code.read_many",
+  "code.symbol_search",
+  "code.lsp",
   "docs.read",
   "repo.write",
   "code.edit",
