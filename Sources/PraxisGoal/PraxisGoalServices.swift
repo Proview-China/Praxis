@@ -8,6 +8,13 @@ public struct PraxisGoalNormalizationOptions: Sendable, Equatable, Codable {
   public let failureCriteria: [PraxisGoalCriterion]?
   public let additionalConstraints: [PraxisGoalConstraint]
 
+  /// Creates normalization overrides for a raw goal source.
+  ///
+  /// - Parameters:
+  ///   - taskStatement: Optional replacement task statement.
+  ///   - successCriteria: Optional replacement success criteria.
+  ///   - failureCriteria: Optional replacement failure criteria.
+  ///   - additionalConstraints: Extra constraints appended before deduplication.
   public init(
     taskStatement: String? = nil,
     successCriteria: [PraxisGoalCriterion]? = nil,
@@ -26,6 +33,11 @@ public struct PraxisGoalCompileCapabilityHint: Sendable, Equatable, Codable {
   public let key: String
   public let description: String?
 
+  /// Creates a capability hint used during goal compilation.
+  ///
+  /// - Parameters:
+  ///   - key: Stable capability identifier.
+  ///   - description: Optional explanation surfaced in compiled instructions.
   public init(key: String, description: String? = nil) {
     self.key = key
     self.description = description
@@ -39,6 +51,13 @@ public struct PraxisGoalCompileContext: Sendable, Equatable, Codable {
   public let contextSummary: String?
   public let metadata: [String: PraxisValue]?
 
+  /// Creates compile-time context for goal rendering.
+  ///
+  /// - Parameters:
+  ///   - staticInstructions: Extra instructions always appended to the compiled output.
+  ///   - capabilityHints: Capability hints available to the downstream runtime.
+  ///   - contextSummary: Optional concise summary of surrounding runtime context.
+  ///   - metadata: Additional plain-data metadata merged into the compiled goal.
   public init(
     staticInstructions: [String] = [],
     capabilityHints: [PraxisGoalCompileCapabilityHint] = [],
@@ -107,6 +126,7 @@ public extension PraxisGoalCompiling {
 
 /// Default implementation that trims input and injects baseline goal criteria.
 public struct PraxisDefaultGoalNormalizer: Sendable, PraxisGoalNormalizing {
+  /// Creates the default goal normalizer.
   public init() {}
 
   /// Builds a normalized goal from raw source input and optional caller overrides.
@@ -151,6 +171,7 @@ public struct PraxisDefaultGoalNormalizer: Sendable, PraxisGoalNormalizing {
 
 /// Default implementation that renders normalized goals into instruction text.
 public struct PraxisDefaultGoalCompiler: Sendable, PraxisGoalCompiling {
+  /// Creates the default goal compiler.
   public init() {}
 
   /// Produces a compiled goal containing instruction text and cache metadata.
@@ -247,6 +268,7 @@ public struct PraxisDefaultGoalCompiler: Sendable, PraxisGoalCompiling {
 
 /// Lightweight validation helpers for raw and normalized goal payloads.
 public struct PraxisGoalValidationService: Sendable {
+  /// Creates the lightweight goal validation service.
   public init() {}
 
   /// Validates a raw goal source before normalization.
