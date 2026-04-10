@@ -265,7 +265,7 @@ Core 禁止直接依赖：
 | --- | --- | --- | --- |
 | 37 | `PraxisCLI` | 非交互命令、交互会话、终端渲染、日志回放 | 先命令，后会话，再高级终端体验 |
 | 38 | `PraxisAppleUI` | SwiftUI app shell、inspection、run/session 宿主界面 | 先壳、后只读、再交互 |
-| 39 | `PraxisFFI` | 未来导出层 | 建立在 `PraxisRuntimeInterface` 与 `PraxisRuntimePresentationBridge` 稳定后再做 |
+| 39 | `PraxisFFI` | 未来导出层 | 当前先以 `PraxisFFIBridge` 的最小 encoded bridge surface 锁住可用性，不在此阶段提前冻结完整 ABI / 内存管理语义 |
 
 ### 8.8 当前需要显式纳入规划的模块面
 
@@ -463,11 +463,29 @@ Core 禁止直接依赖：
 
 ### Wave 6：HostRuntime
 
+进度记录（`2026-04-11`）：
+
+- 已基本覆盖到当前阶段所需的 HostRuntime 接口可用性
+- `PraxisRuntimeComposition`、`PraxisRuntimeUseCases`、`PraxisRuntimeFacades`、`PraxisRuntimeInterface`、`PraxisRuntimePresentationBridge` 已形成可验证闭环
+- 当前已经具备：
+  - host-backed inspection / run / resume 最小运行链
+  - replay-aware resume contract
+  - typed runtime interface request / structured response / error envelope
+  - runtime interface session registry / opaque handle lifecycle
+  - `PraxisFFIBridge` 的最小 encoded bridge surface
+- 这些覆盖已经足以支撑后续 CLI / AppleUI / FFI 继续演进，不需要现在就把完整 FFI target、C ABI、字符串/内存管理策略一次性做死
+- 当前阶段应刻意保留的弹性包括：
+  - 真实导出函数表如何组织
+  - 跨线程调用约束
+  - 流式 token / partial update 协议
+  - 最终的句柄释放与缓冲区所有权模型
+
 覆盖 target：
 
 - `PraxisRuntimeComposition`
 - `PraxisRuntimeUseCases`
 - `PraxisRuntimeFacades`
+- `PraxisRuntimeInterface`
 - `PraxisRuntimePresentationBridge`
 
 目标：
@@ -478,8 +496,21 @@ Core 禁止直接依赖：
 
 - 宿主可经由 facade / bridge 调 Core
 - 但不会把 Core 规则重新吸回 runtime 层
+- 对未来导出层已经有可验证的最小 neutral contract 与 encoded bridge surface
+- 但不在 Wave 6 冻结完整 `PraxisFFI` 行为细节
 
 ### Wave 7：Entry
+
+进度策略（`2026-04-11`）：
+
+- `PraxisCLI` 与 `PraxisAppleUI` 可以继续按宿主体验推进
+- `PraxisFFI` 当前不要求完整实现先落地
+- 进入 Wave 7 时，优先把现有 `PraxisFFIBridge` 升格成正式 target 与稳定导出边界
+- 不建议现在就补完整 ABI，因为这会过早冻结：
+  - 错误传递语义
+  - 内存管理方式
+  - 事件流协议
+  - 多语言绑定映射策略
 
 覆盖 target：
 
@@ -495,6 +526,7 @@ Core 禁止直接依赖：
 
 - CLI 能接管最小运行面
 - Apple UI 能承接 inspection 与后续交互页面
+- `PraxisFFI` 进入实现时，以当前最小 encoded bridge surface 为基线增量推进，而不是重写运行协议
 
 ## 10. 目标范围与不该迁移的内容
 

@@ -245,6 +245,9 @@
 原因：
 
 - FFI 应该建立在稳定的 `PraxisRuntimeInterface` 与 `PraxisRuntimePresentationBridge` 之上，而不是提前扩张 HostContracts。
+- 当前也保持这个原则：
+  - 先在 `PraxisRuntimePresentationBridge` 内部落最小 `PraxisFFIBridge` 包装
+  - 不把 `FFIBridgeExporter` / `FFICodec` 升格成通用 HostContracts target
 
 ### Observability / Telemetry / Metrics
 

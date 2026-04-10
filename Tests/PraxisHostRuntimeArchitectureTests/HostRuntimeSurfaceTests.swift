@@ -10,6 +10,7 @@ import PraxisSession
 import PraxisState
 @testable import PraxisRuntimeComposition
 @testable import PraxisRuntimeFacades
+@testable import PraxisRuntimeInterface
 @testable import PraxisRuntimePresentationBridge
 
 private func encodeTestJSON<T: Encodable>(_ value: T) throws -> String {
@@ -175,6 +176,92 @@ struct HostRuntimeSurfaceTests {
     #expect(runState.events.map(\.name) == ["run.started", "run.follow_up_ready"])
     #expect(bridgeEvents.map(\.name) == ["run.started", "run.follow_up_ready"])
     #expect(bridgeEvents.last?.intentID == "evt.created.run:session.cli.goal:cli.goal:model")
+  }
+
+  @Test
+  func ffiBridgeRoutesEncodedRuntimeInterfaceRequestsAcrossSessionHandles() async throws {
+    let ffiBridge = try PraxisRuntimeBridgeFactory.makeFFIBridge()
+    let codec = PraxisJSONRuntimeInterfaceCodec()
+    let handle = try await ffiBridge.openRuntimeSession()
+
+    let request = PraxisRuntimeInterfaceRequest.runGoal(
+      .init(
+        payloadSummary: "FFI bridge smoke test",
+        goalID: "goal.ffi-smoke",
+        goalTitle: "FFI Smoke Goal",
+        sessionID: "session.ffi-smoke"
+      )
+    )
+    let responseData = try await ffiBridge.handleEncodedRequest(
+      codec.encode(request),
+      on: handle
+    )
+    let response = try codec.decodeResponse(responseData)
+    let eventData = try await ffiBridge.drainEncodedEvents(for: handle)
+    let eventEnvelope = try JSONDecoder().decode(PraxisFFIEventEnvelope.self, from: eventData)
+
+    #expect(response.status == .success)
+    #expect(response.snapshot?.sessionID?.rawValue == "session.ffi-smoke")
+    #expect(response.events.map(\.name) == ["run.started", "run.follow_up_ready"])
+    #expect(eventEnvelope.status == .success)
+    #expect(eventEnvelope.handle == handle)
+    #expect(eventEnvelope.events.map(\.name) == ["run.started", "run.follow_up_ready"])
+    #expect(eventEnvelope.error == nil)
+    #expect(await ffiBridge.activeRuntimeSessionHandles() == [handle])
+  }
+
+  @Test
+  func ffiBridgeReturnsStructuredFailuresForInvalidPayloadAndClosedHandle() async throws {
+    let ffiBridge = try PraxisRuntimeBridgeFactory.makeFFIBridge()
+    let codec = PraxisJSONRuntimeInterfaceCodec()
+    let handle = try await ffiBridge.openRuntimeSession()
+
+    let invalidResponseData = try await ffiBridge.handleEncodedRequest(
+      Data("not-json".utf8),
+      on: handle
+    )
+    let invalidResponse = try codec.decodeResponse(invalidResponseData)
+
+    #expect(invalidResponse.status == .failure)
+    #expect(invalidResponse.error?.code == .invalidInput)
+    #expect(invalidResponse.error?.message.contains("Failed to decode runtime interface request payload") == true)
+
+    #expect(await ffiBridge.closeRuntimeSession(handle))
+
+    let closedResponseData = try await ffiBridge.handleEncodedRequest(
+      codec.encode(.inspectArchitecture),
+      on: handle
+    )
+    let closedResponse = try codec.decodeResponse(closedResponseData)
+    let closedEventData = try await ffiBridge.snapshotEncodedEvents(for: handle)
+    let closedEventEnvelope = try JSONDecoder().decode(PraxisFFIEventEnvelope.self, from: closedEventData)
+
+    #expect(closedResponse.status == .failure)
+    #expect(closedResponse.error?.code == .sessionNotFound)
+    #expect(closedEventEnvelope.status == .failure)
+    #expect(closedEventEnvelope.error?.code == .sessionNotFound)
+    #expect(closedEventEnvelope.handle == handle)
+  }
+
+  @Test
+  func ffiBridgeAcceptsLegacyFlatRuntimeInterfaceRequests() async throws {
+    let ffiBridge = try PraxisRuntimeBridgeFactory.makeFFIBridge()
+    let codec = PraxisJSONRuntimeInterfaceCodec()
+    let handle = try await ffiBridge.openRuntimeSession()
+    let legacyRunGoalJSON = """
+    {"kind":"runGoal","payloadSummary":"Legacy flat FFI request","goalID":"goal.legacy-ffi","goalTitle":"Legacy FFI Goal","sessionID":"session.legacy-ffi"}
+    """
+
+    let responseData = try await ffiBridge.handleEncodedRequest(
+      Data(legacyRunGoalJSON.utf8),
+      on: handle
+    )
+    let response = try codec.decodeResponse(responseData)
+
+    #expect(response.status == .success)
+    #expect(response.snapshot?.runID?.rawValue == "run:session.legacy-ffi:goal.legacy-ffi")
+    #expect(response.snapshot?.sessionID?.rawValue == "session.legacy-ffi")
+    #expect(response.events.map(\.name) == ["run.started", "run.follow_up_ready"])
   }
 
   @Test

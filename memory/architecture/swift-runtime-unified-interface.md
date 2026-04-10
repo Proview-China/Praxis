@@ -70,11 +70,14 @@
 ### 1. Request
 
 - `PraxisRuntimeInterfaceRequest`
+- `PraxisRuntimeInterfaceRunGoalRequestPayload`
+- `PraxisRuntimeInterfaceResumeRunRequestPayload`
 
 职责：
 
 - 表达一个宿主无关的 runtime 请求
 - 避免暴露 CLI / UI 专有命名
+- 对不同 command 固定 typed payload，而不是把所有字段揉进一个大而松散的 optional request bag
 
 当前覆盖的 command：
 
@@ -85,6 +88,37 @@
 - `inspectCmp`
 - `inspectMp`
 - `buildCapabilityCatalog`
+
+当前 request contract 采用：
+
+- 顶层 `kind`
+- 按 command 分开的 payload key
+
+编码默认输出 nested payload 形状，但当前 decoder 必须继续兼容历史 flat request 形状。
+
+例如 `resumeRun` 的 JSON shape 固定为：
+
+```json
+{
+  "kind": "resumeRun",
+  "resumeRun": {
+    "payloadSummary": "Resume this run",
+    "runID": "run:session.codec:goal.codec"
+  }
+}
+```
+
+这样做的目的：
+
+- 让跨语言调用方可以先按 `kind` 分发，再解析对应 payload
+- 避免 `goalID` / `runID` / `sessionID` 之类字段在不同 command 间变成“有时必填、有时无意义”的 optional 组合
+- 给未来 FFI / 其它语言 lib 保留稳定、可枚举的 payload schema
+
+同时还需要保留一条兼容约束：
+
+- 新 caller 应该发送 nested payload
+- 但 decoder 仍要接受历史 top-level `payloadSummary / goalID / goalTitle / sessionID / runID` 形式
+- 这是 wire-format backward compatibility，不只是内部重构细节
 
 对 `runGoal` / `resumeRun` 这组 run-oriented command，还要额外满足一个稳定约束：
 
@@ -106,12 +140,14 @@
 
 - `PraxisRuntimeInterfaceSnapshot`
 - `PraxisRuntimeInterfaceResponse`
+- `PraxisRuntimeInterfaceErrorEnvelope`
 
 职责：
 
 - 把一次调用后的当前状态压成稳定、可导出的 plain data
 - 在需要时附带 run/session/checkpoint/pending intent 等 runtime 关键信息
 - 对 run 类响应显式暴露 lifecycle disposition，避免调用方从 summary 文本猜测本次到底是 started、resumed，还是只根据 replay 恢复了真相
+- 对失败路径提供稳定的 `status + error` envelope，而不是把 Swift `Error` 原样泄漏给导出层
 
 ### 3. Event
 
@@ -132,6 +168,80 @@
 
 - 固定最小可导出编码面
 - 为未来其它语言绑定先准备稳定的 JSON contract
+
+### 5. Session Lifecycle
+
+- `PraxisRuntimeInterfaceSessionHandle`
+- `PraxisRuntimeInterfaceRegistry`
+
+职责：
+
+- 给统一接口提供宿主无关的 opaque handle 层
+- 按 handle 路由 request / snapshot / event drain
+- 隔离每个 interface session 自己的事件缓冲
+- 把 session open / close 语义固定在 runtime interface 内侧，而不是让未来 FFI 自己发明一套句柄表规则
+
+当前 registry contract 的最小语义是：
+
+- `openSession()` 分配新的 opaque handle
+- `closeSession(handle)` 释放一个 interface session
+- `activeHandles()` 返回当前存活句柄
+- `handle(request, on: handle)` 把请求路由到对应 session
+- `snapshotEvents(for:)` / `drainEvents(for:)` 只观察该 handle 自己的事件缓冲
+
+这里有一个边界需要明确：
+
+- handle 隔离的是 interface session lifecycle 和 event buffer
+- 不等于底层一定是独立 runtime persistence sandbox
+- 多个 handle 仍然可以复用同一组 host-backed adapters 与持久化底座
+
+这正是当前想要的行为：
+
+- 导出层可以拿到稳定句柄
+- 底层 runtime 真相仍由 HostRuntime / checkpoint / journal 统一维护
+- 不会因为 future FFI 句柄表而倒逼我们复制一份假的运行态存储
+
+## Result and error envelope contract
+
+`PraxisRuntimeInterfaceSession.handle(...)` 对外返回的总是 `PraxisRuntimeInterfaceResponse`。
+
+也就是说：
+
+- 成功时：
+  - `status = success`
+  - `snapshot != nil`
+  - `error == nil`
+- 失败时：
+  - `status = failure`
+  - `snapshot == nil`
+  - `error != nil`
+
+当前 error envelope 最小固定字段为：
+
+- `code`
+- `message`
+- `retryable`
+- `missingField`
+- `runID`
+- `sessionID`
+
+当前已稳定的错误码包括：
+
+- `session_not_found`
+- `missing_required_field`
+- `checkpoint_not_found`
+- `invalid_input`
+- `dependency_missing`
+- `unsupported_operation`
+- `invalid_transition`
+- `invariant_violation`
+- `unknown_error`
+
+这样做的目的不是把所有内部错误 taxonomy 一次性做完，而是先确保：
+
+- 统一接口调用方不需要理解 Swift `throw`
+- JSON codec 可以稳定 roundtrip 成功态和失败态
+- FFI / 其它语言绑定后续只需要对接结构化 envelope，而不是做异常桥接
 
 ## Resume reconciliation contract
 
@@ -191,6 +301,12 @@
 - Apple UI 可以继续吃 presentation bridge
 - FFI / 其它语言绑定优先建立在 runtime interface 上
 
+当前已经落下的一步是：
+
+- `PraxisFFIBridge` 已经开始在 `PraxisRuntimePresentationBridge` 内部包装 runtime interface registry
+- 它现在能提供 open / close session、encoded request -> encoded response、以及按 handle drain encoded events 的最小桥面
+- 但这仍然只是 Swift 内部桥层包装，还不是最终的 C ABI / symbol export
+
 也就是说：
 
 - `PresentationBridge` 负责“怎么展示”
@@ -202,29 +318,30 @@
 
 - 已创建 `PraxisRuntimeInterface` target
 - 已落下：
-  - request / response / event 模型
+  - typed request / response / event 模型
   - run lifecycle disposition
+  - structured result/error envelope
+  - session registry / opaque handle lifecycle
   - canonical run/session identity contract documented against `PraxisRunIdentityCodec`
   - serving protocol
   - JSON codec
   - `PraxisRuntimeInterfaceSession`
+  - `PraxisRuntimeInterfaceRegistry`
 
 当前还没做：
 
 - C ABI
-- FFI 句柄管理
 - 跨线程生命周期约束
 - 流式 token / partial update 协议
-- 多会话 registry
 
 ## 后续演进建议
 
 下一步如果继续推进这层，建议顺序如下：
 
 1. 先冻结 run/session/checkpoint/event 的 neutral contract
-2. 再补 error envelope 和 result code
-3. 再补更多 replay / terminal reconciliation smoke tests
-4. 最后才做具体 FFI target
+2. 再补更多 replay / terminal reconciliation / failure mapping smoke tests
+3. 再把当前 `PraxisFFIBridge` 升格成真正的 FFI target / C ABI surface
+4. 最后才补跨线程与流式协议细节
 
 不建议的顺序：
 

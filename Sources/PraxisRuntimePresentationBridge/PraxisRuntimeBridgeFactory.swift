@@ -82,6 +82,13 @@ public enum PraxisRuntimeBridgeFactory {
     try makeRuntimeInterface(hostAdapters: sharedScaffoldHostAdapters, blueprint: PraxisRuntimePresentationBridgeModule.bootstrap)
   }
 
+  public static func makeRuntimeInterfaceRegistry() -> PraxisRuntimeInterfaceRegistry {
+    makeRuntimeInterfaceRegistry(
+      hostAdapters: sharedScaffoldHostAdapters,
+      blueprint: PraxisRuntimePresentationBridgeModule.bootstrap
+    )
+  }
+
   static func makeRuntimeInterface(
     hostAdapters: PraxisHostAdapterRegistry = sharedScaffoldHostAdapters,
     blueprint: PraxisRuntimeBlueprint = PraxisRuntimePresentationBridgeModule.bootstrap
@@ -92,10 +99,21 @@ public enum PraxisRuntimeBridgeFactory {
     )
   }
 
+  static func makeRuntimeInterfaceRegistry(
+    hostAdapters: PraxisHostAdapterRegistry = sharedScaffoldHostAdapters,
+    blueprint: PraxisRuntimeBlueprint = PraxisRuntimePresentationBridgeModule.bootstrap
+  ) -> PraxisRuntimeInterfaceRegistry {
+    PraxisRuntimeInterfaceRegistry { _ in
+      try makeRuntimeInterface(hostAdapters: hostAdapters, blueprint: blueprint)
+    }
+  }
+
   static func makeFFIBridge(
     hostAdapters: PraxisHostAdapterRegistry = sharedScaffoldHostAdapters,
     blueprint: PraxisRuntimeBlueprint = PraxisRuntimePresentationBridgeModule.bootstrap
   ) throws -> PraxisFFIBridge {
-    PraxisFFIBridge(runtimeFacade: try makeRuntimeFacade(hostAdapters: hostAdapters, blueprint: blueprint))
+    PraxisFFIBridge(
+      runtimeInterfaceRegistry: makeRuntimeInterfaceRegistry(hostAdapters: hostAdapters, blueprint: blueprint)
+    )
   }
 }
