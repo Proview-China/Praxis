@@ -6,18 +6,6 @@ import PraxisCoreTypes
 // - 让 tooling contracts 保持“执行器协议层”，不反向带入领域规则。
 // - 文件可继续拆分：ShellExecutor.swift、BrowserExecutor.swift、GitExecutor.swift、ProcessSupervisor.swift。
 
-public protocol PraxisShellExecutor: Sendable {
-  func run(command: String) async throws -> String
-}
-
-public protocol PraxisBrowserExecutor: Sendable {
-  func navigate(url: String) async throws
-}
-
-public protocol PraxisGitExecutor: Sendable {
-  func apply(planSummary: String) async throws -> String
-}
-
 public enum PraxisToolingContractsModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisToolingContracts",

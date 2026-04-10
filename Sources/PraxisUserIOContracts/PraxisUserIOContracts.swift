@@ -6,18 +6,6 @@ import PraxisCoreTypes
 // - 保持 user I/O 只描述交互边界，不承担业务编排。
 // - 文件可继续拆分：UserInputDriver.swift、PermissionDriver.swift、TerminalPresenter.swift、ConversationPresenter.swift。
 
-public protocol PraxisUserInputDriver: Sendable {
-  func prompt(summary: String) async throws -> String
-}
-
-public protocol PraxisPermissionDriver: Sendable {
-  func request(scope: String) async throws -> Bool
-}
-
-public protocol PraxisConversationPresenter: Sendable {
-  func present(summary: String) async
-}
-
 public enum PraxisUserIOContractsModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisUserIOContracts",

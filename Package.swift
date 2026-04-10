@@ -418,7 +418,12 @@ let package = Package(
       name: "PraxisRuntimeUseCases",
       dependencies: [
         "PraxisCoreTypes",
+        "PraxisCapabilityContracts",
         "PraxisRuntimeComposition",
+        "PraxisTapTypes",
+        "PraxisTapGovernance",
+        "PraxisTapReview",
+        "PraxisTapRuntime",
       ],
       path: "Sources/PraxisRuntimeUseCases",
     ),

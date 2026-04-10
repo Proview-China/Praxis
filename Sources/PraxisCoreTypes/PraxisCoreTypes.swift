@@ -1,28 +1,6 @@
 // TODO(reboot-plan):
-// - 实现跨子域共用的 ID、错误、版本、边界标签和 lightweight protocol。
-// - 冻结可被 FFI 与宿主层安全复用的基础值类型，避免把高层语义塞回这里。
-// - 为所有子域补充统一命名、追踪标签和最小共享枚举，而不是继续堆 shared/util。
-// - 文件可继续拆分：BoundaryDescriptor.swift、CoreIdentifiers.swift、CoreErrors.swift、CoreConventions.swift。
-
-public struct PraxisBoundaryDescriptor: Sendable, Equatable, Identifiable {
-  public let name: String
-  public let responsibility: String
-  public let tsModules: [String]
-
-  public var id: String {
-    name
-  }
-
-  public init(
-    name: String,
-    responsibility: String,
-    tsModules: [String] = [],
-  ) {
-    self.name = name
-    self.responsibility = responsibility
-    self.tsModules = tsModules
-  }
-}
+// - 继续把跨子域公共约定稳定在 CoreTypes，不向高层回灌领域语义。
+// - 当多个 target 出现重复基础值对象时，优先下沉到独立文件，而不是回并成 shared/util。
 
 public enum PraxisCoreTypesModule {
   public static let boundary = PraxisBoundaryDescriptor(

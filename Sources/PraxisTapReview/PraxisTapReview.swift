@@ -1,4 +1,3 @@
-import PraxisCapabilityContracts
 import PraxisCapabilityResults
 import PraxisCoreTypes
 import PraxisTapGovernance

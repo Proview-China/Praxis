@@ -1,5 +1,6 @@
 import PraxisCoreTypes
 import PraxisRuntimeUseCases
+import PraxisRun
 
 // TODO(reboot-plan):
 // - 实现稳定 facade、宿主可消费 DTO、会话/运行视图聚合模型。

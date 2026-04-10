@@ -6,18 +6,6 @@ import PraxisCoreTypes
 // - 明确 workspace 只描述宿主能力，不承接业务规划逻辑。
 // - 文件可继续拆分：WorkspaceReader.swift、WorkspaceSearcher.swift、WorkspaceWriter.swift、WorkspaceChangeTypes.swift。
 
-public protocol PraxisWorkspaceReader: Sendable {
-  func read(path: String) async throws -> String
-}
-
-public protocol PraxisWorkspaceSearcher: Sendable {
-  func search(query: String) async throws -> [String]
-}
-
-public protocol PraxisWorkspaceWriter: Sendable {
-  func apply(changeSummary: String) async throws
-}
-
 public enum PraxisWorkspaceContractsModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisWorkspaceContracts",

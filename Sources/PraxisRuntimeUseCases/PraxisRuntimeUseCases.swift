@@ -1,5 +1,8 @@
 import PraxisCoreTypes
+import PraxisGoal
 import PraxisRuntimeComposition
+import PraxisRun
+import PraxisSession
 
 // TODO(reboot-plan):
 // - 实现 runGoal、resumeRun、inspectTap、inspectCmp、buildCapabilityCatalog 等高层用例。
