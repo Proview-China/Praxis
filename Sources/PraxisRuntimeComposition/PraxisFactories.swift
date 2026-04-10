@@ -1,3 +1,4 @@
+import Foundation
 import PraxisCoreTypes
 
 public struct PraxisCoreServiceFactory: Sendable {
@@ -9,6 +10,10 @@ public final class PraxisHostAdapterFactory: Sendable {
 
   public func makeScaffoldAdapters() -> PraxisHostAdapterRegistry {
     .scaffoldDefaults()
+  }
+
+  public func makeLocalAdapters(rootDirectory: URL? = nil) -> PraxisHostAdapterRegistry {
+    .localDefaults(rootDirectory: rootDirectory)
   }
 }
 

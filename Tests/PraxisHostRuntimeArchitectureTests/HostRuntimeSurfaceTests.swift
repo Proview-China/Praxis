@@ -540,15 +540,57 @@ struct HostRuntimeSurfaceTests {
   }
 
   @Test
-  func defaultBridgeFactoryReusesSharedScaffoldHostAdaptersAcrossBridgeInstances() async throws {
+  func localDefaultsPersistCheckpointAndJournalAcrossIndependentRegistries() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-local-defaults-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let sessionID = PraxisSessionID(rawValue: "session.local-defaults")
+    let runID = PraxisRunID(rawValue: "run:session.local-defaults:goal.local-defaults")
+    let checkpointRecord = try makeCheckpointRecord(
+      status: .paused,
+      sessionID: sessionID,
+      runID: runID,
+      tickCount: 2,
+      lastCursor: .init(sequence: 1)
+    )
+
+    let firstRegistry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+    let secondRegistry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+    let journalEvent = PraxisJournalEvent(
+      sequence: 0,
+      sessionID: sessionID,
+      runReference: runID.rawValue,
+      type: "run.created",
+      summary: "Local defaults wrote one journal event"
+    )
+
+    _ = try await firstRegistry.checkpointStore?.save(checkpointRecord)
+    _ = try await firstRegistry.journalStore?.append(.init(events: [journalEvent]))
+
+    let loadedCheckpoint = try await secondRegistry.checkpointStore?.load(pointer: checkpointRecord.pointer)
+    let loadedJournal = try await secondRegistry.journalStore?.read(
+      .init(sessionID: sessionID.rawValue, limit: 10)
+    )
+    let gitReport = await secondRegistry.gitAvailabilityProbe?.probeGitReadiness()
+
+    #expect(loadedCheckpoint?.snapshot.id == checkpointRecord.snapshot.id)
+    #expect(loadedJournal?.events.count == 1)
+    #expect(loadedJournal?.events.first?.summary == "Local defaults wrote one journal event")
+    #expect(gitReport != nil)
+    #expect(gitReport?.notes.isEmpty == false)
+  }
+
+  @Test
+  func defaultBridgeFactoryReusesSharedLocalHostAdaptersAcrossBridgeInstances() async throws {
     let facade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade()
     let goal = PraxisCompiledGoal(
       normalizedGoal: .init(
         id: .init(rawValue: "goal.shared-factory"),
         title: "Shared Factory Goal",
-        summary: "Verify shared scaffold adapters"
+        summary: "Verify shared local adapters"
       ),
-      intentSummary: "Verify shared scaffold adapters"
+      intentSummary: "Verify shared local adapters"
     )
     let started = try await facade.runFacade.runGoal(
       .init(

@@ -244,9 +244,10 @@
 
 原因：
 
-- FFI 应该建立在稳定的 `PraxisRuntimeInterface` 与 `PraxisRuntimePresentationBridge` 之上，而不是提前扩张 HostContracts。
+- FFI 应该优先建立在稳定的 `PraxisRuntimeInterface` 之上。
+- `PraxisRuntimePresentationBridge` 只服务 Swift-native host，不应被当成其它语言 UI / shell 的前置耦合层。
 - 当前也保持这个原则：
-  - 先在 `PraxisRuntimePresentationBridge` 内部落最小 `PraxisFFIBridge` 包装
+  - 先保留最小 `PraxisFFIBridge` 包装，逐步从 neutral runtime contract 进入系统
   - 不把 `FFIBridgeExporter` / `FFICodec` 升格成通用 HostContracts target
 
 ### Observability / Telemetry / Metrics

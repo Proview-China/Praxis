@@ -7,7 +7,7 @@ public struct PraxisRuntimeCompositionRoot: Sendable {
 
   public init(
     boundaries: [PraxisBoundaryDescriptor],
-    hostAdapters: PraxisHostAdapterRegistry = .scaffoldDefaults(),
+    hostAdapters: PraxisHostAdapterRegistry = .localDefaults(),
     bootstrapValidator: PraxisBootstrapValidator = .init()
   ) {
     self.boundaries = boundaries

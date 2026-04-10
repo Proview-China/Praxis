@@ -19,6 +19,7 @@ import PraxisProviderContracts
 import PraxisRun
 import PraxisRuntimeComposition
 import PraxisRuntimeFacades
+import PraxisRuntimeGateway
 import PraxisRuntimeInterface
 import PraxisRuntimeUseCases
 import PraxisSession
@@ -35,15 +36,17 @@ import PraxisUserIOContracts
 import PraxisWorkspaceContracts
 
 // TODO(reboot-plan):
-// - Implement presentation-facing DTOs, intents, and bridge mappers shared by CLI, SwiftUI, and FFI.
-// - Ensure entry layers consume the runtime only through this target instead of touching composition, use case, or facade internals directly.
-// - Provide stable bridge models for different hosts, such as command results, view state, and streaming events.
-// - This file can later be split into PresentationModels.swift, CLICommandBridge.swift, ApplePresentationBridge.swift, and FFIBridge.swift.
+// - Implement presentation-facing DTOs and bridge mappers for native hosts while keeping
+//   runtime interface contracts host-agnostic and export-friendly.
+// - Ensure native presentation layers avoid touching composition, use case, or facade internals directly.
+// - Provide stable bridge models for view state, command rendering, and compatibility wrappers.
+// - This file can later be split into PresentationModels.swift, ApplePresentationBridge.swift,
+//   compatibility adapters, and FFIBridge.swift.
 
 public enum PraxisRuntimePresentationBridgeModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisRuntimePresentationBridge",
-    responsibility: "把 runtime facade/use case 映射为 CLI / UI / FFI 可消费的展示桥。",
+    responsibility: "把 runtime facade/use case 映射为原生展示态与兼容包装，不承担 portal-agnostic runtime contract。",
     tsModules: [
       "src/agent_core/live-agent-chat/shared.ts",
       "src/agent_core/live-agent-chat/ui.ts",
@@ -93,6 +96,7 @@ public enum PraxisRuntimePresentationBridgeModule {
       PraxisRuntimeUseCasesModule.boundary,
       PraxisRuntimeFacadesModule.boundary,
       PraxisRuntimeInterfaceModule.boundary,
+      PraxisRuntimeGatewayModule.boundary,
       boundary,
     ],
     entrypoints: [
@@ -103,8 +107,8 @@ public enum PraxisRuntimePresentationBridgeModule {
     rules: [
       "Core 是逻辑层，不是单一模块。",
       "HostContracts 必须按协议族继续拆分。",
-      "HostRuntime 必须按 composition/use case/facade/runtime interface/presentation bridge 拆分。",
-      "Entry 只能经由 RuntimePresentationBridge 进入系统。",
+      "HostRuntime 必须按 composition/use case/facade/runtime interface/runtime gateway/presentation bridge 拆分。",
+      "CLI / 导出入口优先经由 RuntimeGateway -> RuntimeInterface；原生 UI 展示态通过 RuntimePresentationBridge 进入系统。",
     ],
   )
 }

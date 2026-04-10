@@ -1,49 +1,49 @@
 import PraxisRuntimeComposition
 import PraxisRuntimeFacades
+import PraxisRuntimeGateway
 import PraxisRuntimeInterface
 
 public enum PraxisRuntimeBridgeFactory {
-  private static let sharedScaffoldHostAdapters = PraxisHostAdapterRegistry.scaffoldDefaults()
+  private static let sharedLocalHostAdapters = PraxisHostAdapterRegistry.localDefaults()
 
   static func makeCompositionRoot() -> PraxisRuntimeCompositionRoot {
-    makeCompositionRoot(hostAdapters: sharedScaffoldHostAdapters, blueprint: PraxisRuntimePresentationBridgeModule.bootstrap)
-  }
-
-  static func makeCompositionRoot(
-    hostAdapters: PraxisHostAdapterRegistry = sharedScaffoldHostAdapters,
-    blueprint: PraxisRuntimeBlueprint = PraxisRuntimePresentationBridgeModule.bootstrap
-  ) -> PraxisRuntimeCompositionRoot {
-    PraxisRuntimeCompositionRoot(
-      boundaries: blueprint.foundationModules
-        + blueprint.functionalDomainModules
-        + blueprint.hostContractModules
-        + blueprint.runtimeModules,
-      hostAdapters: hostAdapters
+    PraxisRuntimeGatewayFactory.makeCompositionRoot(
+      hostAdapters: sharedLocalHostAdapters,
+      blueprint: PraxisRuntimePresentationBridgeModule.bootstrap
     )
   }
 
+  static func makeCompositionRoot(
+    hostAdapters: PraxisHostAdapterRegistry = sharedLocalHostAdapters,
+    blueprint: PraxisRuntimeBlueprint = PraxisRuntimePresentationBridgeModule.bootstrap
+  ) -> PraxisRuntimeCompositionRoot {
+    PraxisRuntimeGatewayFactory.makeCompositionRoot(hostAdapters: hostAdapters, blueprint: blueprint)
+  }
+
   static func makeRuntimeFacade() throws -> PraxisRuntimeFacade {
-    try makeRuntimeFacade(hostAdapters: sharedScaffoldHostAdapters, blueprint: PraxisRuntimePresentationBridgeModule.bootstrap)
+    try PraxisRuntimeGatewayFactory.makeRuntimeFacade(
+      hostAdapters: sharedLocalHostAdapters,
+      blueprint: PraxisRuntimePresentationBridgeModule.bootstrap
+    )
   }
 
   static func makeRuntimeFacade(
-    hostAdapters: PraxisHostAdapterRegistry = sharedScaffoldHostAdapters,
+    hostAdapters: PraxisHostAdapterRegistry = sharedLocalHostAdapters,
     blueprint: PraxisRuntimeBlueprint = PraxisRuntimePresentationBridgeModule.bootstrap
   ) throws -> PraxisRuntimeFacade {
-    let dependencies = try makeCompositionRoot(hostAdapters: hostAdapters, blueprint: blueprint).makeDependencyGraph()
-    return PraxisRuntimeFacade(dependencies: dependencies)
+    try PraxisRuntimeGatewayFactory.makeRuntimeFacade(hostAdapters: hostAdapters, blueprint: blueprint)
   }
 
   public static func makeCLICommandBridge() throws -> PraxisCLICommandBridge {
     try makeCLICommandBridge(
-      hostAdapters: sharedScaffoldHostAdapters,
+      hostAdapters: sharedLocalHostAdapters,
       blueprint: PraxisRuntimePresentationBridgeModule.bootstrap,
       stateMapper: .init()
     )
   }
 
   static func makeCLICommandBridge(
-    hostAdapters: PraxisHostAdapterRegistry = sharedScaffoldHostAdapters,
+    hostAdapters: PraxisHostAdapterRegistry = sharedLocalHostAdapters,
     blueprint: PraxisRuntimeBlueprint = PraxisRuntimePresentationBridgeModule.bootstrap,
     stateMapper: PraxisPresentationStateMapper = .init()
   ) throws -> PraxisCLICommandBridge {
@@ -56,7 +56,7 @@ public enum PraxisRuntimeBridgeFactory {
   @MainActor
   public static func makeApplePresentationBridge() throws -> PraxisApplePresentationBridge {
     try makeApplePresentationBridge(
-      hostAdapters: sharedScaffoldHostAdapters,
+      hostAdapters: sharedLocalHostAdapters,
       blueprint: PraxisRuntimePresentationBridgeModule.bootstrap,
       stateMapper: .init()
     )
@@ -64,7 +64,7 @@ public enum PraxisRuntimeBridgeFactory {
 
   @MainActor
   static func makeApplePresentationBridge(
-    hostAdapters: PraxisHostAdapterRegistry = sharedScaffoldHostAdapters,
+    hostAdapters: PraxisHostAdapterRegistry = sharedLocalHostAdapters,
     blueprint: PraxisRuntimeBlueprint = PraxisRuntimePresentationBridgeModule.bootstrap,
     stateMapper: PraxisPresentationStateMapper = .init()
   ) throws -> PraxisApplePresentationBridge {
@@ -75,41 +75,39 @@ public enum PraxisRuntimeBridgeFactory {
   }
 
   public static func makeFFIBridge() throws -> PraxisFFIBridge {
-    try makeFFIBridge(hostAdapters: sharedScaffoldHostAdapters, blueprint: PraxisRuntimePresentationBridgeModule.bootstrap)
+    try makeFFIBridge(hostAdapters: sharedLocalHostAdapters, blueprint: PraxisRuntimePresentationBridgeModule.bootstrap)
   }
 
   public static func makeRuntimeInterface() throws -> PraxisRuntimeInterfaceSession {
-    try makeRuntimeInterface(hostAdapters: sharedScaffoldHostAdapters, blueprint: PraxisRuntimePresentationBridgeModule.bootstrap)
+    try PraxisRuntimeGatewayFactory.makeRuntimeInterface(
+      hostAdapters: sharedLocalHostAdapters,
+      blueprint: PraxisRuntimePresentationBridgeModule.bootstrap
+    )
   }
 
   public static func makeRuntimeInterfaceRegistry() -> PraxisRuntimeInterfaceRegistry {
-    makeRuntimeInterfaceRegistry(
-      hostAdapters: sharedScaffoldHostAdapters,
+    PraxisRuntimeGatewayFactory.makeRuntimeInterfaceRegistry(
+      hostAdapters: sharedLocalHostAdapters,
       blueprint: PraxisRuntimePresentationBridgeModule.bootstrap
     )
   }
 
   static func makeRuntimeInterface(
-    hostAdapters: PraxisHostAdapterRegistry = sharedScaffoldHostAdapters,
+    hostAdapters: PraxisHostAdapterRegistry = sharedLocalHostAdapters,
     blueprint: PraxisRuntimeBlueprint = PraxisRuntimePresentationBridgeModule.bootstrap
   ) throws -> PraxisRuntimeInterfaceSession {
-    PraxisRuntimeInterfaceSession(
-      runtimeFacade: try makeRuntimeFacade(hostAdapters: hostAdapters, blueprint: blueprint),
-      blueprint: blueprint
-    )
+    try PraxisRuntimeGatewayFactory.makeRuntimeInterface(hostAdapters: hostAdapters, blueprint: blueprint)
   }
 
   static func makeRuntimeInterfaceRegistry(
-    hostAdapters: PraxisHostAdapterRegistry = sharedScaffoldHostAdapters,
+    hostAdapters: PraxisHostAdapterRegistry = sharedLocalHostAdapters,
     blueprint: PraxisRuntimeBlueprint = PraxisRuntimePresentationBridgeModule.bootstrap
   ) -> PraxisRuntimeInterfaceRegistry {
-    PraxisRuntimeInterfaceRegistry { _ in
-      try makeRuntimeInterface(hostAdapters: hostAdapters, blueprint: blueprint)
-    }
+    PraxisRuntimeGatewayFactory.makeRuntimeInterfaceRegistry(hostAdapters: hostAdapters, blueprint: blueprint)
   }
 
   static func makeFFIBridge(
-    hostAdapters: PraxisHostAdapterRegistry = sharedScaffoldHostAdapters,
+    hostAdapters: PraxisHostAdapterRegistry = sharedLocalHostAdapters,
     blueprint: PraxisRuntimeBlueprint = PraxisRuntimePresentationBridgeModule.bootstrap
   ) throws -> PraxisFFIBridge {
     PraxisFFIBridge(

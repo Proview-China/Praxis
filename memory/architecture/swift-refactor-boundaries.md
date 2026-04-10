@@ -12,6 +12,12 @@
   - `PraxisHostRuntime`
   - `PraxisCLI / PraxisAppleUI / PraxisFFI`
 - `PraxisCore` 只代表逻辑层，不代表具体模块名或产品名。
+- 当前产品策略上，`PraxisCLI / PraxisAppleUI` 都不作为近期必须优先做厚的实现面。
+- 如果后续 UI / shell 有其它语言代码进入，默认优先通过：
+  - `PraxisRuntimeInterface`
+  - `PraxisFFIBridge`
+  - 后续正式 `PraxisFFI`
+  接入系统。
 
 ## 对 Swift 重构的约束
 
@@ -62,6 +68,7 @@
 - Entrypoints:
   - `PraxisCLI`
   - `PraxisAppleUI`
+  - 未来 `PraxisFFI`
 
 - 当前 target 设计原则：
   - 先按功能边界拆到“可编译、可继续细分”的粒度
@@ -74,6 +81,7 @@
 - Git / DB / MQ / provider 相关能力都必须拆成：
   - Core planner/model
   - Host executor
-- CLI 和 SwiftUI 只能通过 `PraxisRuntimePresentationBridge` 调用系统能力。
+- Swift-native CLI 和 SwiftUI 只能通过 `PraxisRuntimePresentationBridge` 调用系统能力。
+- 但跨语言 UI / shell 不应被迫先经过 CLI；默认优先走 `PraxisRuntimeInterface` / `PraxisFFI`。
 - `live-agent-chat`、`rax facade/runtime`、`runtime.ts` 只保留为行为参考，不作为代码结构模板。
 - Capability / TAP / CMP / HostContracts / HostRuntime 当前都已经拆到 phase-1 target 粒度，不允许再回并成粗模块。

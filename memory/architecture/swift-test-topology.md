@@ -49,7 +49,8 @@
 - target: `PraxisHostRuntimeArchitectureTests`
 - 负责：
   - `Composition / UseCases / Facades / PresentationBridge` 四分结构稳定
-  - Entry 是否仍只通过 `PraxisRuntimePresentationBridge` 进入
+  - Swift-native Entry 是否仍只通过 `PraxisRuntimePresentationBridge` 进入
+  - 跨语言导出入口是否继续优先建立在 `PraxisRuntimeInterface` / `PraxisFFI` 上
 
 ## 当前阶段这些测试的本质
 

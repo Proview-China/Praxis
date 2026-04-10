@@ -12,7 +12,8 @@
 - `Core` 是逻辑层，不是单一 target。
 - `HostContracts` 只定义协议，不承载业务规则。
 - `HostRuntime` 负责装配与对外用例，不重新吸收 Core 规则。
-- `Entry` 只能通过 `PraxisRuntimePresentationBridge` 进入系统。
+- `PraxisCLI`、导出 lib、跨语言 UI / shell / desktop host 默认优先通过 `PraxisRuntimeInterface` / `PraxisFFI` 进入系统。
+- Swift-native UI host 需要展示态映射时，再通过 `PraxisRuntimePresentationBridge` 进入系统。
 
 ## 层级矩阵
 
@@ -29,7 +30,8 @@
 | `HostRuntime` | `Entry` | 不允许 | 装配层不反向知道入口 |
 | `Entry` | `Core` | 不允许 | 不允许越层直连 Core |
 | `Entry` | `HostContracts` | 不允许 | 入口层不直接持有宿主协议 |
-| `Entry` | `PraxisRuntimePresentationBridge` | 允许 | 唯一正式入口 |
+| `Entry` | `PraxisRuntimePresentationBridge` | 允许 | 原生 UI 展示入口 |
+| `Entry` | `PraxisRuntimeInterface` | 允许 | CLI / 跨语言 host / 导出层首选中立入口 |
 
 ## Product 与 target 的关系
 
@@ -368,6 +370,7 @@
 
 - `PraxisRuntimeInterface` 负责宿主无关的统一 request/response/event/coding surface。
 - 它可以被未来的导出层或跨语言绑定复用，但不能吸收 CLI、SwiftUI、ABI 细节。
+- 如果 CLI / GUI 暂时不推进，也不影响这层先作为长期主接入协议冻结。
 
 #### `PraxisRuntimePresentationBridge`
 
@@ -382,13 +385,15 @@
 
 说明：
 
-- `PraxisRuntimePresentationBridge` 是 Entry 的唯一正式入口。
+- `PraxisRuntimePresentationBridge` 是 Swift-native Entry 的正式入口。
+- 它不是未来所有跨语言 UI 的唯一强制入口。
 
 ### Entry
 
 #### `PraxisCLI`
 
 - 可依赖：
+  - `PraxisRuntimeInterface`
   - `PraxisRuntimePresentationBridge`
 - 禁止依赖：
   - 其它所有 Core target
@@ -396,6 +401,13 @@
   - `PraxisRuntimeComposition`
   - `PraxisRuntimeUseCases`
   - `PraxisRuntimeFacades`
+
+说明：
+
+- `PraxisCLI` 默认只作为薄适配层 / debug harness。
+- 运行时请求应优先经由 `PraxisRuntimeInterface`。
+- 如果暂时复用 `PraxisRuntimePresentationBridge`，也只允许用于共享 bootstrap / compatibility helper，不应把 CLI 再绑回 presentation contract。
+- 不应成为后续多语言 UI 接入的耦合中心。
 
 #### `PraxisAppleUI`
 
@@ -407,6 +419,11 @@
   - `PraxisRuntimeComposition`
   - `PraxisRuntimeUseCases`
   - `PraxisRuntimeFacades`
+
+说明：
+
+- `PraxisAppleUI` 默认只作为 Swift-native 可选宿主壳。
+- 不应反向决定 runtime contract 设计。
 
 ## 继续细分时的硬规则
 

@@ -12,6 +12,12 @@
 
 它只是把 HostRuntime 当前已经稳定下来的运行能力，收口成一组未来可被任何宿主或任何语言绑定复用的统一 request/response/event 面。
 
+当前额外冻结一条策略：
+
+- 这层不是给 Swift CLI / SwiftUI 打下手的次要接口
+- 如果后续 UI / shell 有其它语言代码进入，默认优先建立在这层之上
+- CLI / GUI 当前都不应反向牵引 runtime contract 设计
+
 ## 为什么需要单独一层
 
 当前已经有：
@@ -22,7 +28,7 @@
 但它们各自的角色不同：
 
 - `Facades` 负责宿主可理解的稳定应用表面
-- `PresentationBridge` 负责把 facade/use case 映射为 CLI / UI / FFI 可消费的展示状态
+- `PresentationBridge` 负责原生展示态映射与兼容包装
 
 问题在于：
 
@@ -53,6 +59,7 @@
 - 统一 runtime event 模型
 - 统一编码接口，例如 JSON codec
 - 统一事件缓冲与 drain/snapshot 语义
+- 作为未来多语言 UI / shell / desktop host 的首选运行接入面
 
 它不负责：
 
@@ -62,6 +69,9 @@
 - FFI ABI 细节
 - C header / symbol export
 - Host adapter composition
+- 替 Swift CLI 固化长期命令形状
+- 替 SwiftUI 固化长期页面模型
+- 让其它语言 UI 必须先经过 CLI
 
 ## 当前最小 contract
 
@@ -297,9 +307,10 @@
 
 以后理想状态下：
 
-- CLI 可以继续吃 presentation bridge
-- Apple UI 可以继续吃 presentation bridge
+- `PraxisCLI` 默认应直接吃 runtime interface
+- Swift-native Apple UI 可以继续吃 presentation bridge
 - FFI / 其它语言绑定优先建立在 runtime interface 上
+- 如果未来 UI 有其它语言代码进入，默认不要求它先经过 CLI
 
 当前已经落下的一步是：
 
@@ -311,6 +322,7 @@
 
 - `PresentationBridge` 负责“怎么展示”
 - `RuntimeInterface` 负责“系统对外稳定地说什么”
+- CLI 与未来导出 lib 应尽量共享后者，而不是各自长命令桥
 
 ## 当前实现策略
 
@@ -348,6 +360,7 @@
 - 先写 C header
 - 先做 SwiftUI/CLI 反向适配
 - 先把所有 provider/tooling 事件塞进统一接口
+- 先把 CLI / GUI 做厚以后再回头抽中立协议
 
 ## 当前结论
 
@@ -358,3 +371,4 @@
 - 为未来其它语言导出 lib 提前冻结稳定接口
 - 不让 CLI / AppleUI / FFI 各自长出不同协议
 - 让导出层建立在 neutral runtime contract 上，而不是直接绑定展示层或宿主层
+- 让 CLI / GUI 即使暂时不做，也不会阻塞后续其它语言 UI 接入
