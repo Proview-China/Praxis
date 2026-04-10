@@ -44,20 +44,46 @@
   - CMP facade / service 不再只靠一个大表面承接，而是已经出现 `session`、`flow`、`project`、`roles`、`control`、`readback` 这些清晰缝
   - HostRuntime 内部也已经出现 `activeFlow`、`project`、`tapBridge` 这样的服务切面
   - HostContracts 侧已经开始出现 MP baseline、semantic memory、browser grounding、multimodal user-io 的明确契约占位
-- 当前 Swift 仍然主要是“可编译骨架 + 架构守卫测试”，还没有承接 TS 的完整行为深度。
+- 当前 Swift 已不再只是“可编译骨架 + 架构守卫测试”：
+  - `PraxisRuntimeComposition` 默认 local profile 已经具备第一批真实本地 adapter：
+    - checkpoint / journal / projection / delivery truth
+    - embedding / semantic memory / semantic search
+    - message bus
+    - shell executor
+    - git readiness probe
+    - workspace reader / searcher / writer
+    - git executor
+    - lineage store
+  - `PraxisCLI` 已具备最小命令式壳：
+    - `inspect-architecture`
+    - `inspect-tap`
+    - `inspect-cmp`
+    - `inspect-mp`
+    - `run-goal`
+    - `resume-run`
+    - `events`
+- 但当前 Swift 仍然没有承接 TS 的完整 live/runtime 深度：
+  - provider live inference 仍默认是 scaffold surface
+  - browser grounding / multimodal user-io 仍默认是 scaffold surface
+  - 本地持久化仍是 JSON-backed baseline，而不是正式 SQLite schema
 
 ### 2.3 当前验证状态
 
-截至 `2026-04-10`，本地已确认：
+截至 `2026-04-11`，本地已确认：
 
 - `swift test` 通过
 - Swift package tests 已切换到 `Swift Testing`
-- `npm run typecheck` 通过
+- 当前 `swift test` 快照为：
+  - `125` tests
+  - `39` suites
+- `npm run typecheck` 当前未全绿：
+  - `src/agent_core/live-agent-chat.ts:1690` 存在 TypeScript 参数个数错误
 
 这说明：
 
-- Swift 骨架当前是可编译、可守卫的
+- Swift 主路径当前是可编译、可守卫、且已具备一批真实 local runtime adapter 的
 - 但它还不是 TS 运行时的功能等价替代
+- TS 侧当前仍是行为参考基线，而不是“所有静态检查都完全健康”的基线
 
 ## 3. 总目标
 
@@ -482,6 +508,16 @@ Core 禁止直接依赖：
   - typed runtime interface request / structured response / error envelope
   - runtime interface session registry / opaque handle lifecycle
   - `PraxisFFIBridge` 的最小 encoded bridge surface
+- `PraxisRuntimeComposition` 默认 local profile 当前已不再只是 scaffold 装配：
+  - 已有真实 local persistence / semantic memory / message bus / shell / git probe
+  - 已补入真实 workspace reader/searcher/writer
+  - 已补入最小 system git executor
+  - 已补入 local lineage store
+- `PraxisInspectCmpUseCase` 当前也不再只看“adapter 是否存在”，而是开始读取：
+  - workspace 读写检索状态
+  - git repository verify 状态
+  - projection 引用到的 lineage resolution 状态
+- 这意味着当前 Wave 6 已进入“最小 local runtime 闭环”阶段，而不是只停留在 neutral bridge / facade 可调用
 - 这些覆盖已经足以支撑后续多语言 UI / shell / CLI adapter 继续演进，不需要现在就把 Swift CLI / SwiftUI 做成主产品面，也不需要现在就把完整 FFI target、C ABI、字符串/内存管理策略一次性做死
 - 当前阶段应刻意保留的弹性包括：
   - 真实导出函数表如何组织
@@ -507,6 +543,11 @@ Core 禁止直接依赖：
 - 但不会把 Core 规则重新吸回 runtime 层
 - 对未来导出层已经有可验证的最小 neutral contract 与 encoded bridge surface
 - 但不在 Wave 6 冻结完整 `PraxisFFI` 行为细节
+- local runtime 默认装配至少具备：
+  - workspace read/search/write
+  - git readiness + minimal git execution
+  - lineage persistence
+  - inspection summary 能反映这些真实本地能力，而不是只反映“有无接线”
 
 ### Wave 7：Entry / Export Adapters
 

@@ -464,6 +464,9 @@ private func hostCapabilityIDs(from dependencies: PraxisDependencyGraph) -> [Pra
   if adapters.workspaceReader != nil {
     capabilityIDs.append(.init(rawValue: "workspace.read"))
   }
+  if adapters.workspaceSearcher != nil {
+    capabilityIDs.append(.init(rawValue: "workspace.search"))
+  }
   if adapters.workspaceWriter != nil {
     capabilityIDs.append(.init(rawValue: "workspace.write"))
   }
@@ -552,6 +555,131 @@ private func cmpSemanticIndexSummary(
     return "Semantic search, semantic memory, and embedding metadata stores are all wired for local-first inspection."
   }
   return "Semantic memory/search remains partial until search index, memory store, and embedding store are all present."
+}
+
+private func cmpWorkspaceSummary(
+  from dependencies: PraxisDependencyGraph
+) async -> (statusWord: String, summary: String, issue: String?) {
+  let workspaceRoot = dependencies.hostAdapters.workspaceRootDirectory
+  var findings: [String] = []
+  var issues: [String] = []
+
+  if let workspaceRoot {
+    var isDirectory: ObjCBool = false
+    if FileManager.default.fileExists(atPath: workspaceRoot.path, isDirectory: &isDirectory), isDirectory.boolValue {
+      findings.append("root ready (\(workspaceRoot.path))")
+    } else {
+      issues.append("configured workspace root is unavailable: \(workspaceRoot.path)")
+    }
+  } else {
+    findings.append("workspace root inherited from host process")
+  }
+
+  if let reader = dependencies.hostAdapters.workspaceReader {
+    _ = reader
+    findings.append("reader registered")
+  } else {
+    issues.append("workspace reader is missing")
+  }
+
+  if let searcher = dependencies.hostAdapters.workspaceSearcher {
+    _ = searcher
+    findings.append("searcher registered")
+  } else {
+    issues.append("workspace searcher is missing")
+  }
+
+  if dependencies.hostAdapters.workspaceWriter != nil {
+    findings.append("writer registered")
+  } else {
+    issues.append("workspace writer is missing")
+  }
+
+  let statusWord: String
+  switch (findings.isEmpty, issues.isEmpty) {
+  case (false, true):
+    statusWord = "ready"
+  case (false, false):
+    statusWord = "degraded"
+  default:
+    statusWord = "missing"
+  }
+
+  let summary = issues.isEmpty
+    ? "Workspace surface is \(statusWord): \(findings.joined(separator: ", "))."
+    : "Workspace surface is \(statusWord): \(findings.joined(separator: ", ")). Issues: \(issues.joined(separator: "; "))."
+  return (statusWord, summary, issues.isEmpty ? nil : issues.joined(separator: "; "))
+}
+
+private func cmpGitExecutorSummary(
+  from dependencies: PraxisDependencyGraph
+) async -> (statusWord: String, summary: String, issue: String?) {
+  let repositoryRoot = dependencies.hostAdapters.workspaceRootDirectory?.path
+    ?? FileManager.default.currentDirectoryPath
+  guard let gitExecutor = dependencies.hostAdapters.gitExecutor else {
+    return ("missing", "System git executor is not wired into HostRuntime yet.", "System git executor is still missing from HostRuntime composition.")
+  }
+
+  do {
+    let receipt = try await gitExecutor.apply(
+      .init(
+        operationID: "cmp.inspect.git.verify",
+        repositoryRoot: repositoryRoot,
+        steps: [
+          .init(kind: .verifyRepository, summary: "Verify runtime workspace is a git repository.")
+        ],
+        summary: "Verify local CMP repository readiness."
+      )
+    )
+    switch receipt.status {
+    case .applied:
+      return ("ready", "System git executor verified repository access at \(repositoryRoot).", nil)
+    case .partial:
+      return ("degraded", "System git executor partially verified repository access: \(receipt.outputSummary)", receipt.outputSummary)
+    case .rejected:
+      return ("degraded", "System git executor could not verify repository access: \(receipt.outputSummary)", receipt.outputSummary)
+    }
+  } catch {
+    return ("degraded", "System git executor failed during repository verification.", "System git executor failed: \(error)")
+  }
+}
+
+private func cmpLineageSummary(
+  projectionDescriptors: [PraxisProjectionRecordDescriptor],
+  dependencies: PraxisDependencyGraph
+) async -> (statusWord: String, summary: String, issue: String?) {
+  guard let lineageStore = dependencies.hostAdapters.lineageStore else {
+    return ("missing", "Lineage store is not wired into HostRuntime yet.", "Lineage persistence is still missing from HostRuntime composition.")
+  }
+
+  let lineageIDs = Array(Set(projectionDescriptors.compactMap(\.lineageID)))
+    .sorted { $0.rawValue < $1.rawValue }
+
+  guard !lineageIDs.isEmpty else {
+    return ("ready", "Lineage store is wired, but no projection descriptors currently reference stored lineages.", nil)
+  }
+
+  var resolvedCount = 0
+  var unresolvedIDs: [String] = []
+  for lineageID in lineageIDs {
+    do {
+      let descriptor = try await lineageStore.describe(.init(lineageID: lineageID))
+      if descriptor == nil {
+        unresolvedIDs.append(lineageID.rawValue)
+      } else {
+        resolvedCount += 1
+      }
+    } catch {
+      unresolvedIDs.append(lineageID.rawValue)
+    }
+  }
+
+  let issue = unresolvedIDs.isEmpty
+    ? nil
+    : "Lineage store is missing descriptors for \(unresolvedIDs.joined(separator: ", "))."
+  let statusWord = unresolvedIDs.isEmpty ? "ready" : "degraded"
+  let summary = "Lineage persistence resolved \(resolvedCount) of \(lineageIDs.count) projected lineages."
+  return (statusWord, summary, issue)
 }
 
 private func mpMultimodalSummary(from dependencies: PraxisDependencyGraph) -> String {
@@ -942,13 +1070,20 @@ public final class PraxisInspectCmpUseCase: PraxisInspectCmpUseCaseProtocol {
     let semanticSearchAvailable = dependencies.hostAdapters.semanticSearchIndex != nil
     let semanticMemoryAvailable = dependencies.hostAdapters.semanticMemoryStore != nil
     let embeddingStoreAvailable = dependencies.hostAdapters.embeddingStore != nil
+    let workspaceStatus = await cmpWorkspaceSummary(from: dependencies)
+    let gitExecutorStatus = await cmpGitExecutorSummary(from: dependencies)
+    let lineageStatus = await cmpLineageSummary(
+      projectionDescriptors: projectionDescriptors,
+      dependencies: dependencies
+    )
+    let structuredStoreSummary = cmpStructuredStoreSummary(
+      checkpointStoreAvailable: checkpointStoreAvailable,
+      journalStoreAvailable: journalStoreAvailable,
+      projectionDescriptors: projectionDescriptors
+    ) + " " + lineageStatus.summary
 
     let runtimeProfile = PraxisCmpLocalRuntimeProfile(
-      structuredStoreSummary: cmpStructuredStoreSummary(
-        checkpointStoreAvailable: checkpointStoreAvailable,
-        journalStoreAvailable: journalStoreAvailable,
-        projectionDescriptors: projectionDescriptors
-      ),
+      structuredStoreSummary: structuredStoreSummary,
       deliveryStoreSummary: cmpDeliverySummary(
         deliveryTruthRecords: deliveryTruthRecords,
         messageBusAvailable: messageBusAvailable
@@ -956,7 +1091,7 @@ public final class PraxisInspectCmpUseCase: PraxisInspectCmpUseCaseProtocol {
       messageBusSummary: messageBusAvailable
         ? "Neighborhood fan-out can flow through the registered host message bus."
         : "Neighborhood fan-out still needs a host message bus adapter.",
-      gitSummary: gitStatus.summary,
+      gitSummary: "\(gitStatus.summary) \(gitExecutorStatus.summary)",
       semanticIndexSummary: cmpSemanticIndexSummary(
         semanticSearchAvailable: semanticSearchAvailable,
         semanticMemoryAvailable: semanticMemoryAvailable,
@@ -973,6 +1108,15 @@ public final class PraxisInspectCmpUseCase: PraxisInspectCmpUseCaseProtocol {
     if let gitIssue = gitStatus.issue {
       issues.append(gitIssue)
     }
+    if let workspaceIssue = workspaceStatus.issue {
+      issues.append(workspaceIssue)
+    }
+    if let gitExecutorIssue = gitExecutorStatus.issue {
+      issues.append(gitExecutorIssue)
+    }
+    if let lineageIssue = lineageStatus.issue {
+      issues.append(lineageIssue)
+    }
     if !messageBusAvailable {
       issues.append("Message bus adapter is still missing from HostRuntime composition.")
     }
@@ -980,10 +1124,10 @@ public final class PraxisInspectCmpUseCase: PraxisInspectCmpUseCaseProtocol {
       issues.append("Semantic memory/search still needs the full local-first adapter set.")
     }
 
-    let hostSummary = "macOS local runtime / sqlite persistence (\(projectionDescriptors.count) projections) / sqlite delivery truth (\(deliveryTruthRecords.count) records) / actor message bus (\(messageBusAvailable ? "ready" : "missing")) / system git (\(gitStatus.statusWord)) / accelerate-like semantic index (\(semanticSearchAvailable ? "ready" : "missing"))"
+    let hostSummary = "macOS local runtime / workspace (\(workspaceStatus.statusWord)) / sqlite persistence (\(projectionDescriptors.count) projections) / lineage store (\(lineageStatus.statusWord)) / sqlite delivery truth (\(deliveryTruthRecords.count) records) / actor message bus (\(messageBusAvailable ? "ready" : "missing")) / system git probe (\(gitStatus.statusWord)) / system git executor (\(gitExecutorStatus.statusWord)) / accelerate-like semantic index (\(semanticSearchAvailable ? "ready" : "missing"))"
     return PraxisCmpInspection(
       runtimeProfile: runtimeProfile,
-      summary: "CMP inspection now reads the current HostRuntime local profile instead of a static assumption.",
+      summary: "CMP inspection now reads the current HostRuntime local profile, workspace, git, and lineage state instead of a static assumption.",
       projectID: "cmp.local-runtime",
       issues: issues,
       hostSummary: hostSummary

@@ -1,3 +1,4 @@
+import Foundation
 import PraxisCapabilityResults
 import PraxisCoreTypes
 import PraxisInfraContracts
@@ -9,6 +10,8 @@ import PraxisWorkspaceContracts
 /// Groups host-facing adapters so Composition can assemble a runtime without leaking
 /// individual doubles and protocol conformers across entry points or tests.
 public struct PraxisHostAdapterRegistry: Sendable {
+  public let runtimeRootDirectory: URL?
+  public let workspaceRootDirectory: URL?
   public let capabilityExecutor: (any PraxisCapabilityExecutor)?
   public let providerInferenceExecutor: (any PraxisProviderInferenceExecutor)?
   public let providerEmbeddingExecutor: (any PraxisProviderEmbeddingExecutor)?
@@ -48,6 +51,8 @@ public struct PraxisHostAdapterRegistry: Sendable {
   public let imageGenerationDriver: (any PraxisImageGenerationDriver)?
 
   public init(
+    runtimeRootDirectory: URL? = nil,
+    workspaceRootDirectory: URL? = nil,
     capabilityExecutor: (any PraxisCapabilityExecutor)? = nil,
     providerInferenceExecutor: (any PraxisProviderInferenceExecutor)? = nil,
     providerEmbeddingExecutor: (any PraxisProviderEmbeddingExecutor)? = nil,
@@ -82,6 +87,8 @@ public struct PraxisHostAdapterRegistry: Sendable {
     speechSynthesisDriver: (any PraxisSpeechSynthesisDriver)? = nil,
     imageGenerationDriver: (any PraxisImageGenerationDriver)? = nil
   ) {
+    self.runtimeRootDirectory = runtimeRootDirectory
+    self.workspaceRootDirectory = workspaceRootDirectory
     self.capabilityExecutor = capabilityExecutor
     self.providerInferenceExecutor = providerInferenceExecutor
     self.providerEmbeddingExecutor = providerEmbeddingExecutor
@@ -119,6 +126,8 @@ public struct PraxisHostAdapterRegistry: Sendable {
 
   public static func scaffoldDefaults() -> PraxisHostAdapterRegistry {
     PraxisHostAdapterRegistry(
+      runtimeRootDirectory: nil,
+      workspaceRootDirectory: nil,
       capabilityExecutor: PraxisStubCapabilityExecutor { request in
         PraxisHostCapabilityReceipt(
           capabilityKey: request.capabilityKey,

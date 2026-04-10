@@ -18,6 +18,7 @@ private struct PraxisLocalRuntimePaths: Sendable {
   let deliveryTruthFileURL: URL
   let embeddingsFileURL: URL
   let semanticMemoryFileURL: URL
+  let lineageFileURL: URL
 
   init(rootDirectory: URL) {
     self.rootDirectory = rootDirectory
@@ -27,6 +28,7 @@ private struct PraxisLocalRuntimePaths: Sendable {
     deliveryTruthFileURL = rootDirectory.appendingPathComponent("delivery-truth.json", isDirectory: false)
     embeddingsFileURL = rootDirectory.appendingPathComponent("embeddings.json", isDirectory: false)
     semanticMemoryFileURL = rootDirectory.appendingPathComponent("semantic-memory.json", isDirectory: false)
+    lineageFileURL = rootDirectory.appendingPathComponent("lineages.json", isDirectory: false)
   }
 
   static func resolveRootDirectory(_ explicitRootDirectory: URL?) -> URL {
@@ -67,6 +69,335 @@ private enum PraxisLocalJSONFileIO {
 
 private func localRuntimeNow() -> String {
   ISO8601DateFormatter().string(from: Date())
+}
+
+private struct PraxisLocalWorkspaceContext: Sendable {
+  let rootDirectory: URL
+
+  init(rootDirectory: URL) {
+    self.rootDirectory = rootDirectory.standardizedFileURL
+  }
+
+  static func resolveRootDirectory(_ explicitRootDirectory: URL?) -> URL {
+    if let explicitRootDirectory {
+      return explicitRootDirectory
+    }
+
+    if let configuredRoot = ProcessInfo.processInfo.environment["PRAXIS_WORKSPACE_ROOT"],
+       !configuredRoot.isEmpty {
+      return URL(fileURLWithPath: configuredRoot, isDirectory: true)
+    }
+
+    return URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+  }
+
+  func resolvePath(_ path: String) throws -> URL {
+    let candidate: URL
+    if path.hasPrefix("/") {
+      candidate = URL(fileURLWithPath: path, isDirectory: false)
+    } else {
+      candidate = rootDirectory.appendingPathComponent(path, isDirectory: false)
+    }
+    let standardized = candidate.standardizedFileURL
+    let rootPath = rootDirectory.path
+    let candidatePath = standardized.path
+    guard candidatePath == rootPath || candidatePath.hasPrefix(rootPath + "/") else {
+      throw PraxisError.invalidInput("Workspace path \(path) escapes the configured local workspace root.")
+    }
+    return standardized
+  }
+}
+
+private func localWorkspaceNormalizedLines(from content: String) -> [String] {
+  guard !content.isEmpty else {
+    return []
+  }
+
+  var lines = content.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+  if content.hasSuffix("\n"), lines.last == "" {
+    lines.removeLast()
+  }
+  return lines
+}
+
+private func localWorkspaceSlice(content: String, range: PraxisWorkspaceLineRange?) -> String {
+  guard let range else {
+    return content
+  }
+
+  let lines = localWorkspaceNormalizedLines(from: content)
+  guard !lines.isEmpty else {
+    return ""
+  }
+
+  let startIndex = max(range.startLine - 1, 0)
+  let endIndex = min(range.endLine - 1, lines.count - 1)
+  guard startIndex <= endIndex, startIndex < lines.count else {
+    return ""
+  }
+
+  return lines[startIndex...endIndex].joined(separator: "\n")
+}
+
+private func localWorkspaceRevisionToken(for fileURL: URL) -> String? {
+  guard let attributes = try? FileManager.default.attributesOfItem(atPath: fileURL.path) else {
+    return nil
+  }
+  let modificationDate = (attributes[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+  let fileSize = (attributes[.size] as? NSNumber)?.int64Value ?? 0
+  return "\(Int64(modificationDate * 1000))-\(fileSize)"
+}
+
+private func localWorkspaceMatchesFilePattern(_ path: String, filePattern: String?) -> Bool {
+  guard let filePattern, !filePattern.isEmpty else {
+    return true
+  }
+
+  let escaped = NSRegularExpression.escapedPattern(for: filePattern)
+    .replacingOccurrences(of: "\\*", with: ".*")
+    .replacingOccurrences(of: "\\?", with: ".")
+  guard let regex = try? NSRegularExpression(pattern: "^\(escaped)$", options: [.caseInsensitive]) else {
+    return path == filePattern
+  }
+  let range = NSRange(path.startIndex..<path.endIndex, in: path)
+  return regex.firstMatch(in: path, options: [], range: range) != nil
+}
+
+private func localWorkspaceRoots(
+  for requestRoots: [String],
+  context: PraxisLocalWorkspaceContext
+) -> [URL] {
+  let roots = requestRoots.isEmpty ? [context.rootDirectory.path] : requestRoots
+  var resolvedRoots: [URL] = []
+  for root in roots {
+    if let resolved = try? context.resolvePath(root), !resolvedRoots.contains(resolved) {
+      resolvedRoots.append(resolved)
+    }
+  }
+  return resolvedRoots.isEmpty ? [context.rootDirectory] : resolvedRoots
+}
+
+private func localWorkspaceCandidateFiles(
+  for request: PraxisWorkspaceSearchRequest,
+  context: PraxisLocalWorkspaceContext
+) -> [URL] {
+  let fileManager = FileManager.default
+  let ignoredDirectories = Set([".git", ".build", "node_modules"])
+  let roots = localWorkspaceRoots(for: request.roots, context: context)
+  var fileURLs: [URL] = []
+
+  for root in roots {
+    var isDirectory: ObjCBool = false
+    guard fileManager.fileExists(atPath: root.path, isDirectory: &isDirectory) else {
+      continue
+    }
+
+    if !isDirectory.boolValue {
+      if localWorkspaceMatchesFilePattern(root.lastPathComponent, filePattern: request.filePattern) {
+        fileURLs.append(root)
+      }
+      continue
+    }
+
+    guard let enumerator = fileManager.enumerator(
+      at: root,
+      includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+      options: [.skipsHiddenFiles]
+    ) else {
+      continue
+    }
+
+    for case let fileURL as URL in enumerator {
+      if ignoredDirectories.contains(fileURL.lastPathComponent) {
+        enumerator.skipDescendants()
+        continue
+      }
+      let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+      guard values?.isRegularFile == true else {
+        continue
+      }
+      if let fileSize = values?.fileSize, fileSize > 1_000_000 {
+        continue
+      }
+      if localWorkspaceMatchesFilePattern(fileURL.lastPathComponent, filePattern: request.filePattern) {
+        fileURLs.append(fileURL)
+      }
+    }
+  }
+
+  return fileURLs
+}
+
+private func localWorkspaceReadText(at fileURL: URL) -> String? {
+  guard let data = try? Data(contentsOf: fileURL) else {
+    return nil
+  }
+  return String(data: data, encoding: .utf8)
+}
+
+private func localWorkspaceRelativePath(for fileURL: URL, workspaceRoot: URL) -> String {
+  let rootComponents = workspaceRoot.standardizedFileURL.pathComponents
+  let fileComponents = fileURL.standardizedFileURL.pathComponents
+  guard fileComponents.starts(with: rootComponents) else {
+    return fileURL.path
+  }
+
+  let relativeComponents = Array(fileComponents.dropFirst(rootComponents.count))
+  guard !relativeComponents.isEmpty else {
+    return fileURL.lastPathComponent
+  }
+  return NSString.path(withComponents: relativeComponents)
+}
+
+private func localWorkspaceSearchMatch(
+  for fileURL: URL,
+  content: String,
+  query: String,
+  workspaceRoot: URL
+) -> PraxisWorkspaceSearchMatch? {
+  let lines = localWorkspaceNormalizedLines(from: content)
+  guard let lineIndex = lines.firstIndex(where: { $0.localizedCaseInsensitiveContains(query) }) else {
+    return nil
+  }
+
+  let line = lines[lineIndex]
+  let lowercasedLine = line.lowercased()
+  let lowercasedQuery = query.lowercased()
+  let column = lowercasedLine.range(of: lowercasedQuery)?.lowerBound.utf16Offset(in: lowercasedLine).advanced(by: 1)
+  let relativePath = localWorkspaceRelativePath(for: fileURL, workspaceRoot: workspaceRoot)
+  return PraxisWorkspaceSearchMatch(
+    path: relativePath,
+    line: lineIndex + 1,
+    column: column,
+    summary: "Matched \(query) in \(fileURL.lastPathComponent).",
+    snippet: line
+  )
+}
+
+public struct PraxisLocalWorkspaceReader: PraxisWorkspaceReader, Sendable {
+  private let context: PraxisLocalWorkspaceContext
+
+  public init(rootDirectory: URL) {
+    self.context = PraxisLocalWorkspaceContext(rootDirectory: rootDirectory)
+  }
+
+  public func read(_ request: PraxisWorkspaceReadRequest) async throws -> PraxisWorkspaceReadResult {
+    let fileURL = try context.resolvePath(request.path)
+    guard let content = localWorkspaceReadText(at: fileURL) else {
+      return PraxisWorkspaceReadResult(path: request.path, content: "", lineCount: 0)
+    }
+    let slicedContent = localWorkspaceSlice(content: content, range: request.range)
+    return PraxisWorkspaceReadResult(
+      path: request.path,
+      content: slicedContent,
+      revisionToken: request.includeRevisionToken ? localWorkspaceRevisionToken(for: fileURL) : nil,
+      lineCount: localWorkspaceNormalizedLines(from: slicedContent).count
+    )
+  }
+}
+
+public struct PraxisLocalWorkspaceSearcher: PraxisWorkspaceSearcher, Sendable {
+  private let context: PraxisLocalWorkspaceContext
+
+  public init(rootDirectory: URL) {
+    self.context = PraxisLocalWorkspaceContext(rootDirectory: rootDirectory)
+  }
+
+  public func search(_ request: PraxisWorkspaceSearchRequest) async throws -> [PraxisWorkspaceSearchMatch] {
+    guard !request.query.isEmpty else {
+      return []
+    }
+
+    let files = localWorkspaceCandidateFiles(for: request, context: context)
+    var matches: [PraxisWorkspaceSearchMatch] = []
+
+    for fileURL in files {
+      guard matches.count < request.maxResults else {
+        break
+      }
+
+      let relativePath = localWorkspaceRelativePath(for: fileURL, workspaceRoot: context.rootDirectory)
+
+      switch request.kind {
+      case .fileName:
+        guard fileURL.lastPathComponent.localizedCaseInsensitiveContains(request.query) else {
+          continue
+        }
+        matches.append(
+          PraxisWorkspaceSearchMatch(
+            path: relativePath,
+            summary: "Matched file name \(fileURL.lastPathComponent)."
+          )
+        )
+      case .fullText, .symbol:
+        guard let content = localWorkspaceReadText(at: fileURL),
+              let match = localWorkspaceSearchMatch(
+                for: fileURL,
+                content: content,
+                query: request.query,
+                workspaceRoot: context.rootDirectory
+              ) else {
+          continue
+        }
+        matches.append(match)
+      }
+    }
+
+    return matches
+  }
+}
+
+public actor PraxisLocalWorkspaceWriter: PraxisWorkspaceWriter {
+  private let context: PraxisLocalWorkspaceContext
+
+  public init(rootDirectory: URL) {
+    self.context = PraxisLocalWorkspaceContext(rootDirectory: rootDirectory)
+  }
+
+  public func apply(_ request: PraxisWorkspaceChangeRequest) async throws -> PraxisWorkspaceChangeReceipt {
+    var changedPaths: [String] = []
+
+    for change in request.changes {
+      let fileURL = try context.resolvePath(change.path)
+      try validateRevisionToken(change.expectedRevisionToken, for: fileURL)
+
+      switch change.kind {
+      case .createFile, .updateFile:
+        guard let content = change.content else {
+          throw PraxisError.invalidInput("Workspace change \(change.kind.rawValue) requires content.")
+        }
+        try FileManager.default.createDirectory(
+          at: fileURL.deletingLastPathComponent(),
+          withIntermediateDirectories: true
+        )
+        try content.write(to: fileURL, atomically: true, encoding: .utf8)
+      case .deleteFile:
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+          try FileManager.default.removeItem(at: fileURL)
+        }
+      case .applyPatch:
+        throw PraxisError.unsupportedOperation("Local workspace patch application is not implemented yet.")
+      }
+
+      changedPaths.append(change.path)
+    }
+
+    return PraxisWorkspaceChangeReceipt(
+      changedPaths: changedPaths,
+      appliedChangeCount: changedPaths.count,
+      summary: request.changeSummary
+    )
+  }
+
+  private func validateRevisionToken(_ expectedRevisionToken: String?, for fileURL: URL) throws {
+    guard let expectedRevisionToken else {
+      return
+    }
+    let currentRevisionToken = localWorkspaceRevisionToken(for: fileURL)
+    guard currentRevisionToken == expectedRevisionToken else {
+      throw PraxisError.invariantViolation("Workspace revision token mismatch for \(fileURL.path).")
+    }
+  }
 }
 
 public actor PraxisLocalCheckpointStore: PraxisCheckpointStoreContract {
@@ -496,6 +827,48 @@ public struct PraxisLocalSemanticSearchIndex: PraxisSemanticSearchIndexContract,
   }
 }
 
+public actor PraxisLocalLineageStore: PraxisLineageStoreContract {
+  private let fileURL: URL
+  private var descriptors: [PraxisLineageDescriptor] = []
+  private var didLoad = false
+
+  public init(fileURL: URL) {
+    self.fileURL = fileURL
+  }
+
+  public func save(_ descriptor: PraxisLineageDescriptor) async throws {
+    try loadIfNeeded()
+    descriptors.removeAll { $0.lineageID == descriptor.lineageID }
+    descriptors.append(descriptor)
+    try persist()
+  }
+
+  public func describe(lineageID: PraxisCmpLineageID) async throws -> String {
+    try loadIfNeeded()
+    return descriptors.first { $0.lineageID == lineageID }?.summary ?? "Unknown lineage \(lineageID.rawValue)"
+  }
+
+  public func describe(_ request: PraxisLineageLookupRequest) async throws -> PraxisLineageDescriptor? {
+    try loadIfNeeded()
+    return descriptors.first { $0.lineageID == request.lineageID }
+  }
+
+  private func loadIfNeeded() throws {
+    guard !didLoad else {
+      return
+    }
+    descriptors = try PraxisLocalJSONFileIO.load([PraxisLineageDescriptor].self, from: fileURL) ?? []
+    didLoad = true
+  }
+
+  private func persist() throws {
+    try PraxisLocalJSONFileIO.save(
+      descriptors.sorted { $0.lineageID.rawValue < $1.lineageID.rawValue },
+      to: fileURL
+    )
+  }
+}
+
 private final class PraxisProcessResumeGate: @unchecked Sendable {
   private let lock = NSLock()
   private var hasResumed = false
@@ -511,6 +884,18 @@ private final class PraxisProcessResumeGate: @unchecked Sendable {
     }
     hasResumed = true
     continuation.resume(with: result)
+  }
+}
+
+private enum PraxisSystemGitExecutableResolver {
+  static func resolve() -> String? {
+    let fileManager = FileManager.default
+    let candidatePaths = [
+      "/usr/bin/git",
+      "/opt/homebrew/bin/git",
+      "/usr/local/bin/git",
+    ]
+    return candidatePaths.first(where: { fileManager.isExecutableFile(atPath: $0) })
   }
 }
 
@@ -614,18 +999,119 @@ public struct PraxisSystemShellExecutor: PraxisShellExecutor, Sendable {
   }
 }
 
+public struct PraxisSystemGitExecutor: PraxisGitExecutor, Sendable {
+  public init() {}
+
+  public func apply(_ plan: PraxisGitPlan) async throws -> PraxisGitExecutionReceipt {
+    guard let executablePath = PraxisSystemGitExecutableResolver.resolve() else {
+      return PraxisGitExecutionReceipt(
+        operationID: plan.operationID,
+        status: .rejected,
+        outputSummary: "System git executable is unavailable.",
+        completedAt: localRuntimeNow()
+      )
+    }
+
+    var stepSummaries: [String] = []
+    var completedStepCount = 0
+
+    for step in plan.steps {
+      let arguments = try gitArguments(for: step)
+      let result = try await PraxisLocalProcessRunner.run(
+        executableURL: URL(fileURLWithPath: executablePath, isDirectory: false),
+        arguments: arguments,
+        currentDirectoryURL: plan.repositoryRoot.map { URL(fileURLWithPath: $0, isDirectory: true) },
+        timeoutSeconds: 15
+      )
+      let output = [result.stdout, result.stderr]
+        .joined(separator: "\n")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+
+      if result.exitCode == 0 {
+        completedStepCount += 1
+        stepSummaries.append("\(step.kind.rawValue): \(output.isEmpty ? "ok" : output)")
+        continue
+      }
+
+      let failureSummary = output.isEmpty ? "git exited with \(result.exitCode)." : output
+      stepSummaries.append("\(step.kind.rawValue): \(failureSummary)")
+      return PraxisGitExecutionReceipt(
+        operationID: plan.operationID,
+        status: completedStepCount == 0 ? .rejected : .partial,
+        outputSummary: stepSummaries.joined(separator: " | "),
+        completedAt: localRuntimeNow()
+      )
+    }
+
+    let summary = stepSummaries.isEmpty ? plan.summary : stepSummaries.joined(separator: " | ")
+    return PraxisGitExecutionReceipt(
+      operationID: plan.operationID,
+      status: .applied,
+      outputSummary: summary,
+      completedAt: localRuntimeNow()
+    )
+  }
+
+  private func gitArguments(for step: PraxisGitPlanStep) throws -> [String] {
+    switch step.kind {
+    case .verifyRepository:
+      return ["rev-parse", "--show-toplevel"]
+    case .fetch:
+      return ["fetch"] + optionalGitArgument(step.arguments["remote"])
+    case .checkout:
+      if let target = step.arguments["target"] ?? step.arguments["branch"] {
+        if step.arguments["createBranch"] == "true" {
+          return ["checkout", "-b", target]
+        }
+        return ["checkout", target]
+      }
+      throw PraxisError.invalidInput("Git checkout step requires a target or branch argument.")
+    case .commit:
+      guard let message = step.arguments["message"], !message.isEmpty else {
+        throw PraxisError.invalidInput("Git commit step requires a message argument.")
+      }
+      return ["commit", "-m", message]
+    case .push:
+      var arguments = ["push"]
+      if let remote = step.arguments["remote"] {
+        arguments.append(remote)
+      }
+      if let branch = step.arguments["branch"] {
+        arguments.append(branch)
+      }
+      return arguments
+    case .merge:
+      guard let target = step.arguments["target"] ?? step.arguments["branch"] else {
+        throw PraxisError.invalidInput("Git merge step requires a target or branch argument.")
+      }
+      return ["merge", target]
+    case .inspectRef:
+      guard let ref = step.arguments["ref"] else {
+        throw PraxisError.invalidInput("Git inspectRef step requires a ref argument.")
+      }
+      return ["rev-parse", "--verify", ref]
+    case .updateRef:
+      guard let ref = step.arguments["ref"],
+            let target = step.arguments["target"] else {
+        throw PraxisError.invalidInput("Git updateRef step requires ref and target arguments.")
+      }
+      return ["update-ref", ref, target]
+    }
+  }
+
+  private func optionalGitArgument(_ value: String?) -> [String] {
+    guard let value, !value.isEmpty else {
+      return []
+    }
+    return [value]
+  }
+}
+
 public struct PraxisSystemGitAvailabilityProbe: PraxisGitAvailabilityProbe, Sendable {
   public init() {}
 
   public func probeGitReadiness() async -> PraxisGitAvailabilityReport {
-    let fileManager = FileManager.default
-    let candidatePaths = [
-      "/usr/bin/git",
-      "/opt/homebrew/bin/git",
-      "/usr/local/bin/git",
-    ]
-
-    guard let executablePath = candidatePaths.first(where: { fileManager.isExecutableFile(atPath: $0) }) else {
+    guard let executablePath = PraxisSystemGitExecutableResolver.resolve() else {
       return PraxisGitAvailabilityReport(
         status: .unavailable,
         executablePath: nil,
@@ -711,11 +1197,13 @@ public struct PraxisSystemGitAvailabilityProbe: PraxisGitAvailabilityProbe, Send
 public extension PraxisHostAdapterRegistry {
   static func localDefaults(rootDirectory: URL? = nil) -> PraxisHostAdapterRegistry {
     let scaffold = scaffoldDefaults()
-    let paths = PraxisLocalRuntimePaths(
-      rootDirectory: PraxisLocalRuntimePaths.resolveRootDirectory(rootDirectory)
-    )
+    let resolvedRootDirectory = PraxisLocalRuntimePaths.resolveRootDirectory(rootDirectory)
+    let paths = PraxisLocalRuntimePaths(rootDirectory: resolvedRootDirectory)
+    let workspaceRootDirectory = PraxisLocalWorkspaceContext.resolveRootDirectory(rootDirectory)
 
     return PraxisHostAdapterRegistry(
+      runtimeRootDirectory: resolvedRootDirectory,
+      workspaceRootDirectory: workspaceRootDirectory,
       capabilityExecutor: scaffold.capabilityExecutor,
       providerInferenceExecutor: scaffold.providerInferenceExecutor,
       providerEmbeddingExecutor: scaffold.providerEmbeddingExecutor,
@@ -724,14 +1212,14 @@ public extension PraxisHostAdapterRegistry {
       providerSkillRegistry: scaffold.providerSkillRegistry,
       providerSkillActivator: scaffold.providerSkillActivator,
       providerMCPExecutor: scaffold.providerMCPExecutor,
-      workspaceReader: scaffold.workspaceReader,
-      workspaceSearcher: scaffold.workspaceSearcher,
-      workspaceWriter: scaffold.workspaceWriter,
+      workspaceReader: PraxisLocalWorkspaceReader(rootDirectory: workspaceRootDirectory),
+      workspaceSearcher: PraxisLocalWorkspaceSearcher(rootDirectory: workspaceRootDirectory),
+      workspaceWriter: PraxisLocalWorkspaceWriter(rootDirectory: workspaceRootDirectory),
       shellExecutor: PraxisSystemShellExecutor(),
       browserExecutor: scaffold.browserExecutor,
       browserGroundingCollector: scaffold.browserGroundingCollector,
       gitAvailabilityProbe: PraxisSystemGitAvailabilityProbe(),
-      gitExecutor: scaffold.gitExecutor,
+      gitExecutor: PraxisSystemGitExecutor(),
       processSupervisor: scaffold.processSupervisor,
       checkpointStore: PraxisLocalCheckpointStore(fileURL: paths.checkpointsFileURL),
       journalStore: PraxisLocalJournalStore(fileURL: paths.journalFileURL),
@@ -741,7 +1229,7 @@ public extension PraxisHostAdapterRegistry {
       embeddingStore: PraxisLocalEmbeddingStore(fileURL: paths.embeddingsFileURL),
       semanticSearchIndex: PraxisLocalSemanticSearchIndex(semanticMemoryFileURL: paths.semanticMemoryFileURL),
       semanticMemoryStore: PraxisLocalSemanticMemoryStore(fileURL: paths.semanticMemoryFileURL),
-      lineageStore: scaffold.lineageStore,
+      lineageStore: PraxisLocalLineageStore(fileURL: paths.lineageFileURL),
       userInputDriver: scaffold.userInputDriver,
       permissionDriver: scaffold.permissionDriver,
       terminalPresenter: scaffold.terminalPresenter,

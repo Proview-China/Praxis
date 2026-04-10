@@ -44,6 +44,8 @@ public final class PraxisDependencyGraph: PraxisDependencyResolving, @unchecked 
   ) {
     self.boundaries = boundaries
     self.hostAdapters = PraxisHostAdapterRegistry(
+      runtimeRootDirectory: hostAdapters.runtimeRootDirectory,
+      workspaceRootDirectory: hostAdapters.workspaceRootDirectory,
       capabilityExecutor: hostAdapters.capabilityExecutor,
       providerInferenceExecutor: providerInferenceExecutor ?? hostAdapters.providerInferenceExecutor,
       providerEmbeddingExecutor: hostAdapters.providerEmbeddingExecutor,

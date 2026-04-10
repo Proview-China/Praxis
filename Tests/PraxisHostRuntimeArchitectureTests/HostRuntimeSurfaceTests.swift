@@ -8,6 +8,8 @@ import PraxisJournal
 import PraxisRun
 import PraxisSession
 import PraxisState
+import PraxisToolingContracts
+import PraxisWorkspaceContracts
 @testable import PraxisRuntimeComposition
 @testable import PraxisRuntimeFacades
 @testable import PraxisRuntimeInterface
@@ -27,6 +29,28 @@ private func decodeTestJSON<T: Decodable>(_ type: T.Type, from string: String) t
     throw PraxisError.invalidInput("Failed to decode test runtime payload from UTF-8 JSON.")
   }
   return try JSONDecoder().decode(type, from: data)
+}
+
+private func runHostTestProcess(
+  executablePath: String,
+  arguments: [String],
+  currentDirectoryURL: URL? = nil
+) throws -> (stdout: String, stderr: String, exitCode: Int32) {
+  let process = Process()
+  let stdoutPipe = Pipe()
+  let stderrPipe = Pipe()
+  process.executableURL = URL(fileURLWithPath: executablePath, isDirectory: false)
+  process.arguments = arguments
+  process.currentDirectoryURL = currentDirectoryURL
+  process.standardOutput = stdoutPipe
+  process.standardError = stderrPipe
+  try process.run()
+  process.waitUntilExit()
+  return (
+    stdout: String(decoding: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self),
+    stderr: String(decoding: stderrPipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self),
+    exitCode: process.terminationStatus
+  )
 }
 
 private func makeCheckpointRecord(
@@ -579,6 +603,167 @@ struct HostRuntimeSurfaceTests {
     #expect(loadedJournal?.events.first?.summary == "Local defaults wrote one journal event")
     #expect(gitReport != nil)
     #expect(gitReport?.notes.isEmpty == false)
+  }
+
+  @Test
+  func localDefaultsProvideRealWorkspaceAndLineageAdapters() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-local-workspace-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let firstRegistry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+    let secondRegistry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+
+    _ = try await firstRegistry.workspaceWriter?.apply(
+      .init(
+        changes: [
+          .init(
+            kind: .createFile,
+            path: "Package.swift",
+            content: "// swift-tools-version: 6.0\n"
+          ),
+          .init(
+            kind: .createFile,
+            path: "SWIFT_REFACTOR_PLAN.md",
+            content: "# Local Test Plan\n"
+          ),
+          .init(
+            kind: .createFile,
+            path: "notes/runtime.txt",
+            content: "alpha\nbeta\n"
+          ),
+        ],
+        changeSummary: "Seed local workspace files"
+      )
+    )
+    let initialRead = try await secondRegistry.workspaceReader?.read(
+      .init(path: "notes/runtime.txt", includeRevisionToken: true)
+    )
+    _ = try await secondRegistry.workspaceWriter?.apply(
+      .init(
+        changes: [
+          .init(
+            kind: .updateFile,
+            path: "notes/runtime.txt",
+            content: "alpha\nbeta\nrelease\n",
+            expectedRevisionToken: initialRead?.revisionToken
+          )
+        ],
+        changeSummary: "Update workspace note"
+      )
+    )
+
+    let rangedRead = try await secondRegistry.workspaceReader?.read(
+      .init(path: "notes/runtime.txt", range: .init(startLine: 2, endLine: 3), includeRevisionToken: true)
+    )
+    let searchMatches = try await secondRegistry.workspaceSearcher?.search(
+      .init(query: "release", kind: .fullText, maxResults: 5)
+    )
+
+    let lineageStore = PraxisLocalLineageStore(fileURL: rootDirectory.appendingPathComponent("lineages.json", isDirectory: false))
+    try await lineageStore.save(
+      .init(
+        lineageID: .init(rawValue: "lineage.local"),
+        branchRef: "cmp/local",
+        summary: "Local lineage descriptor"
+      )
+    )
+    let lineageDescriptor = try await secondRegistry.lineageStore?.describe(
+      .init(lineageID: .init(rawValue: "lineage.local"))
+    )
+
+    #expect(rangedRead?.content == "beta\nrelease")
+    #expect(rangedRead?.revisionToken != nil)
+    #expect(searchMatches?.first?.path == "notes/runtime.txt")
+    #expect(lineageDescriptor?.branchRef == "cmp/local")
+  }
+
+  @Test
+  func localGitExecutorVerifiesRepositoryAndCmpInspectionReportsLocalAdapters() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-local-git-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+    try FileManager.default.createDirectory(at: rootDirectory, withIntermediateDirectories: true)
+
+    let gitInit = try runHostTestProcess(
+      executablePath: "/usr/bin/git",
+      arguments: ["init", "-q"],
+      currentDirectoryURL: rootDirectory
+    )
+    #expect(gitInit.exitCode == 0)
+
+    let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+    _ = try await registry.projectionStore?.save(
+      .init(
+        projectID: "cmp.local-runtime",
+        projectionID: .init(rawValue: "projection.local"),
+        lineageID: .init(rawValue: "lineage.local"),
+        agentID: "agent.local",
+        visibilityLevel: .localOnly,
+        storageKey: "sqlite://cmp/projection.local",
+        updatedAt: "2026-04-11T02:00:00Z",
+        summary: "Local runtime projection"
+      )
+    )
+    let lineageStore = PraxisLocalLineageStore(fileURL: rootDirectory.appendingPathComponent("lineages.json", isDirectory: false))
+    try await lineageStore.save(
+      .init(
+        lineageID: .init(rawValue: "lineage.local"),
+        branchRef: "cmp/agent.local",
+        summary: "Resolved local lineage"
+      )
+    )
+
+    let gitReceipt = try await registry.gitExecutor?.apply(
+      .init(
+        operationID: "host-runtime.git.verify",
+        repositoryRoot: rootDirectory.path,
+        steps: [
+          .init(kind: .verifyRepository, summary: "Verify local temp repository")
+        ],
+        summary: "Verify local git repository"
+      )
+    )
+    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: registry)
+    let cmpSnapshot = try await runtimeFacade.inspectionFacade.inspectCmp()
+
+    #expect(gitReceipt?.status == .applied)
+    #expect(cmpSnapshot.summary.contains("workspace, git, and lineage state"))
+    #expect(cmpSnapshot.hostRuntimeSummary.contains("workspace (ready)"))
+    #expect(cmpSnapshot.hostRuntimeSummary.contains("lineage store (ready)"))
+    #expect(cmpSnapshot.hostRuntimeSummary.contains("system git executor (ready)"))
+    #expect(cmpSnapshot.persistenceSummary.contains("Lineage persistence resolved 1 of 1 projected lineages"))
+  }
+
+  @Test
+  func cmpInspectionDoesNotRequirePraxisSentinelFilesForWorkspaceReadiness() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-workspace-health-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+    try FileManager.default.createDirectory(at: rootDirectory, withIntermediateDirectories: true)
+
+    let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: registry)
+    let cmpSnapshot = try await runtimeFacade.inspectionFacade.inspectCmp()
+
+    #expect(cmpSnapshot.hostRuntimeSummary.contains("workspace (ready)"))
+    #expect(cmpSnapshot.hostRuntimeSummary.contains("system git executor (degraded)"))
+    #expect(cmpSnapshot.persistenceSummary.contains("Lineage store is wired"))
+  }
+
+  @Test
+  func cmpInspectionVerifiesGitAgainstConfiguredWorkspaceRoot() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-git-root-mismatch-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+    try FileManager.default.createDirectory(at: rootDirectory, withIntermediateDirectories: true)
+
+    let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: registry)
+    let cmpSnapshot = try await runtimeFacade.inspectionFacade.inspectCmp()
+
+    #expect(cmpSnapshot.hostRuntimeSummary.contains("system git executor (degraded)"))
+    #expect(cmpSnapshot.summary.contains("workspace, git, and lineage state"))
   }
 
   @Test
