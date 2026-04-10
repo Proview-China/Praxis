@@ -14,6 +14,7 @@ import { registerTapToolingBaseline } from "./tap-tooling-adapter.js";
 import { registerTapVendorNetworkCapabilityFamily } from "./tap-vendor-network-adapter.js";
 import { registerTapVendorUserIoFamily } from "./tap-vendor-user-io-adapter.js";
 import { registerFirstClassToolingBaselineCapabilities } from "./workspace-read-adapter.js";
+import type { TapVendorUserIoCapabilityKey } from "../capability-package/index.js";
 
 export const TAP_FORMAL_CAPABILITY_FAMILY_KEYS = [
   "foundation",
@@ -49,7 +50,7 @@ export interface RegisterTapCapabilityFamilyAssemblyInput {
   mcp?: Omit<RegisterRaxMcpCapabilitiesInput, "runtime">;
   mp?: Omit<RegisterRaxMpCapabilityFamilyInput, "runtime">;
   userio?: {
-    capabilityKeys?: readonly ("request_user_input" | "request_permissions")[];
+    capabilityKeys?: readonly TapVendorUserIoCapabilityKey[];
   };
   includeFamilies?: Partial<Record<TapFormalCapabilityFamilyKey, boolean>>;
 }

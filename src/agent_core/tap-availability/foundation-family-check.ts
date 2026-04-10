@@ -20,6 +20,8 @@ export const FOUNDATION_FAMILY_CAPABILITY_KEYS = [
   "view_image",
   "docs.read",
   "repo.write",
+  "spreadsheet.write",
+  "doc.write",
   "code.edit",
   "code.patch",
   "shell.restricted",

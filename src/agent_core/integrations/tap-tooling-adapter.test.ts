@@ -184,6 +184,98 @@ test("repo.write adapter writes inside the configured workspace root", async () 
   assert.equal(written, "hello from repo.write");
 });
 
+test("spreadsheet.write adapter writes csv and xlsx outputs inside the workspace root", async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "praxis-tap-tooling-"));
+  const adapter = createTapToolingCapabilityAdapter("spreadsheet.write", {
+    workspaceRoot,
+  });
+
+  const csvPrepared = await adapter.prepare(
+    createPlan({
+      capabilityKey: "spreadsheet.write",
+      operation: "write_spreadsheet",
+      input: {
+        path: "artifacts/report.csv",
+        headers: ["name", "value"],
+        rows: [["gold", 4755.44]],
+      },
+      metadata: {
+        grantedScope: {
+          pathPatterns: ["workspace/**"],
+          allowedOperations: ["write", "mkdir", "spreadsheet.write"],
+        },
+      },
+    }),
+    createLease("binding.spreadsheet.write.csv"),
+  );
+  const csvResult = await adapter.execute(csvPrepared);
+  const csvText = await readFile(path.join(workspaceRoot, "artifacts", "report.csv"), "utf8");
+  assert.equal(csvResult.status, "success");
+  assert.match(csvText, /gold,4755\.44/u);
+
+  const xlsxPrepared = await adapter.prepare(
+    createPlan({
+      capabilityKey: "spreadsheet.write",
+      operation: "write_spreadsheet",
+      input: {
+        path: "artifacts/report.xlsx",
+        rows: [
+          { name: "gold", value: 4755.44 },
+          { name: "silver", value: 31.2 },
+        ],
+      },
+      metadata: {
+        grantedScope: {
+          pathPatterns: ["workspace/**"],
+          allowedOperations: ["write", "mkdir", "spreadsheet.write"],
+        },
+      },
+    }),
+    createLease("binding.spreadsheet.write.xlsx"),
+  );
+  const xlsxResult = await adapter.execute(xlsxPrepared);
+  const xlsxBuffer = await readFile(path.join(workspaceRoot, "artifacts", "report.xlsx"));
+  assert.equal(xlsxResult.status, "success");
+  assert.equal(xlsxBuffer.subarray(0, 2).toString("utf8"), "PK");
+});
+
+test("doc.write adapter writes docx output inside the workspace root", async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "praxis-tap-tooling-"));
+  const adapter = createTapToolingCapabilityAdapter("doc.write", {
+    workspaceRoot,
+  });
+
+  const prepared = await adapter.prepare(
+    createPlan({
+      capabilityKey: "doc.write",
+      operation: "write_docx",
+      input: {
+        path: "artifacts/status.docx",
+        title: "Status Note",
+        summary: "Praxis doc.write smoke.",
+        sections: [
+          {
+            heading: "Observation",
+            body: ["Current price: 4755.44 USD/oz", "Observed at: 08:48:38"],
+          },
+        ],
+      },
+      metadata: {
+        grantedScope: {
+          pathPatterns: ["workspace/**"],
+          allowedOperations: ["write", "mkdir", "doc.write"],
+        },
+      },
+    }),
+    createLease("binding.doc.write"),
+  );
+
+  const result = await adapter.execute(prepared);
+  const docxBuffer = await readFile(path.join(workspaceRoot, "artifacts", "status.docx"));
+  assert.equal(result.status, "success");
+  assert.equal(docxBuffer.subarray(0, 2).toString("utf8"), "PK");
+});
+
 test("shell.restricted adapter rejects destructive commands before execution", async () => {
   const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "praxis-tap-tooling-"));
   const adapter = createTapToolingCapabilityAdapter("shell.restricted", {
@@ -1304,6 +1396,8 @@ test("registerTapToolingBaseline makes B-group capabilities available to bootstr
 
   assert.deepEqual(result.capabilityKeys, [
     "repo.write",
+    "spreadsheet.write",
+    "doc.write",
     "code.edit",
     "code.patch",
     "shell.restricted",
@@ -1318,10 +1412,10 @@ test("registerTapToolingBaseline makes B-group capabilities available to bootstr
     "skill.doc.generate",
     "write_todos",
   ]);
-  assert.equal(result.packages.length, 14);
-  assert.equal(result.manifests.length, 14);
-  assert.equal(result.bindings.length, 14);
-  assert.equal(result.activationFactoryRefs.length, 14);
+  assert.equal(result.packages.length, 16);
+  assert.equal(result.manifests.length, 16);
+  assert.equal(result.bindings.length, 16);
+  assert.equal(result.activationFactoryRefs.length, 16);
 
   const reviewer = createTapReviewerProfile();
   assert.equal(reviewer.baselineCapabilities?.includes("repo.write"), false);

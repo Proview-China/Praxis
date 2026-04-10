@@ -64,6 +64,27 @@ export interface SkillDocGenerateInput {
   sections?: SkillDocSection[];
 }
 
+export type SpreadsheetWriteCellValue = string | number | boolean | null;
+
+export interface SpreadsheetWriteInput {
+  path?: string;
+  headers?: string[];
+  rows?: Array<SpreadsheetWriteCellValue[] | Record<string, SpreadsheetWriteCellValue>>;
+  delimiter?: "," | "\t";
+  sheet?: string;
+  createParents?: boolean;
+}
+
+export interface DocWriteInput {
+  path?: string;
+  title?: string;
+  summary?: string;
+  content?: string;
+  format?: "text" | "markdown";
+  createParents?: boolean;
+  sections?: SkillDocSection[];
+}
+
 export interface ShellRestrictedInput {
   command: string | string[];
   args?: string[];
@@ -376,6 +397,35 @@ export interface PreparedSkillDocState {
   input: NormalizedSkillDocGenerateInput;
 }
 
+export interface NormalizedSpreadsheetWriteInput {
+  absolutePath: string;
+  relativeWorkspacePath: string;
+  format: "csv" | "tsv" | "xlsx";
+  headers?: string[];
+  rows: SpreadsheetWriteCellValue[][];
+  rowCount: number;
+  columnCount: number;
+  createParents: boolean;
+}
+
+export interface NormalizedDocWriteInput {
+  absolutePath: string;
+  relativeWorkspacePath: string;
+  format: "docx";
+  textContent: string;
+  title?: string;
+  sectionCount: number;
+  createParents: boolean;
+}
+
+export interface PreparedSpreadsheetWriteState {
+  input: NormalizedSpreadsheetWriteInput;
+}
+
+export interface PreparedDocWriteState {
+  input: NormalizedDocWriteInput;
+}
+
 export interface PreparedCodeEditState {
   input: NormalizedCodeEditInput;
 }
@@ -489,6 +539,8 @@ export interface NormalizedBrowserPlaywrightToolResult {
   truncated: boolean;
   imageUrls: string[];
   imageCount: number;
+  screenshotPath?: string;
+  snapshotPath?: string;
   pageUrl?: string;
   pageTitle?: string;
   blockedByInterstitial: boolean;

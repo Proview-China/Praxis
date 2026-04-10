@@ -6,6 +6,11 @@ import { stdin as input, stdout as output } from "node:process";
 import OpenAI from "openai";
 
 import {
+  buildBrowserGroundingEvidenceText,
+  type BrowserTurnSummary,
+  updateBrowserTurnSummary,
+} from "./live-agent-chat/browser-grounding.js";
+import {
   createCmpFiveAgentRuntime,
   createCmpRoleLiveLlmModelExecutor,
 } from "./cmp-five-agent/index.js";
@@ -58,6 +63,7 @@ import {
   shouldPrintStreamLabel,
   summarizeCapabilityRequestForLog,
   summarizeToolOutputForCore,
+  trimStructuredValue,
   toTapAgentModelRoute,
   truncate,
   withStopwatch,
@@ -391,6 +397,8 @@ function buildCoreUserInput(input: {
   cmp?: CmpTurnArtifacts;
   runtime: LiveCliState["runtime"];
   toolResultText?: string;
+  capabilityHistoryText?: string;
+  groundingEvidenceText?: string;
   forceFinalAnswer?: boolean;
   capabilityLoopIndex?: number;
   maxCapabilityLoops?: number;
@@ -440,6 +448,27 @@ function buildCoreUserInput(input: {
     !input.forceFinalAnswer
       ? "If taskStatus would be incomplete and another registered capability can still advance the task, emit action=capability_call instead of stopping with action=reply."
       : "",
+    !input.forceFinalAnswer
+      ? "For browser.playwright, emit exactly one reviewed action per capability_call."
+      : "",
+    !input.forceFinalAnswer
+      ? "Do not emit browser steps arrays, actions arrays, or bundled browser master plans in one request. Let later loop iterations issue the next browser action."
+      : "",
+    input.groundingEvidenceText
+      ? "When browser grounding evidence is provided below, treat it as tool-derived facts rather than speculation."
+      : "",
+    input.groundingEvidenceText
+      ? "The grounding evidence block is normalized JSON with pages[] and facts[]. Prefer verified facts over weaker candidate hints."
+      : "",
+    input.groundingEvidenceText
+      ? "If the grounding evidence already contains the exact value/time/source needed to satisfy the user, answer from that evidence and mark the task completed instead of asking the user to continue manually."
+      : "",
+    input.groundingEvidenceText
+      ? "Do not say the value is unavailable if the grounding evidence below already contains a verified price, timestamp, page title, or source URL."
+      : "",
+    input.groundingEvidenceText
+      ? "If the evidence shows only blockers or candidates and a safe next tool step still exists, keep the task incomplete or blocked instead of claiming completion."
+      : "",
     "If the user asks what you can do, what abilities are in the TAP pool, or asks for a capability introduction, answer directly from the registered capability inventory below instead of calling a tool.",
     "Do not use MCP capabilities merely to inspect your own already-registered TAP inventory.",
     input.toolResultText && !input.forceFinalAnswer
@@ -453,13 +482,13 @@ function buildCoreUserInput(input: {
       : "If the user asks to inspect or operate the local workspace/system, or asks for current online information, emit a structured action envelope immediately whenever a fitting capability exists.",
     input.forceFinalAnswer
       ? "Summarize the actual tool result and continue the task."
-      : "Exact JSON schema: {\"action\":\"reply|capability_call\",\"taskStatus\":\"completed|incomplete|blocked|exhausted\",\"responseText\":\"短中文句子\",\"capabilityRequest\":{\"capabilityKey\":\"shell.restricted|shell.session|test.run|repo.write|code.edit|code.patch|code.diff|git.status|git.diff|git.commit|git.push|browser.playwright|write_todos|code.read|code.ls|code.glob|code.grep|code.read_many|code.symbol_search|code.lsp|spreadsheet.read|doc.read|read_pdf|read_notebook|view_image|docs.read|search.web|search.fetch|search.ground|skill.use|skill.mount|skill.prepare|mcp.listTools|mcp.listResources|mcp.readResource|mcp.call|mcp.native.execute\",\"reason\":\"为什么要用\",\"requestedTier\":\"B0|B1|B2|B3\",\"timeoutMs\":15000,\"input\":{}}}",
+      : "Exact JSON schema: {\"action\":\"reply|capability_call\",\"taskStatus\":\"completed|incomplete|blocked|exhausted\",\"responseText\":\"短中文句子\",\"capabilityRequest\":{\"capabilityKey\":\"shell.restricted|shell.session|test.run|repo.write|spreadsheet.write|doc.write|code.edit|code.patch|code.diff|git.status|git.diff|git.commit|git.push|browser.playwright|write_todos|code.read|code.ls|code.glob|code.grep|code.read_many|code.symbol_search|code.lsp|spreadsheet.read|doc.read|read_pdf|read_notebook|view_image|docs.read|search.web|search.fetch|search.ground|skill.use|skill.mount|skill.prepare|mcp.listTools|mcp.listResources|mcp.readResource|mcp.call|mcp.native.execute|request_user_input|request_permissions|audio.transcribe|speech.synthesize|image.generate\",\"reason\":\"为什么要用\",\"requestedTier\":\"B0|B1|B2|B3\",\"timeoutMs\":15000,\"input\":{}}}",
     input.forceFinalAnswer
       ? "Do not return JSON in the final answer."
       : "Return strict JSON only. No markdown fences. No prose outside JSON.",
     input.forceFinalAnswer
       ? ""
-      : "For shell.restricted/test.run, use structured input like {\"command\":\"zsh\",\"args\":[\"--version\"],\"cwd\":\".\",\"timeoutMs\":15000}. For shell.session, use {\"action\":\"start\",\"command\":\"python3\",\"args\":[\"-i\"],\"cwd\":\".\",\"yield_time_ms\":500} and later {\"action\":\"write\",\"sessionId\":\"...\",\"chars\":\"print(1)\\n\"}. For code.edit, use {\"path\":\"src/file.ts\",\"old_string\":\"旧文本\",\"new_string\":\"新文本\",\"allow_multiple\":false}. For code.patch, use {\"patch\":\"*** Begin Patch\\n*** Update File: path\\n@@\\n-旧\\n+新\\n*** End Patch\\n\"}. For git.status/git.diff use bounded cwd/path inputs. For git.commit, use explicit paths like {\"cwd\":\".\",\"paths\":[\"src/file.ts\"],\"message\":\"Clear commit reason\"} and avoid sweeping unrelated dirty files. For git.push, use normal push input like {\"cwd\":\".\",\"remote\":\"origin\",\"branch\":\"feature-name\"} and never request force semantics. For browser.playwright, use actions like {\"action\":\"navigate\",\"url\":\"https://example.com\",\"allowedDomains\":[\"example.com\"],\"headless\":true}, then {\"action\":\"snapshot\"} or {\"action\":\"screenshot\"}; file uploads stay blocked unless allowFileUploads=true. For spreadsheet.read, use {\"path\":\"data/report.xlsx\",\"maxEntries\":20} or {\"path\":\"data/table.csv\",\"maxEntries\":20}; optional sheet can narrow one workbook tab. For doc.read, use {\"path\":\"docs/file.docx\",\"maxEntries\":20,\"maxBytes\":12000}. For code.symbol_search, use {\"query\":\"SymbolName\",\"path\":\".\"}. For code.lsp, use {\"path\":\"src/file.ts\",\"operation\":\"document_symbol|definition|references|hover\",\"line\":1,\"character\":1}. For read_pdf, use {\"path\":\"docs/file.pdf\",\"pages\":\"1-3\"}. For read_notebook, use {\"path\":\"notebooks/demo.ipynb\",\"maxEntries\":20}. For view_image, use {\"path\":\"assets/mockup.png\",\"detail\":\"original\"} when the user wants you to inspect a local image. For write_todos use {\"todos\":[{\"description\":\"...\",\"status\":\"pending|in_progress|completed|blocked|cancelled\"}]}. Do not use shell operators like ||, &&, pipes, redirects, or inline shell strings. For code.glob/code.grep/code.read_many, prefer bounded path/pattern inputs instead of huge raw dumps.",
+      : "For shell.restricted/test.run, use structured input like {\"command\":\"zsh\",\"args\":[\"--version\"],\"cwd\":\".\",\"timeoutMs\":15000}. For shell.session, use {\"action\":\"start\",\"command\":\"python3\",\"args\":[\"-i\"],\"cwd\":\".\",\"yield_time_ms\":500} and later {\"action\":\"write\",\"sessionId\":\"...\",\"chars\":\"print(1)\\n\"}. For code.edit, use {\"path\":\"src/file.ts\",\"old_string\":\"旧文本\",\"new_string\":\"新文本\",\"allow_multiple\":false}. For code.patch, use {\"patch\":\"*** Begin Patch\\n*** Update File: path\\n@@\\n-旧\\n+新\\n*** End Patch\\n\"}. For git.status/git.diff use bounded cwd/path inputs. For git.commit, use explicit paths like {\"cwd\":\".\",\"paths\":[\"src/file.ts\"],\"message\":\"Clear commit reason\"} and avoid sweeping unrelated dirty files. For git.push, use normal push input like {\"cwd\":\".\",\"remote\":\"origin\",\"branch\":\"feature-name\"} and never request force semantics. For browser.playwright, use actions like {\"action\":\"navigate\",\"url\":\"https://example.com\",\"allowedDomains\":[\"example.com\"],\"headless\":true}, then {\"action\":\"snapshot\"} or {\"action\":\"screenshot\"}; file uploads stay blocked unless allowFileUploads=true. For spreadsheet.read, use {\"path\":\"data/report.xlsx\",\"maxEntries\":20} or {\"path\":\"data/table.csv\",\"maxEntries\":20}; optional sheet can narrow one workbook tab. For spreadsheet.write, use {\"path\":\"artifacts/report.xlsx\",\"headers\":[\"name\",\"value\"],\"rows\":[[\"gold\",4755.44]]}. For doc.read, use {\"path\":\"docs/file.docx\",\"maxEntries\":20,\"maxBytes\":12000}. For doc.write, use {\"path\":\"artifacts/status.docx\",\"title\":\"Status\",\"content\":\"...\",\"sections\":[{\"heading\":\"Observation\",\"body\":[\"...\"]}]}. For audio.transcribe, use {\"path\":\"artifacts/meeting.mp3\",\"language\":\"zh\",\"prompt\":\"保留关键专有名词\"}. For speech.synthesize, use {\"input\":\"要播报的文本\",\"voice\":\"alloy\",\"path\":\"memory/generated/tts.mp3\"}. For image.generate, use {\"prompt\":\"A precise technical illustration...\",\"path\":\"memory/generated/diagram.png\",\"size\":\"1024x1024\"}. For request_user_input use {\"questions\":[...]} and for request_permissions use {\"permissions\":{...},\"reason\":\"...\"}. For code.symbol_search, use {\"query\":\"SymbolName\",\"path\":\".\"}. For code.lsp, use {\"path\":\"src/file.ts\",\"operation\":\"document_symbol|definition|references|hover\",\"line\":1,\"character\":1}. For read_pdf, use {\"path\":\"docs/file.pdf\",\"pages\":\"1-3\"}. For read_notebook, use {\"path\":\"notebooks/demo.ipynb\",\"maxEntries\":20}. For view_image, use {\"path\":\"assets/mockup.png\",\"detail\":\"original\"} when the user wants you to inspect a local image. For write_todos use {\"todos\":[{\"description\":\"...\",\"status\":\"pending|in_progress|completed|blocked|cancelled\"}]}. Do not use shell operators like ||, &&, pipes, redirects, or inline shell strings. For code.glob/code.grep/code.read_many, prefer bounded path/pattern inputs instead of huge raw dumps.",
     input.forceFinalAnswer
       ? ""
       : "If the user asks for latest/current web information, browsing, live situation, or anything explicitly requiring the internet, prefer search.ground; use search.web for broad discovery and search.fetch for targeted page retrieval.",
@@ -477,7 +506,7 @@ function buildCoreUserInput(input: {
       : "For MCP capabilities, provide route.provider, route.model, and structured input. Examples: mcp.listTools => {\"route\":{...},\"input\":{\"connectionId\":\"...\"}}, mcp.listResources => {\"route\":{...},\"input\":{\"connectionId\":\"...\"}}, mcp.call => {\"route\":{...},\"input\":{\"connectionId\":\"...\",\"toolName\":\"...\",\"arguments\":{}}}.",
     input.forceFinalAnswer
       ? ""
-      : "If shell.restricted, shell.session, test.run, repo.write, code.edit, code.patch, code.diff, git.status, git.diff, git.commit, git.push, browser.playwright, write_todos, code.symbol_search, code.lsp, spreadsheet.read, doc.read, read_pdf, read_notebook, view_image, search.web, search.fetch, or search.ground is already registered, treat it as ready-to-use TAP inventory rather than something that still needs user approval.",
+      : "If shell.restricted, shell.session, test.run, repo.write, spreadsheet.write, doc.write, code.edit, code.patch, code.diff, git.status, git.diff, git.commit, git.push, browser.playwright, write_todos, code.symbol_search, code.lsp, spreadsheet.read, doc.read, read_pdf, read_notebook, view_image, search.web, search.fetch, search.ground, request_user_input, request_permissions, audio.transcribe, speech.synthesize, or image.generate is already registered, treat it as ready-to-use TAP inventory rather than something that still needs user approval.",
     `Currently registered TAP capabilities: ${availableCapabilities || "(none)"}.`,
     "",
     "Latest user message:",
@@ -487,11 +516,25 @@ function buildCoreUserInput(input: {
     formatTranscript(recentTurns),
     "",
     ...cmpSummaryBlock,
+    ...(input.capabilityHistoryText
+      ? [
+        "",
+        "Capability results collected so far this turn:",
+        input.capabilityHistoryText,
+      ]
+      : []),
     ...(input.toolResultText
       ? [
         "",
         "Latest TAP tool result:",
         input.toolResultText,
+      ]
+      : []),
+    ...(input.groundingEvidenceText
+      ? [
+        "",
+        "Normalized grounding evidence extracted from browser/tool results:",
+        input.groundingEvidenceText,
       ]
       : []),
     "",
@@ -505,6 +548,7 @@ async function runCoreModelPass(input: {
   cmp?: CmpTurnArtifacts;
   config: ReturnType<typeof loadOpenAILiveConfig>;
   inputImageUrls?: string[];
+  reasoningEffortOverride?: "low" | "medium" | "high";
 }): Promise<{
   runId: string;
   answer: string;
@@ -521,7 +565,7 @@ async function runCoreModelPass(input: {
         provider: "openai",
         model: LIVE_CHAT_MODEL_PLAN.core.model,
         variant: "responses",
-        reasoningEffort: resolveReasoningEffort(LIVE_CHAT_MODEL_PLAN.core),
+        reasoningEffort: input.reasoningEffortOverride ?? resolveReasoningEffort(LIVE_CHAT_MODEL_PLAN.core),
         cliHarness: "praxis-live-cli",
         cliLogger: input.state.logger,
         cliTurnIndex: input.state.turnIndex,
@@ -673,8 +717,10 @@ async function runCoreActionPlanner(
         "Do not use mcp.* just to inspect your own registered inventory.",
         "If the user asks for current, latest, online, web, or live information and search.ground is available, choose capability_call with search.ground instead of saying you cannot browse. Use search.web for broad discovery and search.fetch for targeted page reads.",
         "For shell.restricted and test.run, prefer bounded output and avoid commands likely to dump an entire large repository or massive raw result in one step.",
+        "For browser.playwright, emit exactly one reviewed action per capability_call.",
+        "Do not emit browser steps arrays, actions arrays, or bundled browser master plans in one request. Let later loop iterations issue the next browser action.",
         "Schema:",
-        '{"action":"reply|capability_call","taskStatus":"completed|incomplete|blocked|exhausted","responseText":"user-facing text","capabilityRequest":{"capabilityKey":"shell.restricted|shell.session|test.run|repo.write|code.edit|code.patch|code.diff|git.status|git.diff|git.commit|git.push|browser.playwright|write_todos|code.read|code.ls|code.glob|code.grep|code.read_many|code.symbol_search|code.lsp|spreadsheet.read|doc.read|read_pdf|read_notebook|view_image|search.web|search.fetch|search.ground|skill.use|skill.mount|skill.prepare|mcp.listTools|mcp.listResources|mcp.readResource|mcp.call|mcp.native.execute|...","reason":"short reason","input":{"command":"...","args":["..."],"cwd":"."},"requestedTier":"B0|B1|B2|B3","timeoutMs":20000}}',
+        '{"action":"reply|capability_call","taskStatus":"completed|incomplete|blocked|exhausted","responseText":"user-facing text","capabilityRequest":{"capabilityKey":"shell.restricted|shell.session|test.run|repo.write|spreadsheet.write|doc.write|code.edit|code.patch|code.diff|git.status|git.diff|git.commit|git.push|browser.playwright|write_todos|code.read|code.ls|code.glob|code.grep|code.read_many|code.symbol_search|code.lsp|spreadsheet.read|doc.read|read_pdf|read_notebook|view_image|search.web|search.fetch|search.ground|skill.use|skill.mount|skill.prepare|mcp.listTools|mcp.listResources|mcp.readResource|mcp.call|mcp.native.execute|request_user_input|request_permissions|audio.transcribe|speech.synthesize|image.generate|...","reason":"short reason","input":{"command":"...","args":["..."],"cwd":"."},"requestedTier":"B0|B1|B2|B3","timeoutMs":20000}}',
         "If action=reply, omit capabilityRequest.",
         "If action=capability_call, responseText should briefly tell the user what tool you are using and then proceed.",
         "For search.web/search.ground, emit input like {\"query\":\"...\",\"freshness\":\"day\",\"citations\":\"preferred|required\"}. The CLI will supply provider/model defaults. For search.fetch, emit input like {\"url\":\"https://...\",\"prompt\":\"extract the needed facts\"}.",
@@ -1223,6 +1269,154 @@ function inferDeterministicCoreActionEnvelope(
   return undefined;
 }
 
+function inferDeterministicBrowserFollowupEnvelope(params: {
+  userMessage: string;
+  toolExecution: NonNullable<CoreTurnArtifacts["toolExecution"]>;
+  summary: BrowserTurnSummary;
+}): CoreActionEnvelope | undefined {
+  if (params.toolExecution.capabilityKey !== "browser.playwright") {
+    return undefined;
+  }
+  const output = params.toolExecution.output && typeof params.toolExecution.output === "object"
+    ? params.toolExecution.output as Record<string, unknown>
+    : undefined;
+  if (!output) {
+    return undefined;
+  }
+
+  const action = readString(output.action);
+  const pageUrl = readString(output.pageUrl);
+  const explicitUrl = extractFirstHttpUrl(params.userMessage);
+  const wantsScreenshot = /(截图|screenshot)/iu.test(params.userMessage);
+  const googleQuery = buildGoogleSearchQueryFromUserMessage(params.userMessage);
+  const wantsGoldPrice = /(金价|黄金|美元\/盎司|美刀\/盎司|usd\/oz|XAU\/USD)/iu.test(params.userMessage);
+
+  if (
+    action === "navigate"
+    && explicitUrl
+    && pageUrl?.startsWith(explicitUrl)
+    && wantsScreenshot
+  ) {
+    return {
+      action: "capability_call",
+      taskStatus: "incomplete",
+      responseText: "继续补上页面截图。",
+      capabilityRequest: {
+        capabilityKey: "browser.playwright",
+        reason: "The target page is open and now needs a screenshot to complete the current browser subtask.",
+        requestedTier: "B1",
+        timeoutMs: 15_000,
+        input: {
+          action: "screenshot",
+        },
+      },
+    };
+  }
+
+  if (
+    action === "screenshot"
+    && googleQuery
+    && !(pageUrl && /google\.com\/search/iu.test(pageUrl))
+  ) {
+    return {
+      action: "capability_call",
+      taskStatus: "incomplete",
+      responseText: "继续打开 Google 搜索结果页。",
+      capabilityRequest: {
+        capabilityKey: "browser.playwright",
+        reason: "The first page screenshot is done; continue to the requested Google search step.",
+        requestedTier: "B1",
+        timeoutMs: 15_000,
+        input: {
+          action: "navigate",
+          url: `https://www.google.com/search?q=${encodeURIComponent(googleQuery)}`,
+          allowedDomains: ["google.com", "www.google.com"],
+        },
+      },
+    };
+  }
+
+  if (
+    action === "navigate"
+    && pageUrl
+    && /google\.com\/search/iu.test(pageUrl)
+  ) {
+    return {
+      action: "capability_call",
+      taskStatus: "incomplete",
+      responseText: "继续读取当前搜索结果页。",
+      capabilityRequest: {
+        capabilityKey: "browser.playwright",
+        reason: "The Google results page is open; capture a snapshot so core can inspect visible result content.",
+        requestedTier: "B1",
+        timeoutMs: 15_000,
+        input: {
+          action: "snapshot",
+        },
+      },
+    };
+  }
+
+  if (
+    action === "snapshot"
+    && pageUrl
+    && /google\.com\/search/iu.test(pageUrl)
+    && wantsGoldPrice
+    && params.summary.candidateSourceUrl
+    && params.summary.goldPriceEvidenceSource !== "verified_source"
+  ) {
+    let allowedDomains: string[] | undefined;
+    try {
+      const parsed = new URL(params.summary.candidateSourceUrl);
+      allowedDomains = parsed.hostname ? [parsed.hostname] : undefined;
+    } catch {
+      allowedDomains = undefined;
+    }
+    return {
+      action: "capability_call",
+      taskStatus: "incomplete",
+      responseText: "继续打开候选行情源页做求证。",
+      capabilityRequest: {
+        capabilityKey: "browser.playwright",
+        reason: "The Google results page exposed a promising gold-price source, so open it and verify the USD/oz number on-page.",
+        requestedTier: "B1",
+        timeoutMs: 15_000,
+        input: {
+          action: "navigate",
+          url: params.summary.candidateSourceUrl,
+          ...(allowedDomains ? { allowedDomains } : {}),
+        },
+      },
+    };
+  }
+
+  if (
+    action === "navigate"
+    && pageUrl
+    && wantsGoldPrice
+    && !/google\.com\/search/iu.test(pageUrl)
+    && !pageUrl.startsWith("https://example.com")
+    && params.summary.goldPriceEvidenceSource !== "verified_source"
+  ) {
+    return {
+      action: "capability_call",
+      taskStatus: "incomplete",
+      responseText: "继续读取候选行情源页的可见内容。",
+      capabilityRequest: {
+        capabilityKey: "browser.playwright",
+        reason: "The candidate source page is open; capture a snapshot so core can verify the visible USD/oz price.",
+        requestedTier: "B1",
+        timeoutMs: 15_000,
+        input: {
+          action: "snapshot",
+        },
+      },
+    };
+  }
+
+  return undefined;
+}
+
 function isEmptyCorePlaceholderAnswer(text: string | undefined): boolean {
   if (!text) {
     return true;
@@ -1346,6 +1540,9 @@ async function runCoreTurn(
   let latestTaskStatus: CoreTaskStatus = "completed";
   let latestToolExecution: NonNullable<CoreTurnArtifacts["toolExecution"]> | undefined;
   let completedCapabilityLoops = 0;
+  let browserTurnSummary: BrowserTurnSummary = {};
+  let capabilityLoopHistory: string[] = [];
+  let browserGroundingEvidenceText: string | undefined;
   let pendingToolResultText: string | undefined;
   let pendingInputImageUrls: string[] | undefined;
   let pendingIncompleteReplyText: string | undefined;
@@ -1394,12 +1591,19 @@ async function runCoreTurn(
     };
   };
 
-  try {
-    actionEnvelope = await runCoreActionPlanner(state, userMessage);
+  const deterministicFirstStep = inferDeterministicCoreActionEnvelope(state, userMessage);
+  if (deterministicFirstStep?.action === "capability_call"
+    && deterministicFirstStep.capabilityRequest?.capabilityKey === "browser.playwright") {
+    actionEnvelope = deterministicFirstStep;
     rawAnswer = JSON.stringify(actionEnvelope);
-  } catch {
-    actionEnvelope = inferDeterministicCoreActionEnvelope(state, userMessage);
-    rawAnswer = actionEnvelope ? JSON.stringify(actionEnvelope) : "";
+  } else {
+    try {
+      actionEnvelope = await runCoreActionPlanner(state, userMessage);
+      rawAnswer = JSON.stringify(actionEnvelope);
+    } catch {
+      actionEnvelope = deterministicFirstStep;
+      rawAnswer = actionEnvelope ? JSON.stringify(actionEnvelope) : "";
+    }
   }
 
   while (true) {
@@ -1412,6 +1616,8 @@ async function runCoreTurn(
           cmp,
           runtime: state.runtime,
           toolResultText: pendingToolResultText,
+          capabilityHistoryText: capabilityLoopHistory.join("\n\n"),
+          groundingEvidenceText: browserGroundingEvidenceText,
           capabilityLoopIndex: completedCapabilityLoops,
           maxCapabilityLoops,
           previousTaskStatus: pendingIncompleteReplyText ? "incomplete" : undefined,
@@ -1420,6 +1626,7 @@ async function runCoreTurn(
         cmp,
         config,
         inputImageUrls: pendingInputImageUrls,
+        reasoningEffortOverride: pendingToolResultText ? "low" : undefined,
       });
       latestRunId = fallback.runId;
       latestEventTypes = fallback.eventTypes;
@@ -1480,7 +1687,22 @@ async function runCoreTurn(
       actionEnvelope.capabilityRequest,
       config,
       userMessage,
-    );
+      latestToolExecution?.capabilityKey === "browser.playwright"
+        && latestToolExecution.output
+        && typeof latestToolExecution.output === "object"
+        ? {
+          headless: typeof (latestToolExecution.output as { headless?: unknown }).headless === "boolean"
+            ? (latestToolExecution.output as { headless: boolean }).headless
+            : undefined,
+          browser: typeof (latestToolExecution.output as { browser?: unknown }).browser === "string"
+            ? (latestToolExecution.output as { browser: string }).browser
+            : undefined,
+          isolated: typeof (latestToolExecution.output as { isolated?: unknown }).isolated === "boolean"
+            ? (latestToolExecution.output as { isolated: boolean }).isolated
+            : undefined,
+        }
+        : undefined,
+      );
     if (state.uiMode === "direct") {
       printDirectSub(`调用能力 ${capabilityRequest.capabilityKey}`);
     }
@@ -1504,8 +1726,8 @@ async function runCoreTurn(
       stage: "core/capability_bridge",
       status: resolvedToolExecution.status,
       capabilityKey: resolvedToolExecution.capabilityKey,
-      output: resolvedToolExecution.output,
-      error: resolvedToolExecution.error,
+      output: trimStructuredValue(resolvedToolExecution.output, 4_000),
+      error: trimStructuredValue(resolvedToolExecution.error, 1_500),
     });
 
     const toolResultCapabilityKey = resolvedToolExecution.capabilityKey || capabilityRequest.capabilityKey;
@@ -1528,15 +1750,40 @@ async function runCoreTurn(
     latestToolExecution = resolvedToolExecution;
     latestTaskStatus = "incomplete";
     completedCapabilityLoops += 1;
+    if (toolResultCapabilityKey === "browser.playwright") {
+      browserTurnSummary = updateBrowserTurnSummary(browserTurnSummary, resolvedToolExecution.output);
+      browserGroundingEvidenceText = buildBrowserGroundingEvidenceText(browserTurnSummary);
+    }
     pendingToolResultText = toolResultText;
     pendingInputImageUrls = inputImageUrls;
     pendingIncompleteReplyText = undefined;
     incompleteReplyRecoveries = 0;
+    capabilityLoopHistory = [
+      ...capabilityLoopHistory,
+      `Step ${completedCapabilityLoops} · ${toolResultCapabilityKey} · ${resolvedToolExecution.status}\n${toolResultText}`,
+    ].slice(-4);
     const forceFinalAnswer = shouldStopCoreCapabilityLoop({
       capabilityResultStatus: resolvedToolExecution.status,
       completedLoops: completedCapabilityLoops,
       maxLoops: maxCapabilityLoops,
     });
+
+    const deterministicFollowup = !forceFinalAnswer
+      ? inferDeterministicBrowserFollowupEnvelope({
+        userMessage,
+        toolExecution: resolvedToolExecution,
+        summary: browserTurnSummary,
+      })
+      : undefined;
+    if (deterministicFollowup?.action === "capability_call" && deterministicFollowup.capabilityRequest) {
+      latestTaskStatus = normalizeCoreTaskStatus(deterministicFollowup);
+      actionEnvelope = deterministicFollowup;
+      rawAnswer = JSON.stringify(deterministicFollowup);
+      pendingToolResultText = undefined;
+      pendingInputImageUrls = undefined;
+      pendingIncompleteReplyText = undefined;
+      continue;
+    }
 
     const followup = await runCoreModelPass({
       state,
@@ -1546,6 +1793,8 @@ async function runCoreTurn(
         cmp,
         runtime: state.runtime,
         toolResultText,
+        capabilityHistoryText: capabilityLoopHistory.join("\n\n"),
+        groundingEvidenceText: browserGroundingEvidenceText,
         forceFinalAnswer,
         capabilityLoopIndex: completedCapabilityLoops,
         maxCapabilityLoops,
@@ -1553,6 +1802,7 @@ async function runCoreTurn(
       cmp,
       config,
       inputImageUrls,
+      reasoningEffortOverride: "low",
     });
     latestRunId = followup.runId;
     latestEventTypes = [
@@ -1609,11 +1859,15 @@ async function runCoreTurn(
       : synthesizedToolAnswer
         || actionEnvelope.responseText
         || rawAnswer;
-    latestTaskStatus = deriveTerminalCoreTaskStatus({
-      toolExecutionStatus: resolvedToolExecution.status,
-      forceFinalAnswer,
-      envelope: followupEnvelope,
-    });
+    latestTaskStatus = toolResultCapabilityKey === "search.ground"
+      && (resolvedToolExecution.status === "success" || resolvedToolExecution.status === "partial")
+      && !isEmptyCorePlaceholderAnswer(followupAnswer)
+      ? "completed"
+      : deriveTerminalCoreTaskStatus({
+        toolExecutionStatus: resolvedToolExecution.status,
+        forceFinalAnswer,
+        envelope: followupEnvelope,
+      });
     return {
       runId: followup.runId,
       answer: followupAnswer,
@@ -1632,6 +1886,9 @@ async function handleUserTurn(
   state: LiveCliState,
   userMessage: string,
   config: ReturnType<typeof loadOpenAILiveConfig>,
+  options: {
+    enableCmpSync?: boolean;
+  } = {},
 ): Promise<void> {
   state.turnIndex += 1;
   await state.logger.log("turn_start", {
@@ -1646,24 +1903,34 @@ async function handleUserTurn(
   console.log("");
   console.log(state.uiMode === "direct"
     ? `You asked: ${truncate(userMessage, 96)}`
-    : `[turn ${state.turnIndex}] core starts immediately; CMP sidecar runs in background.`);
+    : options.enableCmpSync === false
+      ? `[turn ${state.turnIndex}] core starts immediately; CMP sidecar is skipped for this once-mode turn.`
+      : `[turn ${state.turnIndex}] core starts immediately; CMP sidecar runs in background.`);
   if (state.uiMode === "direct") {
     printDirectBullet(`Working · turn ${state.turnIndex}`);
     printDirectSub("core 前台开始处理");
-    printDirectSub("CMP sidecar 后台启动，不阻塞当前回合");
+    printDirectSub(
+      options.enableCmpSync === false
+        ? "本轮跳过 CMP sidecar，同步把前台结果尽快返回"
+        : "CMP sidecar 后台启动，不阻塞当前回合",
+    );
   }
-  state.pendingCmpSync = (async () => {
-    const cmp = await withStopwatch(backgroundCmpLabel, () => runCmpTurn(state, userMessage), {
-      quiet: state.uiMode === "direct",
-    });
-    state.latestCmp = cmp;
-    state.lastTurn = state.lastTurn
-      ? { ...state.lastTurn, cmp }
-      : state.lastTurn;
-    console.log(state.uiMode === "direct"
-      ? `  ↳ CMP sidecar 已同步 (${formatElapsed(Date.now() - cmpStartedAt)})`
-      : `[turn ${state.turnIndex}] CMP sidecar synced.`);
-  })();
+  if (options.enableCmpSync === false) {
+    state.pendingCmpSync = undefined;
+  } else {
+    state.pendingCmpSync = (async () => {
+      const cmp = await withStopwatch(backgroundCmpLabel, () => runCmpTurn(state, userMessage), {
+        quiet: state.uiMode === "direct",
+      });
+      state.latestCmp = cmp;
+      state.lastTurn = state.lastTurn
+        ? { ...state.lastTurn, cmp }
+        : state.lastTurn;
+      console.log(state.uiMode === "direct"
+        ? `  ↳ CMP sidecar 已同步 (${formatElapsed(Date.now() - cmpStartedAt)})`
+        : `[turn ${state.turnIndex}] CMP sidecar synced.`);
+    })();
+  }
 
   const coreLabel = `[turn ${state.turnIndex}] TAP + core dispatch elapsed`;
   await state.logger.log("stage_start", {
@@ -1695,28 +1962,30 @@ async function handleUserTurn(
   state.transcript.push({ role: "assistant", text: core.answer });
   state.lastTurn = {
     cmp: state.latestCmp ?? previousCmp ?? {
-      agentId: "cmp-sidecar-pending",
-      packageId: "pending",
-      packageRef: "pending",
-      projectionId: "pending",
-      snapshotId: "pending",
+      agentId: options.enableCmpSync === false ? "cmp-sidecar-skipped" : "cmp-sidecar-pending",
+      packageId: options.enableCmpSync === false ? "skipped" : "pending",
+      packageRef: options.enableCmpSync === false ? "skipped" : "pending",
+      projectionId: options.enableCmpSync === false ? "skipped" : "pending",
+      snapshotId: options.enableCmpSync === false ? "skipped" : "pending",
       summary: state.runtime.getCmpFiveAgentRuntimeSummary("cmp-live-cli-main"),
-      intent: "pending",
-      operatorGuide: "CMP sidecar is still preparing or no prior package is available.",
-      childGuide: "pending",
-      checkerReason: "pending",
-      routeRationale: "pending",
-      scopePolicy: "pending",
-      packageStrategy: "pending",
-      timelineStrategy: "pending",
+      intent: options.enableCmpSync === false ? "skipped in once mode" : "pending",
+      operatorGuide: options.enableCmpSync === false
+        ? "CMP sidecar was intentionally skipped so once mode could return immediately."
+        : "CMP sidecar is still preparing or no prior package is available.",
+      childGuide: options.enableCmpSync === false ? "skipped" : "pending",
+      checkerReason: options.enableCmpSync === false ? "skipped" : "pending",
+      routeRationale: options.enableCmpSync === false ? "skipped" : "pending",
+      scopePolicy: options.enableCmpSync === false ? "skipped" : "pending",
+      packageStrategy: options.enableCmpSync === false ? "skipped" : "pending",
+      timelineStrategy: options.enableCmpSync === false ? "skipped" : "pending",
     },
     core,
   };
   await state.logger.log("turn_result", {
     turnIndex: state.turnIndex,
-    cmp: state.lastTurn.cmp,
-    core,
-    transcriptTail: state.transcript.slice(-8),
+    cmp: trimStructuredValue(state.lastTurn.cmp, 4_000),
+    core: trimStructuredValue(core, 5_000),
+    transcriptTail: trimStructuredValue(state.transcript.slice(-8), 2_000),
   });
 
   if (state.uiMode === "direct") {
@@ -1748,11 +2017,18 @@ function createRuntime() {
         "code.symbol_search",
         "code.lsp",
         "spreadsheet.read",
+        "spreadsheet.write",
         "doc.read",
+        "doc.write",
         "read_pdf",
         "read_notebook",
         "view_image",
         "browser.playwright",
+        "request_user_input",
+        "request_permissions",
+        "audio.transcribe",
+        "speech.synthesize",
+        "image.generate",
         "docs.read",
         "repo.write",
         "code.edit",
@@ -1901,8 +2177,18 @@ async function main(): Promise<void> {
 
   try {
     if (options.once) {
-      await handleUserTurn(state, options.once, config);
-      await state.pendingCmpSync;
+      await handleUserTurn(state, options.once, config, {
+        enableCmpSync: false,
+      });
+      await executeCoreCapabilityRequest(state, {
+        capabilityKey: "browser.playwright",
+        reason: "Close once-mode browser sessions before returning control to the shell.",
+        requestedTier: "B1",
+        timeoutMs: 5_000,
+        input: {
+          action: "disconnect",
+        },
+      }).catch(() => undefined);
       return;
     }
 

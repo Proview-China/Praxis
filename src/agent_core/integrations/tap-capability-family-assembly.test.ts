@@ -40,6 +40,8 @@ test("registerTapCapabilityFamilyAssembly wires foundation, search, skill, MCP, 
     "view_image",
     "docs.read",
     "repo.write",
+    "spreadsheet.write",
+    "doc.write",
     "code.edit",
     "code.patch",
     "shell.restricted",
@@ -88,11 +90,14 @@ test("registerTapCapabilityFamilyAssembly wires foundation, search, skill, MCP, 
   assert.deepEqual(result.familyKeys.userio, [
     "request_user_input",
     "request_permissions",
+    "audio.transcribe",
+    "speech.synthesize",
+    "image.generate",
   ]);
-  assert.equal(result.packages.length, 51);
-  assert.equal(result.bindings.length, 51);
+  assert.equal(result.packages.length, 57);
+  assert.equal(result.bindings.length, 57);
   assert.equal(result.activationFactoryRefs.length, activationFactories.size);
-  assert.equal(result.registrationAudit.length, 51);
+  assert.equal(result.registrationAudit.length, 57);
   assert.equal(result.activationFactoryAudit.length, activationFactories.size);
   assert.equal(registeredCapabilityKeys.includes("search.web"), true);
   assert.equal(registeredCapabilityKeys.includes("search.fetch"), true);
@@ -101,6 +106,7 @@ test("registerTapCapabilityFamilyAssembly wires foundation, search, skill, MCP, 
   assert.equal(registeredCapabilityKeys.includes("mcp.native.execute"), true);
   assert.equal(registeredCapabilityKeys.includes("mp.search"), true);
   assert.equal(registeredCapabilityKeys.includes("request_user_input"), true);
+  assert.equal(registeredCapabilityKeys.includes("image.generate"), true);
 
   const codeReadAudit = result.registrationAudit.find(
     (entry) => entry.capabilityKey === "code.read",
