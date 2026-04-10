@@ -5,6 +5,35 @@ import Testing
 
 struct PraxisRunLifecycleTests {
   @Test
+  func runIdentityCodecRoundTripsColonContainingSessions() {
+    let codec = PraxisRunIdentityCodec()
+
+    let runID = codec.makeRunID(sessionRawValue: "team:alpha", goalID: "goal-1")
+
+    #expect(runID.rawValue == "run:pct~team%3Aalpha:goal-1")
+    #expect(codec.sessionRawValue(from: runID) == "team:alpha")
+    #expect(codec.sessionRawValueCandidates(from: runID) == ["team:alpha"])
+  }
+
+  @Test
+  func runIdentityCodecPreservesLegacyPercentLiteralSessions() {
+    let codec = PraxisRunIdentityCodec()
+    let runID = PraxisRunID(rawValue: "run:team%3Aalpha:goal-1")
+
+    #expect(codec.sessionRawValue(from: runID) == "team%3Aalpha")
+    #expect(codec.sessionRawValueCandidates(from: runID) == ["team%3Aalpha", "team:alpha"])
+  }
+
+  @Test
+  func runIdentityCodecSupportsLegacyDotSeparatedRuns() {
+    let codec = PraxisRunIdentityCodec()
+    let runID = PraxisRunID(rawValue: "run.session.host-runtime.goal.host-runtime")
+
+    #expect(codec.sessionRawValue(from: runID) == "session.host-runtime")
+    #expect(codec.sessionRawValueCandidates(from: runID) == ["session.host-runtime"])
+  }
+
+  @Test
   func advanceRunAppliesTransitionDecisionAndStateDelta() throws {
     let lifecycle = PraxisRunLifecycleService()
     let run = lifecycle.createRun(id: .init(rawValue: "run-1"))

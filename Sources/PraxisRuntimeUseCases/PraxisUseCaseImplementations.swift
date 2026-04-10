@@ -22,7 +22,7 @@ private let tapInspectionCheckpointPointer = PraxisCheckpointPointer(
   sessionID: tapInspectionSessionID
 )
 private let checkpointReplayPageSize = 50
-private let encodedRunIDSessionPrefix = "pct~"
+private let runIdentityCodec = PraxisRunIdentityCodec()
 
 private struct PraxisContractBackedJournalReader: PraxisJournalReading {
   let store: any PraxisJournalStoreContract
@@ -91,85 +91,19 @@ private func runtimeNow() -> String {
 }
 
 private func defaultSessionID(for goalID: String) -> PraxisSessionID {
-  .init(rawValue: "session.\(goalID)")
-}
-
-private func encodeRunIDSessionComponent(_ rawValue: String) -> String {
-  let requiresEncoding =
-    rawValue.contains(":")
-    || rawValue.contains("%")
-    || rawValue.hasPrefix(encodedRunIDSessionPrefix)
-  guard requiresEncoding else {
-    return rawValue
-  }
-
-  return encodedRunIDSessionPrefix + rawValue
-    .replacingOccurrences(of: "%", with: "%25")
-    .replacingOccurrences(of: ":", with: "%3A")
-}
-
-private func decodeRunIDSessionComponent(_ rawValue: String) -> String {
-  guard rawValue.hasPrefix(encodedRunIDSessionPrefix) else {
-    return rawValue
-  }
-
-  let encodedComponent = String(rawValue.dropFirst(encodedRunIDSessionPrefix.count))
-  return encodedComponent.removingPercentEncoding ?? encodedComponent
-}
-
-private func rawRunIDSessionComponent(from runID: PraxisRunID) -> String? {
-  guard runID.rawValue.hasPrefix("run:") else {
-    return nil
-  }
-  let parts = runID.rawValue.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
-  guard parts.count >= 3 else {
-    return nil
-  }
-  return String(parts[1])
+  .init(rawValue: runIdentityCodec.makeDefaultSessionRawValue(for: goalID))
 }
 
 private func sessionIDCandidates(from runID: PraxisRunID) -> [PraxisSessionID] {
-  guard let rawSessionComponent = rawRunIDSessionComponent(from: runID) else {
-    return [sessionID(from: runID)]
-  }
-
-  var candidates: [PraxisSessionID] = []
-  let primary = PraxisSessionID(rawValue: decodeRunIDSessionComponent(rawSessionComponent))
-  candidates.append(primary)
-
-  if !rawSessionComponent.hasPrefix(encodedRunIDSessionPrefix),
-     let decodedLegacyComponent = rawSessionComponent.removingPercentEncoding,
-     decodedLegacyComponent != rawSessionComponent {
-    let decodedCandidate = PraxisSessionID(rawValue: decodedLegacyComponent)
-    if !candidates.contains(decodedCandidate) {
-      candidates.append(decodedCandidate)
-    }
-  }
-
-  return candidates
+  runIdentityCodec.sessionRawValueCandidates(from: runID).map(PraxisSessionID.init(rawValue:))
 }
 
 private func runID(for sessionID: PraxisSessionID, goalID: String) -> PraxisRunID {
-  .init(rawValue: "run:\(encodeRunIDSessionComponent(sessionID.rawValue)):\(goalID)")
+  runIdentityCodec.makeRunID(sessionRawValue: sessionID.rawValue, goalID: goalID)
 }
 
 private func sessionID(from runID: PraxisRunID) -> PraxisSessionID {
-  if runID.rawValue.hasPrefix("run:") {
-    let parts = runID.rawValue.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
-    if parts.count >= 3 {
-      return .init(rawValue: decodeRunIDSessionComponent(String(parts[1])))
-    }
-  }
-  if runID.rawValue.hasPrefix("run.") {
-    let suffix = runID.rawValue.dropFirst(4)
-    if let goalMarker = suffix.range(of: ".goal.") {
-      return .init(rawValue: String(suffix[..<goalMarker.lowerBound]))
-    }
-    if let dotIndex = suffix.lastIndex(of: ".") {
-      return .init(rawValue: String(suffix[..<dotIndex]))
-    }
-  }
-  return .init(rawValue: "session.\(runID.rawValue)")
+  .init(rawValue: runIdentityCodec.sessionRawValue(from: runID))
 }
 
 private func checkpointPointer(for runID: PraxisRunID, sessionID: PraxisSessionID) -> PraxisCheckpointPointer {

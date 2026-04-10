@@ -93,6 +93,15 @@
 - 可逆编码必须带显式标记，避免把历史 `run:` ID 中本来就是字面量 `%3A` / `%25` 的 session 误当成新编码格式
 - 调用方不需要也不应该自己预处理 `sessionID`
 
+当前这条 identity contract 的 canonical 实现在：
+
+- `PraxisRunIdentityCodec`
+
+也就是说：
+
+- HostRuntime 不应该再在 use case、bridge、interface session 里各自维护一套 run/session 解析 helper
+- 未来 FFI / 其它语言绑定如果需要做同构实现，应当以这套 codec 语义为准
+
 ### 2. Snapshot / Response
 
 - `PraxisRuntimeInterfaceSnapshot`
@@ -195,6 +204,7 @@
 - 已落下：
   - request / response / event 模型
   - run lifecycle disposition
+  - canonical run/session identity contract documented against `PraxisRunIdentityCodec`
   - serving protocol
   - JSON codec
   - `PraxisRuntimeInterfaceSession`

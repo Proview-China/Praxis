@@ -50,6 +50,9 @@
   - 先 replay checkpoint 之后的 journal 真相
   - 再决定是否真的发出新的 `run.resumed`
   - 如果 replay 已经证明 run 终态成立，则返回 `recoveredWithoutResume`，并发出 `run.recovered`
+- 把 run/session identity 规则从 HostRuntime use case 私有 helper 抽成了：
+  - `PraxisRunIdentityCodec`
+- 现在新的 run ID 编码、历史 `%3A` 字面量兼容、legacy dotted run 解析，都由同一份 codec 负责
 
 ## 这层当前不负责什么
 
@@ -83,11 +86,14 @@
   - 统一接口可生成 neutral run response 与 buffered events
   - JSON codec request/response roundtrip 正常
   - replay 命中终态时，统一接口会暴露 `recoveredWithoutResume` 而不是伪造 `run.resumed`
+- `Tests/PraxisRunTests/PraxisRunLifecycleTests.swift`
+  - `PraxisRunIdentityCodec` 覆盖了新的 colon session、历史 percent-literal session、legacy dotted run 三条兼容路径
 
 ## 当前结论
 
 - 这层统一接口已经具备最小可用框架，可以作为后续 lib/FFI 导出的正式起点。
 - 现在这个起点已经包含 replay-aware resume contract，后续跨语言绑定不需要再解析英文 summary 去猜恢复语义。
+- run/session identity 也已经有了单一 canonical codec，后续接口层和导出层不需要再各自复制解析逻辑。
 - 之后如果继续推进，优先补：
   - neutral error envelope
   - encoded smoke tests
