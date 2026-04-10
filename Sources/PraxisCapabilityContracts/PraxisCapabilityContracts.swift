@@ -1,10 +1,10 @@
 import PraxisCoreTypes
 
 // TODO(reboot-plan):
-// - 实现 CapabilityManifest、InvocationContract、BindingSpec、CapabilityIdentity 等协议模型。
-// - 定义 capability 请求、响应、生命周期状态与错误语义。
-// - 冻结 Capability 子域最低层边界，避免 planning/results/catalog 反向污染 contracts。
-// - 文件可继续拆分：CapabilityIdentity.swift、CapabilityManifest.swift、InvocationContract.swift、CapabilityErrors.swift。
+// - Implement protocol-layer models such as CapabilityManifest, InvocationContract, BindingSpec, and CapabilityIdentity.
+// - Define capability request, response, lifecycle state, and error semantics.
+// - Freeze the lowest Capability boundary so planning, results, and catalog do not leak back into contracts.
+// - This file can later be split into CapabilityIdentity.swift, CapabilityManifest.swift, InvocationContract.swift, and CapabilityErrors.swift.
 
 public enum PraxisCapabilityContractsModule {
   public static let boundary = PraxisBoundaryDescriptor(

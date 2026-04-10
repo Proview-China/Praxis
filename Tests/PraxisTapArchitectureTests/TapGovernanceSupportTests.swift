@@ -14,7 +14,7 @@ struct TapGovernanceSupportTests {
     )
     let risk = PraxisPlainLanguageRiskPayload(
       requestedAction: "run repo write tool",
-      riskLevel: .high,
+      riskLevel: .risky,
       plainLanguageSummary: "这次会改工作区内容。",
       whyItIsRisky: "可能影响多个文件。",
       possibleConsequence: "改错会引入额外修复。",
@@ -42,10 +42,10 @@ struct TapGovernanceSupportTests {
       forbiddenObjects: [
         .init(kind: .secretLiteral, summary: "secret must never enter aperture")
       ],
-      mode: .careful
+      mode: .standard
     )
 
-    #expect(aperture.riskSummary.riskLevel == .high)
+    #expect(aperture.riskSummary.riskLevel == .risky)
     #expect(aperture.sections.first?.trustLevel == .verified)
     #expect(aperture.forbiddenObjects.first?.kind == .secretLiteral)
   }
@@ -74,7 +74,7 @@ struct TapGovernanceSupportTests {
     let runtimeSnapshot = PraxisTapRuntimeSnapshot(
       controlPlaneState: .init(
         sessionID: .init(rawValue: "session-1"),
-        governance: .init(mode: .careful, riskLevel: .medium, capabilityIDs: []),
+        governance: .init(mode: .standard, riskLevel: .risky, capabilityIDs: []),
         humanGateState: .waitingApproval
       ),
       checkpointPointer: nil

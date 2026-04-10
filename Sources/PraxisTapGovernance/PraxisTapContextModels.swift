@@ -2,19 +2,19 @@ import PraxisCapabilityContracts
 import PraxisTapTypes
 
 public enum PraxisContextSummaryStatus: String, Sendable, Codable {
-  case placeholder
+  case pending
   case ready
 }
 
 public enum PraxisContextFreshnessLevel: String, Sendable, Codable {
-  case placeholder
+  case unknown
   case stale
   case fresh
   case live
 }
 
 public enum PraxisContextTrustLevel: String, Sendable, Codable {
-  case placeholder
+  case unknown
   case derived
   case declared
   case verified

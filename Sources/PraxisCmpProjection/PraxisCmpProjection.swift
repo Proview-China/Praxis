@@ -4,10 +4,10 @@ import PraxisCmpTypes
 import PraxisCoreTypes
 
 // TODO(reboot-plan):
-// - 实现 ProjectionRecord、MaterializationPlan、VisibilityPolicy、ProjectionRecovery 等模型。
-// - 实现 projection rebuild、runtime snapshot、visibility enforcement 和恢复规则。
-// - 保持 projection 只表达“上下文怎样被投影”，不直接调用 store。
-// - 文件可继续拆分：ProjectionRecord.swift、Materializer.swift、VisibilityPolicy.swift、ProjectionRecovery.swift。
+// - Implement models such as ProjectionRecord, MaterializationPlan, VisibilityPolicy, and ProjectionRecovery.
+// - Implement projection rebuild, runtime snapshot, visibility enforcement, and recovery rules.
+// - Keep projection focused on how context is projected instead of calling stores directly.
+// - This file can later be split into ProjectionRecord.swift, Materializer.swift, VisibilityPolicy.swift, and ProjectionRecovery.swift.
 
 public enum PraxisCmpProjectionModule {
   public static let boundary = PraxisBoundaryDescriptor(

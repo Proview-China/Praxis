@@ -1,11 +1,11 @@
 import PraxisCoreTypes
 
 // TODO(reboot-plan):
-// - 实现 shell、browser、git、process supervision 的完整协议边界。
-// - 补充 system git 可用性探测与首次安装引导的宿主契约。
-// - 补充执行结果、超时、取消、流式输出、browser grounding evidence 和错误分类等契约。
-// - 让 tooling contracts 保持“执行器协议层”，不反向带入领域规则。
-// - 文件可继续拆分：ShellExecutor.swift、BrowserExecutor.swift、GitAvailabilityProbe.swift、GitExecutor.swift、ProcessSupervisor.swift、BrowserGroundingModels.swift。
+// - Implement the full contract boundaries for shell, browser, git, and process supervision.
+// - Add host contracts for system git availability checks and first-time installation guidance.
+// - Add contracts for execution results, timeouts, cancellation, streaming output, browser grounding evidence, and error taxonomies.
+// - Keep tooling contracts as an executor-protocol layer without pulling domain rules back in.
+// - This file can later be split into ShellExecutor.swift, BrowserExecutor.swift, GitAvailabilityProbe.swift, GitExecutor.swift, ProcessSupervisor.swift, and BrowserGroundingModels.swift.
 
 public enum PraxisToolingContractsModule {
   public static let boundary = PraxisBoundaryDescriptor(

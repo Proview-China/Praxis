@@ -1,10 +1,10 @@
 import PraxisCoreTypes
 
 // TODO(reboot-plan):
-// - 实现 user input、permission、terminal/conversation presentation 的协议族。
-// - 补充结构化提问、权限决策回传、渲染事件、展示状态和 multimodal user-io chips 模型。
-// - 保持 user I/O 只描述交互边界，不承担业务编排。
-// - 文件可继续拆分：UserInputDriver.swift、PermissionDriver.swift、TerminalPresenter.swift、ConversationPresenter.swift、UserIOMultimodalRequests.swift。
+// - Implement protocol families for user input, permission handling, and terminal/conversation presentation.
+// - Add models for structured questioning, permission-decision callbacks, render events, presentation state, and multimodal user-I/O chips.
+// - Keep user I/O focused on interaction boundaries rather than business orchestration.
+// - This file can later be split into UserInputDriver.swift, PermissionDriver.swift, TerminalPresenter.swift, ConversationPresenter.swift, and UserIOMultimodalRequests.swift.
 
 public enum PraxisUserIOContractsModule {
   public static let boundary = PraxisBoundaryDescriptor(

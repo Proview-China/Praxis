@@ -3,10 +3,10 @@ import PraxisCapabilityPlanning
 import PraxisCoreTypes
 
 // TODO(reboot-plan):
-// - 实现 capability catalog、family registry、baseline set 与 discoverability 模型。
-// - 实现从 manifest/planning 信息构建目录与过滤视图的规则。
-// - 保证 catalog 只负责“系统有什么能力”，不承担实际执行。
-// - 文件可继续拆分：CapabilityCatalogModels.swift、CapabilityCatalogBuilder.swift、CapabilityFamilyRegistry.swift、CapabilityDiscoveryPolicy.swift、CapabilityCatalogMPModels.swift。
+// - Implement the capability catalog, family registry, baseline set, and discoverability models.
+// - Implement the rules that build catalog and filtered views from manifest and planning data.
+// - Keep catalog focused on describing what capabilities exist in the system, not on executing them.
+// - This file can later be split into CapabilityCatalogModels.swift, CapabilityCatalogBuilder.swift, CapabilityFamilyRegistry.swift, CapabilityDiscoveryPolicy.swift, and CapabilityCatalogMPModels.swift.
 
 public enum PraxisCapabilityCatalogModule {
   public static let boundary = PraxisBoundaryDescriptor(

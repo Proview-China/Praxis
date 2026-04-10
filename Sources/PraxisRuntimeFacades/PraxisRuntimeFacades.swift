@@ -3,10 +3,10 @@ import PraxisRuntimeUseCases
 import PraxisRun
 
 // TODO(reboot-plan):
-// - 实现稳定 facade、宿主可消费 DTO、会话/运行视图聚合模型。
-// - 让 facade 成为 runtime 对外表面，避免 CLI/UI/FFI 直接理解内部 use case 细节。
-// - 补充 blueprint 之外的展示状态和面向宿主的只读快照类型。
-// - 文件可继续拆分：RuntimeBlueprint.swift、FacadeDTOs.swift、RunFacade.swift、InspectionFacade.swift。
+// - Implement stable facades, host-facing DTOs, and aggregated session/run view models.
+// - Make facades the external runtime surface so CLI, UI, and FFI do not need to understand internal use-case details directly.
+// - Add presentation state and host-facing read-only snapshot types beyond the blueprint metadata.
+// - This file can later be split into RuntimeBlueprint.swift, FacadeDTOs.swift, RunFacade.swift, and InspectionFacade.swift.
 
 public struct PraxisRuntimeBlueprint: Sendable, Equatable {
   public let foundationModules: [PraxisBoundaryDescriptor]

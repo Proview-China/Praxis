@@ -1,10 +1,10 @@
 import PraxisCoreTypes
 
 // TODO(reboot-plan):
-// - 实现 GoalSource、NormalizedGoal、CompiledGoal 等目标领域模型。
-// - 实现目标归一化、编译、校验与来源追踪规则。
-// - 抽清 goal 与 run/session 的边界，只保留“目标是什么”，不引入执行细节。
-// - 文件可继续拆分：GoalModels.swift、GoalNormalization.swift、GoalCompiler.swift、GoalValidation.swift。
+// - Implement goal-domain models such as GoalSource, NormalizedGoal, and CompiledGoal.
+// - Implement goal normalization, compilation, validation, and source-tracking rules.
+// - Clarify the boundary between goal and run/session so this target only describes what the goal is, not how it executes.
+// - This file can later be split into GoalModels.swift, GoalNormalization.swift, GoalCompiler.swift, and GoalValidation.swift.
 
 public struct PraxisGoalBlueprint: Sendable, Equatable {
   public let sourceKinds: [String]

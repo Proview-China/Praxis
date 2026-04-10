@@ -34,10 +34,10 @@ import PraxisUserIOContracts
 import PraxisWorkspaceContracts
 
 // TODO(reboot-plan):
-// - 实现 CLI / SwiftUI / FFI 共用的 presentation-facing DTO、intent 和 bridge mapper。
-// - 明确入口层只通过这里消费 runtime，不直接触碰 composition/use case/facade 内部细节。
-// - 为不同宿主提供稳定桥接模型，例如命令结果、视图状态、流式事件。
-// - 文件可继续拆分：PresentationModels.swift、CLICommandBridge.swift、ApplePresentationBridge.swift、FFIBridge.swift。
+// - Implement presentation-facing DTOs, intents, and bridge mappers shared by CLI, SwiftUI, and FFI.
+// - Ensure entry layers consume the runtime only through this target instead of touching composition, use case, or facade internals directly.
+// - Provide stable bridge models for different hosts, such as command results, view state, and streaming events.
+// - This file can later be split into PresentationModels.swift, CLICommandBridge.swift, ApplePresentationBridge.swift, and FFIBridge.swift.
 
 public enum PraxisRuntimePresentationBridgeModule {
   public static let boundary = PraxisBoundaryDescriptor(

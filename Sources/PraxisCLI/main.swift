@@ -1,10 +1,10 @@
 import PraxisRuntimePresentationBridge
 
 // TODO(reboot-plan):
-// - 把当前打印脚手架替换成真正的 CLI app bootstrap、command router 和 terminal session。
-// - 通过 PraxisRuntimePresentationBridge 接入运行时，而不是直接拼内部模块状态。
-// - 规划交互式会话、非交互命令、日志回放和权限提示的 CLI 路径。
-// - 文件可继续拆分：CLIApp.swift、CommandRouter.swift、TerminalRenderer.swift、InteractiveSession.swift。
+// - Replace the current print scaffold with a real CLI app bootstrap, command router, and terminal session.
+// - Enter the runtime through PraxisRuntimePresentationBridge instead of assembling internal module state directly.
+// - Plan the CLI path for interactive sessions, non-interactive commands, log replay, and permission prompts.
+// - This file can later be split into CLIApp.swift, CommandRouter.swift, TerminalRenderer.swift, and InteractiveSession.swift.
 
 let blueprint = PraxisRuntimePresentationBridgeModule.bootstrap
 

@@ -5,11 +5,11 @@ import PraxisCoreTypes
 import PraxisJournal
 
 // TODO(reboot-plan):
-// - 实现 checkpoint、journal、projection、message bus、delivery truth、embedding store 的协议边界。
-// - 补充 SQLite 持久化键、版本、读写一致性和批处理语义。
-// - 补充本地 semantic search index、MP semantic memory store 与 Accelerate 相似度计算的协作边界。
-// - 保证 infra 只描述基础设施能力，不承接 CMP/TAP 业务规则。
-// - 文件可继续拆分：CheckpointStore.swift、JournalStore.swift、ProjectionStore.swift、MessageBus.swift、DeliveryTruthStore.swift、EmbeddingStore.swift、SemanticSearchIndex.swift、SemanticMemoryStore.swift、LineageStore.swift。
+// - Implement contract boundaries for checkpoint, journal, projection, message bus, delivery truth, and embedding stores.
+// - Add SQLite persistence keys, versioning, read/write consistency, and batch-processing semantics.
+// - Add collaboration boundaries for the local semantic search index, MP semantic memory store, and Accelerate similarity computation.
+// - Keep infra focused on infrastructure capabilities instead of CMP or TAP business rules.
+// - This file can later be split into CheckpointStore.swift, JournalStore.swift, ProjectionStore.swift, MessageBus.swift, DeliveryTruthStore.swift, EmbeddingStore.swift, SemanticSearchIndex.swift, SemanticMemoryStore.swift, and LineageStore.swift.
 
 public enum PraxisInfraContractsModule {
   public static let boundary = PraxisBoundaryDescriptor(

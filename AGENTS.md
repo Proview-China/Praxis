@@ -59,6 +59,24 @@
 - 注释保持少而准，只解释边界、规则或不直观约束，不写显然注释。
 - Placeholder 可以存在，但必须明确是 placeholder，并且不要伪装成已经承接真实行为。
 
+### Swift 文档注释规则
+
+- 对外可调用的 `public` 函数、重要协议方法、关键 service/type 默认补 `///` 文档注释。
+- 函数文档注释统一使用下面格式：
+  ```swift
+  /// Explains what the function does.
+  ///
+  /// - Parameters:
+  ///   - parameterName1: Explains what this parameter represents.
+  ///   - parameterName2: Explains what this parameter represents.
+  /// - Returns: Explains what the return value represents.
+  /// - Throws: Explains which errors may be thrown. Omit when the function does not throw.
+  /// ```
+- 如果函数没有参数，可以省略 `Parameters`；如果没有返回值，可以写 `Returns: None.` 或省略 `Returns`，但同一文件内风格要一致。
+- 类型文档注释至少说明“这个类型负责什么 / 不负责什么”；不要只写泛泛描述。
+- 代码里的注释和文档注释统一使用英文；即使协作沟通默认是中文，也不要写中文注释，避免中英混杂。
+- 文档注释描述的是稳定职责，不要把“临时接通了”“占位用”这类开发态口语直接写进长期 API 注释里。
+
 ### Swift 宿主与平台约束
 
 - 当前 Swift 主路径先面向 macOS 本地运行。

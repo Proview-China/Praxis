@@ -2,10 +2,10 @@ import PraxisCmpTypes
 import PraxisCoreTypes
 
 // TODO(reboot-plan):
-// - 实现 ingest contract、section builder、section lowering 与 ownership rules。
-// - 实现上下文切片创建、裁剪、可见性边界和 section rule evaluation。
-// - 保证 sections 只负责上下文结构化，不直接承担 projection/delivery 的副作用。
-// - 文件可继续拆分：SectionIngress.swift、SectionBuilder.swift、SectionLowering.swift、SectionRules.swift。
+// - Implement ingest contracts, section builders, section lowering, and ownership rules.
+// - Implement context slicing, trimming, visibility boundaries, and section rule evaluation.
+// - Keep sections focused on structuring context without taking on projection or delivery side effects directly.
+// - This file can later be split into SectionIngress.swift, SectionBuilder.swift, SectionLowering.swift, and SectionRules.swift.
 
 public enum PraxisCmpSectionsModule {
   public static let boundary = PraxisBoundaryDescriptor(

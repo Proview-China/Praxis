@@ -8,10 +8,10 @@ import PraxisTapReview
 import PraxisTapRuntime
 
 // TODO(reboot-plan):
-// - 实现 ICMA / iterator / checker / dbagent / dispatcher 的角色模型与交互协议。
-// - 实现多 agent hand-off、职责边界、窗口约束和上下文分配规则。
-// - 保持这里描述 five-agent 协议，不直接承担 runtime composition。
-// - 文件可继续拆分：FiveAgentRoles.swift、FiveAgentProtocol.swift、FiveAgentHandOff.swift、FiveAgentPolicies.swift。
+// - Implement the role models and interaction contracts for ICMA, iterator, checker, dbagent, and dispatcher.
+// - Implement multi-agent handoff, responsibility boundaries, window constraints, and context allocation rules.
+// - Keep this target focused on describing the five-agent protocol rather than runtime composition.
+// - This file can later be split into FiveAgentRoles.swift, FiveAgentProtocol.swift, FiveAgentHandOff.swift, and FiveAgentPolicies.swift.
 
 public enum PraxisCmpFiveAgentModule {
   public static let boundary = PraxisBoundaryDescriptor(

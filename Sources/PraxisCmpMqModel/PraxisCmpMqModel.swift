@@ -3,10 +3,10 @@ import PraxisCmpTypes
 import PraxisCoreTypes
 
 // TODO(reboot-plan):
-// - 实现 TopicTopology、RoutingPlan、NeighborhoodGraph、EscalationPlan 等模型。
-// - 实现 MQ 投递主题、路由、邻接关系和升级策略的纯规则。
-// - 保持这里是消息队列 planner/model，不直接绑定 Redis/NATS/Kafka。
-// - 文件可继续拆分：TopicTopology.swift、RoutingPlan.swift、NeighborhoodGraph.swift、EscalationPlan.swift。
+// - Implement models such as TopicTopology, RoutingPlan, NeighborhoodGraph, and EscalationPlan.
+// - Implement pure rules for MQ topics, routing, neighborhood relationships, and escalation strategies.
+// - Keep this target as a message-queue planner/model layer without binding directly to Redis, NATS, or Kafka.
+// - This file can later be split into TopicTopology.swift, RoutingPlan.swift, NeighborhoodGraph.swift, and EscalationPlan.swift.
 
 public enum PraxisCmpMqModelModule {
   public static let boundary = PraxisBoundaryDescriptor(

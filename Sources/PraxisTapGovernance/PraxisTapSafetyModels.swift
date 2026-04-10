@@ -10,17 +10,20 @@ public enum PraxisTapSafetyOutcome: String, Sendable, Codable {
 
 public struct PraxisTapSafetyInterception: Sendable, Equatable, Codable {
   public let mode: PraxisTapMode
+  public let requestedTier: PraxisTapCapabilityTier?
   public let capabilityKey: String
   public let requestedOperation: String
   public let riskLevel: PraxisTapRiskLevel
 
   public init(
     mode: PraxisTapMode,
+    requestedTier: PraxisTapCapabilityTier? = nil,
     capabilityKey: String,
     requestedOperation: String,
     riskLevel: PraxisTapRiskLevel
   ) {
     self.mode = mode
+    self.requestedTier = requestedTier
     self.capabilityKey = capabilityKey
     self.requestedOperation = requestedOperation
     self.riskLevel = riskLevel

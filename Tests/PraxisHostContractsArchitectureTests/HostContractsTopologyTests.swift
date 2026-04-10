@@ -6,9 +6,9 @@ import Testing
 @testable import PraxisWorkspaceContracts
 
 // TODO(reboot-plan):
-// - 增加五类 HostContracts 之间互不耦合的守卫测试。
-// - 增加协议族最小表面面积测试，防止业务模型偷偷回流到 contracts。
-// - 后续可继续拆分：HostContractsBoundaryTests.swift、HostContractsDependencyTests.swift、HostContractsProtocolSurfaceTests.swift。
+// - Add guard tests to keep the five HostContracts families decoupled from one another.
+// - Add minimal protocol-surface tests so business models do not quietly flow back into contracts.
+// - This file can later be split into HostContractsBoundaryTests.swift, HostContractsDependencyTests.swift, and HostContractsProtocolSurfaceTests.swift.
 
 struct HostContractsTopologyTests {
   @Test

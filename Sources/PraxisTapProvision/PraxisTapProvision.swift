@@ -5,10 +5,10 @@ import PraxisTapGovernance
 import PraxisTapTypes
 
 // TODO(reboot-plan):
-// - 实现 ProvisionRequest、ProvisionRegistry、AssetIndex、ProvisionPlan 等模型。
-// - 实现 capability/tool 供应、依赖满足、资源选择与 provisioning planner 规则。
-// - 保证 provision 只负责“该供应什么”，不直接落执行器。
-// - 文件可继续拆分：ProvisionRequest.swift、ProvisionRegistry.swift、AssetIndex.swift、ProvisionPlanner.swift。
+// - The current implementation already covers the minimal rule surface for provision requests, assets, registry, and plans.
+// - Next, add asset indexes, activation specs, and finer replay-recommendation models.
+// - Keep provision focused on answering what should be provisioned instead of performing installs, repo writes, or network execution directly.
+// - This file can later be split into ProvisionRequest.swift, ProvisionRegistry.swift, AssetIndex.swift, and ProvisionPlanner.swift.
 
 public enum PraxisTapProvisionModule {
   public static let boundary = PraxisBoundaryDescriptor(

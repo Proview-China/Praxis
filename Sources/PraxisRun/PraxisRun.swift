@@ -3,10 +3,10 @@ import PraxisState
 import PraxisTransition
 
 // TODO(reboot-plan):
-// - 实现 RunAggregate、RunPhase、RunTick、RunFailure 等运行期核心模型。
-// - 实现 run lifecycle、tick 协调、resume/fail/complete 纯规则。
-// - 保持 run 只描述一次运行，不直接知道持久化、provider 或 UI。
-// - 文件可继续拆分：RunModels.swift、RunLifecycle.swift、RunCoordinator.swift、RunRecovery.swift。
+// - Implement core runtime models such as RunAggregate, RunPhase, RunTick, and RunFailure.
+// - Implement pure rules for run lifecycle, tick coordination, and resume/fail/complete transitions.
+// - Keep run focused on describing a single execution without direct knowledge of persistence, providers, or UI.
+// - This file can later be split into RunModels.swift, RunLifecycle.swift, RunCoordinator.swift, and RunRecovery.swift.
 
 /// Stable blueprint describing the `PraxisRun` target responsibilities.
 public struct PraxisRunBlueprint: Sendable, Equatable {

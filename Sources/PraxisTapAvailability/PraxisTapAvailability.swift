@@ -4,10 +4,10 @@ import PraxisTapGovernance
 import PraxisTapTypes
 
 // TODO(reboot-plan):
-// - 实现 AvailabilityState、GateRule、FailureTaxonomy、AvailabilityReport 等模型。
-// - 实现 capability 暴露、gating、故障降级和 family audit 规则。
-// - 让 availability 成为独立子域，而不是散落在 governance/runtime 里的附属判断。
-// - 文件可继续拆分：AvailabilityState.swift、GateRules.swift、FailureTaxonomy.swift、AvailabilityReport.swift。
+// - The current implementation already covers availability records, gate decisions, and baseline auditor rules.
+// - Next, add family-level audits, live evidence injection, and finer failure-taxonomy/report aggregation.
+// - Keep availability as an independent subdomain rather than a scattered side judgment inside governance or runtime.
+// - This file can later be split into AvailabilityState.swift, GateRules.swift, FailureTaxonomy.swift, and AvailabilityReport.swift.
 
 public enum PraxisTapAvailabilityModule {
   public static let boundary = PraxisBoundaryDescriptor(

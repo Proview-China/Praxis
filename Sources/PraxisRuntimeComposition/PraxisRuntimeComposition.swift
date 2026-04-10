@@ -31,10 +31,10 @@ import PraxisUserIOContracts
 import PraxisWorkspaceContracts
 
 // TODO(reboot-plan):
-// - 实现 composition root、dependency graph、adapter registry 和 bootstrap validation。
-// - 定义 Core 子域与五类 HostContracts 的组装方式，但不把业务规则再次吸进来。
-// - 明确 runtime 中哪些依赖是必选、可替换、可测试 fake。
-// - 文件可继续拆分：CompositionRoot.swift、DependencyGraph.swift、AdapterRegistry.swift、BootstrapValidation.swift。
+// - Implement the composition root, dependency graph, adapter registry, and bootstrap validation.
+// - Define how Core subdomains compose with the five HostContracts families without pulling business rules back in.
+// - Clarify which runtime dependencies are required, replaceable, or test doubles.
+// - This file can later be split into CompositionRoot.swift, DependencyGraph.swift, AdapterRegistry.swift, and BootstrapValidation.swift.
 
 public enum PraxisRuntimeCompositionModule {
   public static let boundary = PraxisBoundaryDescriptor(

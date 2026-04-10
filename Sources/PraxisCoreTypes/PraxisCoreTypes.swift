@@ -1,6 +1,6 @@
 // TODO(reboot-plan):
-// - 继续把跨子域公共约定稳定在 CoreTypes，不向高层回灌领域语义。
-// - 当多个 target 出现重复基础值对象时，优先下沉到独立文件，而不是回并成 shared/util。
+// - Keep stabilizing cross-domain shared conventions inside CoreTypes without reintroducing higher-level domain semantics.
+// - When multiple targets repeat the same base value objects, move them into dedicated files instead of folding them back into shared/util buckets.
 
 /// Boundary metadata for the `PraxisCoreTypes` target.
 public enum PraxisCoreTypesModule {

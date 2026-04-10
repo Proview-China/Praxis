@@ -7,9 +7,9 @@ import Testing
 @testable import PraxisTapTypes
 
 // TODO(reboot-plan):
-// - 增加 TAP 六分结构的依赖方向测试，确认 governance/review/provision/runtime/availability 不越界。
-// - 增加治理、审查、供应、availability blueprint 守卫。
-// - 后续可继续拆分：TapBoundaryTests.swift、TapDependencyTests.swift、TapBlueprintTests.swift。
+// - Add dependency-direction tests for the six-part TAP split so governance, review, provision, runtime, and availability stay within their boundaries.
+// - Add blueprint guards for governance, review, provision, and availability responsibilities.
+// - This file can later be split into TapBoundaryTests.swift, TapDependencyTests.swift, and TapBlueprintTests.swift.
 
 struct TapTopologyTests {
   @Test

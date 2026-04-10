@@ -5,10 +5,10 @@ import PraxisRun
 import PraxisSession
 
 // TODO(reboot-plan):
-// - 实现 runGoal、resumeRun、inspectTap、inspectCmp、inspectMp、buildCapabilityCatalog 等高层用例。
-// - 约束用例只依赖 composition 暴露的能力，不直接越层拿入口或宿主实现。
-// - 把 use case 输入输出设计成稳定 DTO，方便 facade、CLI、SwiftUI 和 FFI 复用。
-// - 文件可继续拆分：GoalUseCases.swift、TapUseCases.swift、CmpUseCases.swift、MpUseCases.swift、CapabilityUseCases.swift。
+// - Implement high-level use cases such as runGoal, resumeRun, inspectTap, inspectCmp, inspectMp, and buildCapabilityCatalog.
+// - Keep use cases dependent only on capabilities exposed by composition instead of crossing layers to reach entry points or host implementations.
+// - Design use-case inputs and outputs as stable DTOs that facades, CLI, SwiftUI, and FFI can reuse.
+// - This file can later be split into GoalUseCases.swift, TapUseCases.swift, CmpUseCases.swift, MpUseCases.swift, and CapabilityUseCases.swift.
 
 public struct PraxisUseCaseDescriptor: Sendable, Equatable, Identifiable {
   public let name: String

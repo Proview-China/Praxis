@@ -9,9 +9,9 @@ import Testing
 @testable import PraxisCmpTypes
 
 // TODO(reboot-plan):
-// - 增加 CMP 八分结构的单向依赖守卫，确认 model/planner 不回流宿主实现。
-// - 增加 sections/projection/delivery/git/db/mq/five-agent 的 blueprint 测试。
-// - 后续可继续拆分：CmpBoundaryTests.swift、CmpDependencyTests.swift、CmpBlueprintTests.swift。
+// - Add one-way dependency guards for the eight-part CMP split so model and planner layers do not flow back into host implementations.
+// - Add blueprint tests for sections, projection, delivery, git, db, mq, and five-agent targets.
+// - This file can later be split into CmpBoundaryTests.swift, CmpDependencyTests.swift, and CmpBlueprintTests.swift.
 
 struct CmpTopologyTests {
   @Test

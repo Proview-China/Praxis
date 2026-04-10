@@ -3,10 +3,10 @@ import PraxisCapabilityResults
 import PraxisCoreTypes
 
 // TODO(reboot-plan):
-// - 实现 provider request/receipt、inference、embedding、skill、MCP 相关协议模型。
-// - 细化 capability executor 与 provider executor 的分层，避免语义混叠。
-// - 统一 provider 原始能力到核心规范请求/结果的映射边界。
-// - 文件可继续拆分：ProviderRequests.swift、ProviderReceipts.swift、InferenceProtocols.swift、SkillAndMCPProtocols.swift。
+// - Implement protocol models for provider request/receipt, inference, embedding, skill, and MCP surfaces.
+// - Refine the layering between capability executors and provider executors to avoid semantic overlap.
+// - Standardize the mapping boundary from raw provider capabilities to Core request/result semantics.
+// - This file can later be split into ProviderRequests.swift, ProviderReceipts.swift, InferenceProtocols.swift, and SkillAndMCPProtocols.swift.
 
 public enum PraxisProviderContractsModule {
   public static let boundary = PraxisBoundaryDescriptor(

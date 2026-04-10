@@ -4,10 +4,10 @@ import PraxisJournal
 import PraxisSession
 
 // TODO(reboot-plan):
-// - 实现 CheckpointSnapshot、RecoveryEnvelope、CheckpointPointer 等模型。
-// - 实现快照封装、恢复边界、序列化约束和版本兼容策略。
-// - 保证 checkpoint 只负责恢复真相，不承担业务推理或治理决策。
-// - 文件可继续拆分：CheckpointSnapshot.swift、RecoveryEnvelope.swift、CheckpointCodec.swift、CheckpointVersioning.swift。
+// - Implement models such as CheckpointSnapshot, RecoveryEnvelope, and CheckpointPointer.
+// - Implement snapshot packaging, recovery boundaries, serialization constraints, and version compatibility policies.
+// - Keep checkpoint focused on recovery truth instead of business reasoning or governance decisions.
+// - This file can later be split into CheckpointSnapshot.swift, RecoveryEnvelope.swift, CheckpointCodec.swift, and CheckpointVersioning.swift.
 
 /// Stable blueprint describing the `PraxisCheckpoint` target responsibilities.
 public struct PraxisCheckpointBlueprint: Sendable, Equatable {

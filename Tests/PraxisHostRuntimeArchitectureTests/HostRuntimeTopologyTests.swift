@@ -5,9 +5,9 @@ import Testing
 @testable import PraxisRuntimeUseCases
 
 // TODO(reboot-plan):
-// - 增加 composition/use cases/facades/presentation bridge 的职责守卫测试。
-// - 增加 Entry 只能经由 PresentationBridge 进入系统的显式测试。
-// - 后续可继续拆分：HostRuntimeBoundaryTests.swift、HostRuntimeDependencyTests.swift、PresentationBridgeRuleTests.swift。
+// - Add responsibility guard tests for composition, use cases, facades, and the presentation bridge.
+// - Add explicit tests to ensure entry points can reach the system only through PresentationBridge.
+// - This file can later be split into HostRuntimeBoundaryTests.swift, HostRuntimeDependencyTests.swift, and PresentationBridgeRuleTests.swift.
 
 struct HostRuntimeTopologyTests {
   @Test

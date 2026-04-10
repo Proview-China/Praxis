@@ -2,10 +2,10 @@ import PraxisCoreTypes
 import PraxisSession
 
 // TODO(reboot-plan):
-// - 实现 JournalEvent、JournalCursor、AppendOnlyStream 等核心模型。
-// - 实现事件追加、读取窗口、cursor 前进和读模型输入边界。
-// - 保证 journal 只表达事件流真相，不承担 session/run 业务判断。
-// - 文件可继续拆分：JournalEvent.swift、JournalCursor.swift、JournalStream.swift、JournalReadModelInput.swift。
+// - Implement core models such as JournalEvent, JournalCursor, and AppendOnlyStream.
+// - Implement event append, read windows, cursor advancement, and read-model input boundaries.
+// - Keep journal focused on event-stream truth instead of session or run business decisions.
+// - This file can later be split into JournalEvent.swift, JournalCursor.swift, JournalStream.swift, and JournalReadModelInput.swift.
 
 /// Stable blueprint describing the `PraxisJournal` target responsibilities.
 public struct PraxisJournalBlueprint: Sendable, Equatable {

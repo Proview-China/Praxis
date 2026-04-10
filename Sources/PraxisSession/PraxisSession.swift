@@ -1,10 +1,10 @@
 import PraxisCoreTypes
 
 // TODO(reboot-plan):
-// - 实现 SessionHeader、SessionAttachment、HotColdLifecycle 等会话模型。
-// - 实现会话与 run/checkpoint 的挂载关系和生命周期边界。
-// - 保证 session 不滑向 journal 或 runtime composition 的职责。
-// - 文件可继续拆分：SessionModels.swift、SessionLifecycle.swift、SessionAttachment.swift、SessionIndexes.swift。
+// - Implement session models such as SessionHeader, SessionAttachment, and HotColdLifecycle.
+// - Implement attachment relationships and lifecycle boundaries between session and run/checkpoint.
+// - Keep session from sliding into journal or runtime-composition responsibilities.
+// - This file can later be split into SessionModels.swift, SessionLifecycle.swift, SessionAttachment.swift, and SessionIndexes.swift.
 
 /// Stable blueprint describing the `PraxisSession` target responsibilities.
 public struct PraxisSessionBlueprint: Sendable, Equatable {

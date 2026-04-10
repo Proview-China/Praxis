@@ -5,10 +5,10 @@ import PraxisCoreTypes
 import PraxisTapTypes
 
 // TODO(reboot-plan):
-// - 实现 ContextPackage、DeliveryPlan、DispatchInstruction、FallbackPlan 等模型。
-// - 实现 active/passive delivery、dispatch routing 和历史回退规则。
-// - 保证 delivery 只给出投递计划，不直接触碰 bus 或 DB。
-// - 文件可继续拆分：ContextPackage.swift、DeliveryPlan.swift、DispatchInstruction.swift、DeliveryFallback.swift。
+// - Implement models such as ContextPackage, DeliveryPlan, DispatchInstruction, and FallbackPlan.
+// - Implement active/passive delivery, dispatch routing, and historical fallback rules.
+// - Keep delivery focused on producing dispatch plans without touching the bus or DB directly.
+// - This file can later be split into ContextPackage.swift, DeliveryPlan.swift, DispatchInstruction.swift, and DeliveryFallback.swift.
 
 public enum PraxisCmpDeliveryModule {
   public static let boundary = PraxisBoundaryDescriptor(

@@ -9,9 +9,9 @@ import Testing
 @testable import PraxisTransition
 
 // TODO(reboot-plan):
-// - 增加 Foundation 依赖方向守卫，确认低层不反向依赖 Capability/TAP/CMP/Host。
-// - 增加 blueprint 内容测试，覆盖 sourceKinds、responsibilities、恢复边界等稳定字段。
-// - 后续可继续拆分：FoundationBoundaryTests.swift、FoundationDependencyTests.swift、FoundationBlueprintTests.swift。
+// - Add Foundation dependency-direction guards so lower layers do not reverse-depend on Capability, TAP, CMP, or Host layers.
+// - Add blueprint-content tests covering stable fields such as sourceKinds, responsibilities, and recovery boundaries.
+// - This file can later be split into FoundationBoundaryTests.swift, FoundationDependencyTests.swift, and FoundationBlueprintTests.swift.
 
 struct FoundationTopologyTests {
   @Test

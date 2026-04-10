@@ -3,10 +3,10 @@ import PraxisCmpTypes
 import PraxisCoreTypes
 
 // TODO(reboot-plan):
-// - 实现 GitBranchFamily、GitRefLifecycle、LineageRule、GitSyncPlan 等模型。
-// - 实现 refs 生命周期、分支谱系和同步规划的纯规则。
-// - 保持这里是 Git planner/model，不落具体 git CLI 或 libgit 实现。
-// - 文件可继续拆分：GitBranchFamily.swift、GitRefLifecycle.swift、GitSyncPlan.swift、GitGovernance.swift。
+// - Implement models such as GitBranchFamily, GitRefLifecycle, LineageRule, and GitSyncPlan.
+// - Implement pure rules for ref lifecycles, branch lineage, and sync planning.
+// - Keep this target as a Git planner/model layer rather than a concrete git CLI or libgit implementation.
+// - This file can later be split into GitBranchFamily.swift, GitRefLifecycle.swift, GitSyncPlan.swift, and GitGovernance.swift.
 
 public enum PraxisCmpGitModelModule {
   public static let boundary = PraxisBoundaryDescriptor(

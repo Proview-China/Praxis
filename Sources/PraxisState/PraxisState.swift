@@ -1,10 +1,10 @@
 import PraxisCoreTypes
 
 // TODO(reboot-plan):
-// - 实现 StateSnapshot、StateDelta、ProjectionState 等状态领域模型。
-// - 实现状态投影、校验、不变量检查和最小 diff 规则。
-// - 保持这里纯化，只表达状态真相，不承接 transition/run 的编排逻辑。
-// - 文件可继续拆分：StateModels.swift、StateProjection.swift、StateValidation.swift、StateDelta.swift。
+// - Implement state-domain models such as StateSnapshot, StateDelta, and ProjectionState.
+// - Implement state projection, validation, invariant checks, and minimal diff rules.
+// - Keep this target pure so it only expresses state truth instead of transition or run orchestration logic.
+// - This file can later be split into StateModels.swift, StateProjection.swift, StateValidation.swift, and StateDelta.swift.
 
 public struct PraxisStateBlueprint: Sendable, Equatable {
   public let responsibilities: [String]

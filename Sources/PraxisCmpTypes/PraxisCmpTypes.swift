@@ -1,10 +1,10 @@
 import PraxisCoreTypes
 
 // TODO(reboot-plan):
-// - 实现 CMP 共用对象模型，包括 section/request/package/projection/lineage 基础类型。
-// - 冻结跨 CMP 子域共享的标识、状态、优先级和传输标签。
-// - 保持这里只放共用语义，不混入 delivery/projection 的具体规则。
-// - 文件可继续拆分：CmpIdentifiers.swift、CmpSectionTypes.swift、CmpPackageTypes.swift、CmpLineageTypes.swift。
+// - Implement shared CMP object models, including base types for section, request, package, projection, and lineage.
+// - Freeze identifiers, state tags, priorities, and transport labels shared across CMP subdomains.
+// - Keep only shared semantics here without mixing in delivery or projection-specific rules.
+// - This file can later be split into CmpIdentifiers.swift, CmpSectionTypes.swift, CmpPackageTypes.swift, and CmpLineageTypes.swift.
 
 public enum PraxisCmpTypesModule {
   public static let boundary = PraxisBoundaryDescriptor(

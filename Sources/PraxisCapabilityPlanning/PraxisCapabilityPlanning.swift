@@ -4,10 +4,10 @@ import PraxisGoal
 import PraxisRun
 
 // TODO(reboot-plan):
-// - 实现 capability selector、routing policy、invocation plan 和 lowering 规则。
-// - 实现 lease、queue、dispatch、retry 等纯 planner 语义，不直接调用 executor。
-// - 补足从 goal/run 到 capability plan 的映射与约束。
-// - 文件可继续拆分：CapabilityPlanner.swift、CapabilityRouting.swift、CapabilityLease.swift、CapabilityDispatchLowering.swift。
+// - Implement the capability selector, routing policy, invocation plan, and lowering rules.
+// - Implement planner-only semantics for lease, queue, dispatch, and retry without calling executors directly.
+// - Complete the mappings and constraints from goal/run to capability plans.
+// - This file can later be split into CapabilityPlanner.swift, CapabilityRouting.swift, CapabilityLease.swift, and CapabilityDispatchLowering.swift.
 
 public enum PraxisCapabilityPlanningModule {
   public static let boundary = PraxisBoundaryDescriptor(

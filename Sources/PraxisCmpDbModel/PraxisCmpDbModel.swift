@@ -3,10 +3,10 @@ import PraxisCmpTypes
 import PraxisCoreTypes
 
 // TODO(reboot-plan):
-// - 实现 ProjectionPersistencePlan、PackagePersistencePlan、StorageTopology 等模型。
-// - 实现 DB 写入/读取需要的纯 planner 与 schema 语义。
-// - 保持这里是 DB model，不直接绑定 PostgreSQL/SQLite 客户端。
-// - 文件可继续拆分：StorageTopology.swift、ProjectionPersistencePlan.swift、PackagePersistencePlan.swift、DeliveryPersistencePlan.swift。
+// - Implement models such as ProjectionPersistencePlan, PackagePersistencePlan, and StorageTopology.
+// - Implement planner-only and schema semantics for DB reads and writes.
+// - Keep this target as a DB model layer without binding directly to PostgreSQL or SQLite clients.
+// - This file can later be split into StorageTopology.swift, ProjectionPersistencePlan.swift, PackagePersistencePlan.swift, and DeliveryPersistencePlan.swift.
 
 public enum PraxisCmpDbModelModule {
   public static let boundary = PraxisBoundaryDescriptor(

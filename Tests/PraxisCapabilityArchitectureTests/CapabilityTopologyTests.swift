@@ -5,9 +5,9 @@ import Testing
 @testable import PraxisCapabilityResults
 
 // TODO(reboot-plan):
-// - 增加 Capability 子域单向依赖测试，防止反向依赖 TAP/CMP/Host。
-// - 增加 contracts/planning/results/catalog 四分职责的 blueprint 守卫。
-// - 后续可继续拆分：CapabilityBoundaryTests.swift、CapabilityDependencyTests.swift、CapabilityBlueprintTests.swift。
+// - Add one-way dependency tests for the Capability domain to prevent reverse edges into TAP, CMP, or Host layers.
+// - Add blueprint guards for the four-way split across contracts, planning, results, and catalog.
+// - This file can later be split into CapabilityBoundaryTests.swift, CapabilityDependencyTests.swift, and CapabilityBlueprintTests.swift.
 
 struct CapabilityTopologyTests {
   @Test
