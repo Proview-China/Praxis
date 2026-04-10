@@ -2,8 +2,8 @@
 
 ## 做了什么
 
-- 新增根目录执行计划书：
-  - `SWIFT_TARGET_EXECUTION_PLAN.md`
+- 当时新增根目录执行计划书，后续已并入：
+  - `SWIFT_REFACTOR_PLAN.md`
 
 ## 这次固定了什么
 
@@ -27,6 +27,6 @@
 
 ## 对后续的直接约束
 
-- 真正开始编码时，优先按 `SWIFT_TARGET_EXECUTION_PLAN.md` 的 wave 和 target 顺序推进。
+- 真正开始编码时，优先按 `SWIFT_REFACTOR_PLAN.md` 的 wave 和 target 顺序推进。
 - `PraxisRuntimeUseCases` 与 `PraxisRuntimePresentationBridge` 需要额外 review gate。
 - 任何想提前接 live provider / git / db / mq 的需求，都应默认视为越过当前推荐顺序。

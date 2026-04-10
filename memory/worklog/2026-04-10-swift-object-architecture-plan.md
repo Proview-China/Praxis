@@ -2,8 +2,8 @@
 
 ## 做了什么
 
-- 新增根目录类级架构计划书：
-  - `SWIFT_OBJECT_ARCHITECTURE_PLAN.md`
+- 当时新增根目录类级架构计划书，后续已并入：
+  - `SWIFT_REFACTOR_PLAN.md`
 - 新增长期对象设计规则：
   - `memory/architecture/swift-object-design-rules.md`
 

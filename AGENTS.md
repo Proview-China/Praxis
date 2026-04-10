@@ -14,6 +14,8 @@
 ## Working Defaults
 
 - TypeScript + Node.js 是当前新实现的主语言和主工具链。
+- 根目录下与 Swift 重构相关的主计划文档，统一以 `SWIFT_REFACTOR_PLAN.md` 为唯一入口；不要重新恢复并行的 `SWIFT_ARCHITECTURE.md`、`SWIFT_OBJECT_ARCHITECTURE_PLAN.md`、`SWIFT_TARGET_EXECUTION_PLAN.md`、`REFACTOR_SWIFT_WORKORDER.md`。
+- 如果任务涉及 Swift 重构范围、target 职责、执行顺序或阶段边界，优先先回读 `SWIFT_REFACTOR_PLAN.md`，再按需补读 `memory/architecture/` 和 `memory/decisions/`。
 - `docs/` 可能会被另一个 Codex 实例持续更新；不要回滚或覆盖与你当前任务无关的文档改动。
 - `memory/` 是项目级记忆层，不要只依赖这个 `AGENTS.md`；做完重要架构决策、约束调整或阶段性结论后，要把可复用的信息写回 `memory/`。
 - 保持仓库干净、最小化，除非用户明确要求，否则不要提前铺大型目录树或旧时代兼容层。
@@ -22,6 +24,56 @@
 
 - macOS 不默认走 Electron，Apple 端优先保留原生应用方向。
 - Windows 和 Linux 后续可以考虑 Electron，但在明确需求前不要提前搭 UI 壳子。
+
+## Swift Conventions
+
+- Swift 重构的唯一根目录主计划是 `SWIFT_REFACTOR_PLAN.md`；写 Swift 代码前，先确认当前改动属于哪个 target、处于哪个 wave、是否越过既定顺序。
+- `Core` 只是逻辑层概念，不是兜底模块名；不要新建“大 Core” 文件或 target 来收容暂时不知道放哪的代码。
+- phase-1 已拆开的 target 不要回并成粗模块；如果一个文件同时出现纯规则和宿主副作用实现，默认继续拆，而不是接受混合状态。
+
+### Swift 类型选择
+
+- 纯领域真相、DTO、展示模型优先使用 `struct`。
+- 有限状态集合、模式、错误种类优先使用 `enum`。
+- 共享流程编排、需要持有依赖的服务优先使用 `final class`。
+- 有并发可变状态的协调器、注册表、runtime state holder 优先使用 `actor`。
+- 外部能力、仓储、执行器、宿主接缝优先使用 `protocol`。
+- 不要为了“面向对象”而引入抽象基类树；业务层默认坚持 `protocol + composition`。
+
+### Swift 分层约束
+
+- `PraxisCore` 只放纯领域模型、状态机、规则、planner、编排协议。
+- `PraxisHostContracts` 只定义宿主协议，不承载业务规则。
+- `PraxisHostRuntime` 只负责装配、use case、facade、presentation bridge，不重新吞回 Core 规则。
+- `PraxisCLI`、`PraxisAppleUI`、未来 `PraxisFFI` 只能通过 `PraxisRuntimePresentationBridge` 进入系统。
+- Core 禁止直接依赖 provider SDK、`Process`、Git CLI、数据库客户端、Redis/MQ 客户端、SwiftUI/AppKit/UIKit、终端 I/O。
+- Git / DB / MQ / provider 相关能力必须拆成 “Core model/planner + Host executor/adapter” 两层。
+
+### Swift 编码规则
+
+- 默认使用 initializer injection；不要在 use case、facade、bridge、view model 里直接 new 具体 adapter。
+- 只有 `PraxisRuntimeComposition` 可以知道具体 adapter 实现类；不要把 composition root 散落到别处。
+- 命名优先表达领域语义，不按 SDK、数据库、第三方产品名命名核心接口。
+- 新增模型时，先明确它属于哪个 target 的职责边界，再落代码；不要先写实现再找归属。
+- 公共输入输出优先使用 Core 语义模型，不要把 provider 原始 payload、SQL 行结构、CLI 文本碎片直接泄漏到高层。
+- 注释保持少而准，只解释边界、规则或不直观约束，不写显然注释。
+- Placeholder 可以存在，但必须明确是 placeholder，并且不要伪装成已经承接真实行为。
+
+### Swift 宿主与平台约束
+
+- 当前 Swift 主路径先面向 macOS 本地运行。
+- 默认结构化持久化底座是 `SQLite`，默认消息传播底座是进程内 `actor` / `AsyncStream`，默认本地向量计算底座是 `Accelerate`。
+- `PostgreSQL`、`Redis`、`LanceDB` 不作为 macOS 单机 App 的运行前置。
+- 系统 `git` 可以作为按需依赖，但不能让 App 启动强依赖 git 已经就绪。
+- 不要把旧 TS 的 `cmp-db`、`cmp-mq`、`rax` 实现形态原样投射到 Swift 目录结构里。
+
+### Swift 测试与验收
+
+- 新增或修改 Swift target 时，至少补对应 target 的单元测试或架构守卫测试，不要只改实现不补验证。
+- 架构守卫测试必须和 target 拆分同步更新，防止边界漂移。
+- 如果改动涉及纯规则迁移，优先建立与 TS 的对照样本，例如 goal compile、run transition、TAP governance、CMP routing。
+- 涉及 Swift 脚手架或实现变更后，至少回读一次 `git status`，并优先执行相关 `swift test`。
+- 如果当前改动只影响文档或入口说明，可以不强跑全量验证，但要在结果里说明没有跑哪些检查。
 
 ## Verification
 

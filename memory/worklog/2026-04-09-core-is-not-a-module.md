@@ -7,10 +7,10 @@
 - 新增：
   - `memory/architecture/swift-core-decomposition.md`
 - 更新：
-  - `SWIFT_ARCHITECTURE.md`
+  - 当前统一主计划：`SWIFT_REFACTOR_PLAN.md`
   - `Package.swift`
   - `memory/architecture/swift-refactor-boundaries.md`
-  - `REFACTOR_SWIFT_WORKORDER.md`
+  - 现已统一收敛到 `SWIFT_REFACTOR_PLAN.md`
 
 ## 为什么要这么做
 
@@ -24,4 +24,3 @@
   - `PraxisCapability`
   - `PraxisTAP`
   - `PraxisCMP`
-

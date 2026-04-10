@@ -2,12 +2,12 @@
 
 ## 做了什么
 
-- 新增根目录架构蓝图：
-  - `SWIFT_ARCHITECTURE.md`
+- 当时新增根目录架构蓝图，后续已并入：
+  - `SWIFT_REFACTOR_PLAN.md`
 - 新增 ADR：
   - `memory/decisions/ADR-0002-swift-rearchitecture-layering.md`
 - 更新已有工单与架构边界说明：
-  - `REFACTOR_SWIFT_WORKORDER.md`
+  - 现已统一收敛到 `SWIFT_REFACTOR_PLAN.md`
   - `memory/architecture/swift-refactor-boundaries.md`
 
 ## 这次冻结了什么

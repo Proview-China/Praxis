@@ -11,6 +11,10 @@
 
 当前起点文件见 [platform-direction.md](/home/proview/Desktop/Praxis_series/Praxis/memory/architecture/platform-direction.md)。
 
+当前根目录唯一保留的 Swift 重构主计划：
+
+- [SWIFT_REFACTOR_PLAN.md](/Users/shiyu/Documents/Project/Praxis/SWIFT_REFACTOR_PLAN.md)
+
 当前与 Swift/macOS 本地运行方案直接相关的文件：
 
 - [swift-macos-local-runtime-policy.md](/Users/shiyu/Documents/Project/Praxis/memory/architecture/swift-macos-local-runtime-policy.md)
