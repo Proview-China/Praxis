@@ -244,7 +244,7 @@
 
 原因：
 
-- FFI 应该建立在稳定的 `PraxisRuntimePresentationBridge` 之上，而不是提前扩张 HostContracts。
+- FFI 应该建立在稳定的 `PraxisRuntimeInterface` 与 `PraxisRuntimePresentationBridge` 之上，而不是提前扩张 HostContracts。
 
 ### Observability / Telemetry / Metrics
 

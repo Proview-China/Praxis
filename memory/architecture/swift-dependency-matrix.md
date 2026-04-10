@@ -352,12 +352,30 @@
 - 禁止依赖：
   - Entry targets
 
+#### `PraxisRuntimeInterface`
+
+- 可依赖：
+  - `PraxisGoal`
+  - `PraxisRun`
+  - `PraxisSession`
+  - `PraxisRuntimeFacades`
+- 禁止依赖：
+  - Entry targets
+  - `PraxisRuntimeComposition`
+  - `PraxisRuntimePresentationBridge`
+
+说明：
+
+- `PraxisRuntimeInterface` 负责宿主无关的统一 request/response/event/coding surface。
+- 它可以被未来的导出层或跨语言绑定复用，但不能吸收 CLI、SwiftUI、ABI 细节。
+
 #### `PraxisRuntimePresentationBridge`
 
 - 可依赖：
   - `PraxisRuntimeComposition`
   - `PraxisRuntimeUseCases`
   - `PraxisRuntimeFacades`
+  - `PraxisRuntimeInterface`
   - 为 blueprint 与边界描述读取必要的 Core / HostContracts target
 - 禁止依赖：
   - Entry targets

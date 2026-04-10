@@ -52,6 +52,7 @@ let hostRuntimeTargets = [
   "PraxisRuntimeComposition",
   "PraxisRuntimeUseCases",
   "PraxisRuntimeFacades",
+  "PraxisRuntimeInterface",
   "PraxisRuntimePresentationBridge",
 ]
 
@@ -439,6 +440,17 @@ let package = Package(
       path: "Sources/PraxisRuntimeFacades",
     ),
     .target(
+      name: "PraxisRuntimeInterface",
+      dependencies: [
+        "PraxisCoreTypes",
+        "PraxisGoal",
+        "PraxisRun",
+        "PraxisSession",
+        "PraxisRuntimeFacades",
+      ],
+      path: "Sources/PraxisRuntimeInterface",
+    ),
+    .target(
       name: "PraxisRuntimePresentationBridge",
       dependencies: [
         "PraxisCoreTypes",
@@ -475,6 +487,7 @@ let package = Package(
         "PraxisRuntimeComposition",
         "PraxisRuntimeUseCases",
         "PraxisRuntimeFacades",
+        "PraxisRuntimeInterface",
       ],
       path: "Sources/PraxisRuntimePresentationBridge",
     ),
@@ -764,6 +777,7 @@ let package = Package(
         "PraxisRuntimeComposition",
         "PraxisRuntimeUseCases",
         "PraxisRuntimeFacades",
+        "PraxisRuntimeInterface",
         "PraxisRuntimePresentationBridge",
       ],
       path: "Tests/PraxisHostRuntimeArchitectureTests",

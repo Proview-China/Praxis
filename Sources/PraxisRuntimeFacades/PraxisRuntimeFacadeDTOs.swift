@@ -1,11 +1,47 @@
 import PraxisRun
+import PraxisSession
+import PraxisRuntimeUseCases
+
+/// Describes which lifecycle path produced the current run summary.
+public enum PraxisRunLifecycleDisposition: String, Sendable, Equatable, Codable {
+  case started
+  case resumed
+  case recoveredWithoutResume
+}
 
 public struct PraxisRunSummary: Sendable, Equatable, Codable {
   public let runID: PraxisRunID
+  public let sessionID: PraxisSessionID
+  public let phase: PraxisRunPhase
+  public let tickCount: Int
+  public let lifecycleDisposition: PraxisRunLifecycleDisposition
+  public let journalSequence: Int?
+  public let checkpointReference: String?
+  public let recoveredEventCount: Int
+  public let followUpAction: PraxisRunFollowUpAction?
   public let phaseSummary: String
 
-  public init(runID: PraxisRunID, phaseSummary: String) {
+  public init(
+    runID: PraxisRunID,
+    sessionID: PraxisSessionID,
+    phase: PraxisRunPhase,
+    tickCount: Int,
+    lifecycleDisposition: PraxisRunLifecycleDisposition,
+    journalSequence: Int? = nil,
+    checkpointReference: String? = nil,
+    recoveredEventCount: Int = 0,
+    followUpAction: PraxisRunFollowUpAction? = nil,
+    phaseSummary: String
+  ) {
     self.runID = runID
+    self.sessionID = sessionID
+    self.phase = phase
+    self.tickCount = tickCount
+    self.lifecycleDisposition = lifecycleDisposition
+    self.journalSequence = journalSequence
+    self.checkpointReference = checkpointReference
+    self.recoveredEventCount = recoveredEventCount
+    self.followUpAction = followUpAction
     self.phaseSummary = phaseSummary
   }
 }

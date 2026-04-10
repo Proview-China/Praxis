@@ -5,13 +5,16 @@ import PraxisRun
 public final class PraxisCLICommandBridge {
   public let runtimeFacade: PraxisRuntimeFacade
   public let stateMapper: PraxisPresentationStateMapper
+  public let eventStream: PraxisPresentationEventStream
 
   public init(
     runtimeFacade: PraxisRuntimeFacade,
-    stateMapper: PraxisPresentationStateMapper = .init()
+    stateMapper: PraxisPresentationStateMapper = .init(),
+    eventStream: PraxisPresentationEventStream = .init()
   ) {
     self.runtimeFacade = runtimeFacade
     self.stateMapper = stateMapper
+    self.eventStream = eventStream
   }
 
   public func handle(_ command: PraxisPresentationCommand) async throws -> PraxisPresentationState {
@@ -28,12 +31,16 @@ public final class PraxisCLICommandBridge {
         intentSummary: command.payloadSummary
       )
       let summary = try await runtimeFacade.runFacade.runGoal(.init(goal: goal))
-      return stateMapper.map(runSummary: summary)
+      let state = stateMapper.map(runSummary: summary)
+      await eventStream.append(contentsOf: state.events)
+      return state
     case .resumeRun:
       let summary = try await runtimeFacade.runFacade.resumeRun(
         .init(runID: PraxisRunID(rawValue: command.payloadSummary))
       )
-      return stateMapper.map(runSummary: summary)
+      let state = stateMapper.map(runSummary: summary)
+      await eventStream.append(contentsOf: state.events)
+      return state
     case .inspectTap:
       let inspection = try await runtimeFacade.inspectionFacade.inspectTap()
       return stateMapper.map(tapInspection: inspection)
@@ -45,19 +52,30 @@ public final class PraxisCLICommandBridge {
       return stateMapper.map(mpInspection: inspection)
     }
   }
+
+  public func snapshotEvents() async -> [PraxisPresentationEvent] {
+    await eventStream.snapshot()
+  }
+
+  public func drainEvents() async -> [PraxisPresentationEvent] {
+    await eventStream.drain()
+  }
 }
 
 @MainActor
 public final class PraxisApplePresentationBridge {
   public let runtimeFacade: PraxisRuntimeFacade
   public let stateMapper: PraxisPresentationStateMapper
+  public let eventStream: PraxisPresentationEventStream
 
   public init(
     runtimeFacade: PraxisRuntimeFacade,
-    stateMapper: PraxisPresentationStateMapper = .init()
+    stateMapper: PraxisPresentationStateMapper = .init(),
+    eventStream: PraxisPresentationEventStream = .init()
   ) {
     self.runtimeFacade = runtimeFacade
     self.stateMapper = stateMapper
+    self.eventStream = eventStream
   }
 
   public func initialState() -> PraxisPresentationState {
@@ -74,6 +92,28 @@ public final class PraxisApplePresentationBridge {
 
   public func inspectMpState() async throws -> PraxisPresentationState {
     stateMapper.map(mpInspection: try await runtimeFacade.inspectionFacade.inspectMp())
+  }
+
+  public func runGoalState(_ goal: PraxisCompiledGoal) async throws -> PraxisPresentationState {
+    let summary = try await runtimeFacade.runFacade.runGoal(.init(goal: goal))
+    let state = stateMapper.map(runSummary: summary)
+    await eventStream.append(contentsOf: state.events)
+    return state
+  }
+
+  public func resumeRunState(runID: PraxisRunID) async throws -> PraxisPresentationState {
+    let summary = try await runtimeFacade.runFacade.resumeRun(.init(runID: runID))
+    let state = stateMapper.map(runSummary: summary)
+    await eventStream.append(contentsOf: state.events)
+    return state
+  }
+
+  public func snapshotEvents() async -> [PraxisPresentationEvent] {
+    await eventStream.snapshot()
+  }
+
+  public func drainEvents() async -> [PraxisPresentationEvent] {
+    await eventStream.drain()
   }
 }
 

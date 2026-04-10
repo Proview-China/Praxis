@@ -4,6 +4,60 @@ import PraxisSession
 import PraxisTapGovernance
 import PraxisTapReview
 import PraxisTapRuntime
+import PraxisTransition
+
+public struct PraxisRunFollowUpAction: Sendable, Equatable, Codable {
+  public let kind: PraxisStepActionKind
+  public let reason: String
+  public let intentID: String?
+  public let intentKind: PraxisTransitionIntentKind?
+
+  public init(
+    kind: PraxisStepActionKind,
+    reason: String,
+    intentID: String? = nil,
+    intentKind: PraxisTransitionIntentKind? = nil
+  ) {
+    self.kind = kind
+    self.reason = reason
+    self.intentID = intentID
+    self.intentKind = intentKind
+  }
+}
+
+public struct PraxisRunExecution: Sendable, Equatable, Codable {
+  public let runID: PraxisRunID
+  public let sessionID: PraxisSessionID
+  public let phase: PraxisRunPhase
+  public let tickCount: Int
+  public let journalSequence: Int?
+  public let checkpointReference: String?
+  public let recoveredEventCount: Int
+  public let resumeIssued: Bool
+  public let followUpAction: PraxisRunFollowUpAction?
+
+  public init(
+    runID: PraxisRunID,
+    sessionID: PraxisSessionID,
+    phase: PraxisRunPhase,
+    tickCount: Int,
+    journalSequence: Int? = nil,
+    checkpointReference: String? = nil,
+    recoveredEventCount: Int = 0,
+    resumeIssued: Bool = true,
+    followUpAction: PraxisRunFollowUpAction? = nil
+  ) {
+    self.runID = runID
+    self.sessionID = sessionID
+    self.phase = phase
+    self.tickCount = tickCount
+    self.journalSequence = journalSequence
+    self.checkpointReference = checkpointReference
+    self.recoveredEventCount = recoveredEventCount
+    self.resumeIssued = resumeIssued
+    self.followUpAction = followUpAction
+  }
+}
 
 public struct PraxisRunGoalCommand: Sendable, Equatable, Codable {
   public let goal: PraxisCompiledGoal

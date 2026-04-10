@@ -15,6 +15,11 @@ public final class PraxisBridgeStore: ObservableObject {
     self.presentationState = presentationState ?? bridge.initialState()
   }
 
+  public convenience init() throws {
+    let bridge = try PraxisRuntimeBridgeFactory.makeApplePresentationBridge()
+    self.init(bridge: bridge)
+  }
+
   public func loadTapInspection() async throws {
     presentationState = try await bridge.inspectTapState()
   }

@@ -1,11 +1,11 @@
 import PraxisRun
 
 public protocol PraxisRunGoalUseCaseProtocol: Sendable {
-  func execute(_ command: PraxisRunGoalCommand) async throws -> PraxisRunID
+  func execute(_ command: PraxisRunGoalCommand) async throws -> PraxisRunExecution
 }
 
 public protocol PraxisResumeRunUseCaseProtocol: Sendable {
-  func execute(_ command: PraxisResumeRunCommand) async throws -> PraxisRunID
+  func execute(_ command: PraxisResumeRunCommand) async throws -> PraxisRunExecution
 }
 
 public protocol PraxisInspectTapUseCaseProtocol: Sendable {

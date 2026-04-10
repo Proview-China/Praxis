@@ -34,10 +34,22 @@ public actor PraxisFakeJournalStore: PraxisJournalStoreContract {
   }
 
   public func append(_ batch: PraxisJournalRecordBatch) async throws -> PraxisJournalAppendReceipt {
-    events.append(contentsOf: batch.events)
+    let startingSequence = (events.last?.sequence ?? 0) + 1
+    let normalizedEvents = batch.events.enumerated().map { offset, event in
+      PraxisJournalEvent(
+        sequence: startingSequence + offset,
+        sessionID: event.sessionID,
+        runReference: event.runReference,
+        correlationID: event.correlationID,
+        type: event.type,
+        summary: event.summary,
+        metadata: event.metadata
+      )
+    }
+    events.append(contentsOf: normalizedEvents)
     return PraxisJournalAppendReceipt(
-      appendedCount: batch.events.count,
-      lastCursor: batch.events.last.map { PraxisJournalCursor(sequence: $0.sequence) }
+      appendedCount: normalizedEvents.count,
+      lastCursor: normalizedEvents.last.map { PraxisJournalCursor(sequence: $0.sequence) }
     )
   }
 

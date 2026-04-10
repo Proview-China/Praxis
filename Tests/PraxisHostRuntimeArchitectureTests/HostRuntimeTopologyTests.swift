@@ -1,6 +1,7 @@
 import Testing
 @testable import PraxisRuntimeComposition
 @testable import PraxisRuntimeFacades
+@testable import PraxisRuntimeInterface
 @testable import PraxisRuntimePresentationBridge
 @testable import PraxisRuntimeUseCases
 
@@ -11,17 +12,18 @@ import Testing
 
 struct HostRuntimeTopologyTests {
   @Test
-  func runtimeSplitIntoFourLayers() {
+  func runtimeSplitIntoFiveLayers() {
     #expect(PraxisRuntimeCompositionModule.boundary.name == "PraxisRuntimeComposition")
     #expect(PraxisRuntimeUseCasesModule.boundary.name == "PraxisRuntimeUseCases")
     #expect(PraxisRuntimeFacadesModule.boundary.name == "PraxisRuntimeFacades")
+    #expect(PraxisRuntimeInterfaceModule.boundary.name == "PraxisRuntimeInterface")
     #expect(PraxisRuntimePresentationBridgeModule.boundary.name == "PraxisRuntimePresentationBridge")
   }
 
   @Test
   func presentationBridgeBlueprintMatchesSplit() {
     #expect(PraxisRuntimePresentationBridgeModule.bootstrap.hostContractModules.count == 5)
-    #expect(PraxisRuntimePresentationBridgeModule.bootstrap.runtimeModules.count == 4)
+    #expect(PraxisRuntimePresentationBridgeModule.bootstrap.runtimeModules.count == 5)
     #expect(PraxisRuntimePresentationBridgeModule.bootstrap.rules.contains("Entry 只能经由 RuntimePresentationBridge 进入系统。"))
   }
 }

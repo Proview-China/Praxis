@@ -19,6 +19,7 @@ import PraxisProviderContracts
 import PraxisRun
 import PraxisRuntimeComposition
 import PraxisRuntimeFacades
+import PraxisRuntimeInterface
 import PraxisRuntimeUseCases
 import PraxisSession
 import PraxisState
@@ -91,6 +92,7 @@ public enum PraxisRuntimePresentationBridgeModule {
       PraxisRuntimeCompositionModule.boundary,
       PraxisRuntimeUseCasesModule.boundary,
       PraxisRuntimeFacadesModule.boundary,
+      PraxisRuntimeInterfaceModule.boundary,
       boundary,
     ],
     entrypoints: [
@@ -101,7 +103,7 @@ public enum PraxisRuntimePresentationBridgeModule {
     rules: [
       "Core 是逻辑层，不是单一模块。",
       "HostContracts 必须按协议族继续拆分。",
-      "HostRuntime 必须按 composition/use case/facade/presentation bridge 拆分。",
+      "HostRuntime 必须按 composition/use case/facade/runtime interface/presentation bridge 拆分。",
       "Entry 只能经由 RuntimePresentationBridge 进入系统。",
     ],
   )

@@ -9,6 +9,15 @@ public final class PraxisCLIApp {
     self.bridge = bridge
   }
 
+  public convenience init(
+    configuration: PraxisCLIConfiguration
+  ) throws {
+    try self.init(
+      configuration: configuration,
+      bridge: PraxisRuntimeBridgeFactory.makeCLICommandBridge()
+    )
+  }
+
   public func bootstrapState() -> PraxisPresentationState {
     PraxisPresentationStateMapper().mapBlueprintSummary()
   }
@@ -19,6 +28,10 @@ public final class PraxisCLICommandRouter {
 
   public init(bridge: PraxisCLICommandBridge) {
     self.bridge = bridge
+  }
+
+  public convenience init() throws {
+    try self.init(bridge: PraxisRuntimeBridgeFactory.makeCLICommandBridge())
   }
 
   public func route(_ command: PraxisCLICommand) async throws -> PraxisPresentationState {

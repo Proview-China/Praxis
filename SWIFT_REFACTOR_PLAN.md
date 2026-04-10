@@ -256,15 +256,16 @@ Core 禁止直接依赖：
 | 32 | `PraxisRuntimeComposition` | composition root / dependency graph / adapter registry | `src/agent_core/runtime.ts`、`src/rax/runtime.ts` 的装配部分 |
 | 33 | `PraxisRuntimeUseCases` | runGoal / resumeRun / inspectTap / inspectCmp / inspectMp / buildCapabilityCatalog 等高层用例 | runtime 对外应用用例层 |
 | 34 | `PraxisRuntimeFacades` | 稳定 facade surface / DTO 压平层，承接 CMP `session/flow/project/roles` 这类宿主表面 | `src/rax/facade.ts` 一类对外表面 |
-| 35 | `PraxisRuntimePresentationBridge` | CLI / SwiftUI / FFI 展示桥 / state mapping / event mapping | `live-agent-chat` 的展示边界 |
+| 35 | `PraxisRuntimeInterface` | 宿主无关的统一 request/response/event surface，为未来导出层与跨语言绑定提供稳定接口 | `src/rax/facade.ts`、`live-agent-chat/shared.ts` 的跨宿主表面 |
+| 36 | `PraxisRuntimePresentationBridge` | CLI / SwiftUI / FFI 展示桥 / state mapping / event mapping | `live-agent-chat` 的展示边界 |
 
 ### 8.7 Entry
 
 | 顺序 | Target | 职责范围 | 说明 |
 | --- | --- | --- | --- |
-| 36 | `PraxisCLI` | 非交互命令、交互会话、终端渲染、日志回放 | 先命令，后会话，再高级终端体验 |
-| 37 | `PraxisAppleUI` | SwiftUI app shell、inspection、run/session 宿主界面 | 先壳、后只读、再交互 |
-| 38 | `PraxisFFI` | 未来导出层 | 等 `PraxisRuntimePresentationBridge` 稳定后再做 |
+| 37 | `PraxisCLI` | 非交互命令、交互会话、终端渲染、日志回放 | 先命令，后会话，再高级终端体验 |
+| 38 | `PraxisAppleUI` | SwiftUI app shell、inspection、run/session 宿主界面 | 先壳、后只读、再交互 |
+| 39 | `PraxisFFI` | 未来导出层 | 建立在 `PraxisRuntimeInterface` 与 `PraxisRuntimePresentationBridge` 稳定后再做 |
 
 ### 8.8 当前需要显式纳入规划的模块面
 
