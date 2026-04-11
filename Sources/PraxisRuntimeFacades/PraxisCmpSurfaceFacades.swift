@@ -328,7 +328,9 @@ public final class PraxisCmpRolesFacade: Sendable {
       summary: roles.summary,
       projectID: roles.projectID,
       agentID: roles.agentID,
-      roleCounts: Dictionary(uniqueKeysWithValues: roles.roles.map { ($0.role.rawValue, $0.assignmentCount) }),
+      roleCounts: .init(
+        counts: Dictionary(uniqueKeysWithValues: roles.roles.map { ($0.role, $0.assignmentCount) })
+      ),
       roleStages: .init(
         stages: Dictionary(uniqueKeysWithValues: roles.roles.compactMap { role in
           guard let latestStage = role.latestStage else {
@@ -487,7 +489,9 @@ public final class PraxisCmpReadbackFacade: Sendable {
       packageCount: status.objectModel.packageCount,
       latestPackageID: status.latestPackageID,
       latestDispatchStatus: status.latestDispatchStatus,
-      roleCounts: Dictionary(uniqueKeysWithValues: status.roles.map { ($0.role.rawValue, $0.assignmentCount) }),
+      roleCounts: .init(
+        counts: Dictionary(uniqueKeysWithValues: status.roles.map { ($0.role, $0.assignmentCount) })
+      ),
       roleStages: .init(
         stages: Dictionary(uniqueKeysWithValues: status.roles.compactMap { role in
           guard let latestStage = role.latestStage else {

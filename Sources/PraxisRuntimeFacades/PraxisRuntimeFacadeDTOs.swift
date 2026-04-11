@@ -552,11 +552,69 @@ public struct PraxisCmpRoleStageMap: Sendable, Equatable, Codable {
   }
 }
 
+public struct PraxisCmpRoleCountMap: Sendable, Equatable, Codable {
+  public let counts: [PraxisFiveAgentRole: Int]
+
+  public init(counts: [PraxisFiveAgentRole: Int]) {
+    self.counts = counts
+  }
+
+  public subscript(_ role: PraxisFiveAgentRole) -> Int? {
+    counts[role]
+  }
+
+  public var isEmpty: Bool {
+    counts.isEmpty
+  }
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: DynamicCodingKey.self)
+    var counts: [PraxisFiveAgentRole: Int] = [:]
+
+    for key in container.allKeys {
+      guard let role = PraxisFiveAgentRole(rawValue: key.stringValue) else {
+        throw DecodingError.dataCorruptedError(
+          forKey: key,
+          in: container,
+          debugDescription: "Invalid CMP role key \(key.stringValue)."
+        )
+      }
+
+      counts[role] = try container.decode(Int.self, forKey: key)
+    }
+
+    self.init(counts: counts)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: DynamicCodingKey.self)
+    for role in counts.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
+      let key = DynamicCodingKey(stringValue: role.rawValue)!
+      try container.encode(counts[role], forKey: key)
+    }
+  }
+
+  private struct DynamicCodingKey: CodingKey {
+    let stringValue: String
+    let intValue: Int?
+
+    init?(stringValue: String) {
+      self.stringValue = stringValue
+      self.intValue = nil
+    }
+
+    init?(intValue: Int) {
+      self.stringValue = String(intValue)
+      self.intValue = intValue
+    }
+  }
+}
+
 public struct PraxisCmpRolesPanelSnapshot: Sendable, Equatable, Codable {
   public let summary: String
   public let projectID: String
   public let agentID: String?
-  public let roleCounts: [String: Int]
+  public let roleCounts: PraxisCmpRoleCountMap
   public let roleStages: PraxisCmpRoleStageMap
   public let latestPackageID: String?
   public let latestDispatchStatus: PraxisCmpLatestDispatchStatus?
@@ -565,7 +623,7 @@ public struct PraxisCmpRolesPanelSnapshot: Sendable, Equatable, Codable {
     summary: String,
     projectID: String,
     agentID: String? = nil,
-    roleCounts: [String: Int],
+    roleCounts: PraxisCmpRoleCountMap,
     roleStages: PraxisCmpRoleStageMap,
     latestPackageID: String? = nil,
     latestDispatchStatus: PraxisCmpLatestDispatchStatus? = nil
@@ -764,7 +822,7 @@ public struct PraxisCmpStatusPanelSnapshot: Sendable, Equatable, Codable {
   public let packageCount: Int
   public let latestPackageID: String?
   public let latestDispatchStatus: PraxisCmpLatestDispatchStatus?
-  public let roleCounts: [String: Int]
+  public let roleCounts: PraxisCmpRoleCountMap
   public let roleStages: PraxisCmpRoleStageMap
 
   public init(
@@ -776,7 +834,7 @@ public struct PraxisCmpStatusPanelSnapshot: Sendable, Equatable, Codable {
     packageCount: Int,
     latestPackageID: String? = nil,
     latestDispatchStatus: PraxisCmpLatestDispatchStatus? = nil,
-    roleCounts: [String: Int],
+    roleCounts: PraxisCmpRoleCountMap,
     roleStages: PraxisCmpRoleStageMap
   ) {
     self.summary = summary
