@@ -222,6 +222,233 @@ public struct PraxisCmpContextPackageStoreWriteReceipt: Sendable, Equatable, Cod
   }
 }
 
+public struct PraxisCmpControlDescriptor: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let agentID: String?
+  public let executionStyle: String
+  public let mode: String
+  public let readbackPriority: String
+  public let fallbackPolicy: String
+  public let recoveryPreference: String
+  public let automation: [String: Bool]
+  public let updatedAt: String
+  public let metadata: [String: PraxisValue]
+
+  public init(
+    projectID: String,
+    agentID: String? = nil,
+    executionStyle: String,
+    mode: String,
+    readbackPriority: String,
+    fallbackPolicy: String,
+    recoveryPreference: String,
+    automation: [String: Bool],
+    updatedAt: String,
+    metadata: [String: PraxisValue] = [:]
+  ) {
+    self.projectID = projectID
+    self.agentID = agentID
+    self.executionStyle = executionStyle
+    self.mode = mode
+    self.readbackPriority = readbackPriority
+    self.fallbackPolicy = fallbackPolicy
+    self.recoveryPreference = recoveryPreference
+    self.automation = automation
+    self.updatedAt = updatedAt
+    self.metadata = metadata
+  }
+}
+
+public struct PraxisCmpControlQuery: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let agentID: String?
+
+  public init(projectID: String, agentID: String? = nil) {
+    self.projectID = projectID
+    self.agentID = agentID
+  }
+}
+
+public struct PraxisCmpControlStoreWriteReceipt: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let agentID: String?
+  public let storedAt: String
+
+  public init(
+    projectID: String,
+    agentID: String? = nil,
+    storedAt: String
+  ) {
+    self.projectID = projectID
+    self.agentID = agentID
+    self.storedAt = storedAt
+  }
+}
+
+public struct PraxisCmpPeerApprovalDescriptor: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let agentID: String
+  public let targetAgentID: String
+  public let capabilityKey: String
+  public let requestedTier: String
+  public let tapMode: String
+  public let riskLevel: String
+  public let route: String
+  public let outcome: String
+  public let humanGateState: String
+  public let summary: String
+  public let decisionSummary: String
+  public let requestedAt: String
+  public let updatedAt: String
+  public let metadata: [String: PraxisValue]
+
+  public init(
+    projectID: String,
+    agentID: String,
+    targetAgentID: String,
+    capabilityKey: String,
+    requestedTier: String,
+    tapMode: String,
+    riskLevel: String,
+    route: String,
+    outcome: String,
+    humanGateState: String,
+    summary: String,
+    decisionSummary: String,
+    requestedAt: String,
+    updatedAt: String,
+    metadata: [String: PraxisValue] = [:]
+  ) {
+    self.projectID = projectID
+    self.agentID = agentID
+    self.targetAgentID = targetAgentID
+    self.capabilityKey = capabilityKey
+    self.requestedTier = requestedTier
+    self.tapMode = tapMode
+    self.riskLevel = riskLevel
+    self.route = route
+    self.outcome = outcome
+    self.humanGateState = humanGateState
+    self.summary = summary
+    self.decisionSummary = decisionSummary
+    self.requestedAt = requestedAt
+    self.updatedAt = updatedAt
+    self.metadata = metadata
+  }
+}
+
+public struct PraxisCmpPeerApprovalQuery: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let agentID: String?
+  public let targetAgentID: String?
+  public let capabilityKey: String?
+
+  public init(
+    projectID: String,
+    agentID: String? = nil,
+    targetAgentID: String? = nil,
+    capabilityKey: String? = nil
+  ) {
+    self.projectID = projectID
+    self.agentID = agentID
+    self.targetAgentID = targetAgentID
+    self.capabilityKey = capabilityKey
+  }
+}
+
+public struct PraxisCmpPeerApprovalStoreWriteReceipt: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let agentID: String
+  public let targetAgentID: String
+  public let capabilityKey: String
+  public let storedAt: String
+
+  public init(
+    projectID: String,
+    agentID: String,
+    targetAgentID: String,
+    capabilityKey: String,
+    storedAt: String
+  ) {
+    self.projectID = projectID
+    self.agentID = agentID
+    self.targetAgentID = targetAgentID
+    self.capabilityKey = capabilityKey
+    self.storedAt = storedAt
+  }
+}
+
+/// Captures a single append-only TAP runtime event for audit and readback flows.
+public struct PraxisTapRuntimeEventRecord: Sendable, Equatable, Codable {
+  public let eventID: String
+  public let projectID: String
+  public let agentID: String
+  public let targetAgentID: String?
+  public let eventKind: String
+  public let capabilityKey: String?
+  public let summary: String
+  public let detail: String?
+  public let createdAt: String
+  public let metadata: [String: PraxisValue]
+
+  public init(
+    eventID: String,
+    projectID: String,
+    agentID: String,
+    targetAgentID: String? = nil,
+    eventKind: String,
+    capabilityKey: String? = nil,
+    summary: String,
+    detail: String? = nil,
+    createdAt: String,
+    metadata: [String: PraxisValue] = [:]
+  ) {
+    self.eventID = eventID
+    self.projectID = projectID
+    self.agentID = agentID
+    self.targetAgentID = targetAgentID
+    self.eventKind = eventKind
+    self.capabilityKey = capabilityKey
+    self.summary = summary
+    self.detail = detail
+    self.createdAt = createdAt
+    self.metadata = metadata
+  }
+}
+
+/// Describes a structured TAP runtime event lookup.
+public struct PraxisTapRuntimeEventQuery: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let agentID: String?
+  public let targetAgentID: String?
+  public let limit: Int
+
+  public init(
+    projectID: String,
+    agentID: String? = nil,
+    targetAgentID: String? = nil,
+    limit: Int = 50
+  ) {
+    self.projectID = projectID
+    self.agentID = agentID
+    self.targetAgentID = targetAgentID
+    self.limit = limit
+  }
+}
+
+/// Acknowledges an append-only TAP runtime event write.
+public struct PraxisTapRuntimeEventStoreWriteReceipt: Sendable, Equatable, Codable {
+  public let eventID: String
+  public let projectID: String
+  public let createdAt: String
+
+  public init(eventID: String, projectID: String, createdAt: String) {
+    self.eventID = eventID
+    self.projectID = projectID
+    self.createdAt = createdAt
+  }
+}
+
 public struct PraxisPublishedMessage: Sendable, Equatable, Codable {
   public let messageID: String
   public let topic: String

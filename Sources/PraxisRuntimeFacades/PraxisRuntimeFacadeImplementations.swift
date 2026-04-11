@@ -97,17 +97,23 @@ public final class PraxisRunFacade: Sendable {
 
 public final class PraxisInspectionFacade: Sendable {
   public let inspectTapUseCase: any PraxisInspectTapUseCaseProtocol
+  public let readbackTapStatusUseCase: any PraxisReadbackTapStatusUseCaseProtocol
+  public let readbackTapHistoryUseCase: any PraxisReadbackTapHistoryUseCaseProtocol
   public let inspectCmpUseCase: any PraxisInspectCmpUseCaseProtocol
   public let inspectMpUseCase: any PraxisInspectMpUseCaseProtocol
   public let buildCapabilityCatalogUseCase: any PraxisBuildCapabilityCatalogUseCaseProtocol
 
   public init(
     inspectTapUseCase: any PraxisInspectTapUseCaseProtocol,
+    readbackTapStatusUseCase: any PraxisReadbackTapStatusUseCaseProtocol,
+    readbackTapHistoryUseCase: any PraxisReadbackTapHistoryUseCaseProtocol,
     inspectCmpUseCase: any PraxisInspectCmpUseCaseProtocol,
     inspectMpUseCase: any PraxisInspectMpUseCaseProtocol,
     buildCapabilityCatalogUseCase: any PraxisBuildCapabilityCatalogUseCaseProtocol
   ) {
     self.inspectTapUseCase = inspectTapUseCase
+    self.readbackTapStatusUseCase = readbackTapStatusUseCase
+    self.readbackTapHistoryUseCase = readbackTapHistoryUseCase
     self.inspectCmpUseCase = inspectCmpUseCase
     self.inspectMpUseCase = inspectMpUseCase
     self.buildCapabilityCatalogUseCase = buildCapabilityCatalogUseCase
@@ -116,6 +122,8 @@ public final class PraxisInspectionFacade: Sendable {
   public convenience init(dependencies: PraxisDependencyGraph) {
     self.init(
       inspectTapUseCase: PraxisInspectTapUseCase(dependencies: dependencies),
+      readbackTapStatusUseCase: PraxisReadbackTapStatusUseCase(dependencies: dependencies),
+      readbackTapHistoryUseCase: PraxisReadbackTapHistoryUseCase(dependencies: dependencies),
       inspectCmpUseCase: PraxisInspectCmpUseCase(dependencies: dependencies),
       inspectMpUseCase: PraxisInspectMpUseCase(dependencies: dependencies),
       buildCapabilityCatalogUseCase: PraxisBuildCapabilityCatalogUseCase(dependencies: dependencies)
@@ -128,6 +136,48 @@ public final class PraxisInspectionFacade: Sendable {
       summary: inspection.summary,
       governanceSummary: inspection.governanceSnapshot.summary,
       reviewSummary: inspection.toolReviewReport.session.actions.first?.summary ?? inspection.reviewContext.riskSummary.plainLanguageSummary
+    )
+  }
+
+  public func readbackTapStatus(_ command: PraxisReadbackTapStatusCommand) async throws -> PraxisTapStatusSnapshot {
+    let status = try await readbackTapStatusUseCase.execute(command)
+    return PraxisTapStatusSnapshot(
+      summary: status.summary,
+      readinessSummary: status.readinessSummary,
+      projectID: status.projectID,
+      agentID: status.agentID,
+      tapMode: status.tapMode,
+      riskLevel: status.riskLevel,
+      humanGateState: status.humanGateState,
+      availableCapabilityCount: status.availableCapabilityCount,
+      availableCapabilityIDs: status.availableCapabilityIDs,
+      pendingApprovalCount: status.pendingApprovalCount,
+      approvedApprovalCount: status.approvedApprovalCount,
+      latestCapabilityKey: status.latestCapabilityKey,
+      latestDecisionSummary: status.latestDecisionSummary
+    )
+  }
+
+  public func readbackTapHistory(_ command: PraxisReadbackTapHistoryCommand) async throws -> PraxisTapHistorySnapshot {
+    let history = try await readbackTapHistoryUseCase.execute(command)
+    return PraxisTapHistorySnapshot(
+      summary: history.summary,
+      projectID: history.projectID,
+      agentID: history.agentID,
+      totalCount: history.totalCount,
+      entries: history.entries.map { entry in
+        .init(
+          agentID: entry.agentID,
+          targetAgentID: entry.targetAgentID,
+          capabilityKey: entry.capabilityKey,
+          requestedTier: entry.requestedTier,
+          route: entry.route,
+          outcome: entry.outcome,
+          humanGateState: entry.humanGateState,
+          updatedAt: entry.updatedAt,
+          decisionSummary: entry.decisionSummary
+        )
+      }
     )
   }
 
@@ -166,7 +216,14 @@ public final class PraxisCmpFacade: Sendable {
   public let resolveCmpFlowUseCase: any PraxisResolveCmpFlowUseCaseProtocol
   public let materializeCmpFlowUseCase: any PraxisMaterializeCmpFlowUseCaseProtocol
   public let dispatchCmpFlowUseCase: any PraxisDispatchCmpFlowUseCaseProtocol
+  public let retryCmpDispatchUseCase: any PraxisRetryCmpDispatchUseCaseProtocol
   public let requestCmpHistoryUseCase: any PraxisRequestCmpHistoryUseCaseProtocol
+  public let readbackCmpRolesUseCase: any PraxisReadbackCmpRolesUseCaseProtocol
+  public let readbackCmpControlUseCase: any PraxisReadbackCmpControlUseCaseProtocol
+  public let updateCmpControlUseCase: any PraxisUpdateCmpControlUseCaseProtocol
+  public let requestCmpPeerApprovalUseCase: any PraxisRequestCmpPeerApprovalUseCaseProtocol
+  public let decideCmpPeerApprovalUseCase: any PraxisDecideCmpPeerApprovalUseCaseProtocol
+  public let readbackCmpPeerApprovalUseCase: any PraxisReadbackCmpPeerApprovalUseCaseProtocol
   public let readbackCmpStatusUseCase: any PraxisReadbackCmpStatusUseCaseProtocol
   public let smokeCmpProjectUseCase: any PraxisSmokeCmpProjectUseCaseProtocol
 
@@ -179,7 +236,14 @@ public final class PraxisCmpFacade: Sendable {
     resolveCmpFlowUseCase: any PraxisResolveCmpFlowUseCaseProtocol,
     materializeCmpFlowUseCase: any PraxisMaterializeCmpFlowUseCaseProtocol,
     dispatchCmpFlowUseCase: any PraxisDispatchCmpFlowUseCaseProtocol,
+    retryCmpDispatchUseCase: any PraxisRetryCmpDispatchUseCaseProtocol,
     requestCmpHistoryUseCase: any PraxisRequestCmpHistoryUseCaseProtocol,
+    readbackCmpRolesUseCase: any PraxisReadbackCmpRolesUseCaseProtocol,
+    readbackCmpControlUseCase: any PraxisReadbackCmpControlUseCaseProtocol,
+    updateCmpControlUseCase: any PraxisUpdateCmpControlUseCaseProtocol,
+    requestCmpPeerApprovalUseCase: any PraxisRequestCmpPeerApprovalUseCaseProtocol,
+    decideCmpPeerApprovalUseCase: any PraxisDecideCmpPeerApprovalUseCaseProtocol,
+    readbackCmpPeerApprovalUseCase: any PraxisReadbackCmpPeerApprovalUseCaseProtocol,
     readbackCmpStatusUseCase: any PraxisReadbackCmpStatusUseCaseProtocol,
     smokeCmpProjectUseCase: any PraxisSmokeCmpProjectUseCaseProtocol
   ) {
@@ -191,7 +255,14 @@ public final class PraxisCmpFacade: Sendable {
     self.resolveCmpFlowUseCase = resolveCmpFlowUseCase
     self.materializeCmpFlowUseCase = materializeCmpFlowUseCase
     self.dispatchCmpFlowUseCase = dispatchCmpFlowUseCase
+    self.retryCmpDispatchUseCase = retryCmpDispatchUseCase
     self.requestCmpHistoryUseCase = requestCmpHistoryUseCase
+    self.readbackCmpRolesUseCase = readbackCmpRolesUseCase
+    self.readbackCmpControlUseCase = readbackCmpControlUseCase
+    self.updateCmpControlUseCase = updateCmpControlUseCase
+    self.requestCmpPeerApprovalUseCase = requestCmpPeerApprovalUseCase
+    self.decideCmpPeerApprovalUseCase = decideCmpPeerApprovalUseCase
+    self.readbackCmpPeerApprovalUseCase = readbackCmpPeerApprovalUseCase
     self.readbackCmpStatusUseCase = readbackCmpStatusUseCase
     self.smokeCmpProjectUseCase = smokeCmpProjectUseCase
   }
@@ -206,7 +277,14 @@ public final class PraxisCmpFacade: Sendable {
       resolveCmpFlowUseCase: PraxisResolveCmpFlowUseCase(dependencies: dependencies),
       materializeCmpFlowUseCase: PraxisMaterializeCmpFlowUseCase(dependencies: dependencies),
       dispatchCmpFlowUseCase: PraxisDispatchCmpFlowUseCase(dependencies: dependencies),
+      retryCmpDispatchUseCase: PraxisRetryCmpDispatchUseCase(dependencies: dependencies),
       requestCmpHistoryUseCase: PraxisRequestCmpHistoryUseCase(dependencies: dependencies),
+      readbackCmpRolesUseCase: PraxisReadbackCmpRolesUseCase(dependencies: dependencies),
+      readbackCmpControlUseCase: PraxisReadbackCmpControlUseCase(dependencies: dependencies),
+      updateCmpControlUseCase: PraxisUpdateCmpControlUseCase(dependencies: dependencies),
+      requestCmpPeerApprovalUseCase: PraxisRequestCmpPeerApprovalUseCase(dependencies: dependencies),
+      decideCmpPeerApprovalUseCase: PraxisDecideCmpPeerApprovalUseCase(dependencies: dependencies),
+      readbackCmpPeerApprovalUseCase: PraxisReadbackCmpPeerApprovalUseCase(dependencies: dependencies),
       readbackCmpStatusUseCase: PraxisReadbackCmpStatusUseCase(dependencies: dependencies),
       smokeCmpProjectUseCase: PraxisSmokeCmpProjectUseCase(dependencies: dependencies)
     )
@@ -334,6 +412,19 @@ public final class PraxisCmpFacade: Sendable {
     )
   }
 
+  public func retryDispatch(_ command: PraxisRetryCmpDispatchCommand) async throws -> PraxisCmpFlowDispatchSnapshot {
+    let dispatch = try await retryCmpDispatchUseCase.execute(command)
+    return PraxisCmpFlowDispatchSnapshot(
+      summary: dispatch.summary,
+      projectID: dispatch.projectID,
+      agentID: dispatch.agentID,
+      dispatchID: dispatch.result.receipt.id.rawValue,
+      targetAgentID: dispatch.result.receipt.targetAgentID,
+      targetKind: dispatch.result.receipt.targetKind.rawValue,
+      status: dispatch.result.receipt.status.rawValue
+    )
+  }
+
   public func requestHistory(_ command: PraxisRequestCmpHistoryCommand) async throws -> PraxisCmpFlowHistorySnapshot {
     let history = try await requestCmpHistoryUseCase.execute(command)
     return PraxisCmpFlowHistorySnapshot(
@@ -343,6 +434,116 @@ public final class PraxisCmpFacade: Sendable {
       found: history.result.found,
       snapshotID: history.result.snapshot?.id.rawValue,
       packageID: history.result.contextPackage?.id.rawValue
+    )
+  }
+
+  public func readbackRoles(_ command: PraxisReadbackCmpRolesCommand) async throws -> PraxisCmpRolesPanelSnapshot {
+    let roles = try await readbackCmpRolesUseCase.execute(command)
+    return PraxisCmpRolesPanelSnapshot(
+      summary: roles.summary,
+      projectID: roles.projectID,
+      agentID: roles.agentID,
+      roleCounts: Dictionary(uniqueKeysWithValues: roles.roles.map { ($0.role.rawValue, $0.assignmentCount) }),
+      roleStages: Dictionary(uniqueKeysWithValues: roles.roles.compactMap { role in
+        guard let latestStage = role.latestStage else {
+          return nil
+        }
+        return (role.role.rawValue, latestStage)
+      }),
+      latestPackageID: roles.latestPackageID,
+      latestDispatchStatus: roles.latestDispatchStatus
+    )
+  }
+
+  public func readbackControl(_ command: PraxisReadbackCmpControlCommand) async throws -> PraxisCmpControlPanelSnapshot {
+    let control = try await readbackCmpControlUseCase.execute(command)
+    return PraxisCmpControlPanelSnapshot(
+      summary: control.summary,
+      projectID: control.projectID,
+      agentID: control.agentID,
+      executionStyle: control.control.executionStyle,
+      mode: control.control.mode,
+      readbackPriority: control.control.readbackPriority,
+      fallbackPolicy: control.control.fallbackPolicy,
+      recoveryPreference: control.control.recoveryPreference,
+      automation: control.control.automation,
+      latestPackageID: control.latestPackageID,
+      latestDispatchStatus: control.latestDispatchStatus,
+      latestTargetAgentID: control.latestTargetAgentID
+    )
+  }
+
+  public func updateControl(_ command: PraxisUpdateCmpControlCommand) async throws -> PraxisCmpControlUpdateSnapshot {
+    let update = try await updateCmpControlUseCase.execute(command)
+    return PraxisCmpControlUpdateSnapshot(
+      summary: update.summary,
+      projectID: update.projectID,
+      agentID: update.agentID,
+      executionStyle: update.control.executionStyle,
+      mode: update.control.mode,
+      readbackPriority: update.control.readbackPriority,
+      fallbackPolicy: update.control.fallbackPolicy,
+      recoveryPreference: update.control.recoveryPreference,
+      automation: update.control.automation,
+      storedAt: update.storedAt
+    )
+  }
+
+  public func requestPeerApproval(_ command: PraxisRequestCmpPeerApprovalCommand) async throws -> PraxisCmpPeerApprovalSnapshot {
+    let approval = try await requestCmpPeerApprovalUseCase.execute(command)
+    return PraxisCmpPeerApprovalSnapshot(
+      summary: approval.summary,
+      projectID: approval.projectID,
+      agentID: approval.agentID,
+      targetAgentID: approval.targetAgentID,
+      capabilityKey: approval.capabilityKey,
+      requestedTier: approval.requestedTier.rawValue,
+      route: approval.route,
+      outcome: approval.outcome,
+      tapMode: approval.tapMode,
+      riskLevel: approval.riskLevel,
+      humanGateState: approval.humanGateState,
+      requestedAt: approval.requestedAt,
+      decisionSummary: approval.decisionSummary
+    )
+  }
+
+  public func decidePeerApproval(_ command: PraxisDecideCmpPeerApprovalCommand) async throws -> PraxisCmpPeerApprovalSnapshot {
+    let approval = try await decideCmpPeerApprovalUseCase.execute(command)
+    return PraxisCmpPeerApprovalSnapshot(
+      summary: approval.summary,
+      projectID: approval.projectID,
+      agentID: approval.agentID,
+      targetAgentID: approval.targetAgentID,
+      capabilityKey: approval.capabilityKey,
+      requestedTier: approval.requestedTier.rawValue,
+      route: approval.route,
+      outcome: approval.outcome,
+      tapMode: approval.tapMode,
+      riskLevel: approval.riskLevel,
+      humanGateState: approval.humanGateState,
+      requestedAt: approval.requestedAt,
+      decisionSummary: approval.decisionSummary
+    )
+  }
+
+  public func readbackPeerApproval(_ command: PraxisReadbackCmpPeerApprovalCommand) async throws -> PraxisCmpPeerApprovalReadbackSnapshot {
+    let readback = try await readbackCmpPeerApprovalUseCase.execute(command)
+    return PraxisCmpPeerApprovalReadbackSnapshot(
+      summary: readback.summary,
+      projectID: readback.projectID,
+      agentID: readback.agentID,
+      targetAgentID: readback.targetAgentID,
+      capabilityKey: readback.capabilityKey,
+      requestedTier: readback.requestedTier?.rawValue,
+      route: readback.route,
+      outcome: readback.outcome,
+      tapMode: readback.tapMode,
+      riskLevel: readback.riskLevel,
+      humanGateState: readback.humanGateState,
+      requestedAt: readback.requestedAt,
+      decisionSummary: readback.decisionSummary,
+      found: readback.found
     )
   }
 

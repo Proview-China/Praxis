@@ -68,6 +68,57 @@ public protocol PraxisCmpContextPackageStoreContract: Sendable {
   func describe(_ query: PraxisCmpContextPackageQuery) async throws -> [PraxisCmpContextPackageDescriptor]
 }
 
+/// Persists host-backed CMP control descriptors for neutral control readback and mutation.
+public protocol PraxisCmpControlStoreContract: Sendable {
+  /// Saves or updates a CMP control descriptor.
+  ///
+  /// - Parameter descriptor: Control descriptor to persist.
+  /// - Returns: A receipt describing the stored control scope.
+  func save(_ descriptor: PraxisCmpControlDescriptor) async throws -> PraxisCmpControlStoreWriteReceipt
+
+  /// Returns the latest control descriptor that matches the supplied query.
+  ///
+  /// - Parameter query: Structured control lookup query.
+  /// - Returns: The matching control descriptor when present; otherwise `nil`.
+  func describe(_ query: PraxisCmpControlQuery) async throws -> PraxisCmpControlDescriptor?
+}
+
+/// Persists host-backed CMP peer-approval descriptors for TAP bridge request/readback flows.
+public protocol PraxisCmpPeerApprovalStoreContract: Sendable {
+  /// Saves or updates a CMP peer-approval descriptor.
+  ///
+  /// - Parameter descriptor: Peer-approval descriptor to persist.
+  /// - Returns: A receipt describing the stored approval scope.
+  func save(_ descriptor: PraxisCmpPeerApprovalDescriptor) async throws -> PraxisCmpPeerApprovalStoreWriteReceipt
+
+  /// Returns the latest peer-approval descriptor that matches the supplied query.
+  ///
+  /// - Parameter query: Structured approval lookup query.
+  /// - Returns: The matching approval descriptor when present; otherwise `nil`.
+  func describe(_ query: PraxisCmpPeerApprovalQuery) async throws -> PraxisCmpPeerApprovalDescriptor?
+
+  /// Returns all peer-approval descriptors that match the supplied query.
+  ///
+  /// - Parameter query: Structured approval lookup query.
+  /// - Returns: Matching approval descriptors ordered by latest update first.
+  func describeAll(_ query: PraxisCmpPeerApprovalQuery) async throws -> [PraxisCmpPeerApprovalDescriptor]
+}
+
+/// Persists append-only TAP runtime audit events for readback and export flows.
+public protocol PraxisTapRuntimeEventStoreContract: Sendable {
+  /// Appends one immutable TAP runtime event.
+  ///
+  /// - Parameter record: Runtime event to append.
+  /// - Returns: A receipt describing the appended event.
+  func append(_ record: PraxisTapRuntimeEventRecord) async throws -> PraxisTapRuntimeEventStoreWriteReceipt
+
+  /// Reads TAP runtime events that match the supplied query.
+  ///
+  /// - Parameter query: Structured event lookup query.
+  /// - Returns: Matching TAP runtime events ordered by newest first.
+  func read(_ query: PraxisTapRuntimeEventQuery) async throws -> [PraxisTapRuntimeEventRecord]
+}
+
 /// Publishes messages onto the host message bus.
 public protocol PraxisMessageBusContract: Sendable {
   /// Publishes a message.

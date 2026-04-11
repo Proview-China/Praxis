@@ -510,6 +510,13 @@ private func summarizeRegisteredHostSurfaces(from dependencies: PraxisDependency
   return "Registered host capability surfaces: \(capabilityIDs.joined(separator: ", "))"
 }
 
+private func tapStatusRiskLevel(from capabilityIDs: [PraxisCapabilityID]) -> PraxisTapRiskLevel {
+  if capabilityIDs.contains(.init(rawValue: "workspace.write")) || capabilityIDs.contains(.init(rawValue: "tool.shell")) {
+    return .risky
+  }
+  return .normal
+}
+
 private func cmpGitStatusSummary(_ report: PraxisGitAvailabilityReport?) -> (statusWord: String, summary: String, issue: String?) {
   guard let report else {
     return ("missing", "System git probe is not wired into HostRuntime yet.", "System git readiness still needs a host adapter.")
@@ -781,8 +788,68 @@ private func cmpContextPackage(
   )
 }
 
+private func cmpUpdatedContextPackage(
+  from package: PraxisCmpContextPackage,
+  status: PraxisCmpPackageStatus? = nil,
+  metadata: [String: PraxisValue]? = nil
+) -> PraxisCmpContextPackage {
+  PraxisCmpContextPackage(
+    id: package.id,
+    sourceProjectionID: package.sourceProjectionID,
+    sourceSnapshotID: package.sourceSnapshotID,
+    sourceAgentID: package.sourceAgentID,
+    targetAgentID: package.targetAgentID,
+    kind: package.kind,
+    packageRef: package.packageRef,
+    fidelityLabel: package.fidelityLabel,
+    createdAt: package.createdAt,
+    status: status ?? package.status,
+    sourceSectionIDs: package.sourceSectionIDs,
+    metadata: metadata ?? package.metadata
+  )
+}
+
+private func cmpPackageMetadataString(
+  _ metadata: [String: PraxisValue],
+  key: String
+) -> String? {
+  metadata[key]?.stringValue
+}
+
+private func cmpPackageMetadataNumber(
+  _ metadata: [String: PraxisValue],
+  key: String
+) -> Int? {
+  guard let rawValue = metadata[key]?.numberValue else {
+    return nil
+  }
+  return Int(rawValue)
+}
+
+private func cmpPackageWithDispatchMetadata(
+  package: PraxisCmpContextPackage,
+  targetKind: PraxisCmpDispatchTargetKind,
+  reason: String,
+  dispatchStatus: PraxisCmpDispatchStatus,
+  topicName: String,
+  updatedAt: String,
+  blockedByTapGate: Bool
+) -> PraxisCmpContextPackage {
+  let priorAttemptCount = cmpPackageMetadataNumber(package.metadata, key: "dispatch_attempt_count") ?? 0
+  var metadata = package.metadata
+  metadata["dispatch_target_kind"] = .string(targetKind.rawValue)
+  metadata["dispatch_reason"] = .string(reason)
+  metadata["dispatch_attempt_count"] = .number(Double(priorAttemptCount + 1))
+  metadata["last_dispatch_status"] = .string(dispatchStatus.rawValue)
+  metadata["last_dispatch_topic"] = .string(topicName)
+  metadata["last_dispatch_updated_at"] = .string(updatedAt)
+  metadata["blocked_by_tap_gate"] = .bool(blockedByTapGate)
+  return cmpUpdatedContextPackage(from: package, metadata: metadata)
+}
+
 private func cmpProjectPackageDescriptors(
   projectID: String,
+  packageID: PraxisCmpPackageID? = nil,
   sourceAgentID: String? = nil,
   targetAgentID: String? = nil,
   sourceSnapshotID: PraxisCmpSnapshotID? = nil,
@@ -792,6 +859,7 @@ private func cmpProjectPackageDescriptors(
   try await dependencies.hostAdapters.cmpContextPackageStore?.describe(
     .init(
       projectID: projectID,
+      packageID: packageID,
       sourceAgentID: sourceAgentID,
       targetAgentID: targetAgentID,
       sourceSnapshotID: sourceSnapshotID,
@@ -1684,6 +1752,112 @@ private func dispatchCmpFlow(
   }
   let routingPlan = mqPlanner.routingPlan(for: deliveryPlan, projectID: command.projectID)
   let topicName = routingPlan.destinationTopics.first?.topicName ?? "cmp.\(command.projectID).\(command.agentID).same"
+  let targetControl = try await cmpResolvedControlSurface(
+    projectID: command.projectID,
+    agentID: command.contextPackage.targetAgentID,
+    dependencies: dependencies
+  )
+  let autoDispatchEnabled = targetControl.automation["autoDispatch"] ?? true
+  let pendingApprovals = try await cmpPendingPeerApprovalDescriptors(
+    projectID: command.projectID,
+    agentID: command.agentID,
+    targetAgentID: command.contextPackage.targetAgentID,
+    dependencies: dependencies
+  )
+  let blockedByTapGate = !autoDispatchEnabled || !pendingApprovals.isEmpty
+  let packageWithDispatchMetadata = cmpPackageWithDispatchMetadata(
+    package: command.contextPackage,
+    targetKind: command.targetKind,
+    reason: command.reason,
+    dispatchStatus: blockedByTapGate ? .rejected : (dependencies.hostAdapters.messageBus == nil ? .prepared : .delivered),
+    topicName: topicName,
+    updatedAt: createdAt,
+    blockedByTapGate: blockedByTapGate
+  )
+
+  if blockedByTapGate {
+    let gateReason: String
+    if !autoDispatchEnabled {
+      gateReason = "Dispatch is currently gated because autoDispatch is disabled for \(command.contextPackage.targetAgentID)."
+    } else {
+      gateReason = "Dispatch is currently gated because \(pendingApprovals.count) TAP approval request(s) are still waiting for \(command.contextPackage.targetAgentID)."
+    }
+    let receipt = deliveryPlanner.buildReceipt(
+      for: instruction,
+      status: .rejected,
+      createdAt: createdAt
+    )
+    try validator.validate(receipt)
+
+    if let packageStore = dependencies.hostAdapters.cmpContextPackageStore {
+      _ = try await packageStore.save(
+        cmpPackageDescriptor(
+          projectID: command.projectID,
+          package: cmpUpdatedContextPackage(
+            from: packageWithDispatchMetadata,
+            status: .materialized
+          ),
+          status: .materialized,
+          updatedAt: createdAt
+        )
+      )
+    }
+    if let deliveryTruthStore = dependencies.hostAdapters.deliveryTruthStore {
+      _ = try await deliveryTruthStore.save(
+        .init(
+          id: "delivery.\(receipt.id.rawValue)",
+          packageID: receipt.packageID,
+          topic: topicName,
+          targetAgentID: receipt.targetAgentID,
+          status: .pending,
+          payloadSummary: command.reason,
+          lastErrorSummary: gateReason,
+          updatedAt: createdAt
+        )
+      )
+    }
+    try await appendTapRuntimeEvent(
+      projectID: command.projectID,
+      agentID: command.agentID,
+      targetAgentID: command.contextPackage.targetAgentID,
+      eventKind: "dispatch_blocked",
+      capabilityKey: pendingApprovals.first?.capabilityKey,
+      summary: gateReason,
+      detail: "topic=\(topicName), autoDispatch=\(autoDispatchEnabled), pendingApprovalCount=\(pendingApprovals.count)",
+      createdAt: createdAt,
+      metadata: [
+        "route": .string("tapBridge"),
+        "outcome": .string("dispatch_blocked"),
+        "humanGateState": .string(
+          pendingApprovals.isEmpty
+            ? PraxisHumanGateState.notRequired.rawValue
+            : PraxisHumanGateState.waitingApproval.rawValue
+        ),
+        "targetAgentID": .string(command.contextPackage.targetAgentID),
+        "packageID": .string(command.contextPackage.id.rawValue),
+        "pendingApprovalCount": .number(Double(pendingApprovals.count)),
+        "autoDispatch": .bool(autoDispatchEnabled),
+        "decisionSummary": .string(gateReason),
+      ],
+      dependencies: dependencies
+    )
+
+    return PraxisCmpFlowDispatch(
+      projectID: command.projectID,
+      agentID: command.agentID,
+      summary: "CMP dispatch held package \(command.contextPackage.id.rawValue) for \(command.contextPackage.targetAgentID) because the host-neutral TAP/control gate is not yet clear.",
+      result: PraxisDispatchContextPackageResult(
+        status: .rejected,
+        receipt: receipt,
+        metadata: [
+          "topicName": .string(topicName),
+          "blockedByTapGate": .bool(true),
+          "pendingApprovalCount": .number(Double(pendingApprovals.count)),
+        ]
+      ),
+      deliveryPlan: deliveryPlan
+    )
+  }
 
   let publishedAt = try await dependencies.hostAdapters.messageBus?.publish(
     .init(
@@ -1704,11 +1878,23 @@ private func dispatchCmpFlow(
     createdAt: publishedAt?.acceptedAt ?? createdAt
   )
   try validator.validate(receipt)
+  let dispatchedPackage = cmpUpdatedContextPackage(
+    from: cmpPackageWithDispatchMetadata(
+      package: command.contextPackage,
+      targetKind: command.targetKind,
+      reason: command.reason,
+      dispatchStatus: receipt.status,
+      topicName: topicName,
+      updatedAt: publishedAt?.acceptedAt ?? createdAt,
+      blockedByTapGate: false
+    ),
+    status: publishedAt == nil ? .materialized : .dispatched
+  )
   if let packageStore = dependencies.hostAdapters.cmpContextPackageStore {
     _ = try await packageStore.save(
       cmpPackageDescriptor(
         projectID: command.projectID,
-        package: command.contextPackage,
+        package: dispatchedPackage,
         status: publishedAt == nil ? .materialized : .dispatched,
         updatedAt: publishedAt?.acceptedAt ?? createdAt
       )
@@ -1737,12 +1923,104 @@ private func dispatchCmpFlow(
       "instructionCount": .number(Double(deliveryPlan.instructions.count)),
     ]
   )
+  try await appendTapRuntimeEvent(
+    projectID: command.projectID,
+    agentID: command.agentID,
+    targetAgentID: command.contextPackage.targetAgentID,
+    eventKind: "dispatch_released",
+    summary: "CMP dispatch released package \(command.contextPackage.id.rawValue) toward \(receipt.targetAgentID).",
+    detail: "topic=\(topicName), status=\(receipt.status.rawValue)",
+    createdAt: publishedAt?.acceptedAt ?? createdAt,
+    metadata: [
+      "route": .string("tapBridge"),
+      "outcome": .string("dispatch_released"),
+      "humanGateState": .string(PraxisHumanGateState.notRequired.rawValue),
+      "targetAgentID": .string(command.contextPackage.targetAgentID),
+      "packageID": .string(command.contextPackage.id.rawValue),
+      "decisionSummary": .string("Dispatch released package \(command.contextPackage.id.rawValue) on \(topicName)."),
+    ],
+    dependencies: dependencies
+  )
   return PraxisCmpFlowDispatch(
     projectID: command.projectID,
     agentID: command.agentID,
     summary: "CMP dispatch routed package \(command.contextPackage.id.rawValue) toward \(receipt.targetAgentID) on \(topicName) through the neutral flow surface.",
     result: result,
     deliveryPlan: deliveryPlan
+  )
+}
+
+private func retryCmpDispatch(
+  command: PraxisRetryCmpDispatchCommand,
+  dependencies: PraxisDependencyGraph
+) async throws -> PraxisCmpFlowDispatch {
+  let packageID = PraxisCmpPackageID(rawValue: command.packageID)
+  let packageDescriptor = try await cmpProjectPackageDescriptors(
+    projectID: command.projectID,
+    packageID: packageID,
+    dependencies: dependencies
+  ).first
+  guard let packageDescriptor else {
+    throw PraxisError.invalidInput(
+      "CMP package was not found for project \(command.projectID) and package \(command.packageID)."
+    )
+  }
+  guard packageDescriptor.sourceAgentID == command.agentID else {
+    throw PraxisError.invalidInput(
+      "CMP dispatch retry requires source agent \(packageDescriptor.sourceAgentID) but received \(command.agentID) for package \(command.packageID)."
+    )
+  }
+  let blockedByTapGate = packageDescriptor.metadata["blocked_by_tap_gate"]?.boolValue ?? false
+  let lastDispatchStatus = cmpPackageMetadataString(packageDescriptor.metadata, key: "last_dispatch_status")
+  guard packageDescriptor.status == .materialized,
+        blockedByTapGate,
+        lastDispatchStatus == PraxisCmpDispatchStatus.rejected.rawValue else {
+    throw PraxisError.invalidInput(
+      "CMP dispatch retry is not available for package \(command.packageID) with status \(packageDescriptor.status.rawValue)."
+    )
+  }
+  guard let targetKindRaw = cmpPackageMetadataString(packageDescriptor.metadata, key: "dispatch_target_kind"),
+        let targetKind = PraxisCmpDispatchTargetKind(rawValue: targetKindRaw) else {
+    throw PraxisError.invalidInput(
+      "CMP dispatch retry is not available for package \(command.packageID) because dispatch metadata is missing."
+    )
+  }
+
+  let retryReason = command.reason
+    ?? cmpPackageMetadataString(packageDescriptor.metadata, key: "dispatch_reason")
+    ?? "Retry dispatch package \(command.packageID) through the neutral flow surface."
+  let contextPackage = cmpContextPackage(from: packageDescriptor)
+  let createdAt = runtimeNow()
+  try await appendTapRuntimeEvent(
+    projectID: command.projectID,
+    agentID: command.agentID,
+    targetAgentID: contextPackage.targetAgentID,
+    eventKind: "dispatch_retry_requested",
+    capabilityKey: packageDescriptor.metadata["capabilityKey"]?.stringValue,
+    summary: "CMP retry requested for package \(command.packageID) toward \(contextPackage.targetAgentID).",
+    detail: "targetKind=\(targetKind.rawValue), reason=\(retryReason)",
+    createdAt: createdAt,
+    metadata: [
+      "route": .string("tapBridge"),
+      "outcome": .string("dispatch_retry_requested"),
+      "humanGateState": .string(PraxisHumanGateState.notRequired.rawValue),
+      "targetAgentID": .string(contextPackage.targetAgentID),
+      "packageID": .string(command.packageID),
+      "targetKind": .string(targetKind.rawValue),
+      "decisionSummary": .string("Retry requested for package \(command.packageID)."),
+    ],
+    dependencies: dependencies
+  )
+
+  return try await dispatchCmpFlow(
+    command: .init(
+      projectID: command.projectID,
+      agentID: command.agentID,
+      contextPackage: contextPackage,
+      targetKind: targetKind,
+      reason: retryReason
+    ),
+    dependencies: dependencies
   )
 }
 
@@ -1857,10 +2135,687 @@ private func cmpDefaultControlSurface(projectID: String, agentID: String?) -> Pr
   )
 }
 
-private func readbackCmpStatus(
+private func cmpControlDescriptor(
+  projectID: String,
+  agentID: String?,
+  control: PraxisCmpControlSurface,
+  updatedAt: String
+) -> PraxisCmpControlDescriptor {
+  PraxisCmpControlDescriptor(
+    projectID: projectID,
+    agentID: agentID,
+    executionStyle: control.executionStyle,
+    mode: control.mode,
+    readbackPriority: control.readbackPriority,
+    fallbackPolicy: control.fallbackPolicy,
+    recoveryPreference: control.recoveryPreference,
+    automation: control.automation,
+    updatedAt: updatedAt
+  )
+}
+
+private func cmpControlSurface(from descriptor: PraxisCmpControlDescriptor) -> PraxisCmpControlSurface {
+  PraxisCmpControlSurface(
+    executionStyle: descriptor.executionStyle,
+    mode: descriptor.mode,
+    readbackPriority: descriptor.readbackPriority,
+    fallbackPolicy: descriptor.fallbackPolicy,
+    recoveryPreference: descriptor.recoveryPreference,
+    automation: descriptor.automation
+  )
+}
+
+private func cmpResolvedControlSurface(
+  projectID: String,
+  agentID: String?,
+  dependencies: PraxisDependencyGraph
+) async throws -> PraxisCmpControlSurface {
+  guard let controlStore = dependencies.hostAdapters.cmpControlStore else {
+    return cmpDefaultControlSurface(projectID: projectID, agentID: agentID)
+  }
+  if let agentID,
+    let descriptor = try await controlStore.describe(.init(projectID: projectID, agentID: agentID)) {
+    return cmpControlSurface(from: descriptor)
+  }
+  if let descriptor = try await controlStore.describe(.init(projectID: projectID, agentID: nil)) {
+    return cmpControlSurface(from: descriptor)
+  }
+  return cmpDefaultControlSurface(projectID: projectID, agentID: agentID)
+}
+
+private func cmpMergedControlSurface(
+  base: PraxisCmpControlSurface,
+  command: PraxisUpdateCmpControlCommand
+) -> PraxisCmpControlSurface {
+  let normalizedExecutionStyle = command.executionStyle?.trimmingCharacters(in: .whitespacesAndNewlines)
+  let normalizedMode = command.mode?.trimmingCharacters(in: .whitespacesAndNewlines)
+  let normalizedReadbackPriority = command.readbackPriority?.trimmingCharacters(in: .whitespacesAndNewlines)
+  let normalizedFallbackPolicy = command.fallbackPolicy?.trimmingCharacters(in: .whitespacesAndNewlines)
+  let normalizedRecoveryPreference = command.recoveryPreference?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+  return PraxisCmpControlSurface(
+    executionStyle: (normalizedExecutionStyle?.isEmpty == false) ? normalizedExecutionStyle! : base.executionStyle,
+    mode: (normalizedMode?.isEmpty == false) ? normalizedMode! : base.mode,
+    readbackPriority: (normalizedReadbackPriority?.isEmpty == false) ? normalizedReadbackPriority! : base.readbackPriority,
+    fallbackPolicy: (normalizedFallbackPolicy?.isEmpty == false) ? normalizedFallbackPolicy! : base.fallbackPolicy,
+    recoveryPreference: (normalizedRecoveryPreference?.isEmpty == false) ? normalizedRecoveryPreference! : base.recoveryPreference,
+    automation: base.automation.merging(command.automation) { _, new in new }
+  )
+}
+
+private func cmpTapMode(for controlMode: String) -> PraxisTapMode {
+  switch controlMode.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+  case "bapr":
+    return .bapr
+  case "yolo":
+    return .yolo
+  case "permissive":
+    return .permissive
+  case "strict":
+    return .strict
+  case "restricted", "peer_review", "manual", "human_gate":
+    return .restricted
+  case "balanced":
+    return .balanced
+  case "standard", "active_preferred", "automatic":
+    return .standard
+  default:
+    return .standard
+  }
+}
+
+private func cmpPeerApprovalState(from outcome: PraxisReviewRoutingOutcome) -> PraxisHumanGateState {
+  switch outcome {
+  case .baselineApproved:
+    return .approved
+  case .reviewRequired, .redirectedToProvisioning, .escalatedToHuman:
+    return .waitingApproval
+  case .denied:
+    return .rejected
+  }
+}
+
+private func cmpPeerApprovalProfile(
+  projectID: String,
+  agentID: String,
+  control: PraxisCmpControlSurface,
+  dependencies: PraxisDependencyGraph
+) -> PraxisTapCapabilityProfile {
+  let baselineCapabilities = hostCapabilityIDs(from: dependencies).map(\.rawValue)
+  return PraxisTapCapabilityProfile(
+    profileID: "cmp.\(projectID).\(agentID).peer-approval",
+    agentClass: agentID,
+    defaultMode: cmpTapMode(for: control.mode),
+    baselineTier: .b0,
+    baselineCapabilities: baselineCapabilities
+  )
+}
+
+private func cmpPeerApprovalDescriptor(
+  command: PraxisRequestCmpPeerApprovalCommand,
+  capabilityKey: String,
+  routing: PraxisReviewRoutingResult,
+  humanGateState: PraxisHumanGateState,
+  requestedAt: String
+) -> PraxisCmpPeerApprovalDescriptor {
+  PraxisCmpPeerApprovalDescriptor(
+    projectID: command.projectID,
+    agentID: command.agentID,
+    targetAgentID: command.targetAgentID,
+    capabilityKey: capabilityKey,
+    requestedTier: command.requestedTier.rawValue,
+    tapMode: routing.policy.mode.rawValue,
+    riskLevel: routing.decision.riskLevel?.rawValue ?? "normal",
+    route: routing.decision.route.rawValue,
+    outcome: routing.outcome.rawValue,
+    humanGateState: humanGateState.rawValue,
+    summary: command.summary,
+    decisionSummary: routing.decision.summary,
+    requestedAt: requestedAt,
+    updatedAt: requestedAt,
+    metadata: [
+      "decisionKind": .string(routing.decision.decisionKind.rawValue),
+      "requestPath": .string(routing.policy.requestPath.rawValue),
+      "reviewRequirement": .string(routing.policy.reviewRequirement.rawValue),
+      "reviewerStrategy": .string(routing.policy.reviewerStrategy.rawValue),
+    ]
+  )
+}
+
+private func cmpResolvedPeerApprovalDescriptor(
+  projectID: String,
+  agentID: String,
+  targetAgentID: String,
+  capabilityKey: String,
+  dependencies: PraxisDependencyGraph
+) async throws -> PraxisCmpPeerApprovalDescriptor {
+  guard let descriptor = try await dependencies.hostAdapters.cmpPeerApprovalStore?.describe(
+    .init(
+      projectID: projectID,
+      agentID: agentID,
+      targetAgentID: targetAgentID,
+      capabilityKey: capabilityKey
+    )
+  ) else {
+    throw PraxisError.invalidInput(
+      "CMP peer approval request was not found for \(projectID), \(agentID), \(targetAgentID), \(capabilityKey)."
+    )
+  }
+  return descriptor
+}
+
+private func cmpPeerApprovalResolution(
+  _ decision: PraxisCmpPeerApprovalDecision
+) -> (outcome: String, humanGateState: PraxisHumanGateState, eventKind: String) {
+  switch decision {
+  case .approve:
+    return ("approved_by_human", .approved, "peer_approval_approved")
+  case .reject:
+    return ("rejected_by_human", .rejected, "peer_approval_rejected")
+  case .release:
+    return ("gate_released", .approved, "gate_released")
+  }
+}
+
+private func cmpPeerApprovalReadback(
+  query: PraxisReadbackCmpPeerApprovalCommand,
+  descriptor: PraxisCmpPeerApprovalDescriptor?,
+  dependencies: PraxisDependencyGraph
+) -> PraxisCmpPeerApprovalReadback {
+  var issues: [String] = []
+  if dependencies.hostAdapters.cmpPeerApprovalStore == nil {
+    issues.append("CMP peer approval store adapter is still missing from HostRuntime composition.")
+  }
+
+  guard let descriptor else {
+    let scopeSummary = [
+      query.agentID,
+      query.targetAgentID,
+      query.capabilityKey,
+    ]
+      .compactMap { value in
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+          return nil
+        }
+        return value
+      }
+      .joined(separator: " / ")
+    let summary = scopeSummary.isEmpty
+      ? "CMP peer approval readback found no stored approval request for \(query.projectID)."
+      : "CMP peer approval readback found no stored approval request for \(query.projectID) scoped to \(scopeSummary)."
+    return PraxisCmpPeerApprovalReadback(
+      projectID: query.projectID,
+      agentID: query.agentID,
+      targetAgentID: query.targetAgentID,
+      capabilityKey: query.capabilityKey,
+      requestedTier: nil,
+      summary: summary,
+      found: false,
+      issues: issues
+    )
+  }
+
+  return PraxisCmpPeerApprovalReadback(
+    projectID: descriptor.projectID,
+    agentID: descriptor.agentID,
+    targetAgentID: descriptor.targetAgentID,
+    capabilityKey: descriptor.capabilityKey,
+    requestedTier: PraxisTapCapabilityTier(rawValue: descriptor.requestedTier),
+    summary: "CMP peer approval readback reconstructed the latest TAP-routed approval state from host-backed review truth without coupling callers to CLI or GUI.",
+    route: descriptor.route,
+    outcome: descriptor.outcome,
+    tapMode: descriptor.tapMode,
+    riskLevel: descriptor.riskLevel,
+    humanGateState: descriptor.humanGateState,
+    requestedAt: descriptor.requestedAt,
+    decisionSummary: descriptor.decisionSummary,
+    found: true,
+    issues: issues
+  )
+}
+
+private func readbackTapStatus(
+  command: PraxisReadbackTapStatusCommand,
+  dependencies: PraxisDependencyGraph
+) async throws -> PraxisTapStatusReadback {
+  let capabilityIDs = hostCapabilityIDs(from: dependencies)
+  let capabilityKeys = capabilityIDs.map(\.rawValue)
+  let control = try await cmpResolvedControlSurface(
+    projectID: command.projectID,
+    agentID: command.agentID,
+    dependencies: dependencies
+  )
+  let tapMode = cmpTapMode(for: control.mode)
+  let riskLevel = tapStatusRiskLevel(from: capabilityIDs)
+  let approvalQuery = PraxisCmpPeerApprovalQuery(
+    projectID: command.projectID,
+    agentID: nil,
+    targetAgentID: command.agentID,
+    capabilityKey: nil
+  )
+  let approvalDescriptors = try await dependencies.hostAdapters.cmpPeerApprovalStore?.describeAll(approvalQuery) ?? []
+  let latestApproval = approvalDescriptors.first
+  let pendingApprovalCount = approvalDescriptors.filter { $0.humanGateState == PraxisHumanGateState.waitingApproval.rawValue }.count
+  let approvedApprovalCount = approvalDescriptors.filter { $0.humanGateState == PraxisHumanGateState.approved.rawValue }.count
+  let humanGateState: PraxisHumanGateState
+  if pendingApprovalCount > 0 {
+    humanGateState = .waitingApproval
+  } else if let latestApproval, latestApproval.humanGateState == PraxisHumanGateState.rejected.rawValue {
+    humanGateState = .rejected
+  } else if approvedApprovalCount > 0 {
+    humanGateState = .approved
+  } else {
+    humanGateState = .notRequired
+  }
+
+  var issues: [String] = []
+  if capabilityKeys.isEmpty {
+    issues.append("No TAP-capable host surfaces are currently registered in HostRuntime composition.")
+  }
+  if dependencies.hostAdapters.cmpPeerApprovalStore == nil {
+    issues.append("CMP peer approval store adapter is still missing from HostRuntime composition.")
+  }
+
+  let scopeLabel = command.agentID ?? "project scope"
+  let readinessSummary = "TAP readiness for \(scopeLabel) currently sees \(capabilityKeys.count) registered capability surface(s), \(pendingApprovalCount) pending approval request(s), and \(approvedApprovalCount) approved request(s)."
+  return PraxisTapStatusReadback(
+    projectID: command.projectID,
+    agentID: command.agentID,
+    summary: "TAP status readback summarizes host-backed governance readiness, available capability surfaces, and persisted approval pressure without coupling callers to CLI or GUI.",
+    readinessSummary: readinessSummary,
+    tapMode: tapMode.rawValue,
+    riskLevel: riskLevel.rawValue,
+    humanGateState: humanGateState.rawValue,
+    availableCapabilityCount: capabilityKeys.count,
+    availableCapabilityIDs: capabilityKeys,
+    pendingApprovalCount: pendingApprovalCount,
+    approvedApprovalCount: approvedApprovalCount,
+    latestCapabilityKey: latestApproval?.capabilityKey,
+    latestDecisionSummary: latestApproval?.decisionSummary,
+    issues: issues
+  )
+}
+
+private func tapHistoryEntries(
+  from descriptors: [PraxisCmpPeerApprovalDescriptor],
+  limit: Int
+) -> [PraxisTapHistoryEntry] {
+  descriptors.prefix(limit).map { descriptor in
+    PraxisTapHistoryEntry(
+      agentID: descriptor.agentID,
+      targetAgentID: descriptor.targetAgentID,
+      capabilityKey: descriptor.capabilityKey,
+      requestedTier: descriptor.requestedTier,
+      route: descriptor.route,
+      outcome: descriptor.outcome,
+      humanGateState: descriptor.humanGateState,
+      updatedAt: descriptor.updatedAt,
+      decisionSummary: descriptor.decisionSummary
+    )
+  }
+}
+
+private func tapHistoryEntries(
+  from records: [PraxisTapRuntimeEventRecord],
+  limit: Int
+) -> [PraxisTapHistoryEntry] {
+  records.prefix(limit).map { record in
+    let metadata = record.metadata
+    return PraxisTapHistoryEntry(
+      agentID: record.agentID,
+      targetAgentID: record.targetAgentID ?? metadata["targetAgentID"]?.stringValue ?? record.agentID,
+      capabilityKey: record.capabilityKey ?? metadata["capabilityKey"]?.stringValue ?? record.eventKind,
+      requestedTier: metadata["requestedTier"]?.stringValue ?? "B0",
+      route: metadata["route"]?.stringValue ?? record.eventKind,
+      outcome: metadata["outcome"]?.stringValue ?? "recorded",
+      humanGateState: metadata["humanGateState"]?.stringValue ?? "notRequired",
+      updatedAt: record.createdAt,
+      decisionSummary: metadata["decisionSummary"]?.stringValue ?? record.detail ?? record.summary
+    )
+  }
+}
+
+private func appendTapRuntimeEvent(
+  projectID: String,
+  agentID: String,
+  targetAgentID: String? = nil,
+  eventKind: String,
+  capabilityKey: String? = nil,
+  summary: String,
+  detail: String? = nil,
+  createdAt: String,
+  metadata: [String: PraxisValue] = [:],
+  dependencies: PraxisDependencyGraph
+) async throws {
+  guard let store = dependencies.hostAdapters.tapRuntimeEventStore else {
+    return
+  }
+  _ = try await store.append(
+    .init(
+      eventID: "tap.\(eventKind).\(UUID().uuidString.lowercased())",
+      projectID: projectID,
+      agentID: agentID,
+      targetAgentID: targetAgentID,
+      eventKind: eventKind,
+      capabilityKey: capabilityKey,
+      summary: summary,
+      detail: detail,
+      createdAt: createdAt,
+      metadata: metadata
+    )
+  )
+}
+
+private func cmpPendingPeerApprovalDescriptors(
+  projectID: String,
+  agentID: String,
+  targetAgentID: String,
+  dependencies: PraxisDependencyGraph
+) async throws -> [PraxisCmpPeerApprovalDescriptor] {
+  let descriptors = try await dependencies.hostAdapters.cmpPeerApprovalStore?.describeAll(
+    .init(
+      projectID: projectID,
+      agentID: agentID,
+      targetAgentID: targetAgentID,
+      capabilityKey: nil
+    )
+  ) ?? []
+  return descriptors.filter { $0.humanGateState == PraxisHumanGateState.waitingApproval.rawValue }
+}
+
+private func readbackTapHistory(
+  command: PraxisReadbackTapHistoryCommand,
+  dependencies: PraxisDependencyGraph
+) async throws -> PraxisTapHistoryReadback {
+  let clampedLimit = max(0, min(command.limit, 50))
+  let eventQuery = PraxisTapRuntimeEventQuery(
+    projectID: command.projectID,
+    agentID: nil,
+    targetAgentID: command.agentID,
+    limit: clampedLimit
+  )
+  let eventRecords = try await dependencies.hostAdapters.tapRuntimeEventStore?.read(eventQuery) ?? []
+  let fallbackQuery = PraxisCmpPeerApprovalQuery(
+    projectID: command.projectID,
+    agentID: nil,
+    targetAgentID: command.agentID,
+    capabilityKey: nil
+  )
+  let descriptors = eventRecords.isEmpty
+    ? try await dependencies.hostAdapters.cmpPeerApprovalStore?.describeAll(fallbackQuery) ?? []
+    : []
+  var issues: [String] = []
+  if dependencies.hostAdapters.tapRuntimeEventStore == nil {
+    issues.append("TAP runtime event store adapter is still missing from HostRuntime composition.")
+  }
+  if dependencies.hostAdapters.cmpPeerApprovalStore == nil {
+    issues.append("CMP peer approval store adapter is still missing from HostRuntime composition.")
+  }
+  if eventRecords.isEmpty && descriptors.isEmpty {
+    issues.append("No TAP approval activity is currently persisted for the requested scope.")
+  }
+
+  let scopeSummary = command.agentID.map { " scoped to \($0)" } ?? ""
+  let totalCount = eventRecords.isEmpty ? descriptors.count : eventRecords.count
+  let entries = eventRecords.isEmpty
+    ? tapHistoryEntries(from: descriptors, limit: clampedLimit)
+    : tapHistoryEntries(from: eventRecords, limit: clampedLimit)
+  let summary: String
+  if eventRecords.isEmpty {
+    summary = "TAP history readback reconstructed recent host-backed approval activity\(scopeSummary) without coupling callers to CLI or GUI."
+  } else {
+    summary = "TAP history readback replayed append-only host-backed TAP runtime events\(scopeSummary) without coupling callers to CLI or GUI."
+  }
+
+  return PraxisTapHistoryReadback(
+    projectID: command.projectID,
+    agentID: command.agentID,
+    summary: summary,
+    totalCount: totalCount,
+    entries: entries,
+    issues: issues
+  )
+}
+
+private func requestCmpPeerApproval(
+  command: PraxisRequestCmpPeerApprovalCommand,
+  dependencies: PraxisDependencyGraph
+) async throws -> PraxisCmpPeerApproval {
+  let capabilityKey = command.capabilityKey.trimmingCharacters(in: .whitespacesAndNewlines)
+  guard !capabilityKey.isEmpty else {
+    throw PraxisError.invalidInput("CMP peer approval requires a non-empty capabilityKey.")
+  }
+
+  let control = try await cmpResolvedControlSurface(
+    projectID: command.projectID,
+    agentID: command.targetAgentID,
+    dependencies: dependencies
+  )
+  let reviewEngine = PraxisReviewDecisionEngine()
+  let riskClassifier = PraxisDefaultRiskClassifier()
+  let profile = cmpPeerApprovalProfile(
+    projectID: command.projectID,
+    agentID: command.targetAgentID,
+    control: control,
+    dependencies: dependencies
+  )
+  let risk = riskClassifier.classify(
+    capabilityKey: capabilityKey,
+    requestedTier: command.requestedTier
+  )
+  let routing = reviewEngine.route(
+    request: .init(
+      reviewKind: .human,
+      capabilityID: .init(rawValue: capabilityKey),
+      requestedTier: command.requestedTier,
+      mode: profile.defaultMode,
+      riskLevel: risk.riskLevel,
+      summary: command.summary
+    ),
+    profile: profile,
+    inventory: .init(availableCapabilityIDs: hostCapabilityIDs(from: dependencies))
+  )
+  let requestedAt = runtimeNow()
+  let humanGateState = cmpPeerApprovalState(from: routing.outcome)
+  let descriptor = cmpPeerApprovalDescriptor(
+    command: command,
+    capabilityKey: capabilityKey,
+    routing: routing,
+    humanGateState: humanGateState,
+    requestedAt: requestedAt
+  )
+  let eventMetadata: [String: PraxisValue] = [
+    "requestedTier": .string(command.requestedTier.rawValue),
+    "route": .string(routing.decision.route.rawValue),
+    "outcome": .string(routing.outcome.rawValue),
+    "tapMode": .string(routing.policy.mode.rawValue),
+    "riskLevel": .string(routing.decision.riskLevel?.rawValue ?? risk.riskLevel.rawValue),
+    "humanGateState": .string(humanGateState.rawValue),
+    "decisionSummary": .string(routing.decision.summary),
+    "targetAgentID": .string(command.targetAgentID),
+  ]
+
+  if let store = dependencies.hostAdapters.cmpPeerApprovalStore {
+    _ = try await store.save(descriptor)
+  }
+  try await appendTapRuntimeEvent(
+    projectID: command.projectID,
+    agentID: command.agentID,
+    targetAgentID: command.targetAgentID,
+    eventKind: "peer_approval_requested",
+    capabilityKey: capabilityKey,
+    summary: command.summary,
+    detail: routing.decision.summary,
+    createdAt: requestedAt,
+    metadata: eventMetadata,
+    dependencies: dependencies
+  )
+  let followUpEventKind: String
+  let followUpSummary: String
+  switch humanGateState {
+  case .approved:
+    followUpEventKind = "gate_released"
+    followUpSummary = "TAP released the gate for \(capabilityKey) without requiring additional human intervention."
+  case .rejected:
+    followUpEventKind = "peer_approval_rejected"
+    followUpSummary = "TAP rejected \(capabilityKey) for \(command.targetAgentID) under the current risk policy."
+  case .waitingApproval:
+    followUpEventKind = "peer_approval_waiting"
+    followUpSummary = "TAP is waiting for human approval before \(command.targetAgentID) can use \(capabilityKey)."
+  case .notRequired:
+    followUpEventKind = "gate_released"
+    followUpSummary = "TAP determined that no additional gate is required for \(capabilityKey)."
+  }
+  try await appendTapRuntimeEvent(
+    projectID: command.projectID,
+    agentID: command.agentID,
+    targetAgentID: command.targetAgentID,
+    eventKind: followUpEventKind,
+    capabilityKey: capabilityKey,
+    summary: followUpSummary,
+    detail: routing.decision.summary,
+    createdAt: requestedAt,
+    metadata: eventMetadata,
+    dependencies: dependencies
+  )
+
+  return PraxisCmpPeerApproval(
+    projectID: command.projectID,
+    agentID: command.agentID,
+    targetAgentID: command.targetAgentID,
+    capabilityKey: capabilityKey,
+    requestedTier: command.requestedTier,
+    summary: "CMP peer approval routed a host-neutral TAP review request and persisted the latest approval state without coupling callers to CLI or GUI.",
+    route: routing.decision.route.rawValue,
+    outcome: routing.outcome.rawValue,
+    tapMode: routing.policy.mode.rawValue,
+    riskLevel: routing.decision.riskLevel?.rawValue ?? risk.riskLevel.rawValue,
+    humanGateState: humanGateState.rawValue,
+    requestedAt: requestedAt,
+    decisionSummary: routing.decision.summary
+  )
+}
+
+private func decideCmpPeerApproval(
+  command: PraxisDecideCmpPeerApprovalCommand,
+  dependencies: PraxisDependencyGraph
+) async throws -> PraxisCmpPeerApproval {
+  let capabilityKey = command.capabilityKey.trimmingCharacters(in: .whitespacesAndNewlines)
+  guard !capabilityKey.isEmpty else {
+    throw PraxisError.invalidInput("CMP peer approval decision requires a non-empty capabilityKey.")
+  }
+
+  let existingDescriptor = try await cmpResolvedPeerApprovalDescriptor(
+    projectID: command.projectID,
+    agentID: command.agentID,
+    targetAgentID: command.targetAgentID,
+    capabilityKey: capabilityKey,
+    dependencies: dependencies
+  )
+  guard existingDescriptor.humanGateState == PraxisHumanGateState.waitingApproval.rawValue else {
+    throw PraxisError.invalidInput(
+      "CMP peer approval gate is already resolved for \(command.projectID), \(command.agentID), \(command.targetAgentID), \(capabilityKey)."
+    )
+  }
+  let decidedAt = runtimeNow()
+  let resolution = cmpPeerApprovalResolution(command.decision)
+  let updatedDescriptor = PraxisCmpPeerApprovalDescriptor(
+    projectID: existingDescriptor.projectID,
+    agentID: existingDescriptor.agentID,
+    targetAgentID: existingDescriptor.targetAgentID,
+    capabilityKey: existingDescriptor.capabilityKey,
+    requestedTier: existingDescriptor.requestedTier,
+    tapMode: existingDescriptor.tapMode,
+    riskLevel: existingDescriptor.riskLevel,
+    route: existingDescriptor.route,
+    outcome: resolution.outcome,
+    humanGateState: resolution.humanGateState.rawValue,
+    summary: existingDescriptor.summary,
+    decisionSummary: command.decisionSummary,
+    requestedAt: existingDescriptor.requestedAt,
+    updatedAt: decidedAt,
+    metadata: existingDescriptor.metadata.merging(
+      [
+        "decisionAction": .string(command.decision.rawValue),
+        "reviewerAgentID": command.reviewerAgentID.map(PraxisValue.string) ?? .null,
+        "resolvedAt": .string(decidedAt),
+      ],
+      uniquingKeysWith: { _, new in new }
+    )
+  )
+
+  if let store = dependencies.hostAdapters.cmpPeerApprovalStore {
+    _ = try await store.save(updatedDescriptor)
+  }
+  try await appendTapRuntimeEvent(
+    projectID: command.projectID,
+    agentID: command.agentID,
+    targetAgentID: command.targetAgentID,
+    eventKind: resolution.eventKind,
+    capabilityKey: capabilityKey,
+    summary: "Explicit TAP decision \(command.decision.rawValue) resolved \(capabilityKey) for \(command.targetAgentID).",
+    detail: command.decisionSummary,
+    createdAt: decidedAt,
+    metadata: [
+      "requestedTier": .string(existingDescriptor.requestedTier),
+      "route": .string(existingDescriptor.route),
+      "outcome": .string(resolution.outcome),
+      "tapMode": .string(existingDescriptor.tapMode),
+      "riskLevel": .string(existingDescriptor.riskLevel),
+      "humanGateState": .string(resolution.humanGateState.rawValue),
+      "decisionSummary": .string(command.decisionSummary),
+      "targetAgentID": .string(command.targetAgentID),
+      "reviewerAgentID": command.reviewerAgentID.map(PraxisValue.string) ?? .null,
+    ],
+    dependencies: dependencies
+  )
+
+  return PraxisCmpPeerApproval(
+    projectID: updatedDescriptor.projectID,
+    agentID: updatedDescriptor.agentID,
+    targetAgentID: updatedDescriptor.targetAgentID,
+    capabilityKey: updatedDescriptor.capabilityKey,
+    requestedTier: PraxisTapCapabilityTier(rawValue: updatedDescriptor.requestedTier) ?? .b0,
+    summary: "CMP peer approval decision persisted an explicit host-neutral TAP resolution without coupling callers to CLI or GUI.",
+    route: updatedDescriptor.route,
+    outcome: updatedDescriptor.outcome,
+    tapMode: updatedDescriptor.tapMode,
+    riskLevel: updatedDescriptor.riskLevel,
+    humanGateState: updatedDescriptor.humanGateState,
+    requestedAt: updatedDescriptor.requestedAt,
+    decisionSummary: updatedDescriptor.decisionSummary
+  )
+}
+
+private func readbackCmpPeerApproval(
+  command: PraxisReadbackCmpPeerApprovalCommand,
+  dependencies: PraxisDependencyGraph
+) async throws -> PraxisCmpPeerApprovalReadback {
+  let normalizedCapabilityKey = command.capabilityKey?.trimmingCharacters(in: .whitespacesAndNewlines)
+  let capabilityKey = normalizedCapabilityKey?.isEmpty == true ? nil : normalizedCapabilityKey
+  let descriptor = try await dependencies.hostAdapters.cmpPeerApprovalStore?.describe(
+    .init(
+      projectID: command.projectID,
+      agentID: command.agentID,
+      targetAgentID: command.targetAgentID,
+      capabilityKey: capabilityKey
+    )
+  )
+  return cmpPeerApprovalReadback(query: command, descriptor: descriptor, dependencies: dependencies)
+}
+
+private struct PraxisCmpReadbackScope {
+  let projectionDescriptors: [PraxisProjectionRecordDescriptor]
+  let packageDescriptors: [PraxisCmpContextPackageDescriptor]
+  let deliveryTruthRecords: [PraxisDeliveryTruthRecord]
+  let latestPackage: PraxisCmpContextPackageDescriptor?
+  let latestDispatchRecord: PraxisDeliveryTruthRecord?
+}
+
+private func cmpReadbackScope(
   command: PraxisReadbackCmpStatusCommand,
   dependencies: PraxisDependencyGraph
-) async throws -> PraxisCmpStatusReadback {
+) async throws -> PraxisCmpReadbackScope {
   let projectionDescriptors = try await cmpProjectionDescriptors(
     projectID: command.projectID,
     agentID: command.agentID,
@@ -1910,12 +2865,25 @@ private func readbackCmpStatus(
       return scopedPackageIDs.contains(packageID)
     }
   }
+  return PraxisCmpReadbackScope(
+    projectionDescriptors: projectionDescriptors,
+    packageDescriptors: packageDescriptors,
+    deliveryTruthRecords: deliveryTruthRecords,
+    latestPackage: packageDescriptors.sorted { $0.updatedAt > $1.updatedAt }.first,
+    latestDispatchRecord: deliveryTruthRecords.sorted { $0.updatedAt > $1.updatedAt }.first
+  )
+}
+
+private func cmpReadbackRoles(
+  projectionDescriptors: [PraxisProjectionRecordDescriptor],
+  packageDescriptors: [PraxisCmpContextPackageDescriptor],
+  deliveryTruthRecords: [PraxisDeliveryTruthRecord]
+) -> [PraxisCmpRoleReadback] {
   let latestPackage = packageDescriptors.sorted { $0.updatedAt > $1.updatedAt }.first
-  let latestDispatchRecord = deliveryTruthRecords.sorted { $0.updatedAt > $1.updatedAt }.first
   let fiveAgentPlanner = PraxisCmpFiveAgentPlanner()
   let protocolDefinition = fiveAgentPlanner.defaultProtocolDefinition()
 
-  let roles = protocolDefinition.roles.map { roleDefinition in
+  return protocolDefinition.roles.map { roleDefinition in
     let assignmentCount: Int
     let latestStage: String?
     switch roleDefinition.role {
@@ -1933,7 +2901,7 @@ private func readbackCmpStatus(
       latestStage = packageDescriptors.isEmpty ? (projectionDescriptors.isEmpty ? nil : "projectionReady") : "materialized"
     case .dispatcher:
       assignmentCount = packageDescriptors.isEmpty && deliveryTruthRecords.isEmpty ? 0 : 1
-      latestStage = latestDispatchRecord?.status.rawValue ?? (packageDescriptors.isEmpty ? nil : "prepared")
+      latestStage = deliveryTruthRecords.sorted { $0.updatedAt > $1.updatedAt }.first?.status.rawValue ?? (latestPackage == nil ? nil : "prepared")
     }
     return PraxisCmpRoleReadback(
       role: roleDefinition.role,
@@ -1942,38 +2910,185 @@ private func readbackCmpStatus(
       summary: roleDefinition.responsibility
     )
   }
-  let objectModel = PraxisCmpObjectModelReadback(
-    projectionCount: projectionDescriptors.count,
-    snapshotCount: projectionDescriptors.count,
-    packageCount: packageDescriptors.count,
-    deliveryCount: deliveryTruthRecords.count,
-    packageStatusCounts: Dictionary(
-      packageDescriptors.map(\.status.rawValue).map { ($0, 1) },
-      uniquingKeysWith: +
-    )
-  )
+}
+
+private func cmpReadbackIssues(
+  projectID: String,
+  packageDescriptors: [PraxisCmpContextPackageDescriptor],
+  deliveryTruthRecords: [PraxisDeliveryTruthRecord],
+  dependencies: PraxisDependencyGraph
+) -> [String] {
   var issues: [String] = []
   if dependencies.hostAdapters.cmpContextPackageStore == nil {
     issues.append("CMP package registry adapter is still missing from HostRuntime composition.")
   }
   if packageDescriptors.isEmpty {
-    issues.append("CMP package registry currently has no package descriptors for \(command.projectID).")
+    issues.append("CMP package registry currently has no package descriptors for \(projectID).")
   }
   if deliveryTruthRecords.contains(where: { $0.status == .expired || $0.status == .retryScheduled }) {
     issues.append("CMP delivery truth still contains retry or expired records.")
   }
+  return issues
+}
 
-  let summary = "CMP status readback reconstructed role/control/object-model state from \(projectionDescriptors.count) projection(s), \(packageDescriptors.count) package(s), and \(deliveryTruthRecords.count) delivery record(s) without coupling callers to CLI or GUI."
+private func readbackCmpRoles(
+  command: PraxisReadbackCmpRolesCommand,
+  dependencies: PraxisDependencyGraph
+) async throws -> PraxisCmpRolesReadback {
+  let scope = try await cmpReadbackScope(
+    command: .init(projectID: command.projectID, agentID: command.agentID),
+    dependencies: dependencies
+  )
+  let roles = cmpReadbackRoles(
+    projectionDescriptors: scope.projectionDescriptors,
+    packageDescriptors: scope.packageDescriptors,
+    deliveryTruthRecords: scope.deliveryTruthRecords
+  )
+  let issues = cmpReadbackIssues(
+    projectID: command.projectID,
+    packageDescriptors: scope.packageDescriptors,
+    deliveryTruthRecords: scope.deliveryTruthRecords,
+    dependencies: dependencies
+  )
+
+  return PraxisCmpRolesReadback(
+    projectID: command.projectID,
+    agentID: command.agentID,
+    summary: "CMP roles readback reconstructed five-agent assignment state from host-backed projections, packages, and delivery truth without binding callers to CLI or GUI.",
+    roles: roles,
+    latestPackageID: scope.latestPackage?.packageID.rawValue,
+    latestDispatchStatus: scope.latestDispatchRecord?.status.rawValue,
+    issues: issues
+  )
+}
+
+private func readbackCmpControl(
+  command: PraxisReadbackCmpControlCommand,
+  dependencies: PraxisDependencyGraph
+) async throws -> PraxisCmpControlReadback {
+  let scope = try await cmpReadbackScope(
+    command: .init(projectID: command.projectID, agentID: command.agentID),
+    dependencies: dependencies
+  )
+  let issues = cmpReadbackIssues(
+    projectID: command.projectID,
+    packageDescriptors: scope.packageDescriptors,
+    deliveryTruthRecords: scope.deliveryTruthRecords,
+    dependencies: dependencies
+  )
+
+  return PraxisCmpControlReadback(
+    projectID: command.projectID,
+    agentID: command.agentID,
+    summary: "CMP control readback reconstructed execution defaults, automation gates, and latest dispatch hints from host-backed runtime truth without coupling callers to CLI or GUI.",
+    control: try await cmpResolvedControlSurface(
+      projectID: command.projectID,
+      agentID: command.agentID,
+      dependencies: dependencies
+    ),
+    latestPackageID: scope.latestPackage?.packageID.rawValue,
+    latestDispatchStatus: scope.latestDispatchRecord?.status.rawValue,
+    latestTargetAgentID: scope.latestPackage?.targetAgentID,
+    issues: issues
+  )
+}
+
+private func updateCmpControl(
+  command: PraxisUpdateCmpControlCommand,
+  dependencies: PraxisDependencyGraph
+) async throws -> PraxisCmpControlUpdate {
+  let baseControl = try await cmpResolvedControlSurface(
+    projectID: command.projectID,
+    agentID: command.agentID,
+    dependencies: dependencies
+  )
+  let resolvedControl = cmpMergedControlSurface(base: baseControl, command: command)
+  let updatedAt = runtimeNow()
+  var issues: [String] = []
+
+  if let controlStore = dependencies.hostAdapters.cmpControlStore {
+    _ = try await controlStore.save(
+      cmpControlDescriptor(
+        projectID: command.projectID,
+        agentID: command.agentID,
+        control: resolvedControl,
+        updatedAt: updatedAt
+      )
+    )
+  } else {
+    issues.append("CMP control store adapter is still missing from HostRuntime composition.")
+  }
+  try await appendTapRuntimeEvent(
+    projectID: command.projectID,
+    agentID: command.agentID ?? "project.default",
+    targetAgentID: command.agentID,
+    eventKind: "control_updated",
+    summary: "CMP control updated TAP mode \(cmpTapMode(for: resolvedControl.mode).rawValue) and automation gates for \(command.agentID ?? "project.default").",
+    detail: "autoDispatch=\(resolvedControl.automation["autoDispatch"] ?? true), mode=\(resolvedControl.mode), executionStyle=\(resolvedControl.executionStyle)",
+    createdAt: updatedAt,
+    metadata: [
+      "tapMode": .string(cmpTapMode(for: resolvedControl.mode).rawValue),
+      "executionStyle": .string(resolvedControl.executionStyle),
+      "mode": .string(resolvedControl.mode),
+      "autoDispatch": .bool(resolvedControl.automation["autoDispatch"] ?? true),
+      "targetAgentID": command.agentID.map(PraxisValue.string) ?? .null,
+      "decisionSummary": .string("CMP control updated without crossing into CLI or GUI."),
+    ],
+    dependencies: dependencies
+  )
+
+  return PraxisCmpControlUpdate(
+    projectID: command.projectID,
+    agentID: command.agentID,
+    summary: "CMP control update persisted host-neutral execution defaults and automation gates without coupling callers to CLI or GUI.",
+    control: resolvedControl,
+    storedAt: updatedAt,
+    issues: issues
+  )
+}
+
+private func readbackCmpStatus(
+  command: PraxisReadbackCmpStatusCommand,
+  dependencies: PraxisDependencyGraph
+) async throws -> PraxisCmpStatusReadback {
+  let scope = try await cmpReadbackScope(command: command, dependencies: dependencies)
+  let roles = cmpReadbackRoles(
+    projectionDescriptors: scope.projectionDescriptors,
+    packageDescriptors: scope.packageDescriptors,
+    deliveryTruthRecords: scope.deliveryTruthRecords
+  )
+  let objectModel = PraxisCmpObjectModelReadback(
+    projectionCount: scope.projectionDescriptors.count,
+    snapshotCount: scope.projectionDescriptors.count,
+    packageCount: scope.packageDescriptors.count,
+    deliveryCount: scope.deliveryTruthRecords.count,
+    packageStatusCounts: Dictionary(
+      scope.packageDescriptors.map(\.status.rawValue).map { ($0, 1) },
+      uniquingKeysWith: +
+    )
+  )
+  let issues = cmpReadbackIssues(
+    projectID: command.projectID,
+    packageDescriptors: scope.packageDescriptors,
+    deliveryTruthRecords: scope.deliveryTruthRecords,
+    dependencies: dependencies
+  )
+
+  let summary = "CMP status readback reconstructed role/control/object-model state from \(scope.projectionDescriptors.count) projection(s), \(scope.packageDescriptors.count) package(s), and \(scope.deliveryTruthRecords.count) delivery record(s) without coupling callers to CLI or GUI."
   return PraxisCmpStatusReadback(
     projectID: command.projectID,
     agentID: command.agentID,
     summary: summary,
-    control: cmpDefaultControlSurface(projectID: command.projectID, agentID: command.agentID),
+    control: try await cmpResolvedControlSurface(
+      projectID: command.projectID,
+      agentID: command.agentID,
+      dependencies: dependencies
+    ),
     roles: roles,
     objectModel: objectModel,
-    latestPackageID: latestPackage?.packageID.rawValue,
-    latestDispatchStatus: latestDispatchRecord?.status.rawValue,
-    latestTargetAgentID: latestPackage?.targetAgentID,
+    latestPackageID: scope.latestPackage?.packageID.rawValue,
+    latestDispatchStatus: scope.latestDispatchRecord?.status.rawValue,
+    latestTargetAgentID: scope.latestPackage?.targetAgentID,
     issues: issues
   )
 }
@@ -2488,6 +3603,40 @@ public final class PraxisInspectTapUseCase: PraxisInspectTapUseCaseProtocol {
   }
 }
 
+public final class PraxisReadbackTapStatusUseCase: PraxisReadbackTapStatusUseCaseProtocol {
+  public let dependencies: PraxisDependencyGraph
+
+  public init(dependencies: PraxisDependencyGraph) {
+    self.dependencies = dependencies
+  }
+
+  /// Reads a focused TAP status/readiness snapshot without forcing callers through the broader TAP inspection surface.
+  ///
+  /// - Parameter command: The TAP status query scoped to one project and optional target agent.
+  /// - Returns: A host-neutral readiness summary that includes capability availability and approval pressure.
+  /// - Throws: Propagates approval-store lookup failures.
+  public func execute(_ command: PraxisReadbackTapStatusCommand) async throws -> PraxisTapStatusReadback {
+    try await readbackTapStatus(command: command, dependencies: dependencies)
+  }
+}
+
+public final class PraxisReadbackTapHistoryUseCase: PraxisReadbackTapHistoryUseCaseProtocol {
+  public let dependencies: PraxisDependencyGraph
+
+  public init(dependencies: PraxisDependencyGraph) {
+    self.dependencies = dependencies
+  }
+
+  /// Reads a bounded TAP activity feed reconstructed from persisted approval descriptors.
+  ///
+  /// - Parameter command: The TAP history query scoped to one project and optional target agent.
+  /// - Returns: A host-neutral feed of recent approval activity.
+  /// - Throws: Propagates approval-store lookup failures.
+  public func execute(_ command: PraxisReadbackTapHistoryCommand) async throws -> PraxisTapHistoryReadback {
+    try await readbackTapHistory(command: command, dependencies: dependencies)
+  }
+}
+
 public final class PraxisInspectCmpUseCase: PraxisInspectCmpUseCaseProtocol {
   public let dependencies: PraxisDependencyGraph
 
@@ -2683,6 +3832,23 @@ public final class PraxisDispatchCmpFlowUseCase: PraxisDispatchCmpFlowUseCasePro
   }
 }
 
+public final class PraxisRetryCmpDispatchUseCase: PraxisRetryCmpDispatchUseCaseProtocol {
+  public let dependencies: PraxisDependencyGraph
+
+  public init(dependencies: PraxisDependencyGraph) {
+    self.dependencies = dependencies
+  }
+
+  /// Retries one previously attempted CMP dispatch using host-backed package truth instead of caller-owned state.
+  ///
+  /// - Parameter command: The neutral retry command scoped to one stored package.
+  /// - Returns: A dispatch receipt after the package is replayed through the same host-neutral delivery surface.
+  /// - Throws: Propagates package lookup, validation, or host transport failures.
+  public func execute(_ command: PraxisRetryCmpDispatchCommand) async throws -> PraxisCmpFlowDispatch {
+    try await retryCmpDispatch(command: command, dependencies: dependencies)
+  }
+}
+
 public final class PraxisRequestCmpHistoryUseCase: PraxisRequestCmpHistoryUseCaseProtocol {
   public let dependencies: PraxisDependencyGraph
 
@@ -2697,6 +3863,108 @@ public final class PraxisRequestCmpHistoryUseCase: PraxisRequestCmpHistoryUseCas
   /// - Throws: Propagates host projection lookup failures.
   public func execute(_ command: PraxisRequestCmpHistoryCommand) async throws -> PraxisCmpFlowHistory {
     try await requestCmpHistory(command: command, dependencies: dependencies)
+  }
+}
+
+public final class PraxisReadbackCmpRolesUseCase: PraxisReadbackCmpRolesUseCaseProtocol {
+  public let dependencies: PraxisDependencyGraph
+
+  public init(dependencies: PraxisDependencyGraph) {
+    self.dependencies = dependencies
+  }
+
+  /// Reads a host-neutral CMP roles panel that summarizes five-agent assignments and stages.
+  ///
+  /// - Parameter command: The neutral roles-readback command.
+  /// - Returns: A compact roles panel reconstructed from current host-backed runtime truth.
+  /// - Throws: Propagates host store lookup failures.
+  public func execute(_ command: PraxisReadbackCmpRolesCommand) async throws -> PraxisCmpRolesReadback {
+    try await readbackCmpRoles(command: command, dependencies: dependencies)
+  }
+}
+
+public final class PraxisReadbackCmpControlUseCase: PraxisReadbackCmpControlUseCaseProtocol {
+  public let dependencies: PraxisDependencyGraph
+
+  public init(dependencies: PraxisDependencyGraph) {
+    self.dependencies = dependencies
+  }
+
+  /// Reads a host-neutral CMP control panel that summarizes execution defaults and dispatch hints.
+  ///
+  /// - Parameter command: The neutral control-readback command.
+  /// - Returns: A compact control panel reconstructed from current host-backed runtime truth.
+  /// - Throws: Propagates host store lookup failures.
+  public func execute(_ command: PraxisReadbackCmpControlCommand) async throws -> PraxisCmpControlReadback {
+    try await readbackCmpControl(command: command, dependencies: dependencies)
+  }
+}
+
+public final class PraxisUpdateCmpControlUseCase: PraxisUpdateCmpControlUseCaseProtocol {
+  public let dependencies: PraxisDependencyGraph
+
+  public init(dependencies: PraxisDependencyGraph) {
+    self.dependencies = dependencies
+  }
+
+  /// Updates a host-neutral CMP control surface and persists the latest settings when a store is available.
+  ///
+  /// - Parameter command: The control-update command carrying partial overrides.
+  /// - Returns: The resolved control surface after merging overrides onto the current persisted or default state.
+  /// - Throws: Propagates control-store persistence failures.
+  public func execute(_ command: PraxisUpdateCmpControlCommand) async throws -> PraxisCmpControlUpdate {
+    try await updateCmpControl(command: command, dependencies: dependencies)
+  }
+}
+
+public final class PraxisRequestCmpPeerApprovalUseCase: PraxisRequestCmpPeerApprovalUseCaseProtocol {
+  public let dependencies: PraxisDependencyGraph
+
+  public init(dependencies: PraxisDependencyGraph) {
+    self.dependencies = dependencies
+  }
+
+  /// Requests one host-neutral CMP peer approval decision through the shared TAP review engine.
+  ///
+  /// - Parameter command: The peer-approval request describing the capability, requester, and target peer.
+  /// - Returns: The routed approval state after TAP policy evaluation and optional persistence.
+  /// - Throws: Propagates invalid input or host store failures.
+  public func execute(_ command: PraxisRequestCmpPeerApprovalCommand) async throws -> PraxisCmpPeerApproval {
+    try await requestCmpPeerApproval(command: command, dependencies: dependencies)
+  }
+}
+
+public final class PraxisDecideCmpPeerApprovalUseCase: PraxisDecideCmpPeerApprovalUseCaseProtocol {
+  public let dependencies: PraxisDependencyGraph
+
+  public init(dependencies: PraxisDependencyGraph) {
+    self.dependencies = dependencies
+  }
+
+  /// Persists one explicit host-neutral decision for an existing CMP peer approval request.
+  ///
+  /// - Parameter command: The approval decision command scoped to one approval descriptor.
+  /// - Returns: The updated approval state after the explicit decision is applied.
+  /// - Throws: Propagates missing-approval and store persistence errors.
+  public func execute(_ command: PraxisDecideCmpPeerApprovalCommand) async throws -> PraxisCmpPeerApproval {
+    try await decideCmpPeerApproval(command: command, dependencies: dependencies)
+  }
+}
+
+public final class PraxisReadbackCmpPeerApprovalUseCase: PraxisReadbackCmpPeerApprovalUseCaseProtocol {
+  public let dependencies: PraxisDependencyGraph
+
+  public init(dependencies: PraxisDependencyGraph) {
+    self.dependencies = dependencies
+  }
+
+  /// Reads the latest host-neutral CMP peer approval state for the provided query scope.
+  ///
+  /// - Parameter command: The peer-approval readback query.
+  /// - Returns: The latest persisted approval state or a not-found readback summary.
+  /// - Throws: Propagates peer-approval store lookup failures.
+  public func execute(_ command: PraxisReadbackCmpPeerApprovalCommand) async throws -> PraxisCmpPeerApprovalReadback {
+    try await readbackCmpPeerApproval(command: command, dependencies: dependencies)
   }
 }
 

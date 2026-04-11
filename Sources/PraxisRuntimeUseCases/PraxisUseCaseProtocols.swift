@@ -12,6 +12,14 @@ public protocol PraxisInspectTapUseCaseProtocol: Sendable {
   func execute() async throws -> PraxisTapInspection
 }
 
+public protocol PraxisReadbackTapStatusUseCaseProtocol: Sendable {
+  func execute(_ command: PraxisReadbackTapStatusCommand) async throws -> PraxisTapStatusReadback
+}
+
+public protocol PraxisReadbackTapHistoryUseCaseProtocol: Sendable {
+  func execute(_ command: PraxisReadbackTapHistoryCommand) async throws -> PraxisTapHistoryReadback
+}
+
 public protocol PraxisInspectCmpUseCaseProtocol: Sendable {
   func execute() async throws -> PraxisCmpInspection
 }
@@ -48,8 +56,36 @@ public protocol PraxisDispatchCmpFlowUseCaseProtocol: Sendable {
   func execute(_ command: PraxisDispatchCmpFlowCommand) async throws -> PraxisCmpFlowDispatch
 }
 
+public protocol PraxisRetryCmpDispatchUseCaseProtocol: Sendable {
+  func execute(_ command: PraxisRetryCmpDispatchCommand) async throws -> PraxisCmpFlowDispatch
+}
+
 public protocol PraxisRequestCmpHistoryUseCaseProtocol: Sendable {
   func execute(_ command: PraxisRequestCmpHistoryCommand) async throws -> PraxisCmpFlowHistory
+}
+
+public protocol PraxisReadbackCmpRolesUseCaseProtocol: Sendable {
+  func execute(_ command: PraxisReadbackCmpRolesCommand) async throws -> PraxisCmpRolesReadback
+}
+
+public protocol PraxisReadbackCmpControlUseCaseProtocol: Sendable {
+  func execute(_ command: PraxisReadbackCmpControlCommand) async throws -> PraxisCmpControlReadback
+}
+
+public protocol PraxisUpdateCmpControlUseCaseProtocol: Sendable {
+  func execute(_ command: PraxisUpdateCmpControlCommand) async throws -> PraxisCmpControlUpdate
+}
+
+public protocol PraxisRequestCmpPeerApprovalUseCaseProtocol: Sendable {
+  func execute(_ command: PraxisRequestCmpPeerApprovalCommand) async throws -> PraxisCmpPeerApproval
+}
+
+public protocol PraxisDecideCmpPeerApprovalUseCaseProtocol: Sendable {
+  func execute(_ command: PraxisDecideCmpPeerApprovalCommand) async throws -> PraxisCmpPeerApproval
+}
+
+public protocol PraxisReadbackCmpPeerApprovalUseCaseProtocol: Sendable {
+  func execute(_ command: PraxisReadbackCmpPeerApprovalCommand) async throws -> PraxisCmpPeerApprovalReadback
 }
 
 public protocol PraxisReadbackCmpStatusUseCaseProtocol: Sendable {

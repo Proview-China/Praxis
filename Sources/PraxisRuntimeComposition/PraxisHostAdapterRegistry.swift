@@ -36,6 +36,9 @@ public struct PraxisHostAdapterRegistry: Sendable {
   public let journalStore: (any PraxisJournalStoreContract)?
   public let projectionStore: (any PraxisProjectionStoreContract)?
   public let cmpContextPackageStore: (any PraxisCmpContextPackageStoreContract)?
+  public let cmpControlStore: (any PraxisCmpControlStoreContract)?
+  public let cmpPeerApprovalStore: (any PraxisCmpPeerApprovalStoreContract)?
+  public let tapRuntimeEventStore: (any PraxisTapRuntimeEventStoreContract)?
   public let messageBus: (any PraxisMessageBusContract)?
   public let deliveryTruthStore: (any PraxisDeliveryTruthStoreContract)?
   public let embeddingStore: (any PraxisEmbeddingStoreContract)?
@@ -75,6 +78,9 @@ public struct PraxisHostAdapterRegistry: Sendable {
     journalStore: (any PraxisJournalStoreContract)? = nil,
     projectionStore: (any PraxisProjectionStoreContract)? = nil,
     cmpContextPackageStore: (any PraxisCmpContextPackageStoreContract)? = nil,
+    cmpControlStore: (any PraxisCmpControlStoreContract)? = nil,
+    cmpPeerApprovalStore: (any PraxisCmpPeerApprovalStoreContract)? = nil,
+    tapRuntimeEventStore: (any PraxisTapRuntimeEventStoreContract)? = nil,
     messageBus: (any PraxisMessageBusContract)? = nil,
     deliveryTruthStore: (any PraxisDeliveryTruthStoreContract)? = nil,
     embeddingStore: (any PraxisEmbeddingStoreContract)? = nil,
@@ -112,6 +118,9 @@ public struct PraxisHostAdapterRegistry: Sendable {
     self.journalStore = journalStore
     self.projectionStore = projectionStore
     self.cmpContextPackageStore = cmpContextPackageStore
+    self.cmpControlStore = cmpControlStore
+    self.cmpPeerApprovalStore = cmpPeerApprovalStore
+    self.tapRuntimeEventStore = tapRuntimeEventStore
     self.messageBus = messageBus
     self.deliveryTruthStore = deliveryTruthStore
     self.embeddingStore = embeddingStore
@@ -195,6 +204,9 @@ public struct PraxisHostAdapterRegistry: Sendable {
       journalStore: PraxisFakeJournalStore(),
       projectionStore: PraxisFakeProjectionStore(),
       cmpContextPackageStore: PraxisFakeCmpContextPackageStore(),
+      cmpControlStore: PraxisFakeCmpControlStore(),
+      cmpPeerApprovalStore: PraxisFakeCmpPeerApprovalStore(),
+      tapRuntimeEventStore: PraxisFakeTapRuntimeEventStore(),
       messageBus: PraxisSpyMessageBus(),
       deliveryTruthStore: PraxisFakeDeliveryTruthStore(),
       embeddingStore: PraxisFakeEmbeddingStore(),

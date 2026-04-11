@@ -167,6 +167,138 @@ public actor PraxisFakeCmpContextPackageStore: PraxisCmpContextPackageStoreContr
   }
 }
 
+/// In-memory fake CMP control descriptor store.
+public actor PraxisFakeCmpControlStore: PraxisCmpControlStoreContract {
+  private var descriptors: [PraxisCmpControlDescriptor]
+
+  public init(seedDescriptors: [PraxisCmpControlDescriptor] = []) {
+    self.descriptors = seedDescriptors
+  }
+
+  public func save(_ descriptor: PraxisCmpControlDescriptor) async throws -> PraxisCmpControlStoreWriteReceipt {
+    descriptors.removeAll { $0.projectID == descriptor.projectID && $0.agentID == descriptor.agentID }
+    descriptors.append(descriptor)
+    return PraxisCmpControlStoreWriteReceipt(
+      projectID: descriptor.projectID,
+      agentID: descriptor.agentID,
+      storedAt: descriptor.updatedAt
+    )
+  }
+
+  public func describe(_ query: PraxisCmpControlQuery) async throws -> PraxisCmpControlDescriptor? {
+    descriptors
+      .filter { descriptor in
+        descriptor.projectID == query.projectID && descriptor.agentID == query.agentID
+      }
+      .sorted { $0.updatedAt > $1.updatedAt }
+      .first
+  }
+}
+
+/// In-memory fake CMP peer-approval descriptor store.
+public actor PraxisFakeCmpPeerApprovalStore: PraxisCmpPeerApprovalStoreContract {
+  private var descriptors: [PraxisCmpPeerApprovalDescriptor]
+
+  public init(seedDescriptors: [PraxisCmpPeerApprovalDescriptor] = []) {
+    self.descriptors = seedDescriptors
+  }
+
+  public func save(_ descriptor: PraxisCmpPeerApprovalDescriptor) async throws -> PraxisCmpPeerApprovalStoreWriteReceipt {
+    descriptors.removeAll {
+      $0.projectID == descriptor.projectID &&
+      $0.agentID == descriptor.agentID &&
+      $0.targetAgentID == descriptor.targetAgentID &&
+      $0.capabilityKey == descriptor.capabilityKey
+    }
+    descriptors.append(descriptor)
+    return PraxisCmpPeerApprovalStoreWriteReceipt(
+      projectID: descriptor.projectID,
+      agentID: descriptor.agentID,
+      targetAgentID: descriptor.targetAgentID,
+      capabilityKey: descriptor.capabilityKey,
+      storedAt: descriptor.updatedAt
+    )
+  }
+
+  public func describe(_ query: PraxisCmpPeerApprovalQuery) async throws -> PraxisCmpPeerApprovalDescriptor? {
+    try await describeAll(query).first
+  }
+
+  public func describeAll(_ query: PraxisCmpPeerApprovalQuery) async throws -> [PraxisCmpPeerApprovalDescriptor] {
+    descriptors
+      .filter { descriptor in
+        guard descriptor.projectID == query.projectID else {
+          return false
+        }
+        if let agentID = query.agentID, descriptor.agentID != agentID {
+          return false
+        }
+        if let targetAgentID = query.targetAgentID, descriptor.targetAgentID != targetAgentID {
+          return false
+        }
+        if let capabilityKey = query.capabilityKey, descriptor.capabilityKey != capabilityKey {
+          return false
+        }
+        return true
+      }
+      .sorted { lhs, rhs in
+        if lhs.updatedAt != rhs.updatedAt {
+          return lhs.updatedAt > rhs.updatedAt
+        }
+        if lhs.agentID != rhs.agentID {
+          return lhs.agentID < rhs.agentID
+        }
+        if lhs.targetAgentID != rhs.targetAgentID {
+          return lhs.targetAgentID < rhs.targetAgentID
+        }
+        return lhs.capabilityKey < rhs.capabilityKey
+      }
+  }
+}
+
+/// In-memory append-only store for TAP runtime audit events.
+public actor PraxisFakeTapRuntimeEventStore: PraxisTapRuntimeEventStoreContract {
+  private var records: [PraxisTapRuntimeEventRecord]
+
+  public init(seedRecords: [PraxisTapRuntimeEventRecord] = []) {
+    self.records = seedRecords
+  }
+
+  public func append(_ record: PraxisTapRuntimeEventRecord) async throws -> PraxisTapRuntimeEventStoreWriteReceipt {
+    records.append(record)
+    return PraxisTapRuntimeEventStoreWriteReceipt(
+      eventID: record.eventID,
+      projectID: record.projectID,
+      createdAt: record.createdAt
+    )
+  }
+
+  public func read(_ query: PraxisTapRuntimeEventQuery) async throws -> [PraxisTapRuntimeEventRecord] {
+    let clampedLimit = max(0, min(query.limit, 200))
+    return records
+      .filter { record in
+        guard record.projectID == query.projectID else {
+          return false
+        }
+        if let agentID = query.agentID, record.agentID != agentID {
+          return false
+        }
+        if let targetAgentID = query.targetAgentID, record.targetAgentID != targetAgentID {
+          return false
+        }
+        return true
+      }
+      .sorted { lhs, rhs in
+        if lhs.createdAt != rhs.createdAt {
+          return lhs.createdAt > rhs.createdAt
+        }
+        return lhs.eventID > rhs.eventID
+      }
+      .prefix(clampedLimit)
+      .map { $0 }
+  }
+}
+
 /// Spy bus that records every published message for assertions.
 public actor PraxisSpyMessageBus: PraxisMessageBusContract {
   private var publishedMessages: [PraxisPublishedMessage] = []

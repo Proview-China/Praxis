@@ -295,6 +295,40 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
     )
   }
 
+  private func response(from status: PraxisTapStatusSnapshot) -> PraxisRuntimeInterfaceResponse {
+    .success(
+      snapshot: .init(
+        kind: .tapStatus,
+        title: "TAP Status \(status.projectID)",
+        summary: "\(status.summary) \(status.readinessSummary)",
+        projectID: status.projectID
+      ),
+      events: [
+        .init(
+          name: "tap.status.readback",
+          detail: status.readinessSummary
+        )
+      ]
+    )
+  }
+
+  private func response(from history: PraxisTapHistorySnapshot) -> PraxisRuntimeInterfaceResponse {
+    .success(
+      snapshot: .init(
+        kind: .tapHistory,
+        title: "TAP History \(history.projectID)",
+        summary: history.summary,
+        projectID: history.projectID
+      ),
+      events: [
+        .init(
+          name: "tap.history.readback",
+          detail: history.summary
+        )
+      ]
+    )
+  }
+
   private func response(from readback: PraxisCmpProjectReadbackSnapshot) -> PraxisRuntimeInterfaceResponse {
     .success(
       snapshot: .init(
@@ -303,6 +337,98 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
         summary: readback.summary,
         projectID: readback.projectSummary.projectID
       )
+    )
+  }
+
+  private func response(from roles: PraxisCmpRolesPanelSnapshot) -> PraxisRuntimeInterfaceResponse {
+    .success(
+      snapshot: .init(
+        kind: .cmpRoles,
+        title: "CMP Roles \(roles.projectID)",
+        summary: roles.summary,
+        projectID: roles.projectID
+      ),
+      events: [
+        .init(
+          name: "cmp.roles.readback",
+          detail: roles.summary
+        )
+      ]
+    )
+  }
+
+  private func response(from control: PraxisCmpControlPanelSnapshot) -> PraxisRuntimeInterfaceResponse {
+    .success(
+      snapshot: .init(
+        kind: .cmpControl,
+        title: "CMP Control \(control.projectID)",
+        summary: control.summary,
+        projectID: control.projectID
+      ),
+      events: [
+        .init(
+          name: "cmp.control.readback",
+          detail: control.summary
+        )
+      ]
+    )
+  }
+
+  private func response(from update: PraxisCmpControlUpdateSnapshot) -> PraxisRuntimeInterfaceResponse {
+    .success(
+      snapshot: .init(
+        kind: .cmpControl,
+        title: "CMP Control \(update.projectID)",
+        summary: update.summary,
+        projectID: update.projectID
+      ),
+      events: [
+        .init(
+          name: "cmp.control.updated",
+          detail: update.summary
+        )
+      ]
+    )
+  }
+
+  private func response(from approval: PraxisCmpPeerApprovalSnapshot) -> PraxisRuntimeInterfaceResponse {
+    response(from: approval, eventName: "cmp.peer_approval.requested")
+  }
+
+  private func response(
+    from approval: PraxisCmpPeerApprovalSnapshot,
+    eventName: String
+  ) -> PraxisRuntimeInterfaceResponse {
+    .success(
+      snapshot: .init(
+        kind: .cmpApproval,
+        title: "CMP Approval \(approval.projectID)",
+        summary: approval.summary,
+        projectID: approval.projectID
+      ),
+      events: [
+        .init(
+          name: eventName,
+          detail: approval.decisionSummary
+        )
+      ]
+    )
+  }
+
+  private func response(from readback: PraxisCmpPeerApprovalReadbackSnapshot) -> PraxisRuntimeInterfaceResponse {
+    .success(
+      snapshot: .init(
+        kind: .cmpApproval,
+        title: "CMP Approval \(readback.projectID)",
+        summary: readback.summary,
+        projectID: readback.projectID
+      ),
+      events: [
+        .init(
+          name: "cmp.peer_approval.readback",
+          detail: readback.summary
+        )
+      ]
     )
   }
 
@@ -413,17 +539,21 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
     )
   }
 
-  private func response(from dispatch: PraxisCmpFlowDispatchSnapshot) -> PraxisRuntimeInterfaceResponse {
+  private func response(
+    from dispatch: PraxisCmpFlowDispatchSnapshot,
+    titlePrefix: String = "CMP Dispatch",
+    eventName: String = "cmp.flow.dispatched"
+  ) -> PraxisRuntimeInterfaceResponse {
     .success(
       snapshot: .init(
         kind: .cmpFlow,
-        title: "CMP Dispatch \(dispatch.projectID)",
+        title: "\(titlePrefix) \(dispatch.projectID)",
         summary: dispatch.summary,
         projectID: dispatch.projectID
       ),
       events: [
         .init(
-          name: "cmp.flow.dispatched",
+          name: eventName,
           detail: dispatch.summary,
           intentID: dispatch.dispatchID
         )
@@ -533,6 +663,22 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
           summary: "\(inspection.summary) Governance: \(inspection.governanceSummary)"
         )
       )
+    case .readbackTapStatus(let payload):
+      guard !payload.projectID.isEmpty else {
+        throw PraxisRuntimeInterfaceError.missingRequiredField("projectID")
+      }
+      let status = try await runtimeFacade.inspectionFacade.readbackTapStatus(
+        .init(projectID: payload.projectID, agentID: payload.agentID)
+      )
+      return response(from: status)
+    case .readbackTapHistory(let payload):
+      guard !payload.projectID.isEmpty else {
+        throw PraxisRuntimeInterfaceError.missingRequiredField("projectID")
+      }
+      let history = try await runtimeFacade.inspectionFacade.readbackTapHistory(
+        .init(projectID: payload.projectID, agentID: payload.agentID, limit: payload.limit)
+      )
+      return response(from: history)
     case .openCmpSession(let payload):
       guard !payload.projectID.isEmpty else {
         throw PraxisRuntimeInterfaceError.missingRequiredField("projectID")
@@ -547,6 +693,83 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
       }
       let readback = try await runtimeFacade.cmpFacade.readbackProject(
         .init(projectID: payload.projectID)
+      )
+      return response(from: readback)
+    case .readbackCmpRoles(let payload):
+      guard !payload.projectID.isEmpty else {
+        throw PraxisRuntimeInterfaceError.missingRequiredField("projectID")
+      }
+      let roles = try await runtimeFacade.cmpFacade.readbackRoles(
+        .init(projectID: payload.projectID, agentID: payload.agentID)
+      )
+      return response(from: roles)
+    case .readbackCmpControl(let payload):
+      guard !payload.projectID.isEmpty else {
+        throw PraxisRuntimeInterfaceError.missingRequiredField("projectID")
+      }
+      let control = try await runtimeFacade.cmpFacade.readbackControl(
+        .init(projectID: payload.projectID, agentID: payload.agentID)
+      )
+      return response(from: control)
+    case .updateCmpControl(let payload):
+      guard !payload.projectID.isEmpty else {
+        throw PraxisRuntimeInterfaceError.missingRequiredField("projectID")
+      }
+      let update = try await runtimeFacade.cmpFacade.updateControl(
+        .init(
+          projectID: payload.projectID,
+          agentID: payload.agentID,
+          executionStyle: payload.executionStyle,
+          mode: payload.mode,
+          readbackPriority: payload.readbackPriority,
+          fallbackPolicy: payload.fallbackPolicy,
+          recoveryPreference: payload.recoveryPreference,
+          automation: payload.automation
+        )
+      )
+      return response(from: update)
+    case .requestCmpPeerApproval(let payload):
+      guard !payload.projectID.isEmpty else {
+        throw PraxisRuntimeInterfaceError.missingRequiredField("projectID")
+      }
+      let approval = try await runtimeFacade.cmpFacade.requestPeerApproval(
+        .init(
+          projectID: payload.projectID,
+          agentID: payload.agentID,
+          targetAgentID: payload.targetAgentID,
+          capabilityKey: payload.capabilityKey,
+          requestedTier: payload.requestedTier,
+          summary: payload.summary
+        )
+      )
+      return response(from: approval)
+    case .decideCmpPeerApproval(let payload):
+      guard !payload.projectID.isEmpty else {
+        throw PraxisRuntimeInterfaceError.missingRequiredField("projectID")
+      }
+      let approval = try await runtimeFacade.cmpFacade.decidePeerApproval(
+        .init(
+          projectID: payload.projectID,
+          agentID: payload.agentID,
+          targetAgentID: payload.targetAgentID,
+          capabilityKey: payload.capabilityKey,
+          decision: payload.decision,
+          reviewerAgentID: payload.reviewerAgentID,
+          decisionSummary: payload.decisionSummary
+        )
+      )
+      return response(from: approval, eventName: "cmp.peer_approval.decided")
+    case .readbackCmpPeerApproval(let payload):
+      guard !payload.projectID.isEmpty else {
+        throw PraxisRuntimeInterfaceError.missingRequiredField("projectID")
+      }
+      let readback = try await runtimeFacade.cmpFacade.readbackPeerApproval(
+        .init(
+          projectID: payload.projectID,
+          agentID: payload.agentID,
+          targetAgentID: payload.targetAgentID,
+          capabilityKey: payload.capabilityKey
+        )
       )
       return response(from: readback)
     case .readbackCmpStatus(let payload):
@@ -654,6 +877,26 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
         )
       )
       return response(from: dispatch)
+    case .retryCmpDispatch(let payload):
+      guard !payload.projectID.isEmpty else {
+        throw PraxisRuntimeInterfaceError.missingRequiredField("projectID")
+      }
+      guard !payload.packageID.isEmpty else {
+        throw PraxisRuntimeInterfaceError.missingRequiredField("packageID")
+      }
+      let dispatch = try await runtimeFacade.cmpFacade.retryDispatch(
+        .init(
+          projectID: payload.projectID,
+          agentID: payload.agentID,
+          packageID: payload.packageID,
+          reason: payload.reason
+        )
+      )
+      return response(
+        from: dispatch,
+        titlePrefix: "CMP Retry Dispatch",
+        eventName: "cmp.flow.dispatch_retried"
+      )
     case .requestCmpHistory(let payload):
       guard !payload.projectID.isEmpty else {
         throw PraxisRuntimeInterfaceError.missingRequiredField("projectID")
@@ -757,7 +1000,19 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
     switch error {
     case .invalidInput(let message):
       let code: PraxisRuntimeInterfaceErrorCode =
-        message.hasPrefix("No checkpoint record found for run ") ? .checkpointNotFound : .invalidInput
+        if message.hasPrefix("No checkpoint record found for run ") {
+          .checkpointNotFound
+        } else if message.hasPrefix("CMP peer approval request was not found for ") {
+          .cmpPeerApprovalNotFound
+        } else if message.hasPrefix("CMP peer approval gate is already resolved for ") {
+          .cmpPeerApprovalAlreadyResolved
+        } else if message.hasPrefix("CMP package was not found for ") {
+          .cmpPackageNotFound
+        } else if message.hasPrefix("CMP dispatch retry is not available for ") {
+          .cmpDispatchNotRetryable
+        } else {
+          .invalidInput
+        }
       return .init(
         code: code,
         message: message,

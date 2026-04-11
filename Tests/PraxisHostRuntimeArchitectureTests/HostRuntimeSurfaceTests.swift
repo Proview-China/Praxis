@@ -176,6 +176,12 @@ struct HostRuntimeSurfaceTests {
     let cmpState = try await bridge.handle(.init(intent: .inspectCmp, payloadSummary: ""))
     let mpState = try await bridge.handle(.init(intent: .inspectMp, payloadSummary: ""))
     let catalog = try await runtimeFacade.inspectionFacade.buildCapabilityCatalogSnapshot()
+    let tapStatus = try await runtimeFacade.inspectionFacade.readbackTapStatus(
+      .init(projectID: "cmp.local-runtime", agentID: "runtime.local")
+    )
+    let tapHistory = try await runtimeFacade.inspectionFacade.readbackTapHistory(
+      .init(projectID: "cmp.local-runtime", agentID: "runtime.local", limit: 5)
+    )
 
     #expect(architectureState.title == "Praxis Architecture")
     #expect(tapState.title == "TAP Inspection")
@@ -189,6 +195,12 @@ struct HostRuntimeSurfaceTests {
     #expect(catalog.summary.contains("Capability catalog assembled from current boundaries:"))
     #expect(catalog.summary.contains("Registered host capability surfaces:"))
     #expect(catalog.summary.contains("PraxisCmpFiveAgent"))
+    #expect(tapStatus.projectID == "cmp.local-runtime")
+    #expect(tapStatus.agentID == "runtime.local")
+    #expect(tapStatus.availableCapabilityCount > 0)
+    #expect(tapHistory.projectID == "cmp.local-runtime")
+    #expect(tapHistory.agentID == "runtime.local")
+    #expect(tapHistory.totalCount == 0)
     #expect(dependencies.hostAdapters.providerInferenceExecutor != nil)
     #expect(dependencies.hostAdapters.checkpointStore != nil)
 
@@ -205,7 +217,11 @@ struct HostRuntimeSurfaceTests {
 
   @Test
   func cmpFacadeExposesNeutralSessionBootstrapReadbackAndSmokeSnapshots() async throws {
-    let hostAdapters = PraxisHostAdapterRegistry.localDefaults()
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-cmp-facade-surface-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let hostAdapters = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
     let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(
       hostAdapters: hostAdapters
     )
@@ -304,6 +320,56 @@ struct HostRuntimeSurfaceTests {
         )
       )
     )
+    let controlUpdate = try await runtimeFacade.cmpFacade.updateControl(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "checker.local",
+        executionStyle: "manual",
+        mode: "peer_review",
+        readbackPriority: "package_first",
+        automation: ["autoDispatch": false]
+      )
+    )
+    let rolesPanel = try await runtimeFacade.cmpFacade.readbackRoles(
+      .init(projectID: "cmp.local-runtime", agentID: "checker.local")
+    )
+    let controlPanel = try await runtimeFacade.cmpFacade.readbackControl(
+      .init(projectID: "cmp.local-runtime", agentID: "checker.local")
+    )
+    let peerApproval = try await runtimeFacade.cmpFacade.requestPeerApproval(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityKey: "tool.git",
+        requestedTier: .b1,
+        summary: "Escalate git access to checker"
+      )
+    )
+    let approvalReadback = try await runtimeFacade.cmpFacade.readbackPeerApproval(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityKey: "tool.git"
+      )
+    )
+    _ = try await runtimeFacade.cmpFacade.requestPeerApproval(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityKey: "tool.shell",
+        requestedTier: .b2,
+        summary: "Escalate shell access to checker"
+      )
+    )
+    let tapStatus = try await runtimeFacade.inspectionFacade.readbackTapStatus(
+      .init(projectID: "cmp.local-runtime", agentID: "checker.local")
+    )
+    let tapHistory = try await runtimeFacade.inspectionFacade.readbackTapHistory(
+      .init(projectID: "cmp.local-runtime", agentID: "checker.local", limit: 10)
+    )
     let statusPanel = try await runtimeFacade.cmpFacade.readbackStatus(
       .init(projectID: "cmp.local-runtime", agentID: "runtime.local")
     )
@@ -341,6 +407,50 @@ struct HostRuntimeSurfaceTests {
     #expect(history.requesterAgentID == "checker.local")
     #expect(history.found)
     #expect(history.packageID != nil)
+    #expect(controlUpdate.projectID == "cmp.local-runtime")
+    #expect(controlUpdate.agentID == "checker.local")
+    #expect(controlUpdate.executionStyle == "manual")
+    #expect(controlUpdate.mode == "peer_review")
+    #expect(controlUpdate.automation["autoDispatch"] == false)
+    #expect(rolesPanel.projectID == "cmp.local-runtime")
+    #expect(rolesPanel.agentID == "checker.local")
+    #expect(rolesPanel.roleCounts["dispatcher"] == 1)
+    #expect(rolesPanel.latestPackageID == materialize.packageID)
+    #expect(controlPanel.projectID == "cmp.local-runtime")
+    #expect(controlPanel.agentID == "checker.local")
+    #expect(controlPanel.executionStyle == "manual")
+    #expect(controlPanel.mode == "peer_review")
+    #expect(controlPanel.readbackPriority == "package_first")
+    #expect(controlPanel.automation["autoDispatch"] == false)
+    #expect(controlPanel.latestTargetAgentID == "checker.local")
+    #expect(peerApproval.projectID == "cmp.local-runtime")
+    #expect(peerApproval.targetAgentID == "checker.local")
+    #expect(peerApproval.capabilityKey == "tool.git")
+    #expect(peerApproval.requestedTier == "B1")
+    #expect(peerApproval.tapMode == "restricted")
+    #expect(peerApproval.route == "humanReview")
+    #expect(peerApproval.outcome == "escalated_to_human")
+    #expect(peerApproval.humanGateState == "waitingApproval")
+    #expect(approvalReadback.projectID == "cmp.local-runtime")
+    #expect(approvalReadback.found)
+    #expect(approvalReadback.capabilityKey == "tool.git")
+    #expect(approvalReadback.requestedTier == "B1")
+    #expect(approvalReadback.route == "humanReview")
+    #expect(approvalReadback.outcome == "escalated_to_human")
+    #expect(tapStatus.projectID == "cmp.local-runtime")
+    #expect(tapStatus.agentID == "checker.local")
+    #expect(tapStatus.tapMode == "restricted")
+    #expect(tapStatus.humanGateState == "waitingApproval")
+    #expect(tapStatus.pendingApprovalCount == 2)
+    #expect(tapStatus.latestCapabilityKey == "tool.git")
+    #expect(tapHistory.projectID == "cmp.local-runtime")
+    #expect(tapHistory.agentID == "checker.local")
+    #expect(tapHistory.totalCount == 6)
+    #expect(tapHistory.entries.count == 6)
+    #expect(Set(tapHistory.entries.map(\.capabilityKey)) == Set(["tool.git", "tool.shell", "control_updated", "dispatch_released"]))
+    #expect(Set(tapHistory.entries.map(\.route)).contains("humanReview"))
+    #expect(Set(tapHistory.entries.map(\.route)).contains("tapBridge"))
+    #expect(Set(tapHistory.entries.map(\.humanGateState)) == Set(["waitingApproval", "notRequired"]))
     #expect(statusPanel.projectID == "cmp.local-runtime")
     #expect(statusPanel.agentID == "runtime.local")
     #expect(statusPanel.executionStyle == "automatic")
@@ -848,6 +958,486 @@ struct HostRuntimeSurfaceTests {
     #expect(cmpSnapshot.hostRuntimeSummary.contains("sqlite persistence (1 projections, 0 packages)"))
     #expect(cmpSnapshot.hostRuntimeSummary.contains("sqlite delivery truth (1 records)"))
     #expect(cmpSnapshot.hostRuntimeSummary.contains("lineage store (ready)"))
+  }
+
+  @Test
+  func localDefaultsPersistTapRuntimeEventsAcrossIndependentRegistries() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-local-tap-events-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let firstRegistry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+    let secondRegistry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+    let firstFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: firstRegistry)
+    let secondFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: secondRegistry)
+
+    _ = try await firstFacade.cmpFacade.requestPeerApproval(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityKey: "tool.git",
+        requestedTier: .b1,
+        summary: "Escalate git access to checker"
+      )
+    )
+    _ = try await firstFacade.cmpFacade.requestPeerApproval(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityKey: "tool.shell",
+        requestedTier: .b2,
+        summary: "Escalate shell access to checker"
+      )
+    )
+
+    let history = try await secondFacade.inspectionFacade.readbackTapHistory(
+      .init(projectID: "cmp.local-runtime", agentID: "checker.local", limit: 5)
+    )
+
+    #expect(history.totalCount == 4)
+    #expect(history.entries.count == 4)
+    #expect(Set(history.entries.map(\.capabilityKey)) == Set(["tool.git", "tool.shell"]))
+    #expect(Set(history.entries.map(\.route)).count == 1)
+  }
+
+  @Test
+  func dispatchFlowRespectsAutoDispatchGateAndRecordsTapBlockedEvent() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-dispatch-blocked-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: registry)
+    _ = try await runtimeFacade.cmpFacade.updateControl(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "checker.local",
+        executionStyle: "manual",
+        mode: "peer_review",
+        automation: ["autoDispatch": false]
+      )
+    )
+
+    let contextPackage = PraxisCmpContextPackage(
+      id: .init(rawValue: "projection.runtime.local:checker.local:runtimeFill"),
+      sourceProjectionID: .init(rawValue: "projection.runtime.local"),
+      sourceSnapshotID: .init(rawValue: "projection.runtime.local:checked"),
+      sourceAgentID: "runtime.local",
+      targetAgentID: "checker.local",
+      kind: .runtimeFill,
+      packageRef: "context://cmp.local-runtime/projection.runtime.local/checker.local/runtimeFill",
+      fidelityLabel: .highSignal,
+      createdAt: "2026-04-11T00:00:00Z",
+      sourceSectionIDs: [.init(rawValue: "projection.runtime.local:section")]
+    )
+    let dispatch = try await runtimeFacade.cmpFacade.dispatchFlow(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        contextPackage: contextPackage,
+        targetKind: .peer,
+        reason: "Attempt gated dispatch"
+      )
+    )
+    let tapHistory = try await runtimeFacade.inspectionFacade.readbackTapHistory(
+      .init(projectID: "cmp.local-runtime", agentID: "checker.local", limit: 10)
+    )
+    let deliveryTruth = try await registry.deliveryTruthStore?.lookup(
+      .init(packageID: contextPackage.id)
+    ) ?? []
+
+    #expect(dispatch.status == "rejected")
+    #expect(dispatch.targetAgentID == "checker.local")
+    #expect(tapHistory.entries.contains { $0.capabilityKey == "dispatch_blocked" })
+    #expect(tapHistory.entries.contains { $0.route == "tapBridge" && $0.outcome == "dispatch_blocked" })
+    #expect(deliveryTruth.first?.status == .pending)
+    #expect(deliveryTruth.first?.lastErrorSummary?.contains("autoDispatch is disabled") == true)
+  }
+
+  @Test
+  func retryDispatchReplaysBlockedPackageAfterControlGateClears() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-dispatch-retry-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: registry)
+    _ = try await runtimeFacade.cmpFacade.updateControl(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "checker.local",
+        executionStyle: "manual",
+        mode: "peer_review",
+        automation: ["autoDispatch": false]
+      )
+    )
+
+    let contextPackage = PraxisCmpContextPackage(
+      id: .init(rawValue: "projection.runtime.local:checker.local:runtimeFill"),
+      sourceProjectionID: .init(rawValue: "projection.runtime.local"),
+      sourceSnapshotID: .init(rawValue: "projection.runtime.local:checked"),
+      sourceAgentID: "runtime.local",
+      targetAgentID: "checker.local",
+      kind: .runtimeFill,
+      packageRef: "context://cmp.local-runtime/projection.runtime.local/checker.local/runtimeFill",
+      fidelityLabel: .highSignal,
+      createdAt: "2026-04-11T00:00:00Z",
+      sourceSectionIDs: [.init(rawValue: "projection.runtime.local:section")]
+    )
+    let blockedDispatch = try await runtimeFacade.cmpFacade.dispatchFlow(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        contextPackage: contextPackage,
+        targetKind: .peer,
+        reason: "Attempt gated dispatch"
+      )
+    )
+    _ = try await runtimeFacade.cmpFacade.updateControl(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "checker.local",
+        automation: ["autoDispatch": true]
+      )
+    )
+    let retryDispatch = try await runtimeFacade.cmpFacade.retryDispatch(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        packageID: contextPackage.id.rawValue
+      )
+    )
+    let storedPackage = try await registry.cmpContextPackageStore?.describe(
+      .init(
+        projectID: "cmp.local-runtime",
+        packageID: contextPackage.id
+      )
+    ).first
+    let deliveryTruth = try await registry.deliveryTruthStore?.lookup(
+      .init(packageID: contextPackage.id)
+    ) ?? []
+    let tapHistory = try await runtimeFacade.inspectionFacade.readbackTapHistory(
+      .init(projectID: "cmp.local-runtime", agentID: "checker.local", limit: 10)
+    )
+
+    #expect(blockedDispatch.status == "rejected")
+    #expect(retryDispatch.status == "delivered")
+    #expect(storedPackage?.status == .dispatched)
+    #expect(storedPackage?.metadata["dispatch_target_kind"] == .string("peer"))
+    #expect(storedPackage?.metadata["dispatch_reason"] == .string("Attempt gated dispatch"))
+    #expect(storedPackage?.metadata["dispatch_attempt_count"] == .number(2))
+    #expect(deliveryTruth.first?.status == .published)
+    #expect(tapHistory.entries.contains { $0.capabilityKey == "dispatch_retry_requested" })
+    #expect(tapHistory.entries.contains { $0.outcome == "dispatch_released" })
+  }
+
+  @Test
+  func retryDispatchRejectsAlreadyDispatchedPackage() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-dispatch-retry-rejects-dispatched-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: registry)
+    let contextPackage = PraxisCmpContextPackage(
+      id: .init(rawValue: "projection.runtime.local:checker.local:runtimeFill"),
+      sourceProjectionID: .init(rawValue: "projection.runtime.local"),
+      sourceSnapshotID: .init(rawValue: "projection.runtime.local:checked"),
+      sourceAgentID: "runtime.local",
+      targetAgentID: "checker.local",
+      kind: .runtimeFill,
+      packageRef: "context://cmp.local-runtime/projection.runtime.local/checker.local/runtimeFill",
+      fidelityLabel: .highSignal,
+      createdAt: "2026-04-11T00:00:00Z",
+      sourceSectionIDs: [.init(rawValue: "projection.runtime.local:section")]
+    )
+    let dispatched = try await runtimeFacade.cmpFacade.dispatchFlow(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        contextPackage: contextPackage,
+        targetKind: .peer,
+        reason: "Dispatch once"
+      )
+    )
+
+    do {
+      _ = try await runtimeFacade.cmpFacade.retryDispatch(
+        .init(
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          packageID: contextPackage.id.rawValue
+        )
+      )
+      Issue.record("Retrying an already dispatched package should fail.")
+    } catch let error as PraxisError {
+      guard case .invalidInput(let message) = error else {
+        Issue.record("Expected invalidInput but received \(error).")
+        return
+      }
+      #expect(message.contains("CMP dispatch retry is not available"))
+    }
+    #expect(dispatched.status == "delivered")
+  }
+
+  @Test
+  func localPeerApprovalStoreAppliesScopeBeforeProjectWideCap() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-peer-approval-cap-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+    let store = try #require(registry.cmpPeerApprovalStore)
+    _ = try await store.save(
+      .init(
+        projectID: "project-1",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityKey: "tool.git",
+        requestedTier: "B1",
+        tapMode: "restricted",
+        riskLevel: "normal",
+        route: "humanReview",
+        outcome: "escalated_to_human",
+        humanGateState: "waitingApproval",
+        summary: "Old matching approval",
+        decisionSummary: "Old matching approval should survive scoped reads.",
+        requestedAt: "2026-04-10T00:00:00Z",
+        updatedAt: "2026-04-10T00:00:00Z"
+      )
+    )
+    for offset in 0..<205 {
+      _ = try await store.save(
+        .init(
+          projectID: "project-1",
+          agentID: "agent.\(offset)",
+          targetAgentID: "other.local",
+          capabilityKey: "tool.\(offset)",
+          requestedTier: "B1",
+          tapMode: "restricted",
+          riskLevel: "normal",
+          route: "humanReview",
+          outcome: "escalated_to_human",
+          humanGateState: "waitingApproval",
+          summary: "Newer unrelated approval \(offset)",
+          decisionSummary: "Unrelated approval \(offset)",
+          requestedAt: String(format: "2026-04-11T00:%02d:00Z", offset % 60),
+          updatedAt: String(format: "2026-04-11T00:%02d:00Z", offset % 60)
+        )
+      )
+    }
+
+    let scopedApprovals = try await store.describeAll(
+      .init(projectID: "project-1", targetAgentID: "checker.local")
+    )
+
+    #expect(scopedApprovals.count == 1)
+    #expect(scopedApprovals.first?.capabilityKey == "tool.git")
+  }
+
+  @Test
+  func localTapRuntimeEventStoreAppliesScopeBeforeLimit() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-tap-event-limit-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+    let store = try #require(registry.tapRuntimeEventStore)
+    _ = try await store.append(
+      .init(
+        eventID: "tap-event-old-checker",
+        projectID: "project-1",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        eventKind: "peer_approval_requested",
+        capabilityKey: "tool.git",
+        summary: "Old checker event",
+        detail: "This should still be returned for checker scope.",
+        createdAt: "2026-04-10T00:00:00Z"
+      )
+    )
+    for offset in 0..<20 {
+      _ = try await store.append(
+        .init(
+          eventID: "tap-event-other-\(offset)",
+          projectID: "project-1",
+          agentID: "agent.\(offset)",
+          targetAgentID: "other.local",
+          eventKind: "peer_approval_requested",
+          capabilityKey: "tool.\(offset)",
+          summary: "Unrelated event \(offset)",
+          detail: "Unrelated event \(offset)",
+          createdAt: String(format: "2026-04-11T00:%02d:00Z", offset)
+        )
+      )
+    }
+
+    let scopedRecords = try await store.read(
+      .init(projectID: "project-1", targetAgentID: "checker.local", limit: 1)
+    )
+
+    #expect(scopedRecords.count == 1)
+    #expect(scopedRecords.first?.eventID == "tap-event-old-checker")
+  }
+
+  @Test
+  func peerApprovalPersistsNormalizedCapabilityKey() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-peer-approval-normalized-key-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: registry)
+
+    let requested = try await runtimeFacade.cmpFacade.requestPeerApproval(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityKey: "  tool.git  ",
+        requestedTier: .b1,
+        summary: "Escalate git access to checker"
+      )
+    )
+    let decided = try await runtimeFacade.cmpFacade.decidePeerApproval(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityKey: "tool.git",
+        decision: .approve,
+        reviewerAgentID: "reviewer.local",
+        decisionSummary: "Approved normalized git access"
+      )
+    )
+    let readback = try await runtimeFacade.cmpFacade.readbackPeerApproval(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityKey: "tool.git"
+      )
+    )
+    let storedDescriptor = try await registry.cmpPeerApprovalStore?.describe(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityKey: "tool.git"
+      )
+    )
+
+    #expect(requested.capabilityKey == "tool.git")
+    #expect(decided.capabilityKey == "tool.git")
+    #expect(readback.found)
+    #expect(readback.capabilityKey == "tool.git")
+    #expect(storedDescriptor?.capabilityKey == "tool.git")
+  }
+
+  @Test
+  func explicitPeerApprovalDecisionClearsPendingGateAndUpdatesTapReadback() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-peer-approval-decision-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: registry)
+
+    _ = try await runtimeFacade.cmpFacade.requestPeerApproval(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityKey: "tool.git",
+        requestedTier: .b1,
+        summary: "Escalate git access to checker"
+      )
+    )
+    let decision = try await runtimeFacade.cmpFacade.decidePeerApproval(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityKey: "tool.git",
+        decision: .approve,
+        reviewerAgentID: "reviewer.local",
+        decisionSummary: "Approved git access for checker"
+      )
+    )
+    let readback = try await runtimeFacade.cmpFacade.readbackPeerApproval(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityKey: "tool.git"
+      )
+    )
+    let tapStatus = try await runtimeFacade.inspectionFacade.readbackTapStatus(
+      .init(projectID: "cmp.local-runtime", agentID: "checker.local")
+    )
+    let tapHistory = try await runtimeFacade.inspectionFacade.readbackTapHistory(
+      .init(projectID: "cmp.local-runtime", agentID: "checker.local", limit: 10)
+    )
+
+    #expect(decision.outcome == "approved_by_human")
+    #expect(decision.humanGateState == "approved")
+    #expect(decision.decisionSummary == "Approved git access for checker")
+    #expect(readback.found)
+    #expect(readback.outcome == "approved_by_human")
+    #expect(readback.humanGateState == "approved")
+    #expect(readback.decisionSummary == "Approved git access for checker")
+    #expect(tapStatus.pendingApprovalCount == 0)
+    #expect(tapStatus.approvedApprovalCount == 1)
+    #expect(tapStatus.humanGateState == "approved")
+    #expect(tapHistory.entries.contains { $0.capabilityKey == "tool.git" && $0.outcome == "approved_by_human" })
+  }
+
+  @Test
+  func explicitPeerApprovalDecisionRejectsDuplicateResolution() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-peer-approval-duplicate-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: registry)
+
+    _ = try await runtimeFacade.cmpFacade.requestPeerApproval(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityKey: "tool.git",
+        requestedTier: .b1,
+        summary: "Escalate git access to checker"
+      )
+    )
+    _ = try await runtimeFacade.cmpFacade.decidePeerApproval(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityKey: "tool.git",
+        decision: .approve,
+        reviewerAgentID: "reviewer.local",
+        decisionSummary: "Approved git access for checker"
+      )
+    )
+
+    await #expect(throws: PraxisError.self) {
+      try await runtimeFacade.cmpFacade.decidePeerApproval(
+        .init(
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          targetAgentID: "checker.local",
+          capabilityKey: "tool.git",
+          decision: .reject,
+          reviewerAgentID: "reviewer.local",
+          decisionSummary: "Reject duplicate decision"
+        )
+      )
+    }
   }
 
   @Test

@@ -184,6 +184,104 @@ struct PraxisInfraContractsTests {
 
     #expect(queriedPackages.count == 1)
     #expect(queriedPackages.first?.status == .dispatched)
+
+    let controlStore = PraxisFakeCmpControlStore()
+    _ = try await controlStore.save(
+      .init(
+        projectID: "project-1",
+        agentID: "agent-2",
+        executionStyle: "manual",
+        mode: "peer_review",
+        readbackPriority: "package_first",
+        fallbackPolicy: "registry_only",
+        recoveryPreference: "resume_latest",
+        automation: ["autoDispatch": false],
+        updatedAt: "2026-04-10T20:10:02Z"
+      )
+    )
+    let queriedControl = try await controlStore.describe(
+      .init(projectID: "project-1", agentID: "agent-2")
+    )
+
+    #expect(queriedControl?.executionStyle == "manual")
+    #expect(queriedControl?.automation["autoDispatch"] == false)
+
+    let peerApprovalStore = PraxisFakeCmpPeerApprovalStore()
+    _ = try await peerApprovalStore.save(
+      .init(
+        projectID: "project-1",
+        agentID: "agent-1",
+        targetAgentID: "agent-2",
+        capabilityKey: "tool.git",
+        requestedTier: "B1",
+        tapMode: "restricted",
+        riskLevel: "normal",
+        route: "humanReview",
+        outcome: "escalated_to_human",
+        humanGateState: "waitingApproval",
+        summary: "Request peer approval for tool.git",
+        decisionSummary: "Capability tool.git requires human approval in restricted mode.",
+        requestedAt: "2026-04-10T20:10:03Z",
+        updatedAt: "2026-04-10T20:10:03Z",
+        metadata: [:]
+      )
+    )
+    let queriedPeerApproval = try await peerApprovalStore.describe(
+      .init(
+        projectID: "project-1",
+        agentID: "agent-1",
+        targetAgentID: "agent-2",
+        capabilityKey: "tool.git"
+      )
+    )
+    let allPeerApprovals = try await peerApprovalStore.describeAll(
+      .init(projectID: "project-1", targetAgentID: "agent-2")
+    )
+
+    #expect(queriedPeerApproval?.route == "humanReview")
+    #expect(queriedPeerApproval?.humanGateState == "waitingApproval")
+    #expect(allPeerApprovals.count == 1)
+
+    let tapEventStore = PraxisFakeTapRuntimeEventStore()
+    _ = try await tapEventStore.append(
+      .init(
+        eventID: "tap-event-1",
+        projectID: "project-1",
+        agentID: "agent-1",
+        targetAgentID: "agent-2",
+        eventKind: "peer_approval_requested",
+        capabilityKey: "tool.git",
+        summary: "Peer approval requested",
+        detail: "tool.git requires human review",
+        createdAt: "2026-04-10T20:10:04Z",
+        metadata: [
+          "requestedTier": .string("B1"),
+          "route": .string("humanReview"),
+          "outcome": .string("escalated_to_human"),
+          "humanGateState": .string("waitingApproval"),
+        ]
+      )
+    )
+    _ = try await tapEventStore.append(
+      .init(
+        eventID: "tap-event-2",
+        projectID: "project-1",
+        agentID: "agent-3",
+        targetAgentID: "agent-2",
+        eventKind: "peer_approval_requested",
+        capabilityKey: "tool.shell",
+        summary: "Peer approval requested",
+        detail: "tool.shell requires human review",
+        createdAt: "2026-04-10T20:10:05Z"
+      )
+    )
+    let queriedTapEvents = try await tapEventStore.read(
+      .init(projectID: "project-1", targetAgentID: "agent-2", limit: 5)
+    )
+
+    #expect(queriedTapEvents.count == 2)
+    #expect(queriedTapEvents.first?.eventID == "tap-event-2")
+    #expect(queriedTapEvents.last?.capabilityKey == "tool.git")
   }
 
   @Test

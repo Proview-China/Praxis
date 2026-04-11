@@ -8,6 +8,7 @@ import PraxisCmpSections
 import PraxisCmpTypes
 import PraxisGoal
 import PraxisRun
+import PraxisTapTypes
 import PraxisSession
 import PraxisTapGovernance
 import PraxisTapReview
@@ -104,6 +105,136 @@ public struct PraxisTapInspection: Sendable, Equatable, Codable {
     self.reviewContext = reviewContext
     self.toolReviewReport = toolReviewReport
     self.runtimeSnapshot = runtimeSnapshot
+  }
+}
+
+public struct PraxisReadbackTapStatusCommand: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let agentID: String?
+
+  public init(projectID: String, agentID: String? = nil) {
+    self.projectID = projectID
+    self.agentID = agentID
+  }
+}
+
+public struct PraxisTapStatusReadback: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let agentID: String?
+  public let summary: String
+  public let readinessSummary: String
+  public let tapMode: String
+  public let riskLevel: String
+  public let humanGateState: String
+  public let availableCapabilityCount: Int
+  public let availableCapabilityIDs: [String]
+  public let pendingApprovalCount: Int
+  public let approvedApprovalCount: Int
+  public let latestCapabilityKey: String?
+  public let latestDecisionSummary: String?
+  public let issues: [String]
+
+  public init(
+    projectID: String,
+    agentID: String? = nil,
+    summary: String,
+    readinessSummary: String,
+    tapMode: String,
+    riskLevel: String,
+    humanGateState: String,
+    availableCapabilityCount: Int,
+    availableCapabilityIDs: [String],
+    pendingApprovalCount: Int,
+    approvedApprovalCount: Int,
+    latestCapabilityKey: String? = nil,
+    latestDecisionSummary: String? = nil,
+    issues: [String]
+  ) {
+    self.projectID = projectID
+    self.agentID = agentID
+    self.summary = summary
+    self.readinessSummary = readinessSummary
+    self.tapMode = tapMode
+    self.riskLevel = riskLevel
+    self.humanGateState = humanGateState
+    self.availableCapabilityCount = availableCapabilityCount
+    self.availableCapabilityIDs = availableCapabilityIDs
+    self.pendingApprovalCount = pendingApprovalCount
+    self.approvedApprovalCount = approvedApprovalCount
+    self.latestCapabilityKey = latestCapabilityKey
+    self.latestDecisionSummary = latestDecisionSummary
+    self.issues = issues
+  }
+}
+
+public struct PraxisReadbackTapHistoryCommand: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let agentID: String?
+  public let limit: Int
+
+  public init(projectID: String, agentID: String? = nil, limit: Int = 10) {
+    self.projectID = projectID
+    self.agentID = agentID
+    self.limit = limit
+  }
+}
+
+public struct PraxisTapHistoryEntry: Sendable, Equatable, Codable {
+  public let agentID: String
+  public let targetAgentID: String
+  public let capabilityKey: String
+  public let requestedTier: String
+  public let route: String
+  public let outcome: String
+  public let humanGateState: String
+  public let updatedAt: String
+  public let decisionSummary: String
+
+  public init(
+    agentID: String,
+    targetAgentID: String,
+    capabilityKey: String,
+    requestedTier: String,
+    route: String,
+    outcome: String,
+    humanGateState: String,
+    updatedAt: String,
+    decisionSummary: String
+  ) {
+    self.agentID = agentID
+    self.targetAgentID = targetAgentID
+    self.capabilityKey = capabilityKey
+    self.requestedTier = requestedTier
+    self.route = route
+    self.outcome = outcome
+    self.humanGateState = humanGateState
+    self.updatedAt = updatedAt
+    self.decisionSummary = decisionSummary
+  }
+}
+
+public struct PraxisTapHistoryReadback: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let agentID: String?
+  public let summary: String
+  public let totalCount: Int
+  public let entries: [PraxisTapHistoryEntry]
+  public let issues: [String]
+
+  public init(
+    projectID: String,
+    agentID: String? = nil,
+    summary: String,
+    totalCount: Int,
+    entries: [PraxisTapHistoryEntry],
+    issues: [String]
+  ) {
+    self.projectID = projectID
+    self.agentID = agentID
+    self.summary = summary
+    self.totalCount = totalCount
+    self.entries = entries
+    self.issues = issues
   }
 }
 
@@ -567,6 +698,25 @@ public struct PraxisDispatchCmpFlowCommand: Sendable, Equatable, Codable {
   }
 }
 
+public struct PraxisRetryCmpDispatchCommand: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let agentID: String
+  public let packageID: String
+  public let reason: String?
+
+  public init(
+    projectID: String,
+    agentID: String,
+    packageID: String,
+    reason: String? = nil
+  ) {
+    self.projectID = projectID
+    self.agentID = agentID
+    self.packageID = packageID
+    self.reason = reason
+  }
+}
+
 public struct PraxisCmpFlowDispatch: Sendable, Equatable, Codable {
   public let projectID: String
   public let agentID: String
@@ -690,6 +840,311 @@ public struct PraxisCmpObjectModelReadback: Sendable, Equatable, Codable {
     self.packageCount = packageCount
     self.deliveryCount = deliveryCount
     self.packageStatusCounts = packageStatusCounts
+  }
+}
+
+public struct PraxisReadbackCmpRolesCommand: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let agentID: String?
+
+  public init(projectID: String, agentID: String? = nil) {
+    self.projectID = projectID
+    self.agentID = agentID
+  }
+}
+
+public struct PraxisCmpRolesReadback: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let agentID: String?
+  public let summary: String
+  public let roles: [PraxisCmpRoleReadback]
+  public let latestPackageID: String?
+  public let latestDispatchStatus: String?
+  public let issues: [String]
+
+  public init(
+    projectID: String,
+    agentID: String? = nil,
+    summary: String,
+    roles: [PraxisCmpRoleReadback],
+    latestPackageID: String? = nil,
+    latestDispatchStatus: String? = nil,
+    issues: [String]
+  ) {
+    self.projectID = projectID
+    self.agentID = agentID
+    self.summary = summary
+    self.roles = roles
+    self.latestPackageID = latestPackageID
+    self.latestDispatchStatus = latestDispatchStatus
+    self.issues = issues
+  }
+}
+
+public struct PraxisReadbackCmpControlCommand: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let agentID: String?
+
+  public init(projectID: String, agentID: String? = nil) {
+    self.projectID = projectID
+    self.agentID = agentID
+  }
+}
+
+public struct PraxisCmpControlReadback: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let agentID: String?
+  public let summary: String
+  public let control: PraxisCmpControlSurface
+  public let latestPackageID: String?
+  public let latestDispatchStatus: String?
+  public let latestTargetAgentID: String?
+  public let issues: [String]
+
+  public init(
+    projectID: String,
+    agentID: String? = nil,
+    summary: String,
+    control: PraxisCmpControlSurface,
+    latestPackageID: String? = nil,
+    latestDispatchStatus: String? = nil,
+    latestTargetAgentID: String? = nil,
+    issues: [String]
+  ) {
+    self.projectID = projectID
+    self.agentID = agentID
+    self.summary = summary
+    self.control = control
+    self.latestPackageID = latestPackageID
+    self.latestDispatchStatus = latestDispatchStatus
+    self.latestTargetAgentID = latestTargetAgentID
+    self.issues = issues
+  }
+}
+
+public struct PraxisUpdateCmpControlCommand: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let agentID: String?
+  public let executionStyle: String?
+  public let mode: String?
+  public let readbackPriority: String?
+  public let fallbackPolicy: String?
+  public let recoveryPreference: String?
+  public let automation: [String: Bool]
+
+  public init(
+    projectID: String,
+    agentID: String? = nil,
+    executionStyle: String? = nil,
+    mode: String? = nil,
+    readbackPriority: String? = nil,
+    fallbackPolicy: String? = nil,
+    recoveryPreference: String? = nil,
+    automation: [String: Bool] = [:]
+  ) {
+    self.projectID = projectID
+    self.agentID = agentID
+    self.executionStyle = executionStyle
+    self.mode = mode
+    self.readbackPriority = readbackPriority
+    self.fallbackPolicy = fallbackPolicy
+    self.recoveryPreference = recoveryPreference
+    self.automation = automation
+  }
+}
+
+public struct PraxisCmpControlUpdate: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let agentID: String?
+  public let summary: String
+  public let control: PraxisCmpControlSurface
+  public let storedAt: String
+  public let issues: [String]
+
+  public init(
+    projectID: String,
+    agentID: String? = nil,
+    summary: String,
+    control: PraxisCmpControlSurface,
+    storedAt: String,
+    issues: [String]
+  ) {
+    self.projectID = projectID
+    self.agentID = agentID
+    self.summary = summary
+    self.control = control
+    self.storedAt = storedAt
+    self.issues = issues
+  }
+}
+
+public struct PraxisRequestCmpPeerApprovalCommand: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let agentID: String
+  public let targetAgentID: String
+  public let capabilityKey: String
+  public let requestedTier: PraxisTapCapabilityTier
+  public let summary: String
+
+  public init(
+    projectID: String,
+    agentID: String,
+    targetAgentID: String,
+    capabilityKey: String,
+    requestedTier: PraxisTapCapabilityTier,
+    summary: String
+  ) {
+    self.projectID = projectID
+    self.agentID = agentID
+    self.targetAgentID = targetAgentID
+    self.capabilityKey = capabilityKey
+    self.requestedTier = requestedTier
+    self.summary = summary
+  }
+}
+
+public struct PraxisCmpPeerApproval: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let agentID: String
+  public let targetAgentID: String
+  public let capabilityKey: String
+  public let requestedTier: PraxisTapCapabilityTier
+  public let summary: String
+  public let route: String
+  public let outcome: String
+  public let tapMode: String
+  public let riskLevel: String
+  public let humanGateState: String
+  public let requestedAt: String
+  public let decisionSummary: String
+
+  public init(
+    projectID: String,
+    agentID: String,
+    targetAgentID: String,
+    capabilityKey: String,
+    requestedTier: PraxisTapCapabilityTier,
+    summary: String,
+    route: String,
+    outcome: String,
+    tapMode: String,
+    riskLevel: String,
+    humanGateState: String,
+    requestedAt: String,
+    decisionSummary: String
+  ) {
+    self.projectID = projectID
+    self.agentID = agentID
+    self.targetAgentID = targetAgentID
+    self.capabilityKey = capabilityKey
+    self.requestedTier = requestedTier
+    self.summary = summary
+    self.route = route
+    self.outcome = outcome
+    self.tapMode = tapMode
+    self.riskLevel = riskLevel
+    self.humanGateState = humanGateState
+    self.requestedAt = requestedAt
+    self.decisionSummary = decisionSummary
+  }
+}
+
+public struct PraxisReadbackCmpPeerApprovalCommand: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let agentID: String?
+  public let targetAgentID: String?
+  public let capabilityKey: String?
+
+  public init(
+    projectID: String,
+    agentID: String? = nil,
+    targetAgentID: String? = nil,
+    capabilityKey: String? = nil
+  ) {
+    self.projectID = projectID
+    self.agentID = agentID
+    self.targetAgentID = targetAgentID
+    self.capabilityKey = capabilityKey
+  }
+}
+
+public struct PraxisDecideCmpPeerApprovalCommand: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let agentID: String
+  public let targetAgentID: String
+  public let capabilityKey: String
+  public let decision: PraxisCmpPeerApprovalDecision
+  public let reviewerAgentID: String?
+  public let decisionSummary: String
+
+  public init(
+    projectID: String,
+    agentID: String,
+    targetAgentID: String,
+    capabilityKey: String,
+    decision: PraxisCmpPeerApprovalDecision,
+    reviewerAgentID: String? = nil,
+    decisionSummary: String
+  ) {
+    self.projectID = projectID
+    self.agentID = agentID
+    self.targetAgentID = targetAgentID
+    self.capabilityKey = capabilityKey
+    self.decision = decision
+    self.reviewerAgentID = reviewerAgentID
+    self.decisionSummary = decisionSummary
+  }
+}
+
+public struct PraxisCmpPeerApprovalReadback: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let agentID: String?
+  public let targetAgentID: String?
+  public let capabilityKey: String?
+  public let requestedTier: PraxisTapCapabilityTier?
+  public let summary: String
+  public let route: String?
+  public let outcome: String?
+  public let tapMode: String?
+  public let riskLevel: String?
+  public let humanGateState: String?
+  public let requestedAt: String?
+  public let decisionSummary: String?
+  public let found: Bool
+  public let issues: [String]
+
+  public init(
+    projectID: String,
+    agentID: String? = nil,
+    targetAgentID: String? = nil,
+    capabilityKey: String? = nil,
+    requestedTier: PraxisTapCapabilityTier? = nil,
+    summary: String,
+    route: String? = nil,
+    outcome: String? = nil,
+    tapMode: String? = nil,
+    riskLevel: String? = nil,
+    humanGateState: String? = nil,
+    requestedAt: String? = nil,
+    decisionSummary: String? = nil,
+    found: Bool,
+    issues: [String]
+  ) {
+    self.projectID = projectID
+    self.agentID = agentID
+    self.targetAgentID = targetAgentID
+    self.capabilityKey = capabilityKey
+    self.requestedTier = requestedTier
+    self.summary = summary
+    self.route = route
+    self.outcome = outcome
+    self.tapMode = tapMode
+    self.riskLevel = riskLevel
+    self.humanGateState = humanGateState
+    self.requestedAt = requestedAt
+    self.decisionSummary = decisionSummary
+    self.found = found
+    self.issues = issues
   }
 }
 

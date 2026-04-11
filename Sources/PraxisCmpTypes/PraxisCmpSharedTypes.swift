@@ -122,6 +122,12 @@ public enum PraxisCmpDispatchTargetKind: String, Sendable, Codable {
   case child
 }
 
+public enum PraxisCmpPeerApprovalDecision: String, Sendable, Codable {
+  case approve
+  case reject
+  case release
+}
+
 public enum PraxisCmpContextPackageKind: String, Sendable, Codable {
   case runtimeFill
   case childSeed

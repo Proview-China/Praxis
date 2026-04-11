@@ -125,6 +125,22 @@ private struct StubInspectTapUseCase: PraxisInspectTapUseCaseProtocol {
   }
 }
 
+private struct StubReadbackTapStatusUseCase: PraxisReadbackTapStatusUseCaseProtocol {
+  let executeBody: @Sendable (PraxisReadbackTapStatusCommand) async throws -> PraxisTapStatusReadback
+
+  func execute(_ command: PraxisReadbackTapStatusCommand) async throws -> PraxisTapStatusReadback {
+    try await executeBody(command)
+  }
+}
+
+private struct StubReadbackTapHistoryUseCase: PraxisReadbackTapHistoryUseCaseProtocol {
+  let executeBody: @Sendable (PraxisReadbackTapHistoryCommand) async throws -> PraxisTapHistoryReadback
+
+  func execute(_ command: PraxisReadbackTapHistoryCommand) async throws -> PraxisTapHistoryReadback {
+    try await executeBody(command)
+  }
+}
+
 private struct StubInspectCmpUseCase: PraxisInspectCmpUseCaseProtocol {
   let executeBody: @Sendable () async throws -> PraxisCmpInspection
 
@@ -197,10 +213,66 @@ private struct StubDispatchCmpFlowUseCase: PraxisDispatchCmpFlowUseCaseProtocol 
   }
 }
 
+private struct StubRetryCmpDispatchUseCase: PraxisRetryCmpDispatchUseCaseProtocol {
+  let executeBody: @Sendable (PraxisRetryCmpDispatchCommand) async throws -> PraxisCmpFlowDispatch
+
+  func execute(_ command: PraxisRetryCmpDispatchCommand) async throws -> PraxisCmpFlowDispatch {
+    try await executeBody(command)
+  }
+}
+
 private struct StubRequestCmpHistoryUseCase: PraxisRequestCmpHistoryUseCaseProtocol {
   let executeBody: @Sendable (PraxisRequestCmpHistoryCommand) async throws -> PraxisCmpFlowHistory
 
   func execute(_ command: PraxisRequestCmpHistoryCommand) async throws -> PraxisCmpFlowHistory {
+    try await executeBody(command)
+  }
+}
+
+private struct StubReadbackCmpRolesUseCase: PraxisReadbackCmpRolesUseCaseProtocol {
+  let executeBody: @Sendable (PraxisReadbackCmpRolesCommand) async throws -> PraxisCmpRolesReadback
+
+  func execute(_ command: PraxisReadbackCmpRolesCommand) async throws -> PraxisCmpRolesReadback {
+    try await executeBody(command)
+  }
+}
+
+private struct StubReadbackCmpControlUseCase: PraxisReadbackCmpControlUseCaseProtocol {
+  let executeBody: @Sendable (PraxisReadbackCmpControlCommand) async throws -> PraxisCmpControlReadback
+
+  func execute(_ command: PraxisReadbackCmpControlCommand) async throws -> PraxisCmpControlReadback {
+    try await executeBody(command)
+  }
+}
+
+private struct StubUpdateCmpControlUseCase: PraxisUpdateCmpControlUseCaseProtocol {
+  let executeBody: @Sendable (PraxisUpdateCmpControlCommand) async throws -> PraxisCmpControlUpdate
+
+  func execute(_ command: PraxisUpdateCmpControlCommand) async throws -> PraxisCmpControlUpdate {
+    try await executeBody(command)
+  }
+}
+
+private struct StubRequestCmpPeerApprovalUseCase: PraxisRequestCmpPeerApprovalUseCaseProtocol {
+  let executeBody: @Sendable (PraxisRequestCmpPeerApprovalCommand) async throws -> PraxisCmpPeerApproval
+
+  func execute(_ command: PraxisRequestCmpPeerApprovalCommand) async throws -> PraxisCmpPeerApproval {
+    try await executeBody(command)
+  }
+}
+
+private struct StubDecideCmpPeerApprovalUseCase: PraxisDecideCmpPeerApprovalUseCaseProtocol {
+  let executeBody: @Sendable (PraxisDecideCmpPeerApprovalCommand) async throws -> PraxisCmpPeerApproval
+
+  func execute(_ command: PraxisDecideCmpPeerApprovalCommand) async throws -> PraxisCmpPeerApproval {
+    try await executeBody(command)
+  }
+}
+
+private struct StubReadbackCmpPeerApprovalUseCase: PraxisReadbackCmpPeerApprovalUseCaseProtocol {
+  let executeBody: @Sendable (PraxisReadbackCmpPeerApprovalCommand) async throws -> PraxisCmpPeerApprovalReadback
+
+  func execute(_ command: PraxisReadbackCmpPeerApprovalCommand) async throws -> PraxisCmpPeerApprovalReadback {
     try await executeBody(command)
   }
 }
@@ -241,6 +313,8 @@ private func makeThrowingRuntimeInterface(
   runGoalError: Error? = nil,
   resumeRunError: Error? = nil,
   inspectTapError: Error? = nil,
+  readbackTapStatusError: Error? = nil,
+  readbackTapHistoryError: Error? = nil,
   inspectCmpError: Error? = nil,
   openCmpSessionError: Error? = nil,
   readbackCmpProjectError: Error? = nil,
@@ -250,7 +324,14 @@ private func makeThrowingRuntimeInterface(
   resolveCmpFlowError: Error? = nil,
   materializeCmpFlowError: Error? = nil,
   dispatchCmpFlowError: Error? = nil,
+  retryCmpDispatchError: Error? = nil,
   requestCmpHistoryError: Error? = nil,
+  readbackCmpRolesError: Error? = nil,
+  readbackCmpControlError: Error? = nil,
+  updateCmpControlError: Error? = nil,
+  requestCmpPeerApprovalError: Error? = nil,
+  decideCmpPeerApprovalError: Error? = nil,
+  readbackCmpPeerApprovalError: Error? = nil,
   readbackCmpStatusError: Error? = nil,
   smokeCmpProjectError: Error? = nil,
   inspectMpError: Error? = nil,
@@ -276,6 +357,18 @@ private func makeThrowingRuntimeInterface(
         throw inspectTapError
       }
       throw RuntimeInterfaceUnexpectedInvocationError(operation: "inspectTap")
+    },
+    readbackTapStatusUseCase: StubReadbackTapStatusUseCase { _ in
+      if let readbackTapStatusError {
+        throw readbackTapStatusError
+      }
+      throw RuntimeInterfaceUnexpectedInvocationError(operation: "readbackTapStatus")
+    },
+    readbackTapHistoryUseCase: StubReadbackTapHistoryUseCase { _ in
+      if let readbackTapHistoryError {
+        throw readbackTapHistoryError
+      }
+      throw RuntimeInterfaceUnexpectedInvocationError(operation: "readbackTapHistory")
     },
     inspectCmpUseCase: StubInspectCmpUseCase {
       if let inspectCmpError {
@@ -345,11 +438,53 @@ private func makeThrowingRuntimeInterface(
       }
       throw RuntimeInterfaceUnexpectedInvocationError(operation: "dispatchCmpFlow")
     },
+    retryCmpDispatchUseCase: StubRetryCmpDispatchUseCase { _ in
+      if let retryCmpDispatchError {
+        throw retryCmpDispatchError
+      }
+      throw RuntimeInterfaceUnexpectedInvocationError(operation: "retryCmpDispatch")
+    },
     requestCmpHistoryUseCase: StubRequestCmpHistoryUseCase { _ in
       if let requestCmpHistoryError {
         throw requestCmpHistoryError
       }
       throw RuntimeInterfaceUnexpectedInvocationError(operation: "requestCmpHistory")
+    },
+    readbackCmpRolesUseCase: StubReadbackCmpRolesUseCase { _ in
+      if let readbackCmpRolesError {
+        throw readbackCmpRolesError
+      }
+      throw RuntimeInterfaceUnexpectedInvocationError(operation: "readbackCmpRoles")
+    },
+    readbackCmpControlUseCase: StubReadbackCmpControlUseCase { _ in
+      if let readbackCmpControlError {
+        throw readbackCmpControlError
+      }
+      throw RuntimeInterfaceUnexpectedInvocationError(operation: "readbackCmpControl")
+    },
+    updateCmpControlUseCase: StubUpdateCmpControlUseCase { _ in
+      if let updateCmpControlError {
+        throw updateCmpControlError
+      }
+      throw RuntimeInterfaceUnexpectedInvocationError(operation: "updateCmpControl")
+    },
+    requestCmpPeerApprovalUseCase: StubRequestCmpPeerApprovalUseCase { _ in
+      if let requestCmpPeerApprovalError {
+        throw requestCmpPeerApprovalError
+      }
+      throw RuntimeInterfaceUnexpectedInvocationError(operation: "requestCmpPeerApproval")
+    },
+    decideCmpPeerApprovalUseCase: StubDecideCmpPeerApprovalUseCase { _ in
+      if let decideCmpPeerApprovalError {
+        throw decideCmpPeerApprovalError
+      }
+      throw RuntimeInterfaceUnexpectedInvocationError(operation: "decideCmpPeerApproval")
+    },
+    readbackCmpPeerApprovalUseCase: StubReadbackCmpPeerApprovalUseCase { _ in
+      if let readbackCmpPeerApprovalError {
+        throw readbackCmpPeerApprovalError
+      }
+      throw RuntimeInterfaceUnexpectedInvocationError(operation: "readbackCmpPeerApproval")
     },
     readbackCmpStatusUseCase: StubReadbackCmpStatusUseCase { _ in
       if let readbackCmpStatusError {
@@ -469,6 +604,94 @@ struct HostRuntimeInterfaceTests {
         .init(
           payloadSummary: "Read back local CMP project",
           projectID: "cmp.local-runtime"
+        )
+      )
+    )
+    let tapStatusResponse = await runtimeInterface.handle(
+      .readbackTapStatus(
+        .init(
+          payloadSummary: "Read back TAP status",
+          projectID: "cmp.local-runtime",
+          agentID: "checker.local"
+        )
+      )
+    )
+    let tapHistoryResponse = await runtimeInterface.handle(
+      .readbackTapHistory(
+        .init(
+          payloadSummary: "Read back TAP history",
+          projectID: "cmp.local-runtime",
+          agentID: "checker.local",
+          limit: 5
+        )
+      )
+    )
+    let rolesReadbackResponse = await runtimeInterface.handle(
+      .readbackCmpRoles(
+        .init(
+          payloadSummary: "Read back CMP roles",
+          projectID: "cmp.local-runtime",
+          agentID: "checker.local"
+        )
+      )
+    )
+    let controlReadbackResponse = await runtimeInterface.handle(
+      .readbackCmpControl(
+        .init(
+          payloadSummary: "Read back CMP control",
+          projectID: "cmp.local-runtime",
+          agentID: "checker.local"
+        )
+      )
+    )
+    let controlUpdateResponse = await runtimeInterface.handle(
+      .updateCmpControl(
+        .init(
+          payloadSummary: "Update CMP control",
+          projectID: "cmp.local-runtime",
+          agentID: "checker.local",
+          executionStyle: "manual",
+          mode: "peer_review",
+          readbackPriority: "package_first",
+          automation: ["autoDispatch": false]
+        )
+      )
+    )
+    let approvalRequestResponse = await runtimeInterface.handle(
+      .requestCmpPeerApproval(
+        .init(
+          payloadSummary: "Request CMP peer approval",
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          targetAgentID: "checker.local",
+          capabilityKey: "tool.git",
+          requestedTier: .b1,
+          summary: "Escalate git access to checker"
+        )
+      )
+    )
+    let approvalDecisionResponse = await runtimeInterface.handle(
+      .decideCmpPeerApproval(
+        .init(
+          payloadSummary: "Approve CMP peer approval",
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          targetAgentID: "checker.local",
+          capabilityKey: "tool.git",
+          decision: .approve,
+          reviewerAgentID: "reviewer.local",
+          decisionSummary: "Approved git access for checker"
+        )
+      )
+    )
+    let approvalReadbackResponse = await runtimeInterface.handle(
+      .readbackCmpPeerApproval(
+        .init(
+          payloadSummary: "Read back CMP peer approval",
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          targetAgentID: "checker.local",
+          capabilityKey: "tool.git"
         )
       )
     )
@@ -605,6 +828,38 @@ struct HostRuntimeInterfaceTests {
     #expect(readbackResponse.status == .success)
     #expect(readbackResponse.snapshot?.kind == .cmpProject)
     #expect(readbackResponse.snapshot?.projectID == "cmp.local-runtime")
+    #expect(tapStatusResponse.status == .success)
+    #expect(tapStatusResponse.snapshot?.kind == .tapStatus)
+    #expect(tapStatusResponse.snapshot?.title == "TAP Status cmp.local-runtime")
+    #expect(tapStatusResponse.events.map(\.name) == ["tap.status.readback"])
+    #expect(tapHistoryResponse.status == .success)
+    #expect(tapHistoryResponse.snapshot?.kind == .tapHistory)
+    #expect(tapHistoryResponse.snapshot?.title == "TAP History cmp.local-runtime")
+    #expect(tapHistoryResponse.events.map(\.name) == ["tap.history.readback"])
+    #expect(rolesReadbackResponse.status == .success)
+    #expect(rolesReadbackResponse.snapshot?.kind == .cmpRoles)
+    #expect(rolesReadbackResponse.snapshot?.title == "CMP Roles cmp.local-runtime")
+    #expect(rolesReadbackResponse.events.map(\.name) == ["cmp.roles.readback"])
+    #expect(controlReadbackResponse.status == .success)
+    #expect(controlReadbackResponse.snapshot?.kind == .cmpControl)
+    #expect(controlReadbackResponse.snapshot?.title == "CMP Control cmp.local-runtime")
+    #expect(controlReadbackResponse.events.map(\.name) == ["cmp.control.readback"])
+    #expect(controlUpdateResponse.status == .success)
+    #expect(controlUpdateResponse.snapshot?.kind == .cmpControl)
+    #expect(controlUpdateResponse.snapshot?.title == "CMP Control cmp.local-runtime")
+    #expect(controlUpdateResponse.events.map(\.name) == ["cmp.control.updated"])
+    #expect(approvalRequestResponse.status == .success)
+    #expect(approvalRequestResponse.snapshot?.kind == .cmpApproval)
+    #expect(approvalRequestResponse.snapshot?.title == "CMP Approval cmp.local-runtime")
+    #expect(approvalRequestResponse.events.map(\.name) == ["cmp.peer_approval.requested"])
+    #expect(approvalDecisionResponse.status == .success)
+    #expect(approvalDecisionResponse.snapshot?.kind == .cmpApproval)
+    #expect(approvalDecisionResponse.snapshot?.title == "CMP Approval cmp.local-runtime")
+    #expect(approvalDecisionResponse.events.map(\.name) == ["cmp.peer_approval.decided"])
+    #expect(approvalReadbackResponse.status == .success)
+    #expect(approvalReadbackResponse.snapshot?.kind == .cmpApproval)
+    #expect(approvalReadbackResponse.snapshot?.title == "CMP Approval cmp.local-runtime")
+    #expect(approvalReadbackResponse.events.map(\.name) == ["cmp.peer_approval.readback"])
     #expect(statusReadbackResponse.status == .success)
     #expect(statusReadbackResponse.snapshot?.kind == .cmpStatus)
     #expect(statusReadbackResponse.snapshot?.title == "CMP Status cmp.local-runtime")
@@ -642,6 +897,83 @@ struct HostRuntimeInterfaceTests {
     #expect(smokeResponse.status == .success)
     #expect(smokeResponse.snapshot?.kind == .smoke)
     #expect(smokeResponse.snapshot?.title == "CMP Smoke cmp.local-runtime")
+  }
+
+  @Test
+  func runtimeInterfaceRetriesBlockedCmpDispatchThroughNeutralSurface() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-runtime-interface-retry-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let runtimeInterface = try PraxisRuntimeBridgeFactory.makeRuntimeInterface(
+      hostAdapters: PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+    )
+
+    _ = await runtimeInterface.handle(
+      .updateCmpControl(
+        .init(
+          payloadSummary: "Disable auto dispatch",
+          projectID: "cmp.local-runtime",
+          agentID: "checker.local",
+          executionStyle: "manual",
+          mode: "peer_review",
+          automation: ["autoDispatch": false]
+        )
+      )
+    )
+    let packageID = "projection.retry.runtime.local:checker.local:runtimeFill"
+    let blockedDispatchResponse = await runtimeInterface.handle(
+      .dispatchCmpFlow(
+        .init(
+          payloadSummary: "Dispatch local CMP flow",
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          contextPackage: .init(
+            id: .init(rawValue: packageID),
+            sourceProjectionID: .init(rawValue: "projection.retry.runtime.local"),
+            sourceSnapshotID: .init(rawValue: "projection.retry.runtime.local:checked"),
+            sourceAgentID: "runtime.local",
+            targetAgentID: "checker.local",
+            kind: .runtimeFill,
+            packageRef: "context://cmp.local-runtime/projection.retry.runtime.local/checker.local/runtimeFill",
+            fidelityLabel: .highSignal,
+            createdAt: "2026-04-11T00:00:00Z",
+            sourceSectionIDs: [.init(rawValue: "projection.retry.runtime.local:section")]
+          ),
+          targetKind: .peer,
+          reason: "Initial gated dispatch"
+        )
+      )
+    )
+    _ = await runtimeInterface.handle(
+      .updateCmpControl(
+        .init(
+          payloadSummary: "Enable auto dispatch",
+          projectID: "cmp.local-runtime",
+          agentID: "checker.local",
+          automation: ["autoDispatch": true]
+        )
+      )
+    )
+    let retryResponse = await runtimeInterface.handle(
+      .retryCmpDispatch(
+        .init(
+          payloadSummary: "Retry blocked dispatch",
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          packageID: packageID
+        )
+      )
+    )
+
+    #expect(blockedDispatchResponse.status == .success)
+    #expect(blockedDispatchResponse.snapshot?.kind == .cmpFlow)
+    #expect(blockedDispatchResponse.snapshot?.title == "CMP Dispatch cmp.local-runtime")
+    #expect(blockedDispatchResponse.snapshot?.summary.contains("held package") == true)
+    #expect(retryResponse.status == .success)
+    #expect(retryResponse.snapshot?.kind == .cmpFlow)
+    #expect(retryResponse.snapshot?.title == "CMP Retry Dispatch cmp.local-runtime")
+    #expect(retryResponse.events.map(\.name) == ["cmp.flow.dispatch_retried"])
   }
 
   @Test
@@ -734,9 +1066,77 @@ struct HostRuntimeInterfaceTests {
     let dependencyMissingInterface = makeThrowingRuntimeInterface(
       inspectCmpError: PraxisError.dependencyMissing("CMP structured store adapter is unavailable.")
     )
+    let approvalNotFoundInterface = makeThrowingRuntimeInterface(
+      decideCmpPeerApprovalError: PraxisError.invalidInput(
+        "CMP peer approval request was not found for cmp.local-runtime, runtime.local, checker.local, tool.git."
+      )
+    )
+    let approvalResolvedInterface = makeThrowingRuntimeInterface(
+      decideCmpPeerApprovalError: PraxisError.invalidInput(
+        "CMP peer approval gate is already resolved for cmp.local-runtime, runtime.local, checker.local, tool.git."
+      )
+    )
+    let packageNotFoundInterface = makeThrowingRuntimeInterface(
+      retryCmpDispatchError: PraxisError.invalidInput(
+        "CMP package was not found for project cmp.local-runtime and package package.missing."
+      )
+    )
+    let dispatchNotRetryableInterface = makeThrowingRuntimeInterface(
+      retryCmpDispatchError: PraxisError.invalidInput(
+        "CMP dispatch retry is not available for package package.archived with status archived."
+      )
+    )
 
     let invalidInputResponse = await invalidInputInterface.handle(.inspectTap)
     let dependencyMissingResponse = await dependencyMissingInterface.handle(.inspectCmp)
+    let approvalNotFoundResponse = await approvalNotFoundInterface.handle(
+      .decideCmpPeerApproval(
+        .init(
+          payloadSummary: "Approve missing peer approval",
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          targetAgentID: "checker.local",
+          capabilityKey: "tool.git",
+          decision: .approve,
+          reviewerAgentID: "reviewer.local",
+          decisionSummary: "Approve missing approval"
+        )
+      )
+    )
+    let approvalResolvedResponse = await approvalResolvedInterface.handle(
+      .decideCmpPeerApproval(
+        .init(
+          payloadSummary: "Approve resolved peer approval",
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          targetAgentID: "checker.local",
+          capabilityKey: "tool.git",
+          decision: .approve,
+          reviewerAgentID: "reviewer.local",
+          decisionSummary: "Approve resolved approval"
+        )
+      )
+    )
+    let packageNotFoundResponse = await packageNotFoundInterface.handle(
+      .retryCmpDispatch(
+        .init(
+          payloadSummary: "Retry missing package",
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          packageID: "package.missing"
+        )
+      )
+    )
+    let dispatchNotRetryableResponse = await dispatchNotRetryableInterface.handle(
+      .retryCmpDispatch(
+        .init(
+          payloadSummary: "Retry archived package",
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          packageID: "package.archived"
+        )
+      )
+    )
 
     #expect(invalidInputResponse.status == .failure)
     #expect(invalidInputResponse.error?.code == .invalidInput)
@@ -749,6 +1149,22 @@ struct HostRuntimeInterfaceTests {
     #expect(dependencyMissingResponse.error?.message == "CMP structured store adapter is unavailable.")
     #expect(dependencyMissingResponse.error?.retryable == false)
     #expect(dependencyMissingResponse.events.isEmpty)
+
+    #expect(approvalNotFoundResponse.status == .failure)
+    #expect(approvalNotFoundResponse.error?.code == .cmpPeerApprovalNotFound)
+    #expect(approvalNotFoundResponse.error?.retryable == false)
+
+    #expect(approvalResolvedResponse.status == .failure)
+    #expect(approvalResolvedResponse.error?.code == .cmpPeerApprovalAlreadyResolved)
+    #expect(approvalResolvedResponse.error?.retryable == false)
+
+    #expect(packageNotFoundResponse.status == .failure)
+    #expect(packageNotFoundResponse.error?.code == .cmpPackageNotFound)
+    #expect(packageNotFoundResponse.error?.retryable == false)
+
+    #expect(dispatchNotRetryableResponse.status == .failure)
+    #expect(dispatchNotRetryableResponse.error?.code == .cmpDispatchNotRetryable)
+    #expect(dispatchNotRetryableResponse.error?.retryable == false)
   }
 
   @Test
@@ -1027,14 +1443,26 @@ struct HostRuntimeInterfaceTests {
         )
       )
     )
+    let retryRequest = PraxisRuntimeInterfaceRequest.retryCmpDispatch(
+      .init(
+        payloadSummary: "Retry dispatch",
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        packageID: "projection.runtime.local:checker.local:runtimeFill",
+        reason: "Retry after approval"
+      )
+    )
 
     let ingestData = try codec.encode(ingestRequest)
     let historyData = try codec.encode(historyRequest)
+    let retryData = try codec.encode(retryRequest)
     let decodedIngestRequest = try codec.decodeRequest(ingestData)
     let decodedHistoryRequest = try codec.decodeRequest(historyData)
+    let decodedRetryRequest = try codec.decodeRequest(retryData)
 
     #expect(decodedIngestRequest == ingestRequest)
     #expect(decodedHistoryRequest == historyRequest)
+    #expect(decodedRetryRequest == retryRequest)
   }
 
   @Test
@@ -1052,6 +1480,130 @@ struct HostRuntimeInterfaceTests {
     let decodedRequest = try codec.decodeRequest(requestData)
 
     #expect(decodedRequest == request)
+  }
+
+  @Test
+  func runtimeInterfaceCodecEncodesTapStatusRequestsAsNestedPayloads() throws {
+    let codec = PraxisJSONRuntimeInterfaceCodec()
+    let request = PraxisRuntimeInterfaceRequest.readbackTapStatus(
+      .init(
+        payloadSummary: "Read back TAP status",
+        projectID: "cmp.local-runtime",
+        agentID: "checker.local"
+      )
+    )
+
+    let requestData = try codec.encode(request)
+    let decodedRequest = try codec.decodeRequest(requestData)
+
+    #expect(decodedRequest == request)
+  }
+
+  @Test
+  func runtimeInterfaceCodecEncodesTapHistoryRequestsAsNestedPayloads() throws {
+    let codec = PraxisJSONRuntimeInterfaceCodec()
+    let request = PraxisRuntimeInterfaceRequest.readbackTapHistory(
+      .init(
+        payloadSummary: "Read back TAP history",
+        projectID: "cmp.local-runtime",
+        agentID: "checker.local",
+        limit: 5
+      )
+    )
+
+    let requestData = try codec.encode(request)
+    let decodedRequest = try codec.decodeRequest(requestData)
+
+    #expect(decodedRequest == request)
+  }
+
+  @Test
+  func runtimeInterfaceCodecEncodesCmpRolesAndControlRequestsAsNestedPayloads() throws {
+    let codec = PraxisJSONRuntimeInterfaceCodec()
+    let rolesRequest = PraxisRuntimeInterfaceRequest.readbackCmpRoles(
+      .init(
+        payloadSummary: "Read back roles",
+        projectID: "cmp.local-runtime",
+        agentID: "checker.local"
+      )
+    )
+    let controlRequest = PraxisRuntimeInterfaceRequest.readbackCmpControl(
+      .init(
+        payloadSummary: "Read back control",
+        projectID: "cmp.local-runtime",
+        agentID: "checker.local"
+      )
+    )
+    let updateRequest = PraxisRuntimeInterfaceRequest.updateCmpControl(
+      .init(
+        payloadSummary: "Update control",
+        projectID: "cmp.local-runtime",
+        agentID: "checker.local",
+        executionStyle: "manual",
+        mode: "peer_review",
+        readbackPriority: "package_first",
+        automation: ["autoDispatch": false]
+      )
+    )
+
+    let rolesData = try codec.encode(rolesRequest)
+    let controlData = try codec.encode(controlRequest)
+    let updateData = try codec.encode(updateRequest)
+    let decodedRolesRequest = try codec.decodeRequest(rolesData)
+    let decodedControlRequest = try codec.decodeRequest(controlData)
+    let decodedUpdateRequest = try codec.decodeRequest(updateData)
+
+    #expect(decodedRolesRequest == rolesRequest)
+    #expect(decodedControlRequest == controlRequest)
+    #expect(decodedUpdateRequest == updateRequest)
+  }
+
+  @Test
+  func runtimeInterfaceCodecEncodesCmpPeerApprovalRequestsAsNestedPayloads() throws {
+    let codec = PraxisJSONRuntimeInterfaceCodec()
+    let request = PraxisRuntimeInterfaceRequest.requestCmpPeerApproval(
+      .init(
+        payloadSummary: "Request peer approval",
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityKey: "tool.git",
+        requestedTier: .b1,
+        summary: "Escalate git access to checker"
+      )
+    )
+    let decision = PraxisRuntimeInterfaceRequest.decideCmpPeerApproval(
+      .init(
+        payloadSummary: "Approve peer approval",
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityKey: "tool.git",
+        decision: .approve,
+        reviewerAgentID: "reviewer.local",
+        decisionSummary: "Approved git access"
+      )
+    )
+    let readback = PraxisRuntimeInterfaceRequest.readbackCmpPeerApproval(
+      .init(
+        payloadSummary: "Read back peer approval",
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityKey: "tool.git"
+      )
+    )
+
+    let requestData = try codec.encode(request)
+    let decisionData = try codec.encode(decision)
+    let readbackData = try codec.encode(readback)
+    let decodedRequest = try codec.decodeRequest(requestData)
+    let decodedDecision = try codec.decodeRequest(decisionData)
+    let decodedReadback = try codec.decodeRequest(readbackData)
+
+    #expect(decodedRequest == request)
+    #expect(decodedDecision == decision)
+    #expect(decodedReadback == readback)
   }
 
   @Test

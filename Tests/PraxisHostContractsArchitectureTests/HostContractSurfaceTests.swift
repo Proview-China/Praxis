@@ -62,6 +62,46 @@ struct HostContractSurfaceTests {
       createdAt: "2026-04-10T12:00:00Z",
       updatedAt: "2026-04-10T12:00:00Z"
     )
+    let controlDescriptor = PraxisCmpControlDescriptor(
+      projectID: "project-1",
+      agentID: "agent-2",
+      executionStyle: "manual",
+      mode: "peer_review",
+      readbackPriority: "package_first",
+      fallbackPolicy: "registry_only",
+      recoveryPreference: "resume_latest",
+      automation: ["autoDispatch": false],
+      updatedAt: "2026-04-10T12:05:00Z"
+    )
+    let peerApprovalDescriptor = PraxisCmpPeerApprovalDescriptor(
+      projectID: "project-1",
+      agentID: "agent-1",
+      targetAgentID: "agent-2",
+      capabilityKey: "tool.git",
+      requestedTier: "B1",
+      tapMode: "restricted",
+      riskLevel: "normal",
+      route: "humanReview",
+      outcome: "escalated_to_human",
+      humanGateState: "waitingApproval",
+      summary: "Request peer approval for tool.git",
+      decisionSummary: "Capability tool.git requires human approval in restricted mode.",
+      requestedAt: "2026-04-10T12:06:00Z",
+      updatedAt: "2026-04-10T12:06:00Z",
+      metadata: ["decisionKind": .string("escalated_to_human")]
+    )
+    let tapRuntimeEvent = PraxisTapRuntimeEventRecord(
+      eventID: "tap-event-1",
+      projectID: "project-1",
+      agentID: "agent-1",
+      targetAgentID: "agent-2",
+      eventKind: "peer_approval_requested",
+      capabilityKey: "tool.git",
+      summary: "Request peer approval for tool.git",
+      detail: "Capability tool.git requires human approval in restricted mode.",
+      createdAt: "2026-04-10T12:06:01Z",
+      metadata: ["route": .string("humanReview")]
+    )
 
     #expect(truth.status == .published)
     #expect(embedding.vectorLength == 1536)
@@ -69,6 +109,12 @@ struct HostContractSurfaceTests {
     #expect(match.storageKey == embedding.storageKey)
     #expect(packageDescriptor.packageKind == .runtimeFill)
     #expect(packageDescriptor.status == .materialized)
+    #expect(controlDescriptor.mode == "peer_review")
+    #expect(controlDescriptor.automation["autoDispatch"] == false)
+    #expect(peerApprovalDescriptor.tapMode == "restricted")
+    #expect(peerApprovalDescriptor.humanGateState == "waitingApproval")
+    #expect(tapRuntimeEvent.eventKind == "peer_approval_requested")
+    #expect(tapRuntimeEvent.metadata["route"] == .string("humanReview"))
   }
 
   @Test

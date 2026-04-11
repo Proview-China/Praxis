@@ -192,6 +192,41 @@ private func localSQLiteEnsureSchema(database: OpaquePointer?) throws {
     """,
     "CREATE INDEX IF NOT EXISTS idx_cmp_packages_project_updated_at ON cmp_packages(project_id, updated_at DESC);",
     """
+    CREATE TABLE IF NOT EXISTS cmp_controls (
+      project_id TEXT NOT NULL,
+      agent_id TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      descriptor_json TEXT NOT NULL,
+      PRIMARY KEY (project_id, agent_id)
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_cmp_controls_project_updated_at ON cmp_controls(project_id, updated_at DESC);",
+    """
+    CREATE TABLE IF NOT EXISTS cmp_peer_approvals (
+      project_id TEXT NOT NULL,
+      agent_id TEXT NOT NULL,
+      target_agent_id TEXT NOT NULL,
+      capability_key TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      descriptor_json TEXT NOT NULL,
+      PRIMARY KEY (project_id, agent_id, target_agent_id, capability_key)
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_cmp_peer_approvals_project_updated_at ON cmp_peer_approvals(project_id, updated_at DESC);",
+    """
+    CREATE TABLE IF NOT EXISTS tap_runtime_events (
+      event_id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      agent_id TEXT NOT NULL,
+      target_agent_id TEXT,
+      event_kind TEXT NOT NULL,
+      capability_key TEXT,
+      created_at TEXT NOT NULL,
+      record_json TEXT NOT NULL
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_tap_runtime_events_project_created_at ON tap_runtime_events(project_id, created_at DESC);",
+    """
     CREATE TABLE IF NOT EXISTS delivery_truth (
       delivery_id TEXT PRIMARY KEY,
       package_id TEXT,
@@ -1026,6 +1061,274 @@ public actor PraxisLocalMessageBus: PraxisMessageBusContract {
   }
 }
 
+public actor PraxisLocalCmpControlStore: PraxisCmpControlStoreContract {
+  private let fileURL: URL
+
+  public init(fileURL: URL) {
+    self.fileURL = fileURL
+  }
+
+  public func save(_ descriptor: PraxisCmpControlDescriptor) async throws -> PraxisCmpControlStoreWriteReceipt {
+    let descriptorJSON = try localRuntimeEncodeJSON(descriptor)
+    let agentScope = descriptor.agentID ?? ""
+    try withLocalSQLiteDatabase(at: fileURL) { database in
+      let statement = try localSQLitePrepareStatement(
+        """
+        INSERT INTO cmp_controls (
+          project_id,
+          agent_id,
+          updated_at,
+          descriptor_json
+        ) VALUES (?, ?, ?, ?)
+        ON CONFLICT(project_id, agent_id) DO UPDATE SET
+          updated_at = excluded.updated_at,
+          descriptor_json = excluded.descriptor_json;
+        """,
+        database: database
+      )
+      defer { sqlite3_finalize(statement) }
+      try localSQLiteBindText(descriptor.projectID, at: 1, in: statement, database: database)
+      try localSQLiteBindText(agentScope, at: 2, in: statement, database: database)
+      try localSQLiteBindText(descriptor.updatedAt, at: 3, in: statement, database: database)
+      try localSQLiteBindText(descriptorJSON, at: 4, in: statement, database: database)
+      guard sqlite3_step(statement) == SQLITE_DONE else {
+        throw PraxisError.invariantViolation("Failed to persist CMP control descriptor: \(localSQLiteErrorMessage(database)).")
+      }
+    }
+    return PraxisCmpControlStoreWriteReceipt(
+      projectID: descriptor.projectID,
+      agentID: descriptor.agentID,
+      storedAt: descriptor.updatedAt
+    )
+  }
+
+  public func describe(_ query: PraxisCmpControlQuery) async throws -> PraxisCmpControlDescriptor? {
+    let agentScope = query.agentID ?? ""
+    return try withLocalSQLiteDatabase(at: fileURL) { database in
+      let statement = try localSQLitePrepareStatement(
+        """
+        SELECT descriptor_json
+        FROM cmp_controls
+        WHERE project_id = ? AND agent_id = ?
+        ORDER BY updated_at DESC
+        LIMIT 1;
+        """,
+        database: database
+      )
+      defer { sqlite3_finalize(statement) }
+      try localSQLiteBindText(query.projectID, at: 1, in: statement, database: database)
+      try localSQLiteBindText(agentScope, at: 2, in: statement, database: database)
+      let code = sqlite3_step(statement)
+      switch code {
+      case SQLITE_ROW:
+        guard let descriptorJSON = localSQLiteText(from: statement, at: 0) else {
+          return nil
+        }
+        return try localRuntimeDecodeJSON(PraxisCmpControlDescriptor.self, from: descriptorJSON)
+      case SQLITE_DONE:
+        return nil
+      default:
+        throw PraxisError.invariantViolation("Failed to read CMP control descriptor: \(localSQLiteErrorMessage(database)).")
+      }
+    }
+  }
+}
+
+public actor PraxisLocalCmpPeerApprovalStore: PraxisCmpPeerApprovalStoreContract {
+  private let fileURL: URL
+
+  public init(fileURL: URL) {
+    self.fileURL = fileURL
+  }
+
+  public func save(_ descriptor: PraxisCmpPeerApprovalDescriptor) async throws -> PraxisCmpPeerApprovalStoreWriteReceipt {
+    let descriptorJSON = try localRuntimeEncodeJSON(descriptor)
+    try withLocalSQLiteDatabase(at: fileURL) { database in
+      let statement = try localSQLitePrepareStatement(
+        """
+        INSERT INTO cmp_peer_approvals (
+          project_id,
+          agent_id,
+          target_agent_id,
+          capability_key,
+          updated_at,
+          descriptor_json
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(project_id, agent_id, target_agent_id, capability_key) DO UPDATE SET
+          updated_at = excluded.updated_at,
+          descriptor_json = excluded.descriptor_json;
+        """,
+        database: database
+      )
+      defer { sqlite3_finalize(statement) }
+      try localSQLiteBindText(descriptor.projectID, at: 1, in: statement, database: database)
+      try localSQLiteBindText(descriptor.agentID, at: 2, in: statement, database: database)
+      try localSQLiteBindText(descriptor.targetAgentID, at: 3, in: statement, database: database)
+      try localSQLiteBindText(descriptor.capabilityKey, at: 4, in: statement, database: database)
+      try localSQLiteBindText(descriptor.updatedAt, at: 5, in: statement, database: database)
+      try localSQLiteBindText(descriptorJSON, at: 6, in: statement, database: database)
+      guard sqlite3_step(statement) == SQLITE_DONE else {
+        throw PraxisError.invariantViolation("Failed to persist CMP peer approval descriptor: \(localSQLiteErrorMessage(database)).")
+      }
+    }
+    return PraxisCmpPeerApprovalStoreWriteReceipt(
+      projectID: descriptor.projectID,
+      agentID: descriptor.agentID,
+      targetAgentID: descriptor.targetAgentID,
+      capabilityKey: descriptor.capabilityKey,
+      storedAt: descriptor.updatedAt
+    )
+  }
+
+  public func describe(_ query: PraxisCmpPeerApprovalQuery) async throws -> PraxisCmpPeerApprovalDescriptor? {
+    try await describeAll(query).first
+  }
+
+  public func describeAll(_ query: PraxisCmpPeerApprovalQuery) async throws -> [PraxisCmpPeerApprovalDescriptor] {
+    try withLocalSQLiteDatabase(at: fileURL) { database in
+      var predicates = ["project_id = ?"]
+      var bindings: [String] = [query.projectID]
+      if let agentID = query.agentID {
+        predicates.append("agent_id = ?")
+        bindings.append(agentID)
+      }
+      if let targetAgentID = query.targetAgentID {
+        predicates.append("target_agent_id = ?")
+        bindings.append(targetAgentID)
+      }
+      if let capabilityKey = query.capabilityKey {
+        predicates.append("capability_key = ?")
+        bindings.append(capabilityKey)
+      }
+      let statement = try localSQLitePrepareStatement(
+        """
+        SELECT descriptor_json
+        FROM cmp_peer_approvals
+        WHERE \(predicates.joined(separator: " AND "))
+        ORDER BY updated_at DESC, agent_id ASC, target_agent_id ASC, capability_key ASC
+        LIMIT 200;
+        """,
+        database: database
+      )
+      defer { sqlite3_finalize(statement) }
+      for (offset, binding) in bindings.enumerated() {
+        try localSQLiteBindText(binding, at: Int32(offset + 1), in: statement, database: database)
+      }
+      var descriptors: [PraxisCmpPeerApprovalDescriptor] = []
+
+      while true {
+        let code = sqlite3_step(statement)
+        switch code {
+        case SQLITE_ROW:
+          guard let descriptorJSON = localSQLiteText(from: statement, at: 0) else {
+            continue
+          }
+          let descriptor = try localRuntimeDecodeJSON(PraxisCmpPeerApprovalDescriptor.self, from: descriptorJSON)
+          descriptors.append(descriptor)
+        case SQLITE_DONE:
+          return descriptors
+        default:
+          throw PraxisError.invariantViolation("Failed to read CMP peer approval descriptor: \(localSQLiteErrorMessage(database)).")
+        }
+      }
+    }
+  }
+}
+
+public actor PraxisLocalTapRuntimeEventStore: PraxisTapRuntimeEventStoreContract {
+  private let fileURL: URL
+
+  public init(fileURL: URL) {
+    self.fileURL = fileURL
+  }
+
+  public func append(_ record: PraxisTapRuntimeEventRecord) async throws -> PraxisTapRuntimeEventStoreWriteReceipt {
+    let recordJSON = try localRuntimeEncodeJSON(record)
+    try withLocalSQLiteDatabase(at: fileURL) { database in
+      let statement = try localSQLitePrepareStatement(
+        """
+        INSERT INTO tap_runtime_events (
+          event_id,
+          project_id,
+          agent_id,
+          target_agent_id,
+          event_kind,
+          capability_key,
+          created_at,
+          record_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+        """,
+        database: database
+      )
+      defer { sqlite3_finalize(statement) }
+      try localSQLiteBindText(record.eventID, at: 1, in: statement, database: database)
+      try localSQLiteBindText(record.projectID, at: 2, in: statement, database: database)
+      try localSQLiteBindText(record.agentID, at: 3, in: statement, database: database)
+      try localSQLiteBindText(record.targetAgentID, at: 4, in: statement, database: database)
+      try localSQLiteBindText(record.eventKind, at: 5, in: statement, database: database)
+      try localSQLiteBindText(record.capabilityKey, at: 6, in: statement, database: database)
+      try localSQLiteBindText(record.createdAt, at: 7, in: statement, database: database)
+      try localSQLiteBindText(recordJSON, at: 8, in: statement, database: database)
+      guard sqlite3_step(statement) == SQLITE_DONE else {
+        throw PraxisError.invariantViolation("Failed to append TAP runtime event: \(localSQLiteErrorMessage(database)).")
+      }
+    }
+    return PraxisTapRuntimeEventStoreWriteReceipt(
+      eventID: record.eventID,
+      projectID: record.projectID,
+      createdAt: record.createdAt
+    )
+  }
+
+  public func read(_ query: PraxisTapRuntimeEventQuery) async throws -> [PraxisTapRuntimeEventRecord] {
+    try withLocalSQLiteDatabase(at: fileURL) { database in
+      var predicates = ["project_id = ?"]
+      var textBindings: [String] = [query.projectID]
+      if let agentID = query.agentID {
+        predicates.append("agent_id = ?")
+        textBindings.append(agentID)
+      }
+      if let targetAgentID = query.targetAgentID {
+        predicates.append("target_agent_id = ?")
+        textBindings.append(targetAgentID)
+      }
+      let statement = try localSQLitePrepareStatement(
+        """
+        SELECT record_json
+        FROM tap_runtime_events
+        WHERE \(predicates.joined(separator: " AND "))
+        ORDER BY created_at DESC, event_id DESC
+        LIMIT ?;
+        """,
+        database: database
+      )
+      defer { sqlite3_finalize(statement) }
+      let clampedLimit = max(0, min(query.limit, 200))
+      for (offset, binding) in textBindings.enumerated() {
+        try localSQLiteBindText(binding, at: Int32(offset + 1), in: statement, database: database)
+      }
+      try localSQLiteBindInteger(clampedLimit, at: Int32(textBindings.count + 1), in: statement, database: database)
+
+      var records: [PraxisTapRuntimeEventRecord] = []
+      while true {
+        let code = sqlite3_step(statement)
+        switch code {
+        case SQLITE_ROW:
+          guard let recordJSON = localSQLiteText(from: statement, at: 0) else {
+            continue
+          }
+          let record = try localRuntimeDecodeJSON(PraxisTapRuntimeEventRecord.self, from: recordJSON)
+          records.append(record)
+        case SQLITE_DONE:
+          return records
+        default:
+          throw PraxisError.invariantViolation("Failed to read TAP runtime events: \(localSQLiteErrorMessage(database)).")
+        }
+      }
+    }
+  }
+}
+
 public actor PraxisLocalDeliveryTruthStore: PraxisDeliveryTruthStoreContract {
   private let fileURL: URL
 
@@ -1819,6 +2122,9 @@ public extension PraxisHostAdapterRegistry {
       journalStore: PraxisLocalJournalStore(fileURL: paths.databaseFileURL),
       projectionStore: PraxisLocalProjectionStore(fileURL: paths.databaseFileURL),
       cmpContextPackageStore: PraxisLocalCmpContextPackageStore(fileURL: paths.databaseFileURL),
+      cmpControlStore: PraxisLocalCmpControlStore(fileURL: paths.databaseFileURL),
+      cmpPeerApprovalStore: PraxisLocalCmpPeerApprovalStore(fileURL: paths.databaseFileURL),
+      tapRuntimeEventStore: PraxisLocalTapRuntimeEventStore(fileURL: paths.databaseFileURL),
       messageBus: PraxisLocalMessageBus(),
       deliveryTruthStore: PraxisLocalDeliveryTruthStore(fileURL: paths.databaseFileURL),
       embeddingStore: PraxisLocalEmbeddingStore(fileURL: paths.databaseFileURL),
