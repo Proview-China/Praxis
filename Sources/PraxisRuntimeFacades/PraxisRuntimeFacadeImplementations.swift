@@ -7,23 +7,75 @@ import PraxisRun
 public final class PraxisRuntimeFacade: Sendable {
   public let runFacade: PraxisRunFacade
   public let inspectionFacade: PraxisInspectionFacade
+  public let cmpSessionFacade: PraxisCmpSessionFacade
+  public let cmpProjectFacade: PraxisCmpProjectFacade
+  public let cmpFlowFacade: PraxisCmpFlowFacade
+  public let cmpRolesFacade: PraxisCmpRolesFacade
+  public let cmpControlFacade: PraxisCmpControlFacade
+  public let cmpReadbackFacade: PraxisCmpReadbackFacade
   public let cmpFacade: PraxisCmpFacade
 
   public init(
     runFacade: PraxisRunFacade,
     inspectionFacade: PraxisInspectionFacade,
-    cmpFacade: PraxisCmpFacade
+    cmpSessionFacade: PraxisCmpSessionFacade,
+    cmpProjectFacade: PraxisCmpProjectFacade,
+    cmpFlowFacade: PraxisCmpFlowFacade,
+    cmpRolesFacade: PraxisCmpRolesFacade,
+    cmpControlFacade: PraxisCmpControlFacade,
+    cmpReadbackFacade: PraxisCmpReadbackFacade
   ) {
     self.runFacade = runFacade
     self.inspectionFacade = inspectionFacade
-    self.cmpFacade = cmpFacade
+    self.cmpSessionFacade = cmpSessionFacade
+    self.cmpProjectFacade = cmpProjectFacade
+    self.cmpFlowFacade = cmpFlowFacade
+    self.cmpRolesFacade = cmpRolesFacade
+    self.cmpControlFacade = cmpControlFacade
+    self.cmpReadbackFacade = cmpReadbackFacade
+    self.cmpFacade = .init(
+      sessionFacade: cmpSessionFacade,
+      projectFacade: cmpProjectFacade,
+      flowFacade: cmpFlowFacade,
+      rolesFacade: cmpRolesFacade,
+      controlFacade: cmpControlFacade,
+      readbackFacade: cmpReadbackFacade
+    )
+  }
+
+  public convenience init(
+    runFacade: PraxisRunFacade,
+    inspectionFacade: PraxisInspectionFacade,
+    cmpFacade: PraxisCmpFacade
+  ) {
+    self.init(
+      runFacade: runFacade,
+      inspectionFacade: inspectionFacade,
+      cmpSessionFacade: cmpFacade.sessionFacade,
+      cmpProjectFacade: cmpFacade.projectFacade,
+      cmpFlowFacade: cmpFacade.flowFacade,
+      cmpRolesFacade: cmpFacade.rolesFacade,
+      cmpControlFacade: cmpFacade.controlFacade,
+      cmpReadbackFacade: cmpFacade.readbackFacade
+    )
   }
 
   public convenience init(dependencies: PraxisDependencyGraph) {
+    let cmpSessionFacade = PraxisCmpSessionFacade(dependencies: dependencies)
+    let cmpProjectFacade = PraxisCmpProjectFacade(dependencies: dependencies)
+    let cmpFlowFacade = PraxisCmpFlowFacade(dependencies: dependencies)
+    let cmpRolesFacade = PraxisCmpRolesFacade(dependencies: dependencies)
+    let cmpControlFacade = PraxisCmpControlFacade(dependencies: dependencies)
+    let cmpReadbackFacade = PraxisCmpReadbackFacade(dependencies: dependencies)
     self.init(
       runFacade: .init(dependencies: dependencies),
       inspectionFacade: .init(dependencies: dependencies),
-      cmpFacade: .init(dependencies: dependencies)
+      cmpSessionFacade: cmpSessionFacade,
+      cmpProjectFacade: cmpProjectFacade,
+      cmpFlowFacade: cmpFlowFacade,
+      cmpRolesFacade: cmpRolesFacade,
+      cmpControlFacade: cmpControlFacade,
+      cmpReadbackFacade: cmpReadbackFacade
     )
   }
 }
@@ -205,435 +257,5 @@ public final class PraxisInspectionFacade: Sendable {
 
   public func buildCapabilityCatalogSnapshot() async throws -> PraxisInspectionSnapshot {
     PraxisInspectionSnapshot(summary: try await buildCapabilityCatalogUseCase.execute())
-  }
-}
-
-public final class PraxisCmpFacade: Sendable {
-  public let openCmpSessionUseCase: any PraxisOpenCmpSessionUseCaseProtocol
-  public let readbackCmpProjectUseCase: any PraxisReadbackCmpProjectUseCaseProtocol
-  public let bootstrapCmpProjectUseCase: any PraxisBootstrapCmpProjectUseCaseProtocol
-  public let recoverCmpProjectUseCase: (any PraxisRecoverCmpProjectUseCaseProtocol)?
-  public let ingestCmpFlowUseCase: any PraxisIngestCmpFlowUseCaseProtocol
-  public let commitCmpFlowUseCase: any PraxisCommitCmpFlowUseCaseProtocol
-  public let resolveCmpFlowUseCase: any PraxisResolveCmpFlowUseCaseProtocol
-  public let materializeCmpFlowUseCase: any PraxisMaterializeCmpFlowUseCaseProtocol
-  public let dispatchCmpFlowUseCase: any PraxisDispatchCmpFlowUseCaseProtocol
-  public let retryCmpDispatchUseCase: any PraxisRetryCmpDispatchUseCaseProtocol
-  public let requestCmpHistoryUseCase: any PraxisRequestCmpHistoryUseCaseProtocol
-  public let readbackCmpRolesUseCase: any PraxisReadbackCmpRolesUseCaseProtocol
-  public let readbackCmpControlUseCase: any PraxisReadbackCmpControlUseCaseProtocol
-  public let updateCmpControlUseCase: any PraxisUpdateCmpControlUseCaseProtocol
-  public let requestCmpPeerApprovalUseCase: any PraxisRequestCmpPeerApprovalUseCaseProtocol
-  public let decideCmpPeerApprovalUseCase: any PraxisDecideCmpPeerApprovalUseCaseProtocol
-  public let readbackCmpPeerApprovalUseCase: any PraxisReadbackCmpPeerApprovalUseCaseProtocol
-  public let readbackCmpStatusUseCase: any PraxisReadbackCmpStatusUseCaseProtocol
-  public let smokeCmpProjectUseCase: any PraxisSmokeCmpProjectUseCaseProtocol
-
-  public init(
-    openCmpSessionUseCase: any PraxisOpenCmpSessionUseCaseProtocol,
-    readbackCmpProjectUseCase: any PraxisReadbackCmpProjectUseCaseProtocol,
-    bootstrapCmpProjectUseCase: any PraxisBootstrapCmpProjectUseCaseProtocol,
-    recoverCmpProjectUseCase: (any PraxisRecoverCmpProjectUseCaseProtocol)? = nil,
-    ingestCmpFlowUseCase: any PraxisIngestCmpFlowUseCaseProtocol,
-    commitCmpFlowUseCase: any PraxisCommitCmpFlowUseCaseProtocol,
-    resolveCmpFlowUseCase: any PraxisResolveCmpFlowUseCaseProtocol,
-    materializeCmpFlowUseCase: any PraxisMaterializeCmpFlowUseCaseProtocol,
-    dispatchCmpFlowUseCase: any PraxisDispatchCmpFlowUseCaseProtocol,
-    retryCmpDispatchUseCase: any PraxisRetryCmpDispatchUseCaseProtocol,
-    requestCmpHistoryUseCase: any PraxisRequestCmpHistoryUseCaseProtocol,
-    readbackCmpRolesUseCase: any PraxisReadbackCmpRolesUseCaseProtocol,
-    readbackCmpControlUseCase: any PraxisReadbackCmpControlUseCaseProtocol,
-    updateCmpControlUseCase: any PraxisUpdateCmpControlUseCaseProtocol,
-    requestCmpPeerApprovalUseCase: any PraxisRequestCmpPeerApprovalUseCaseProtocol,
-    decideCmpPeerApprovalUseCase: any PraxisDecideCmpPeerApprovalUseCaseProtocol,
-    readbackCmpPeerApprovalUseCase: any PraxisReadbackCmpPeerApprovalUseCaseProtocol,
-    readbackCmpStatusUseCase: any PraxisReadbackCmpStatusUseCaseProtocol,
-    smokeCmpProjectUseCase: any PraxisSmokeCmpProjectUseCaseProtocol
-  ) {
-    self.openCmpSessionUseCase = openCmpSessionUseCase
-    self.readbackCmpProjectUseCase = readbackCmpProjectUseCase
-    self.bootstrapCmpProjectUseCase = bootstrapCmpProjectUseCase
-    self.recoverCmpProjectUseCase = recoverCmpProjectUseCase
-    self.ingestCmpFlowUseCase = ingestCmpFlowUseCase
-    self.commitCmpFlowUseCase = commitCmpFlowUseCase
-    self.resolveCmpFlowUseCase = resolveCmpFlowUseCase
-    self.materializeCmpFlowUseCase = materializeCmpFlowUseCase
-    self.dispatchCmpFlowUseCase = dispatchCmpFlowUseCase
-    self.retryCmpDispatchUseCase = retryCmpDispatchUseCase
-    self.requestCmpHistoryUseCase = requestCmpHistoryUseCase
-    self.readbackCmpRolesUseCase = readbackCmpRolesUseCase
-    self.readbackCmpControlUseCase = readbackCmpControlUseCase
-    self.updateCmpControlUseCase = updateCmpControlUseCase
-    self.requestCmpPeerApprovalUseCase = requestCmpPeerApprovalUseCase
-    self.decideCmpPeerApprovalUseCase = decideCmpPeerApprovalUseCase
-    self.readbackCmpPeerApprovalUseCase = readbackCmpPeerApprovalUseCase
-    self.readbackCmpStatusUseCase = readbackCmpStatusUseCase
-    self.smokeCmpProjectUseCase = smokeCmpProjectUseCase
-  }
-
-  public convenience init(dependencies: PraxisDependencyGraph) {
-    self.init(
-      openCmpSessionUseCase: PraxisOpenCmpSessionUseCase(dependencies: dependencies),
-      readbackCmpProjectUseCase: PraxisReadbackCmpProjectUseCase(dependencies: dependencies),
-      bootstrapCmpProjectUseCase: PraxisBootstrapCmpProjectUseCase(dependencies: dependencies),
-      recoverCmpProjectUseCase: PraxisRecoverCmpProjectUseCase(dependencies: dependencies),
-      ingestCmpFlowUseCase: PraxisIngestCmpFlowUseCase(dependencies: dependencies),
-      commitCmpFlowUseCase: PraxisCommitCmpFlowUseCase(dependencies: dependencies),
-      resolveCmpFlowUseCase: PraxisResolveCmpFlowUseCase(dependencies: dependencies),
-      materializeCmpFlowUseCase: PraxisMaterializeCmpFlowUseCase(dependencies: dependencies),
-      dispatchCmpFlowUseCase: PraxisDispatchCmpFlowUseCase(dependencies: dependencies),
-      retryCmpDispatchUseCase: PraxisRetryCmpDispatchUseCase(dependencies: dependencies),
-      requestCmpHistoryUseCase: PraxisRequestCmpHistoryUseCase(dependencies: dependencies),
-      readbackCmpRolesUseCase: PraxisReadbackCmpRolesUseCase(dependencies: dependencies),
-      readbackCmpControlUseCase: PraxisReadbackCmpControlUseCase(dependencies: dependencies),
-      updateCmpControlUseCase: PraxisUpdateCmpControlUseCase(dependencies: dependencies),
-      requestCmpPeerApprovalUseCase: PraxisRequestCmpPeerApprovalUseCase(dependencies: dependencies),
-      decideCmpPeerApprovalUseCase: PraxisDecideCmpPeerApprovalUseCase(dependencies: dependencies),
-      readbackCmpPeerApprovalUseCase: PraxisReadbackCmpPeerApprovalUseCase(dependencies: dependencies),
-      readbackCmpStatusUseCase: PraxisReadbackCmpStatusUseCase(dependencies: dependencies),
-      smokeCmpProjectUseCase: PraxisSmokeCmpProjectUseCase(dependencies: dependencies)
-    )
-  }
-
-  public func openSession(_ command: PraxisOpenCmpSessionCommand) async throws -> PraxisCmpSessionSnapshot {
-    let session = try await openCmpSessionUseCase.execute(command)
-    return PraxisCmpSessionSnapshot(
-      sessionID: session.sessionID,
-      projectID: session.projectID,
-      summary: session.summary,
-      createdAt: session.createdAt,
-      hostProfile: mapHostProfile(session.hostProfile),
-      issues: session.issues
-    )
-  }
-
-  public func readbackProject(_ command: PraxisReadbackCmpProjectCommand) async throws -> PraxisCmpProjectReadbackSnapshot {
-    let readback = try await readbackCmpProjectUseCase.execute(command)
-    return PraxisCmpProjectReadbackSnapshot(
-      summary: readback.summary,
-      projectSummary: .init(
-        projectID: readback.projectID,
-        hostProfile: mapHostProfile(readback.hostProfile),
-        componentStatuses: readback.componentStatuses.mapValues(mapTruthLayerStatus),
-        issues: readback.issues
-      ),
-      persistenceSummary: readback.persistenceSummary,
-      coordinationSummary: readback.coordinationSummary
-    )
-  }
-
-  public func bootstrapProject(_ command: PraxisBootstrapCmpProjectCommand) async throws -> PraxisCmpProjectBootstrapSnapshot {
-    let bootstrap = try await bootstrapCmpProjectUseCase.execute(command)
-    let gitStatus: PraxisTruthLayerStatus
-    switch bootstrap.gitReceipt.status {
-    case .bootstrapped, .alreadyExists:
-      gitStatus = .ready
-    case .conflicted:
-      gitStatus = .degraded
-    }
-    return PraxisCmpProjectBootstrapSnapshot(
-      summary: bootstrap.summary,
-      projectSummary: .init(
-        projectID: bootstrap.projectID,
-        hostProfile: mapHostProfile(bootstrap.hostProfile),
-        componentStatuses: [
-          "git": gitStatus,
-          "db": bootstrap.dbReceipt.missingTargetCount == 0 ? .ready : .degraded,
-          "mq": bootstrap.mqReceipts.isEmpty ? .failed : .ready,
-          "lineage": bootstrap.lineages.isEmpty ? .failed : .ready,
-        ],
-        issues: bootstrap.issues
-      ),
-      gitSummary: "Git bootstrap \(bootstrap.gitReceipt.status.rawValue) with \(bootstrap.gitBranchRuntimes.count) branch runtimes and \(bootstrap.gitReceipt.createdBranches.count) created branch refs.",
-      persistenceSummary: bootstrap.persistenceSummary,
-      coordinationSummary: bootstrap.coordinationSummary
-    )
-  }
-
-  public func recoverCmpProject(_ command: PraxisRecoverCmpProjectCommand) async throws -> PraxisCmpProjectRecoverySnapshot {
-    guard let recoverCmpProjectUseCase else {
-      throw PraxisError.dependencyMissing("CMP project recover use case is not wired in this runtime facade.")
-    }
-    let recovery = try await recoverCmpProjectUseCase.execute(command)
-    return PraxisCmpProjectRecoverySnapshot(
-      summary: recovery.summary,
-      projectID: recovery.projectID,
-      sourceAgentID: recovery.sourceAgentID,
-      targetAgentID: recovery.targetAgentID,
-      status: recovery.status,
-      recoverySource: recovery.recoverySource,
-      foundHistoricalContext: recovery.foundHistoricalContext,
-      snapshotID: recovery.snapshotID,
-      packageID: recovery.packageID,
-      packageKind: recovery.packageKind.rawValue,
-      projectionRecoverySummary: recovery.projectionRecoverySummary,
-      hydratedRecoverySummary: recovery.hydratedRecoverySummary,
-      resumableProjectionCount: recovery.resumableProjectionCount,
-      missingProjectionCount: recovery.missingProjectionCount,
-      issues: recovery.issues
-    )
-  }
-
-  public func ingestFlow(_ command: PraxisIngestCmpFlowCommand) async throws -> PraxisCmpFlowIngestSnapshot {
-    let ingest = try await ingestCmpFlowUseCase.execute(command)
-    return PraxisCmpFlowIngestSnapshot(
-      summary: ingest.summary,
-      projectID: ingest.projectID,
-      agentID: ingest.agentID,
-      sessionID: ingest.sessionID,
-      requestID: ingest.requestID.rawValue,
-      acceptedEventCount: ingest.result.acceptedEventIDs.count,
-      sectionCount: ingest.ingress.sections.count,
-      storedSectionCount: ingest.loweredSections.compactMap(\.storedSection).count,
-      nextAction: ingest.result.nextAction
-    )
-  }
-
-  public func commitFlow(_ command: PraxisCommitCmpFlowCommand) async throws -> PraxisCmpFlowCommitSnapshot {
-    let commit = try await commitCmpFlowUseCase.execute(command)
-    return PraxisCmpFlowCommitSnapshot(
-      summary: commit.summary,
-      projectID: commit.projectID,
-      agentID: commit.agentID,
-      deltaID: commit.result.delta.id.rawValue,
-      snapshotCandidateID: commit.result.snapshotCandidateID?.rawValue,
-      activeLineStage: commit.activeLine.stage.rawValue,
-      branchRef: commit.snapshotCandidate.branchRef
-    )
-  }
-
-  public func resolveFlow(_ command: PraxisResolveCmpFlowCommand) async throws -> PraxisCmpFlowResolveSnapshot {
-    let resolve = try await resolveCmpFlowUseCase.execute(command)
-    return PraxisCmpFlowResolveSnapshot(
-      summary: resolve.summary,
-      projectID: resolve.projectID,
-      agentID: resolve.agentID,
-      found: resolve.result.found,
-      snapshotID: resolve.snapshot?.id.rawValue,
-      branchRef: resolve.snapshot?.branchRef,
-      qualityLabel: resolve.snapshot?.qualityLabel.rawValue
-    )
-  }
-
-  public func materializeFlow(_ command: PraxisMaterializeCmpFlowCommand) async throws -> PraxisCmpFlowMaterializeSnapshot {
-    let materialize = try await materializeCmpFlowUseCase.execute(command)
-    return PraxisCmpFlowMaterializeSnapshot(
-      summary: materialize.summary,
-      projectID: materialize.projectID,
-      agentID: materialize.agentID,
-      packageID: materialize.result.contextPackage.id.rawValue,
-      targetAgentID: materialize.result.contextPackage.targetAgentID,
-      packageKind: materialize.result.contextPackage.kind.rawValue,
-      selectedSectionCount: materialize.materializationPlan.selectedSectionIDs.count
-    )
-  }
-
-  public func dispatchFlow(_ command: PraxisDispatchCmpFlowCommand) async throws -> PraxisCmpFlowDispatchSnapshot {
-    let dispatch = try await dispatchCmpFlowUseCase.execute(command)
-    return PraxisCmpFlowDispatchSnapshot(
-      summary: dispatch.summary,
-      projectID: dispatch.projectID,
-      agentID: dispatch.agentID,
-      dispatchID: dispatch.result.receipt.id.rawValue,
-      targetAgentID: dispatch.result.receipt.targetAgentID,
-      targetKind: dispatch.result.receipt.targetKind.rawValue,
-      status: dispatch.result.receipt.status.rawValue
-    )
-  }
-
-  public func retryDispatch(_ command: PraxisRetryCmpDispatchCommand) async throws -> PraxisCmpFlowDispatchSnapshot {
-    let dispatch = try await retryCmpDispatchUseCase.execute(command)
-    return PraxisCmpFlowDispatchSnapshot(
-      summary: dispatch.summary,
-      projectID: dispatch.projectID,
-      agentID: dispatch.agentID,
-      dispatchID: dispatch.result.receipt.id.rawValue,
-      targetAgentID: dispatch.result.receipt.targetAgentID,
-      targetKind: dispatch.result.receipt.targetKind.rawValue,
-      status: dispatch.result.receipt.status.rawValue
-    )
-  }
-
-  public func requestHistory(_ command: PraxisRequestCmpHistoryCommand) async throws -> PraxisCmpFlowHistorySnapshot {
-    let history = try await requestCmpHistoryUseCase.execute(command)
-    return PraxisCmpFlowHistorySnapshot(
-      summary: history.summary,
-      projectID: history.projectID,
-      requesterAgentID: history.requesterAgentID,
-      found: history.result.found,
-      snapshotID: history.result.snapshot?.id.rawValue,
-      packageID: history.result.contextPackage?.id.rawValue
-    )
-  }
-
-  public func readbackRoles(_ command: PraxisReadbackCmpRolesCommand) async throws -> PraxisCmpRolesPanelSnapshot {
-    let roles = try await readbackCmpRolesUseCase.execute(command)
-    return PraxisCmpRolesPanelSnapshot(
-      summary: roles.summary,
-      projectID: roles.projectID,
-      agentID: roles.agentID,
-      roleCounts: Dictionary(uniqueKeysWithValues: roles.roles.map { ($0.role.rawValue, $0.assignmentCount) }),
-      roleStages: Dictionary(uniqueKeysWithValues: roles.roles.compactMap { role in
-        guard let latestStage = role.latestStage else {
-          return nil
-        }
-        return (role.role.rawValue, latestStage)
-      }),
-      latestPackageID: roles.latestPackageID,
-      latestDispatchStatus: roles.latestDispatchStatus
-    )
-  }
-
-  public func readbackControl(_ command: PraxisReadbackCmpControlCommand) async throws -> PraxisCmpControlPanelSnapshot {
-    let control = try await readbackCmpControlUseCase.execute(command)
-    return PraxisCmpControlPanelSnapshot(
-      summary: control.summary,
-      projectID: control.projectID,
-      agentID: control.agentID,
-      executionStyle: control.control.executionStyle,
-      mode: control.control.mode,
-      readbackPriority: control.control.readbackPriority,
-      fallbackPolicy: control.control.fallbackPolicy,
-      recoveryPreference: control.control.recoveryPreference,
-      automation: control.control.automation,
-      latestPackageID: control.latestPackageID,
-      latestDispatchStatus: control.latestDispatchStatus,
-      latestTargetAgentID: control.latestTargetAgentID
-    )
-  }
-
-  public func updateControl(_ command: PraxisUpdateCmpControlCommand) async throws -> PraxisCmpControlUpdateSnapshot {
-    let update = try await updateCmpControlUseCase.execute(command)
-    return PraxisCmpControlUpdateSnapshot(
-      summary: update.summary,
-      projectID: update.projectID,
-      agentID: update.agentID,
-      executionStyle: update.control.executionStyle,
-      mode: update.control.mode,
-      readbackPriority: update.control.readbackPriority,
-      fallbackPolicy: update.control.fallbackPolicy,
-      recoveryPreference: update.control.recoveryPreference,
-      automation: update.control.automation,
-      storedAt: update.storedAt
-    )
-  }
-
-  public func requestPeerApproval(_ command: PraxisRequestCmpPeerApprovalCommand) async throws -> PraxisCmpPeerApprovalSnapshot {
-    let approval = try await requestCmpPeerApprovalUseCase.execute(command)
-    return PraxisCmpPeerApprovalSnapshot(
-      summary: approval.summary,
-      projectID: approval.projectID,
-      agentID: approval.agentID,
-      targetAgentID: approval.targetAgentID,
-      capabilityKey: approval.capabilityKey,
-      requestedTier: approval.requestedTier.rawValue,
-      route: approval.route,
-      outcome: approval.outcome,
-      tapMode: approval.tapMode,
-      riskLevel: approval.riskLevel,
-      humanGateState: approval.humanGateState,
-      requestedAt: approval.requestedAt,
-      decisionSummary: approval.decisionSummary
-    )
-  }
-
-  public func decidePeerApproval(_ command: PraxisDecideCmpPeerApprovalCommand) async throws -> PraxisCmpPeerApprovalSnapshot {
-    let approval = try await decideCmpPeerApprovalUseCase.execute(command)
-    return PraxisCmpPeerApprovalSnapshot(
-      summary: approval.summary,
-      projectID: approval.projectID,
-      agentID: approval.agentID,
-      targetAgentID: approval.targetAgentID,
-      capabilityKey: approval.capabilityKey,
-      requestedTier: approval.requestedTier.rawValue,
-      route: approval.route,
-      outcome: approval.outcome,
-      tapMode: approval.tapMode,
-      riskLevel: approval.riskLevel,
-      humanGateState: approval.humanGateState,
-      requestedAt: approval.requestedAt,
-      decisionSummary: approval.decisionSummary
-    )
-  }
-
-  public func readbackPeerApproval(_ command: PraxisReadbackCmpPeerApprovalCommand) async throws -> PraxisCmpPeerApprovalReadbackSnapshot {
-    let readback = try await readbackCmpPeerApprovalUseCase.execute(command)
-    return PraxisCmpPeerApprovalReadbackSnapshot(
-      summary: readback.summary,
-      projectID: readback.projectID,
-      agentID: readback.agentID,
-      targetAgentID: readback.targetAgentID,
-      capabilityKey: readback.capabilityKey,
-      requestedTier: readback.requestedTier?.rawValue,
-      route: readback.route,
-      outcome: readback.outcome,
-      tapMode: readback.tapMode,
-      riskLevel: readback.riskLevel,
-      humanGateState: readback.humanGateState,
-      requestedAt: readback.requestedAt,
-      decisionSummary: readback.decisionSummary,
-      found: readback.found
-    )
-  }
-
-  public func readbackStatus(_ command: PraxisReadbackCmpStatusCommand) async throws -> PraxisCmpStatusPanelSnapshot {
-    let status = try await readbackCmpStatusUseCase.execute(command)
-    return PraxisCmpStatusPanelSnapshot(
-      summary: status.summary,
-      projectID: status.projectID,
-      agentID: status.agentID,
-      executionStyle: status.control.executionStyle,
-      readbackPriority: status.control.readbackPriority,
-      packageCount: status.objectModel.packageCount,
-      latestPackageID: status.latestPackageID,
-      latestDispatchStatus: status.latestDispatchStatus,
-      roleCounts: Dictionary(uniqueKeysWithValues: status.roles.map { ($0.role.rawValue, $0.assignmentCount) }),
-      roleStages: Dictionary(uniqueKeysWithValues: status.roles.compactMap { role in
-        guard let latestStage = role.latestStage else {
-          return nil
-        }
-        return (role.role.rawValue, latestStage)
-      })
-    )
-  }
-
-  public func smokeProject(_ command: PraxisSmokeCmpProjectCommand) async throws -> PraxisCmpProjectSmokeSnapshot {
-    let smoke = try await smokeCmpProjectUseCase.execute(command)
-    return PraxisCmpProjectSmokeSnapshot(
-      projectID: smoke.projectID,
-      smokeResult: .init(
-        summary: smoke.summary,
-        checks: smoke.checks.map { check in
-          .init(
-            id: check.id,
-            gate: check.gate,
-            status: mapTruthLayerStatus(check.status),
-            summary: check.summary
-          )
-        }
-      )
-    )
-  }
-
-  private func mapHostProfile(_ profile: PraxisCmpProjectHostProfile) -> PraxisLocalRuntimeHostProfile {
-    .init(
-      executionStyle: profile.executionStyle,
-      structuredStore: profile.structuredStore,
-      deliveryStore: profile.deliveryStore,
-      messageTransport: profile.messageTransport,
-      gitAccess: profile.gitAccess,
-      semanticIndex: profile.semanticIndex
-    )
-  }
-
-  private func mapTruthLayerStatus(_ rawValue: String) -> PraxisTruthLayerStatus {
-    switch rawValue {
-    case "ready":
-      return .ready
-    case "failed", "missing":
-      return .failed
-    default:
-      return .degraded
-    }
   }
 }

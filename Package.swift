@@ -919,6 +919,18 @@ let package = Package(
     ),
     hostRuntimeArchitectureTestsTarget,
     .testTarget(
+      name: "PraxisRuntimeFacadesTests",
+      dependencies: [
+        "PraxisCmpTypes",
+        "PraxisRuntimeComposition",
+        "PraxisRuntimeFacades",
+        "PraxisRuntimeGateway",
+        "PraxisRuntimeUseCases",
+        "PraxisTapTypes",
+      ],
+      path: "Tests/PraxisRuntimeFacadesTests",
+    ),
+    .testTarget(
       name: "PraxisCLITests",
       dependencies: [
         "PraxisCLI",

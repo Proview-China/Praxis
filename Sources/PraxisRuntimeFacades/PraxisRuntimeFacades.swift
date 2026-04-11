@@ -3,8 +3,9 @@ import PraxisRuntimeUseCases
 import PraxisRun
 
 // TODO(reboot-plan):
-// - Implement stable facades, host-facing DTOs, and aggregated session/run view models.
+// - Continue tightening stable facades, host-facing DTOs, and aggregated session/run view models.
 // - Make facades the external runtime surface so CLI, UI, and FFI do not need to understand internal use-case details directly.
+// - Keep CMP facades split by neutral host surface instead of regrowing one large aggregate facade.
 // - Add presentation state and host-facing read-only snapshot types beyond the blueprint metadata.
 // - This file can later be split into RuntimeBlueprint.swift, FacadeDTOs.swift, RunFacade.swift, and InspectionFacade.swift.
 
@@ -39,6 +40,11 @@ public enum PraxisRuntimeFacadesModule {
     responsibility: "对 CLI / UI / FFI 暴露的 facade 与稳定入口模型。",
     tsModules: [
       "src/rax/facade.ts",
+      "src/rax/cmp/session.ts",
+      "src/rax/cmp/project.ts",
+      "src/rax/cmp/flow.ts",
+      "src/rax/cmp/roles.ts",
+      "src/rax/cmp/control.ts",
       "src/rax/mp-facade.ts",
       "src/agent_core/cmp-service",
     ],
