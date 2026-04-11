@@ -39,13 +39,10 @@ import PraxisTransition
 import PraxisUserIOContracts
 import PraxisWorkspaceContracts
 
-// TODO(reboot-plan):
-// - Implement presentation-facing DTOs and bridge mappers for native hosts while keeping
-//   runtime interface contracts host-agnostic and export-friendly.
-// - Ensure native presentation layers avoid touching composition, use case, or facade internals directly.
-// - Provide stable bridge models for view state, command rendering, and compatibility wrappers.
-// - This file can later be split into PresentationModels.swift, ApplePresentationBridge.swift,
-//   compatibility adapters, and FFIBridge.swift.
+// Boundary note:
+// - This target maps host-neutral runtime outputs into presentation state and compatibility wrappers.
+// - It must not redefine runtime contract truth or bypass RuntimeGateway / RuntimeInterface rules.
+// - Native hosts should depend on the bridge surface instead of composition, use cases, or facades.
 
 public enum PraxisRuntimePresentationBridgeModule {
   public static let boundary = PraxisBoundaryDescriptor(
@@ -107,16 +104,7 @@ public enum PraxisRuntimePresentationBridgeModule {
       PraxisRuntimeGatewayModule.boundary,
       boundary,
     ],
-    entrypoints: [
-      "PraxisCLI",
-      "PraxisAppleUI",
-      "PraxisFFI",
-    ],
-    rules: [
-      "Core 是逻辑层，不是单一模块。",
-      "HostContracts 必须按协议族继续拆分。",
-      "HostRuntime 必须按 composition/use case/facade/runtime interface/runtime gateway/presentation bridge 拆分。",
-      "CLI / 导出入口优先经由 RuntimeGateway -> RuntimeInterface；原生 UI 展示态通过 RuntimePresentationBridge 进入系统。",
-    ],
+    entrypoints: PraxisHostNeutralRuntimeBoundary.presentationBridgeEntrypoints,
+    rules: PraxisHostNeutralRuntimeBoundary.presentationBridgeBlueprintRules,
   )
 }

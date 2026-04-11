@@ -1,9 +1,12 @@
 import PraxisCoreTypes
 
-// TODO(reboot-plan):
-// - Keep this target host-agnostic and export-friendly; do not absorb CLI, SwiftUI, or ABI details.
-// - Use plain Codable request/response/event models so future FFI layers can map them into stable language bindings.
-// - Keep construction and host adapter wiring outside this target; composition still belongs to HostRuntime composition/bridge layers.
+// Boundary note:
+// - Keep this target host-agnostic and export-friendly; do not absorb CLI, SwiftUI, terminal,
+//   platform, or provider raw payload details.
+// - Use plain Codable request/response/event models so future FFI layers can map them into stable
+//   language bindings without presentation-specific shims.
+// - Keep construction and host adapter wiring outside this target; composition still belongs to
+//   HostRuntime composition / gateway layers.
 
 public enum PraxisRuntimeInterfaceModule {
   public static let boundary = PraxisBoundaryDescriptor(

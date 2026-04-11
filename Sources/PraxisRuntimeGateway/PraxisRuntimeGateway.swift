@@ -98,16 +98,8 @@ public enum PraxisRuntimeGatewayModule {
       PraxisRuntimeInterfaceModule.boundary,
       boundary,
     ],
-    entrypoints: [
-      "PraxisCLI",
-      "PraxisAppleUI",
-      "PraxisFFI",
-    ],
-    rules: [
-      "CLI / 导出入口优先经由 RuntimeGateway -> RuntimeInterface 进入系统。",
-      "原生 UI 如需展示态映射，可在 RuntimeGateway 之上追加 PresentationBridge。",
-      "RuntimeGateway 只负责 portal-agnostic bootstrap 与 runtime access，不吸收终端或 UI 细节。",
-    ],
+    entrypoints: PraxisHostNeutralRuntimeBoundary.gatewayEntrypoints,
+    rules: PraxisHostNeutralRuntimeBoundary.gatewayBlueprintRules,
   )
 }
 
