@@ -1,4 +1,5 @@
 import PraxisGoal
+import PraxisCoreTypes
 import PraxisRuntimeComposition
 import PraxisRuntimeUseCases
 import PraxisRun
@@ -211,6 +212,7 @@ public final class PraxisCmpFacade: Sendable {
   public let openCmpSessionUseCase: any PraxisOpenCmpSessionUseCaseProtocol
   public let readbackCmpProjectUseCase: any PraxisReadbackCmpProjectUseCaseProtocol
   public let bootstrapCmpProjectUseCase: any PraxisBootstrapCmpProjectUseCaseProtocol
+  public let recoverCmpProjectUseCase: (any PraxisRecoverCmpProjectUseCaseProtocol)?
   public let ingestCmpFlowUseCase: any PraxisIngestCmpFlowUseCaseProtocol
   public let commitCmpFlowUseCase: any PraxisCommitCmpFlowUseCaseProtocol
   public let resolveCmpFlowUseCase: any PraxisResolveCmpFlowUseCaseProtocol
@@ -231,6 +233,7 @@ public final class PraxisCmpFacade: Sendable {
     openCmpSessionUseCase: any PraxisOpenCmpSessionUseCaseProtocol,
     readbackCmpProjectUseCase: any PraxisReadbackCmpProjectUseCaseProtocol,
     bootstrapCmpProjectUseCase: any PraxisBootstrapCmpProjectUseCaseProtocol,
+    recoverCmpProjectUseCase: (any PraxisRecoverCmpProjectUseCaseProtocol)? = nil,
     ingestCmpFlowUseCase: any PraxisIngestCmpFlowUseCaseProtocol,
     commitCmpFlowUseCase: any PraxisCommitCmpFlowUseCaseProtocol,
     resolveCmpFlowUseCase: any PraxisResolveCmpFlowUseCaseProtocol,
@@ -250,6 +253,7 @@ public final class PraxisCmpFacade: Sendable {
     self.openCmpSessionUseCase = openCmpSessionUseCase
     self.readbackCmpProjectUseCase = readbackCmpProjectUseCase
     self.bootstrapCmpProjectUseCase = bootstrapCmpProjectUseCase
+    self.recoverCmpProjectUseCase = recoverCmpProjectUseCase
     self.ingestCmpFlowUseCase = ingestCmpFlowUseCase
     self.commitCmpFlowUseCase = commitCmpFlowUseCase
     self.resolveCmpFlowUseCase = resolveCmpFlowUseCase
@@ -272,6 +276,7 @@ public final class PraxisCmpFacade: Sendable {
       openCmpSessionUseCase: PraxisOpenCmpSessionUseCase(dependencies: dependencies),
       readbackCmpProjectUseCase: PraxisReadbackCmpProjectUseCase(dependencies: dependencies),
       bootstrapCmpProjectUseCase: PraxisBootstrapCmpProjectUseCase(dependencies: dependencies),
+      recoverCmpProjectUseCase: PraxisRecoverCmpProjectUseCase(dependencies: dependencies),
       ingestCmpFlowUseCase: PraxisIngestCmpFlowUseCase(dependencies: dependencies),
       commitCmpFlowUseCase: PraxisCommitCmpFlowUseCase(dependencies: dependencies),
       resolveCmpFlowUseCase: PraxisResolveCmpFlowUseCase(dependencies: dependencies),
@@ -342,6 +347,30 @@ public final class PraxisCmpFacade: Sendable {
       gitSummary: "Git bootstrap \(bootstrap.gitReceipt.status.rawValue) with \(bootstrap.gitBranchRuntimes.count) branch runtimes and \(bootstrap.gitReceipt.createdBranches.count) created branch refs.",
       persistenceSummary: bootstrap.persistenceSummary,
       coordinationSummary: bootstrap.coordinationSummary
+    )
+  }
+
+  public func recoverCmpProject(_ command: PraxisRecoverCmpProjectCommand) async throws -> PraxisCmpProjectRecoverySnapshot {
+    guard let recoverCmpProjectUseCase else {
+      throw PraxisError.dependencyMissing("CMP project recover use case is not wired in this runtime facade.")
+    }
+    let recovery = try await recoverCmpProjectUseCase.execute(command)
+    return PraxisCmpProjectRecoverySnapshot(
+      summary: recovery.summary,
+      projectID: recovery.projectID,
+      sourceAgentID: recovery.sourceAgentID,
+      targetAgentID: recovery.targetAgentID,
+      status: recovery.status,
+      recoverySource: recovery.recoverySource,
+      foundHistoricalContext: recovery.foundHistoricalContext,
+      snapshotID: recovery.snapshotID,
+      packageID: recovery.packageID,
+      packageKind: recovery.packageKind.rawValue,
+      projectionRecoverySummary: recovery.projectionRecoverySummary,
+      hydratedRecoverySummary: recovery.hydratedRecoverySummary,
+      resumableProjectionCount: recovery.resumableProjectionCount,
+      missingProjectionCount: recovery.missingProjectionCount,
+      issues: recovery.issues
     )
   }
 

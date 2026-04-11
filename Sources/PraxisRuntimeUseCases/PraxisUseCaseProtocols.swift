@@ -36,6 +36,10 @@ public protocol PraxisBootstrapCmpProjectUseCaseProtocol: Sendable {
   func execute(_ command: PraxisBootstrapCmpProjectCommand) async throws -> PraxisCmpProjectBootstrap
 }
 
+public protocol PraxisRecoverCmpProjectUseCaseProtocol: Sendable {
+  func execute(_ command: PraxisRecoverCmpProjectCommand) async throws -> PraxisCmpProjectRecovery
+}
+
 public protocol PraxisIngestCmpFlowUseCaseProtocol: Sendable {
   func execute(_ command: PraxisIngestCmpFlowCommand) async throws -> PraxisCmpFlowIngest
 }

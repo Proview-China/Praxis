@@ -455,6 +455,92 @@ public struct PraxisCmpProjectBootstrap: Sendable, Equatable, Codable {
   }
 }
 
+public struct PraxisRecoverCmpProjectCommand: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let agentID: String
+  public let targetAgentID: String
+  public let reason: String
+  public let lineageID: String?
+  public let branchRef: String?
+  public let snapshotID: String?
+  public let packageKind: PraxisCmpContextPackageKind
+  public let fidelityLabel: PraxisCmpContextPackageFidelityLabel?
+
+  public init(
+    projectID: String,
+    agentID: String,
+    targetAgentID: String,
+    reason: String,
+    lineageID: String? = nil,
+    branchRef: String? = nil,
+    snapshotID: String? = nil,
+    packageKind: PraxisCmpContextPackageKind = .historicalReply,
+    fidelityLabel: PraxisCmpContextPackageFidelityLabel? = nil
+  ) {
+    self.projectID = projectID
+    self.agentID = agentID
+    self.targetAgentID = targetAgentID
+    self.reason = reason
+    self.lineageID = lineageID
+    self.branchRef = branchRef
+    self.snapshotID = snapshotID
+    self.packageKind = packageKind
+    self.fidelityLabel = fidelityLabel
+  }
+}
+
+public struct PraxisCmpProjectRecovery: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let sourceAgentID: String
+  public let targetAgentID: String
+  public let summary: String
+  public let status: String
+  public let recoverySource: String
+  public let foundHistoricalContext: Bool
+  public let snapshotID: String?
+  public let packageID: String
+  public let packageKind: PraxisCmpContextPackageKind
+  public let projectionRecoverySummary: String?
+  public let hydratedRecoverySummary: String
+  public let resumableProjectionCount: Int
+  public let missingProjectionCount: Int
+  public let issues: [String]
+
+  public init(
+    projectID: String,
+    sourceAgentID: String,
+    targetAgentID: String,
+    summary: String,
+    status: String,
+    recoverySource: String,
+    foundHistoricalContext: Bool,
+    snapshotID: String? = nil,
+    packageID: String,
+    packageKind: PraxisCmpContextPackageKind,
+    projectionRecoverySummary: String? = nil,
+    hydratedRecoverySummary: String,
+    resumableProjectionCount: Int,
+    missingProjectionCount: Int,
+    issues: [String]
+  ) {
+    self.projectID = projectID
+    self.sourceAgentID = sourceAgentID
+    self.targetAgentID = targetAgentID
+    self.summary = summary
+    self.status = status
+    self.recoverySource = recoverySource
+    self.foundHistoricalContext = foundHistoricalContext
+    self.snapshotID = snapshotID
+    self.packageID = packageID
+    self.packageKind = packageKind
+    self.projectionRecoverySummary = projectionRecoverySummary
+    self.hydratedRecoverySummary = hydratedRecoverySummary
+    self.resumableProjectionCount = resumableProjectionCount
+    self.missingProjectionCount = missingProjectionCount
+    self.issues = issues
+  }
+}
+
 public struct PraxisIngestCmpFlowCommand: Sendable, Equatable, Codable {
   public let projectID: String
   public let agentID: String

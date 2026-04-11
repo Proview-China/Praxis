@@ -54,6 +54,32 @@ private func runHostTestProcess(
   )
 }
 
+private func seedRecoverProjectionDescriptor(
+  in registry: PraxisHostAdapterRegistry,
+  projectID: String = "cmp.local-runtime",
+  projectionID: String = "projection.recover.runtime",
+  lineageID: String = "lineage.cmp.local-runtime.runtime.local",
+  agentID: String = "runtime.local",
+  updatedAt: String = "2026-04-11T04:00:00Z"
+) async throws -> PraxisProjectionRecordDescriptor {
+  let descriptor = PraxisProjectionRecordDescriptor(
+    projectID: projectID,
+    projectionID: .init(rawValue: projectionID),
+    lineageID: .init(rawValue: lineageID),
+    agentID: agentID,
+    visibilityLevel: .submittedToParent,
+    storageKey: "sqlite://cmp/\(projectionID)",
+    updatedAt: updatedAt,
+    summary: "Recover projection seed \(projectionID)",
+    metadata: [
+      "branchRef": .string("cmp/\(agentID)"),
+      "selectedSectionIDs": .array([.string("\(projectionID):section")]),
+    ]
+  )
+  _ = try await registry.projectionStore?.save(descriptor)
+  return descriptor
+}
+
 private func makeCheckpointRecord(
   status: PraxisAgentStatus,
   sessionID: PraxisSessionID,
@@ -506,6 +532,150 @@ struct HostRuntimeSurfaceTests {
     #expect(bootstrap.gitSummary.contains("1 branch runtimes"))
     #expect(checkerLineage?.summary == "CMP bootstrap lineage checker.local at depth 0.")
     #expect(runtimeLineage == nil)
+  }
+
+  @Test
+  func recoverCmpProjectUsesHistoricalContextForPackageOnlyHitAndBackfillsIdentifiers() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-recover-package-only-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: registry)
+    let packageStore = try #require(registry.cmpContextPackageStore)
+
+    _ = try await packageStore.save(
+      .init(
+        projectID: "cmp.local-runtime",
+        packageID: .init(rawValue: "package.package-only"),
+        sourceProjectionID: .init(rawValue: "projection.package-only"),
+        sourceSnapshotID: .init(rawValue: "snapshot.package-only"),
+        sourceAgentID: "archivist.local",
+        targetAgentID: "checker.local",
+        packageKind: .historicalReply,
+        fidelityLabel: .highSignal,
+        packageRef: "context://cmp.local-runtime/projection.package-only/checker.local/historicalReply",
+        status: .materialized,
+        sourceSectionIDs: [.init(rawValue: "projection.package-only:section")],
+        createdAt: "2026-04-11T04:10:00Z",
+        updatedAt: "2026-04-11T04:10:00Z"
+      )
+    )
+
+    let recovery = try await runtimeFacade.cmpFacade.recoverCmpProject(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        reason: "Recover package-only historical context",
+        snapshotID: "snapshot.package-only"
+      )
+    )
+
+    #expect(recovery.recoverySource == "historical_context")
+    #expect(recovery.foundHistoricalContext)
+    #expect(recovery.sourceAgentID == "archivist.local")
+    #expect(recovery.targetAgentID == "checker.local")
+    #expect(recovery.snapshotID == "snapshot.package-only")
+    #expect(recovery.packageID == "package.package-only")
+    #expect(recovery.packageKind == "historicalReply")
+    #expect(recovery.status == "aligned")
+    #expect(recovery.missingProjectionCount == 0)
+    #expect(recovery.issues.isEmpty)
+  }
+
+  @Test
+  func recoverCmpProjectScopesRecoveryStatsToRequestedLineageWhenStoredPackageCannotSatisfyFilter() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-recover-historical-snapshot-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: registry)
+    let descriptor = try await seedRecoverProjectionDescriptor(
+      in: registry,
+      projectionID: "projection.recover.snapshot",
+      lineageID: "lineage.cmp.local-runtime.runtime.local"
+    )
+    _ = try await seedRecoverProjectionDescriptor(
+      in: registry,
+      projectionID: "projection.recover.other",
+      lineageID: "lineage.cmp.local-runtime.other.local"
+    )
+    let packageStore = try #require(registry.cmpContextPackageStore)
+
+    _ = try await packageStore.save(
+      .init(
+        projectID: "cmp.local-runtime",
+        packageID: .init(rawValue: "package.stale-history"),
+        sourceProjectionID: descriptor.projectionID,
+        sourceSnapshotID: nil,
+        sourceAgentID: "runtime.local",
+        targetAgentID: "checker.local",
+        packageKind: .historicalReply,
+        fidelityLabel: .highSignal,
+        packageRef: "context://cmp.local-runtime/\(descriptor.projectionID.rawValue)/checker.local/historicalReply",
+        status: .materialized,
+        sourceSectionIDs: [.init(rawValue: "\(descriptor.projectionID.rawValue):section")],
+        createdAt: "2026-04-11T04:20:00Z",
+        updatedAt: "2026-04-11T04:20:00Z"
+      )
+    )
+
+    let recovery = try await runtimeFacade.cmpFacade.recoverCmpProject(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        reason: "Recover from reusable snapshot",
+        lineageID: "lineage.cmp.local-runtime.runtime.local"
+      )
+    )
+
+    #expect(recovery.recoverySource == "historical_snapshot")
+    #expect(recovery.foundHistoricalContext)
+    #expect(recovery.sourceAgentID == "runtime.local")
+    #expect(recovery.snapshotID == "\(descriptor.projectionID.rawValue):checked")
+    #expect(recovery.packageID == "\(descriptor.projectionID.rawValue):checker.local:historicalReply")
+    #expect(recovery.packageKind == "historicalReply")
+    #expect(recovery.status == "aligned")
+    #expect(recovery.resumableProjectionCount == 1)
+    #expect(recovery.missingProjectionCount == 0)
+    #expect(recovery.issues.isEmpty)
+  }
+
+  @Test
+  func recoverCmpProjectRejectsRequestedSnapshotWhenHistoryMissesIt() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-recover-materialize-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: registry)
+    _ = try await seedRecoverProjectionDescriptor(
+      in: registry,
+      projectionID: "projection.recover.materialize"
+    )
+
+    do {
+      _ = try await runtimeFacade.cmpFacade.recoverCmpProject(
+        .init(
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          targetAgentID: "checker.local",
+          reason: "Reject exact snapshot miss",
+          snapshotID: "snapshot.missing"
+        )
+      )
+      Issue.record("Recovering an exact snapshot miss should fail instead of materializing a different checked snapshot.")
+    } catch let error as PraxisError {
+      guard case .invalidInput(let message) = error else {
+        Issue.record("Expected invalidInput but received \(error).")
+        return
+      }
+      #expect(message.contains("snapshot.missing"))
+      #expect(message.contains("without falling back to a different checked snapshot"))
+    }
   }
 
   @Test

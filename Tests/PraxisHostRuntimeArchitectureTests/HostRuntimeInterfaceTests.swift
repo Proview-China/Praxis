@@ -890,13 +890,67 @@ struct HostRuntimeInterfaceTests {
     #expect(dispatchResponse.snapshot?.kind == .cmpFlow)
     #expect(dispatchResponse.snapshot?.title == "CMP Dispatch cmp.local-runtime")
     #expect(dispatchResponse.events.map(\.name) == ["cmp.flow.dispatched"])
+    #expect(dispatchResponse.events.first?.detail == dispatchResponse.snapshot?.summary)
+    #expect(dispatchResponse.events.first?.intentID != nil)
     #expect(historyResponse.status == .success)
     #expect(historyResponse.snapshot?.kind == .cmpFlow)
     #expect(historyResponse.snapshot?.title == "CMP History cmp.local-runtime")
     #expect(historyResponse.events.map(\.name) == ["cmp.flow.history_requested"])
+    #expect(historyResponse.events.first?.detail == historyResponse.snapshot?.summary)
+    #expect(historyResponse.events.first?.intentID == nil)
+    #expect(historyResponse.snapshot?.summary.contains("did not find reusable context") == true)
     #expect(smokeResponse.status == .success)
     #expect(smokeResponse.snapshot?.kind == .smoke)
     #expect(smokeResponse.snapshot?.title == "CMP Smoke cmp.local-runtime")
+  }
+
+  @Test
+  func runtimeInterfaceRecoverCmpProjectReturnsCmpRecoverSnapshotAndRecoveredEvent() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-runtime-interface-recover-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+    let packageStore = try #require(registry.cmpContextPackageStore)
+    _ = try await packageStore.save(
+      .init(
+        projectID: "cmp.local-runtime",
+        packageID: .init(rawValue: "package.interface.package-only"),
+        sourceProjectionID: .init(rawValue: "projection.interface.package-only"),
+        sourceSnapshotID: .init(rawValue: "snapshot.interface.package-only"),
+        sourceAgentID: "archivist.local",
+        targetAgentID: "checker.local",
+        packageKind: .historicalReply,
+        fidelityLabel: .highSignal,
+        packageRef: "context://cmp.local-runtime/projection.interface.package-only/checker.local/historicalReply",
+        status: .materialized,
+        sourceSectionIDs: [.init(rawValue: "projection.interface.package-only:section")],
+        createdAt: "2026-04-11T04:30:00Z",
+        updatedAt: "2026-04-11T04:30:00Z"
+      )
+    )
+    let runtimeInterface = try PraxisRuntimeBridgeFactory.makeRuntimeInterface(hostAdapters: registry)
+
+    let response = await runtimeInterface.handle(
+      .recoverCmpProject(
+        .init(
+          payloadSummary: "Recover local CMP project",
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          targetAgentID: "checker.local",
+          reason: "Recover package-only history",
+          snapshotID: "snapshot.interface.package-only"
+        )
+      )
+    )
+
+    #expect(response.status == .success)
+    #expect(response.error == nil)
+    #expect(response.snapshot?.kind == .cmpRecover)
+    #expect(response.snapshot?.projectID == "cmp.local-runtime")
+    #expect(response.events.map(\.name) == ["cmp.project.recovered"])
+    #expect(response.events.first?.detail == response.snapshot?.summary)
+    #expect(response.events.first?.intentID == "package.interface.package-only")
   }
 
   @Test
@@ -974,6 +1028,8 @@ struct HostRuntimeInterfaceTests {
     #expect(retryResponse.snapshot?.kind == .cmpFlow)
     #expect(retryResponse.snapshot?.title == "CMP Retry Dispatch cmp.local-runtime")
     #expect(retryResponse.events.map(\.name) == ["cmp.flow.dispatch_retried"])
+    #expect(retryResponse.events.first?.detail == retryResponse.snapshot?.summary)
+    #expect(retryResponse.events.first?.intentID != nil)
   }
 
   @Test
@@ -1031,6 +1087,62 @@ struct HostRuntimeInterfaceTests {
     #expect(response.error?.code == .missingRequiredField)
     #expect(response.error?.missingField == "runID")
     #expect(response.error?.retryable == false)
+  }
+
+  @Test
+  func runtimeInterfaceRecoverCmpProjectReturnsStructuredMissingFieldErrors() async throws {
+    let runtimeInterface = try PraxisRuntimeBridgeFactory.makeRuntimeInterface(
+      hostAdapters: PraxisHostAdapterRegistry.scaffoldDefaults()
+    )
+    let cases: [(String, PraxisRuntimeInterfaceRequest)] = [
+      (
+        "projectID",
+        .recoverCmpProject(
+          .init(
+            payloadSummary: "Missing project ID",
+            projectID: "",
+            agentID: "runtime.local",
+            targetAgentID: "checker.local",
+            reason: "Recover context"
+          )
+        )
+      ),
+      (
+        "agentID",
+        .recoverCmpProject(
+          .init(
+            payloadSummary: "Missing agent ID",
+            projectID: "cmp.local-runtime",
+            agentID: "",
+            targetAgentID: "checker.local",
+            reason: "Recover context"
+          )
+        )
+      ),
+      (
+        "targetAgentID",
+        .recoverCmpProject(
+          .init(
+            payloadSummary: "Missing target agent ID",
+            projectID: "cmp.local-runtime",
+            agentID: "runtime.local",
+            targetAgentID: "",
+            reason: "Recover context"
+          )
+        )
+      ),
+    ]
+
+    for (missingField, request) in cases {
+      let response = await runtimeInterface.handle(request)
+
+      #expect(response.status == .failure)
+      #expect(response.snapshot == nil)
+      #expect(response.events.isEmpty)
+      #expect(response.error?.code == .missingRequiredField)
+      #expect(response.error?.missingField == missingField)
+      #expect(response.error?.retryable == false)
+    }
   }
 
   @Test
@@ -1456,10 +1568,20 @@ struct HostRuntimeInterfaceTests {
     let ingestData = try codec.encode(ingestRequest)
     let historyData = try codec.encode(historyRequest)
     let retryData = try codec.encode(retryRequest)
+    let historyJSON = String(decoding: historyData, as: UTF8.self)
+    let retryJSON = String(decoding: retryData, as: UTF8.self)
     let decodedIngestRequest = try codec.decodeRequest(ingestData)
     let decodedHistoryRequest = try codec.decodeRequest(historyData)
     let decodedRetryRequest = try codec.decodeRequest(retryData)
 
+    #expect(
+      historyJSON ==
+        #"{"kind":"requestCmpHistory","requestCmpHistory":{"payloadSummary":"Request history","projectID":"cmp.local-runtime","query":{"metadata":{},"packageKindHint":"historicalReply","snapshotID":"projection.runtime.local:checked"},"reason":"Recover context","requesterAgentID":"checker.local"}}"#
+    )
+    #expect(
+      retryJSON ==
+        #"{"kind":"retryCmpDispatch","retryCmpDispatch":{"agentID":"runtime.local","packageID":"projection.runtime.local:checker.local:runtimeFill","payloadSummary":"Retry dispatch","projectID":"cmp.local-runtime","reason":"Retry after approval"}}"#
+    )
     #expect(decodedIngestRequest == ingestRequest)
     #expect(decodedHistoryRequest == historyRequest)
     #expect(decodedRetryRequest == retryRequest)

@@ -40,6 +40,7 @@ public enum PraxisRuntimeUseCasesModule {
     .init(name: "resumeRun", summary: "恢复中断运行"),
     .init(name: "inspectTap", summary: "读取 TAP 治理视图"),
     .init(name: "inspectCmp", summary: "读取 CMP 项目视图"),
+    .init(name: "recoverCmpProject", summary: "恢复 CMP 项目上下文导出"),
     .init(name: "inspectMp", summary: "读取 MP memory workflow 视图"),
   ]
 }

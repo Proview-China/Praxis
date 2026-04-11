@@ -256,6 +256,58 @@ public struct PraxisCmpProjectBootstrapSnapshot: Sendable, Equatable, Codable {
   }
 }
 
+public struct PraxisCmpProjectRecoverySnapshot: Sendable, Equatable, Codable {
+  public let summary: String
+  public let projectID: String
+  public let sourceAgentID: String
+  public let targetAgentID: String
+  public let status: String
+  public let recoverySource: String
+  public let foundHistoricalContext: Bool
+  public let snapshotID: String?
+  public let packageID: String
+  public let packageKind: String
+  public let projectionRecoverySummary: String?
+  public let hydratedRecoverySummary: String
+  public let resumableProjectionCount: Int
+  public let missingProjectionCount: Int
+  public let issues: [String]
+
+  public init(
+    summary: String,
+    projectID: String,
+    sourceAgentID: String,
+    targetAgentID: String,
+    status: String,
+    recoverySource: String,
+    foundHistoricalContext: Bool,
+    snapshotID: String?,
+    packageID: String,
+    packageKind: String,
+    projectionRecoverySummary: String? = nil,
+    hydratedRecoverySummary: String,
+    resumableProjectionCount: Int,
+    missingProjectionCount: Int,
+    issues: [String]
+  ) {
+    self.summary = summary
+    self.projectID = projectID
+    self.sourceAgentID = sourceAgentID
+    self.targetAgentID = targetAgentID
+    self.status = status
+    self.recoverySource = recoverySource
+    self.foundHistoricalContext = foundHistoricalContext
+    self.snapshotID = snapshotID
+    self.packageID = packageID
+    self.packageKind = packageKind
+    self.projectionRecoverySummary = projectionRecoverySummary
+    self.hydratedRecoverySummary = hydratedRecoverySummary
+    self.resumableProjectionCount = resumableProjectionCount
+    self.missingProjectionCount = missingProjectionCount
+    self.issues = issues
+  }
+}
+
 public struct PraxisCmpFlowIngestSnapshot: Sendable, Equatable, Codable {
   public let summary: String
   public let projectID: String

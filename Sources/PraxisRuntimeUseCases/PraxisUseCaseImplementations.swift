@@ -2114,6 +2114,195 @@ private func requestCmpHistory(
   )
 }
 
+private func recoverCmpProject(
+  command: PraxisRecoverCmpProjectCommand,
+  dependencies: PraxisDependencyGraph
+) async throws -> PraxisCmpProjectRecovery {
+  let projectionMaterializer = PraxisProjectionMaterializer()
+  let historyQuery = PraxisCmpHistoricalContextQuery(
+    snapshotID: command.snapshotID.map(PraxisCmpSnapshotID.init(rawValue:)),
+    lineageID: command.lineageID.map(PraxisCmpLineageID.init(rawValue:)),
+    branchRef: command.branchRef,
+    packageKindHint: command.packageKind
+  )
+  let history = try await requestCmpHistory(
+    command: .init(
+      projectID: command.projectID,
+      requesterAgentID: command.targetAgentID,
+      reason: command.reason,
+      query: historyQuery
+    ),
+    dependencies: dependencies
+  )
+
+  let historicalSnapshot = history.result.snapshot
+  let historicalPackage = history.result.contextPackage
+  var recoveredSnapshot = historicalSnapshot
+  var recoveredPackage = historicalPackage
+  var sourceAgentID = historicalPackage?.sourceAgentID ?? historicalSnapshot?.agentID ?? command.agentID
+  let recoverySource: String =
+    if historicalPackage != nil {
+      "historical_context"
+    } else if historicalSnapshot != nil {
+      "historical_snapshot"
+    } else {
+      "projection_materialization"
+    }
+
+  if recoveredPackage == nil {
+    if recoveredSnapshot == nil {
+      if let requestedSnapshotID = command.snapshotID {
+        throw PraxisError.invalidInput(
+          "CMP project recover could not resolve requested snapshot \(requestedSnapshotID) for \(command.projectID) without falling back to a different checked snapshot."
+        )
+      }
+      let resolve = try await resolveCmpFlow(
+        command: .init(
+          projectID: command.projectID,
+          agentID: command.agentID,
+          lineageID: command.lineageID,
+          branchRef: command.branchRef
+        ),
+        dependencies: dependencies
+      )
+      recoveredSnapshot = resolve.snapshot
+    }
+
+    guard let snapshot = recoveredSnapshot else {
+      throw PraxisError.invalidInput(
+        "CMP project recover could not resolve a reusable snapshot for \(command.projectID) and source \(command.agentID)."
+      )
+    }
+    sourceAgentID = snapshot.agentID
+
+    let materialize = try await materializeCmpFlow(
+      command: .init(
+        projectID: command.projectID,
+        agentID: sourceAgentID,
+        targetAgentID: command.targetAgentID,
+        snapshotID: snapshot.id.rawValue,
+        projectionID: nil,
+        packageKind: command.packageKind,
+        fidelityLabel: command.fidelityLabel
+      ),
+      dependencies: dependencies
+    )
+    recoveredPackage = materialize.result.contextPackage
+  }
+
+  guard let recoveredPackage else {
+    throw PraxisError.invariantViolation(
+      "CMP project recover did not produce a context package for \(command.projectID)."
+    )
+  }
+
+  let descriptors = try await cmpProjectionDescriptors(
+    projectID: command.projectID,
+    agentID: nil,
+    lineageID: nil,
+    dependencies: dependencies
+  )
+  let scopedDescriptors = descriptors.filter { descriptor in
+    if let snapshotID = command.snapshotID,
+       !cmpProjectionDescriptorMatchesSnapshotID(
+         descriptor,
+         snapshotID: .init(rawValue: snapshotID)
+       ) {
+      return false
+    }
+    if let lineageID = command.lineageID,
+       descriptor.lineageID?.rawValue != lineageID {
+      return false
+    }
+    if let branchRef = command.branchRef,
+       let descriptorBranchRef = descriptor.metadata["branchRef"]?.stringValue,
+       descriptorBranchRef != branchRef {
+      return false
+    }
+    return true
+  }
+  let defaultLineageID = cmpFlowDefaultLineageID(projectID: command.projectID, agentID: sourceAgentID)
+  let checkedSnapshots = scopedDescriptors.map { descriptor in
+    cmpCheckedSnapshot(
+      from: descriptor,
+      defaultLineageID: descriptor.lineageID ?? defaultLineageID,
+      defaultAgentID: descriptor.agentID ?? sourceAgentID,
+      defaultBranchRef: command.branchRef ?? descriptor.metadata["branchRef"]?.stringValue ?? "cmp/\(descriptor.agentID ?? sourceAgentID)"
+    )
+  }
+  let projections = zip(scopedDescriptors, checkedSnapshots).map { descriptor, snapshot in
+    cmpProjectionRecord(from: descriptor, snapshot: snapshot)
+  }
+  let runtimeSnapshot = projectionMaterializer.createRuntimeSnapshot(
+    checkedSnapshots: checkedSnapshots,
+    projections: projections
+  )
+
+  let availableProjectionIDs = Set(projections.map(\.id))
+  let hydratedRecovery = projectionMaterializer.hydrateRecovery(
+    from: runtimeSnapshot,
+    availableProjectionIDs: availableProjectionIDs
+  )
+
+  let selectedDescriptor = scopedDescriptors.first { descriptor in
+    descriptor.projectionID == recoveredPackage.sourceProjectionID
+  } ?? descriptors.first { descriptor in
+    descriptor.projectionID == recoveredPackage.sourceProjectionID
+  }
+  let projectionRecoveryPlan = selectedDescriptor.map { descriptor in
+    let snapshot = cmpCheckedSnapshot(
+      from: descriptor,
+      defaultLineageID: descriptor.lineageID ?? defaultLineageID,
+      defaultAgentID: descriptor.agentID ?? sourceAgentID,
+      defaultBranchRef: command.branchRef ?? descriptor.metadata["branchRef"]?.stringValue ?? "cmp/\(descriptor.agentID ?? sourceAgentID)"
+    )
+    let projection = cmpProjectionRecord(from: descriptor, snapshot: snapshot)
+    let availableSectionIDs = Set(scopedDescriptors.flatMap { cmpProjectionSectionIDs(from: $0) })
+    return projectionMaterializer.recoveryPlan(
+      for: projection,
+      availableSectionIDs: availableSectionIDs,
+      checkpointPointer: runtimeSnapshot.checkpointPointer
+    )
+  }
+
+  var issues = hydratedRecovery.issues
+  if let projectionRecoveryPlan, !projectionRecoveryPlan.resumable {
+    issues.append(projectionRecoveryPlan.summary)
+  }
+
+  let status = issues.isEmpty ? "aligned" : "degraded"
+  let hydratedRecoverySummary = hydratedRecovery.missingProjectionIDs.isEmpty
+    ? "Hydrated recovery can resume \(hydratedRecovery.resumableProjectionIDs.count) projection(s)."
+    : "Hydrated recovery resumed \(hydratedRecovery.resumableProjectionIDs.count) projection(s) and is missing \(hydratedRecovery.missingProjectionIDs.count) projection(s)."
+  let summary: String
+  switch recoverySource {
+  case "historical_context":
+    summary = "CMP project recover reused historical context package \(recoveredPackage.id.rawValue) for \(command.targetAgentID) through the host-neutral project surface."
+  case "historical_snapshot":
+    summary = "CMP project recover rebuilt context package \(recoveredPackage.id.rawValue) for \(command.targetAgentID) from a reusable historical snapshot through the host-neutral project surface."
+  default:
+    summary = "CMP project recover materialized context package \(recoveredPackage.id.rawValue) for \(command.targetAgentID) after resolving available checked state through the host-neutral project surface."
+  }
+
+  return PraxisCmpProjectRecovery(
+    projectID: command.projectID,
+    sourceAgentID: sourceAgentID,
+    targetAgentID: command.targetAgentID,
+    summary: summary,
+    status: status,
+    recoverySource: recoverySource,
+    foundHistoricalContext: history.result.found,
+    snapshotID: recoveredSnapshot?.id.rawValue ?? recoveredPackage.sourceSnapshotID?.rawValue,
+    packageID: recoveredPackage.id.rawValue,
+    packageKind: recoveredPackage.kind,
+    projectionRecoverySummary: projectionRecoveryPlan?.summary,
+    hydratedRecoverySummary: hydratedRecoverySummary,
+    resumableProjectionCount: hydratedRecovery.resumableProjectionIDs.count,
+    missingProjectionCount: hydratedRecovery.missingProjectionIDs.count,
+    issues: issues
+  )
+}
+
 private func cmpDefaultControlSurface(projectID: String, agentID: String?) -> PraxisCmpControlSurface {
   _ = projectID
   _ = agentID
@@ -3744,6 +3933,23 @@ public final class PraxisBootstrapCmpProjectUseCase: PraxisBootstrapCmpProjectUs
   /// - Throws: Propagates host adapter failures encountered while persisting lineage descriptors or inferring topology.
   public func execute(_ command: PraxisBootstrapCmpProjectCommand) async throws -> PraxisCmpProjectBootstrap {
     try await bootstrapCmpProject(command: command, dependencies: dependencies)
+  }
+}
+
+public final class PraxisRecoverCmpProjectUseCase: PraxisRecoverCmpProjectUseCaseProtocol {
+  public let dependencies: PraxisDependencyGraph
+
+  public init(dependencies: PraxisDependencyGraph) {
+    self.dependencies = dependencies
+  }
+
+  /// Recovers one CMP project context package through the host-neutral project surface.
+  ///
+  /// - Parameter command: The project recovery command that scopes source/target agents and recovery hints.
+  /// - Returns: A compact project recovery summary and package pointer ready for host export layers.
+  /// - Throws: Propagates history, resolve, or materialization failures.
+  public func execute(_ command: PraxisRecoverCmpProjectCommand) async throws -> PraxisCmpProjectRecovery {
+    try await recoverCmpProject(command: command, dependencies: dependencies)
   }
 }
 

@@ -93,4 +93,61 @@ struct PraxisCmpProjectionTests {
     #expect(runtimeSnapshot.projectionIDs == [olderProjection.id, newerProjection.id])
     #expect(runtimeSnapshot.latestProjectionByAgentID["agent-1"] == newerProjection.id)
   }
+
+  @Test
+  func recoveryPlanMarksProjectionAsNonResumableWhenSectionsAreMissing() {
+    let materializer = PraxisProjectionMaterializer()
+    let projection = PraxisProjectionRecord(
+      id: .init(rawValue: "projection-missing"),
+      snapshotID: .init(rawValue: "snapshot-missing"),
+      lineageID: .init(rawValue: "lineage-missing"),
+      agentID: "agent-missing",
+      sectionIDs: [
+        .init(rawValue: "section-available"),
+        .init(rawValue: "section-missing")
+      ],
+      storedRefs: ["git://section-available", "git://section-missing"],
+      visibilityLevel: .submittedToParent,
+      updatedAt: "2026-04-10T00:03:00Z"
+    )
+
+    let recovery = materializer.recoveryPlan(
+      for: projection,
+      availableSectionIDs: [.init(rawValue: "section-available")],
+      checkpointPointer: .init(
+        checkpointID: .init(rawValue: "checkpoint-missing"),
+        sessionID: .init(rawValue: "session-missing")
+      )
+    )
+
+    #expect(!recovery.resumable)
+    #expect(recovery.missingSectionIDs == [.init(rawValue: "section-missing")])
+    #expect(recovery.summary == "Projection is missing section state.")
+  }
+
+  @Test
+  func hydrateRecoverySeparatesResumableAndMissingProjectionIDs() {
+    let materializer = PraxisProjectionMaterializer()
+    let snapshot = PraxisCmpRuntimeSnapshot(
+      checkedSnapshotIDs: [.init(rawValue: "snapshot-1")],
+      projectionIDs: [
+        .init(rawValue: "projection-present"),
+        .init(rawValue: "projection-missing")
+      ],
+      latestProjectionByAgentID: ["agent-1": .init(rawValue: "projection-present")],
+      checkpointPointer: .init(
+        checkpointID: .init(rawValue: "checkpoint-1"),
+        sessionID: .init(rawValue: "session-1")
+      )
+    )
+
+    let hydrated = materializer.hydrateRecovery(
+      from: snapshot,
+      availableProjectionIDs: [.init(rawValue: "projection-present")]
+    )
+
+    #expect(hydrated.resumableProjectionIDs == [.init(rawValue: "projection-present")])
+    #expect(hydrated.missingProjectionIDs == [.init(rawValue: "projection-missing")])
+    #expect(hydrated.issues == ["Projection projection-missing is missing during recovery."])
+  }
 }

@@ -466,6 +466,24 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
     )
   }
 
+  private func response(from recovery: PraxisCmpProjectRecoverySnapshot) -> PraxisRuntimeInterfaceResponse {
+    .success(
+      snapshot: .init(
+        kind: .cmpRecover,
+        title: "CMP Recover \(recovery.projectID)",
+        summary: recovery.summary,
+        projectID: recovery.projectID
+      ),
+      events: [
+        .init(
+          name: "cmp.project.recovered",
+          detail: recovery.summary,
+          intentID: recovery.packageID
+        )
+      ]
+    )
+  }
+
   private func response(from ingest: PraxisCmpFlowIngestSnapshot) -> PraxisRuntimeInterfaceResponse {
     .success(
       snapshot: .init(
@@ -797,6 +815,30 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
         )
       )
       return response(from: bootstrap)
+    case .recoverCmpProject(let payload):
+      guard !payload.projectID.isEmpty else {
+        throw PraxisRuntimeInterfaceError.missingRequiredField("projectID")
+      }
+      guard !payload.agentID.isEmpty else {
+        throw PraxisRuntimeInterfaceError.missingRequiredField("agentID")
+      }
+      guard !payload.targetAgentID.isEmpty else {
+        throw PraxisRuntimeInterfaceError.missingRequiredField("targetAgentID")
+      }
+      let recovery = try await runtimeFacade.cmpFacade.recoverCmpProject(
+        .init(
+          projectID: payload.projectID,
+          agentID: payload.agentID,
+          targetAgentID: payload.targetAgentID,
+          reason: payload.reason,
+          lineageID: payload.lineageID,
+          branchRef: payload.branchRef,
+          snapshotID: payload.snapshotID,
+          packageKind: payload.packageKind,
+          fidelityLabel: payload.fidelityLabel
+        )
+      )
+      return response(from: recovery)
     case .ingestCmpFlow(let payload):
       guard !payload.projectID.isEmpty else {
         throw PraxisRuntimeInterfaceError.missingRequiredField("projectID")
