@@ -178,6 +178,20 @@ private func localSQLiteEnsureSchema(database: OpaquePointer?) throws {
     """,
     "CREATE INDEX IF NOT EXISTS idx_projections_project_updated_at ON projections(project_id, updated_at DESC);",
     """
+    CREATE TABLE IF NOT EXISTS cmp_packages (
+      project_id TEXT NOT NULL,
+      package_id TEXT NOT NULL,
+      source_agent_id TEXT NOT NULL,
+      target_agent_id TEXT NOT NULL,
+      source_snapshot_id TEXT,
+      package_kind TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      descriptor_json TEXT NOT NULL,
+      PRIMARY KEY (project_id, package_id)
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_cmp_packages_project_updated_at ON cmp_packages(project_id, updated_at DESC);",
+    """
     CREATE TABLE IF NOT EXISTS delivery_truth (
       delivery_id TEXT PRIMARY KEY,
       package_id TEXT,
@@ -887,6 +901,99 @@ public actor PraxisLocalProjectionStore: PraxisProjectionStoreContract {
           return descriptors
         default:
           throw PraxisError.invariantViolation("Failed to read projection descriptors: \(localSQLiteErrorMessage(database)).")
+        }
+      }
+    }
+  }
+}
+
+public actor PraxisLocalCmpContextPackageStore: PraxisCmpContextPackageStoreContract {
+  private let fileURL: URL
+
+  public init(fileURL: URL) {
+    self.fileURL = fileURL
+  }
+
+  public func save(_ descriptor: PraxisCmpContextPackageDescriptor) async throws -> PraxisCmpContextPackageStoreWriteReceipt {
+    let descriptorJSON = try localRuntimeEncodeJSON(descriptor)
+    try withLocalSQLiteDatabase(at: fileURL) { database in
+      let statement = try localSQLitePrepareStatement(
+        """
+        INSERT INTO cmp_packages (
+          project_id,
+          package_id,
+          source_agent_id,
+          target_agent_id,
+          source_snapshot_id,
+          package_kind,
+          updated_at,
+          descriptor_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(project_id, package_id) DO UPDATE SET
+          source_agent_id = excluded.source_agent_id,
+          target_agent_id = excluded.target_agent_id,
+          source_snapshot_id = excluded.source_snapshot_id,
+          package_kind = excluded.package_kind,
+          updated_at = excluded.updated_at,
+          descriptor_json = excluded.descriptor_json;
+        """,
+        database: database
+      )
+      defer { sqlite3_finalize(statement) }
+      try localSQLiteBindText(descriptor.projectID, at: 1, in: statement, database: database)
+      try localSQLiteBindText(descriptor.packageID.rawValue, at: 2, in: statement, database: database)
+      try localSQLiteBindText(descriptor.sourceAgentID, at: 3, in: statement, database: database)
+      try localSQLiteBindText(descriptor.targetAgentID, at: 4, in: statement, database: database)
+      try localSQLiteBindText(descriptor.sourceSnapshotID?.rawValue, at: 5, in: statement, database: database)
+      try localSQLiteBindText(descriptor.packageKind.rawValue, at: 6, in: statement, database: database)
+      try localSQLiteBindText(descriptor.updatedAt, at: 7, in: statement, database: database)
+      try localSQLiteBindText(descriptorJSON, at: 8, in: statement, database: database)
+      guard sqlite3_step(statement) == SQLITE_DONE else {
+        throw PraxisError.invariantViolation("Failed to persist CMP package descriptor: \(localSQLiteErrorMessage(database)).")
+      }
+    }
+    return PraxisCmpContextPackageStoreWriteReceipt(
+      packageID: descriptor.packageID,
+      status: descriptor.status,
+      storedAt: descriptor.updatedAt
+    )
+  }
+
+  public func describe(_ query: PraxisCmpContextPackageQuery) async throws -> [PraxisCmpContextPackageDescriptor] {
+    try withLocalSQLiteDatabase(at: fileURL) { database in
+      let statement = try localSQLitePrepareStatement(
+        """
+        SELECT descriptor_json
+        FROM cmp_packages
+        WHERE project_id = ?
+        ORDER BY updated_at DESC, package_id ASC;
+        """,
+        database: database
+      )
+      defer { sqlite3_finalize(statement) }
+      try localSQLiteBindText(query.projectID, at: 1, in: statement, database: database)
+
+      var descriptors: [PraxisCmpContextPackageDescriptor] = []
+      while true {
+        let code = sqlite3_step(statement)
+        switch code {
+        case SQLITE_ROW:
+          guard let descriptorJSON = localSQLiteText(from: statement, at: 0) else {
+            continue
+          }
+          let descriptor = try localRuntimeDecodeJSON(PraxisCmpContextPackageDescriptor.self, from: descriptorJSON)
+          guard query.packageID == nil || descriptor.packageID == query.packageID,
+                query.sourceAgentID == nil || descriptor.sourceAgentID == query.sourceAgentID,
+                query.targetAgentID == nil || descriptor.targetAgentID == query.targetAgentID,
+                query.sourceSnapshotID == nil || descriptor.sourceSnapshotID == query.sourceSnapshotID,
+                query.packageKind == nil || descriptor.packageKind == query.packageKind else {
+            continue
+          }
+          descriptors.append(descriptor)
+        case SQLITE_DONE:
+          return descriptors
+        default:
+          throw PraxisError.invariantViolation("Failed to read CMP package descriptors: \(localSQLiteErrorMessage(database)).")
         }
       }
     }
@@ -1711,6 +1818,7 @@ public extension PraxisHostAdapterRegistry {
       checkpointStore: PraxisLocalCheckpointStore(fileURL: paths.databaseFileURL),
       journalStore: PraxisLocalJournalStore(fileURL: paths.databaseFileURL),
       projectionStore: PraxisLocalProjectionStore(fileURL: paths.databaseFileURL),
+      cmpContextPackageStore: PraxisLocalCmpContextPackageStore(fileURL: paths.databaseFileURL),
       messageBus: PraxisLocalMessageBus(),
       deliveryTruthStore: PraxisLocalDeliveryTruthStore(fileURL: paths.databaseFileURL),
       embeddingStore: PraxisLocalEmbeddingStore(fileURL: paths.databaseFileURL),

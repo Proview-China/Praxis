@@ -132,6 +132,96 @@ public struct PraxisProjectionStoreWriteReceipt: Sendable, Equatable, Codable {
   }
 }
 
+public struct PraxisCmpContextPackageDescriptor: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let packageID: PraxisCmpPackageID
+  public let sourceProjectionID: PraxisCmpProjectionID
+  public let sourceSnapshotID: PraxisCmpSnapshotID?
+  public let sourceAgentID: String
+  public let targetAgentID: String
+  public let packageKind: PraxisCmpContextPackageKind
+  public let fidelityLabel: PraxisCmpContextPackageFidelityLabel
+  public let packageRef: String
+  public let status: PraxisCmpPackageStatus
+  public let sourceSectionIDs: [PraxisCmpSectionID]
+  public let createdAt: String
+  public let updatedAt: String
+  public let metadata: [String: PraxisValue]
+
+  public init(
+    projectID: String,
+    packageID: PraxisCmpPackageID,
+    sourceProjectionID: PraxisCmpProjectionID,
+    sourceSnapshotID: PraxisCmpSnapshotID? = nil,
+    sourceAgentID: String,
+    targetAgentID: String,
+    packageKind: PraxisCmpContextPackageKind,
+    fidelityLabel: PraxisCmpContextPackageFidelityLabel,
+    packageRef: String,
+    status: PraxisCmpPackageStatus,
+    sourceSectionIDs: [PraxisCmpSectionID] = [],
+    createdAt: String,
+    updatedAt: String,
+    metadata: [String: PraxisValue] = [:]
+  ) {
+    self.projectID = projectID
+    self.packageID = packageID
+    self.sourceProjectionID = sourceProjectionID
+    self.sourceSnapshotID = sourceSnapshotID
+    self.sourceAgentID = sourceAgentID
+    self.targetAgentID = targetAgentID
+    self.packageKind = packageKind
+    self.fidelityLabel = fidelityLabel
+    self.packageRef = packageRef
+    self.status = status
+    self.sourceSectionIDs = sourceSectionIDs
+    self.createdAt = createdAt
+    self.updatedAt = updatedAt
+    self.metadata = metadata
+  }
+}
+
+public struct PraxisCmpContextPackageQuery: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let packageID: PraxisCmpPackageID?
+  public let sourceAgentID: String?
+  public let targetAgentID: String?
+  public let sourceSnapshotID: PraxisCmpSnapshotID?
+  public let packageKind: PraxisCmpContextPackageKind?
+
+  public init(
+    projectID: String,
+    packageID: PraxisCmpPackageID? = nil,
+    sourceAgentID: String? = nil,
+    targetAgentID: String? = nil,
+    sourceSnapshotID: PraxisCmpSnapshotID? = nil,
+    packageKind: PraxisCmpContextPackageKind? = nil
+  ) {
+    self.projectID = projectID
+    self.packageID = packageID
+    self.sourceAgentID = sourceAgentID
+    self.targetAgentID = targetAgentID
+    self.sourceSnapshotID = sourceSnapshotID
+    self.packageKind = packageKind
+  }
+}
+
+public struct PraxisCmpContextPackageStoreWriteReceipt: Sendable, Equatable, Codable {
+  public let packageID: PraxisCmpPackageID
+  public let status: PraxisCmpPackageStatus
+  public let storedAt: String
+
+  public init(
+    packageID: PraxisCmpPackageID,
+    status: PraxisCmpPackageStatus,
+    storedAt: String
+  ) {
+    self.packageID = packageID
+    self.status = status
+    self.storedAt = storedAt
+  }
+}
+
 public struct PraxisPublishedMessage: Sendable, Equatable, Codable {
   public let messageID: String
   public let topic: String

@@ -66,6 +66,7 @@ public final class PraxisDependencyGraph: PraxisDependencyResolving, @unchecked 
       checkpointStore: checkpointStore ?? hostAdapters.checkpointStore,
       journalStore: hostAdapters.journalStore,
       projectionStore: hostAdapters.projectionStore,
+      cmpContextPackageStore: hostAdapters.cmpContextPackageStore,
       messageBus: hostAdapters.messageBus,
       deliveryTruthStore: hostAdapters.deliveryTruthStore,
       embeddingStore: hostAdapters.embeddingStore,

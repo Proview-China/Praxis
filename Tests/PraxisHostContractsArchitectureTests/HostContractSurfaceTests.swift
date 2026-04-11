@@ -47,11 +47,28 @@ struct HostContractSurfaceTests {
       contentSummary: embedding.contentSummary,
       storageKey: embedding.storageKey
     )
+    let packageDescriptor = PraxisCmpContextPackageDescriptor(
+      projectID: "project-1",
+      packageID: .init(rawValue: "package-1"),
+      sourceProjectionID: .init(rawValue: "projection-1"),
+      sourceSnapshotID: .init(rawValue: "snapshot-1"),
+      sourceAgentID: "agent-1",
+      targetAgentID: "agent-2",
+      packageKind: .runtimeFill,
+      fidelityLabel: .highSignal,
+      packageRef: "context://project-1/projection-1/agent-2/runtimeFill",
+      status: .materialized,
+      sourceSectionIDs: [.init(rawValue: "section-1")],
+      createdAt: "2026-04-10T12:00:00Z",
+      updatedAt: "2026-04-10T12:00:00Z"
+    )
 
     #expect(truth.status == .published)
     #expect(embedding.vectorLength == 1536)
     #expect(search.candidateStorageKeys == [embedding.storageKey])
     #expect(match.storageKey == embedding.storageKey)
+    #expect(packageDescriptor.packageKind == .runtimeFill)
+    #expect(packageDescriptor.status == .materialized)
   }
 
   @Test

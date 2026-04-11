@@ -159,6 +159,31 @@ struct PraxisInfraContractsTests {
 
     #expect(queriedTruth.count == 1)
     #expect(queriedTruth.first?.status == .published)
+
+    let packageStore = PraxisFakeCmpContextPackageStore()
+    _ = try await packageStore.save(
+      .init(
+        projectID: "project-1",
+        packageID: .init(rawValue: "package-1"),
+        sourceProjectionID: .init(rawValue: "projection-1"),
+        sourceSnapshotID: .init(rawValue: "snapshot-1"),
+        sourceAgentID: "agent-1",
+        targetAgentID: "agent-2",
+        packageKind: .runtimeFill,
+        fidelityLabel: .highSignal,
+        packageRef: "context://project-1/projection-1/agent-2/runtimeFill",
+        status: .dispatched,
+        sourceSectionIDs: [.init(rawValue: "section-1")],
+        createdAt: "2026-04-10T20:10:00Z",
+        updatedAt: "2026-04-10T20:10:01Z"
+      )
+    )
+    let queriedPackages = try await packageStore.describe(
+      .init(projectID: "project-1", targetAgentID: "agent-2")
+    )
+
+    #expect(queriedPackages.count == 1)
+    #expect(queriedPackages.first?.status == .dispatched)
   }
 
   @Test

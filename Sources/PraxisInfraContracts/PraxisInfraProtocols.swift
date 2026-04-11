@@ -53,6 +53,21 @@ public protocol PraxisProjectionStoreContract: Sendable {
   func describe(_ query: PraxisProjectionDescriptorQuery) async throws -> [PraxisProjectionRecordDescriptor]
 }
 
+/// Persists host-backed CMP context package descriptors for readback and recovery.
+public protocol PraxisCmpContextPackageStoreContract: Sendable {
+  /// Saves or updates a context package descriptor.
+  ///
+  /// - Parameter descriptor: Package descriptor to persist.
+  /// - Returns: A receipt describing the stored package status.
+  func save(_ descriptor: PraxisCmpContextPackageDescriptor) async throws -> PraxisCmpContextPackageStoreWriteReceipt
+
+  /// Returns package descriptors that match the supplied query.
+  ///
+  /// - Parameter query: Structured package lookup query.
+  /// - Returns: Matching package descriptors ordered by recency.
+  func describe(_ query: PraxisCmpContextPackageQuery) async throws -> [PraxisCmpContextPackageDescriptor]
+}
+
 /// Publishes messages onto the host message bus.
 public protocol PraxisMessageBusContract: Sendable {
   /// Publishes a message.

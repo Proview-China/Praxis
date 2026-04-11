@@ -276,6 +276,190 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
     return .success(snapshot: snapshot, events: makeEvents(from: summary))
   }
 
+  private func response(from session: PraxisCmpSessionSnapshot) -> PraxisRuntimeInterfaceResponse {
+    .success(
+      snapshot: .init(
+        kind: .cmpSession,
+        title: "CMP Session \(session.sessionID)",
+        summary: session.summary,
+        projectID: session.projectID,
+        sessionID: .init(rawValue: session.sessionID)
+      ),
+      events: [
+        .init(
+          name: "cmp.session.opened",
+          detail: session.summary,
+          sessionID: .init(rawValue: session.sessionID)
+        )
+      ]
+    )
+  }
+
+  private func response(from readback: PraxisCmpProjectReadbackSnapshot) -> PraxisRuntimeInterfaceResponse {
+    .success(
+      snapshot: .init(
+        kind: .cmpProject,
+        title: "CMP Project \(readback.projectSummary.projectID)",
+        summary: readback.summary,
+        projectID: readback.projectSummary.projectID
+      )
+    )
+  }
+
+  private func response(from status: PraxisCmpStatusPanelSnapshot) -> PraxisRuntimeInterfaceResponse {
+    .success(
+      snapshot: .init(
+        kind: .cmpStatus,
+        title: "CMP Status \(status.projectID)",
+        summary: status.summary,
+        projectID: status.projectID
+      ),
+      events: [
+        .init(
+          name: "cmp.status.readback",
+          detail: status.summary
+        )
+      ]
+    )
+  }
+
+  private func response(from bootstrap: PraxisCmpProjectBootstrapSnapshot) -> PraxisRuntimeInterfaceResponse {
+    .success(
+      snapshot: .init(
+        kind: .cmpBootstrap,
+        title: "CMP Bootstrap \(bootstrap.projectSummary.projectID)",
+        summary: bootstrap.summary,
+        projectID: bootstrap.projectSummary.projectID
+      ),
+      events: [
+        .init(
+          name: "cmp.project.bootstrapped",
+          detail: bootstrap.summary
+        )
+      ]
+    )
+  }
+
+  private func response(from ingest: PraxisCmpFlowIngestSnapshot) -> PraxisRuntimeInterfaceResponse {
+    .success(
+      snapshot: .init(
+        kind: .cmpFlow,
+        title: "CMP Ingest \(ingest.projectID)",
+        summary: ingest.summary,
+        projectID: ingest.projectID,
+        sessionID: .init(rawValue: ingest.sessionID)
+      ),
+      events: [
+        .init(
+          name: "cmp.flow.ingested",
+          detail: ingest.summary,
+          sessionID: .init(rawValue: ingest.sessionID)
+        )
+      ]
+    )
+  }
+
+  private func response(from commit: PraxisCmpFlowCommitSnapshot) -> PraxisRuntimeInterfaceResponse {
+    .success(
+      snapshot: .init(
+        kind: .cmpFlow,
+        title: "CMP Commit \(commit.projectID)",
+        summary: commit.summary,
+        projectID: commit.projectID
+      ),
+      events: [
+        .init(
+          name: "cmp.flow.committed",
+          detail: commit.summary,
+          intentID: commit.deltaID
+        )
+      ]
+    )
+  }
+
+  private func response(from resolve: PraxisCmpFlowResolveSnapshot) -> PraxisRuntimeInterfaceResponse {
+    .success(
+      snapshot: .init(
+        kind: .cmpFlow,
+        title: "CMP Resolve \(resolve.projectID)",
+        summary: resolve.summary,
+        projectID: resolve.projectID
+      ),
+      events: [
+        .init(
+          name: "cmp.flow.resolved",
+          detail: resolve.summary,
+          intentID: resolve.snapshotID
+        )
+      ]
+    )
+  }
+
+  private func response(from materialize: PraxisCmpFlowMaterializeSnapshot) -> PraxisRuntimeInterfaceResponse {
+    .success(
+      snapshot: .init(
+        kind: .cmpFlow,
+        title: "CMP Materialize \(materialize.projectID)",
+        summary: materialize.summary,
+        projectID: materialize.projectID
+      ),
+      events: [
+        .init(
+          name: "cmp.flow.materialized",
+          detail: materialize.summary,
+          intentID: materialize.packageID
+        )
+      ]
+    )
+  }
+
+  private func response(from dispatch: PraxisCmpFlowDispatchSnapshot) -> PraxisRuntimeInterfaceResponse {
+    .success(
+      snapshot: .init(
+        kind: .cmpFlow,
+        title: "CMP Dispatch \(dispatch.projectID)",
+        summary: dispatch.summary,
+        projectID: dispatch.projectID
+      ),
+      events: [
+        .init(
+          name: "cmp.flow.dispatched",
+          detail: dispatch.summary,
+          intentID: dispatch.dispatchID
+        )
+      ]
+    )
+  }
+
+  private func response(from history: PraxisCmpFlowHistorySnapshot) -> PraxisRuntimeInterfaceResponse {
+    .success(
+      snapshot: .init(
+        kind: .cmpFlow,
+        title: "CMP History \(history.projectID)",
+        summary: history.summary,
+        projectID: history.projectID
+      ),
+      events: [
+        .init(
+          name: "cmp.flow.history_requested",
+          detail: history.summary,
+          intentID: history.packageID ?? history.snapshotID
+        )
+      ]
+    )
+  }
+
+  private func response(from smoke: PraxisCmpProjectSmokeSnapshot) -> PraxisRuntimeInterfaceResponse {
+    .success(
+      snapshot: .init(
+        kind: .smoke,
+        title: "CMP Smoke \(smoke.projectID)",
+        summary: smoke.smokeResult.summary,
+        projectID: smoke.projectID
+      )
+    )
+  }
+
   private func makeEvents(from summary: PraxisRunSummary) -> [PraxisRuntimeInterfaceEvent] {
     let lifecycleEventName: String
     switch summary.lifecycleDisposition {
@@ -349,13 +533,156 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
           summary: "\(inspection.summary) Governance: \(inspection.governanceSummary)"
         )
       )
+    case .openCmpSession(let payload):
+      guard !payload.projectID.isEmpty else {
+        throw PraxisRuntimeInterfaceError.missingRequiredField("projectID")
+      }
+      let session = try await runtimeFacade.cmpFacade.openSession(
+        .init(projectID: payload.projectID, sessionID: payload.sessionID)
+      )
+      return response(from: session)
+    case .readbackCmpProject(let payload):
+      guard !payload.projectID.isEmpty else {
+        throw PraxisRuntimeInterfaceError.missingRequiredField("projectID")
+      }
+      let readback = try await runtimeFacade.cmpFacade.readbackProject(
+        .init(projectID: payload.projectID)
+      )
+      return response(from: readback)
+    case .readbackCmpStatus(let payload):
+      guard !payload.projectID.isEmpty else {
+        throw PraxisRuntimeInterfaceError.missingRequiredField("projectID")
+      }
+      let status = try await runtimeFacade.cmpFacade.readbackStatus(
+        .init(projectID: payload.projectID, agentID: payload.agentID)
+      )
+      return response(from: status)
+    case .bootstrapCmpProject(let payload):
+      guard !payload.projectID.isEmpty else {
+        throw PraxisRuntimeInterfaceError.missingRequiredField("projectID")
+      }
+      let bootstrap = try await runtimeFacade.cmpFacade.bootstrapProject(
+        .init(
+          projectID: payload.projectID,
+          agentIDs: payload.agentIDs,
+          defaultAgentID: payload.defaultAgentID,
+          repoName: payload.repoName,
+          repoRootPath: payload.repoRootPath,
+          defaultBranchName: payload.defaultBranchName,
+          databaseName: payload.databaseName,
+          namespaceRoot: payload.namespaceRoot
+        )
+      )
+      return response(from: bootstrap)
+    case .ingestCmpFlow(let payload):
+      guard !payload.projectID.isEmpty else {
+        throw PraxisRuntimeInterfaceError.missingRequiredField("projectID")
+      }
+      let ingest = try await runtimeFacade.cmpFacade.ingestFlow(
+        .init(
+          projectID: payload.projectID,
+          agentID: payload.agentID,
+          sessionID: payload.sessionID,
+          runID: payload.runID,
+          lineageID: payload.lineageID,
+          parentAgentID: payload.parentAgentID,
+          taskSummary: payload.taskSummary,
+          materials: payload.materials,
+          requiresActiveSync: payload.requiresActiveSync
+        )
+      )
+      return response(from: ingest)
+    case .commitCmpFlow(let payload):
+      guard !payload.projectID.isEmpty else {
+        throw PraxisRuntimeInterfaceError.missingRequiredField("projectID")
+      }
+      let commit = try await runtimeFacade.cmpFacade.commitFlow(
+        .init(
+          projectID: payload.projectID,
+          agentID: payload.agentID,
+          sessionID: payload.sessionID,
+          runID: payload.runID,
+          lineageID: payload.lineageID,
+          parentAgentID: payload.parentAgentID,
+          eventIDs: payload.eventIDs,
+          baseRef: payload.baseRef,
+          changeSummary: payload.changeSummary,
+          syncIntent: payload.syncIntent
+        )
+      )
+      return response(from: commit)
+    case .resolveCmpFlow(let payload):
+      guard !payload.projectID.isEmpty else {
+        throw PraxisRuntimeInterfaceError.missingRequiredField("projectID")
+      }
+      let resolve = try await runtimeFacade.cmpFacade.resolveFlow(
+        .init(
+          projectID: payload.projectID,
+          agentID: payload.agentID,
+          lineageID: payload.lineageID,
+          branchRef: payload.branchRef
+        )
+      )
+      return response(from: resolve)
+    case .materializeCmpFlow(let payload):
+      guard !payload.projectID.isEmpty else {
+        throw PraxisRuntimeInterfaceError.missingRequiredField("projectID")
+      }
+      let materialize = try await runtimeFacade.cmpFacade.materializeFlow(
+        .init(
+          projectID: payload.projectID,
+          agentID: payload.agentID,
+          targetAgentID: payload.targetAgentID,
+          snapshotID: payload.snapshotID,
+          projectionID: payload.projectionID,
+          packageKind: payload.packageKind,
+          fidelityLabel: payload.fidelityLabel
+        )
+      )
+      return response(from: materialize)
+    case .dispatchCmpFlow(let payload):
+      guard !payload.projectID.isEmpty else {
+        throw PraxisRuntimeInterfaceError.missingRequiredField("projectID")
+      }
+      let dispatch = try await runtimeFacade.cmpFacade.dispatchFlow(
+        .init(
+          projectID: payload.projectID,
+          agentID: payload.agentID,
+          contextPackage: payload.contextPackage,
+          targetKind: payload.targetKind,
+          reason: payload.reason
+        )
+      )
+      return response(from: dispatch)
+    case .requestCmpHistory(let payload):
+      guard !payload.projectID.isEmpty else {
+        throw PraxisRuntimeInterfaceError.missingRequiredField("projectID")
+      }
+      let history = try await runtimeFacade.cmpFacade.requestHistory(
+        .init(
+          projectID: payload.projectID,
+          requesterAgentID: payload.requesterAgentID,
+          reason: payload.reason,
+          query: payload.query
+        )
+      )
+      return response(from: history)
+    case .smokeCmpProject(let payload):
+      guard !payload.projectID.isEmpty else {
+        throw PraxisRuntimeInterfaceError.missingRequiredField("projectID")
+      }
+      let smoke = try await runtimeFacade.cmpFacade.smokeProject(
+        .init(projectID: payload.projectID)
+      )
+      return response(from: smoke)
     case .inspectCmp:
       let inspection = try await runtimeFacade.inspectionFacade.inspectCmp()
       return .success(
         snapshot: .init(
           kind: .inspection,
           title: "CMP Inspection",
-          summary: "\(inspection.projectID): \(inspection.hostRuntimeSummary)"
+          summary: "\(inspection.projectID): \(inspection.hostRuntimeSummary)",
+          projectID: inspection.projectID
         )
       )
     case .inspectMp:

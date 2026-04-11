@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import PraxisCheckpoint
+import PraxisCmpTypes
 import PraxisCoreTypes
 import PraxisInfraContracts
 import PraxisJournal
@@ -132,6 +133,94 @@ private struct StubInspectCmpUseCase: PraxisInspectCmpUseCaseProtocol {
   }
 }
 
+private struct StubOpenCmpSessionUseCase: PraxisOpenCmpSessionUseCaseProtocol {
+  let executeBody: @Sendable (PraxisOpenCmpSessionCommand) async throws -> PraxisCmpSession
+
+  func execute(_ command: PraxisOpenCmpSessionCommand) async throws -> PraxisCmpSession {
+    try await executeBody(command)
+  }
+}
+
+private struct StubReadbackCmpProjectUseCase: PraxisReadbackCmpProjectUseCaseProtocol {
+  let executeBody: @Sendable (PraxisReadbackCmpProjectCommand) async throws -> PraxisCmpProjectReadback
+
+  func execute(_ command: PraxisReadbackCmpProjectCommand) async throws -> PraxisCmpProjectReadback {
+    try await executeBody(command)
+  }
+}
+
+private struct StubBootstrapCmpProjectUseCase: PraxisBootstrapCmpProjectUseCaseProtocol {
+  let executeBody: @Sendable (PraxisBootstrapCmpProjectCommand) async throws -> PraxisCmpProjectBootstrap
+
+  func execute(_ command: PraxisBootstrapCmpProjectCommand) async throws -> PraxisCmpProjectBootstrap {
+    try await executeBody(command)
+  }
+}
+
+private struct StubIngestCmpFlowUseCase: PraxisIngestCmpFlowUseCaseProtocol {
+  let executeBody: @Sendable (PraxisIngestCmpFlowCommand) async throws -> PraxisCmpFlowIngest
+
+  func execute(_ command: PraxisIngestCmpFlowCommand) async throws -> PraxisCmpFlowIngest {
+    try await executeBody(command)
+  }
+}
+
+private struct StubCommitCmpFlowUseCase: PraxisCommitCmpFlowUseCaseProtocol {
+  let executeBody: @Sendable (PraxisCommitCmpFlowCommand) async throws -> PraxisCmpFlowCommit
+
+  func execute(_ command: PraxisCommitCmpFlowCommand) async throws -> PraxisCmpFlowCommit {
+    try await executeBody(command)
+  }
+}
+
+private struct StubResolveCmpFlowUseCase: PraxisResolveCmpFlowUseCaseProtocol {
+  let executeBody: @Sendable (PraxisResolveCmpFlowCommand) async throws -> PraxisCmpFlowResolve
+
+  func execute(_ command: PraxisResolveCmpFlowCommand) async throws -> PraxisCmpFlowResolve {
+    try await executeBody(command)
+  }
+}
+
+private struct StubMaterializeCmpFlowUseCase: PraxisMaterializeCmpFlowUseCaseProtocol {
+  let executeBody: @Sendable (PraxisMaterializeCmpFlowCommand) async throws -> PraxisCmpFlowMaterialize
+
+  func execute(_ command: PraxisMaterializeCmpFlowCommand) async throws -> PraxisCmpFlowMaterialize {
+    try await executeBody(command)
+  }
+}
+
+private struct StubDispatchCmpFlowUseCase: PraxisDispatchCmpFlowUseCaseProtocol {
+  let executeBody: @Sendable (PraxisDispatchCmpFlowCommand) async throws -> PraxisCmpFlowDispatch
+
+  func execute(_ command: PraxisDispatchCmpFlowCommand) async throws -> PraxisCmpFlowDispatch {
+    try await executeBody(command)
+  }
+}
+
+private struct StubRequestCmpHistoryUseCase: PraxisRequestCmpHistoryUseCaseProtocol {
+  let executeBody: @Sendable (PraxisRequestCmpHistoryCommand) async throws -> PraxisCmpFlowHistory
+
+  func execute(_ command: PraxisRequestCmpHistoryCommand) async throws -> PraxisCmpFlowHistory {
+    try await executeBody(command)
+  }
+}
+
+private struct StubReadbackCmpStatusUseCase: PraxisReadbackCmpStatusUseCaseProtocol {
+  let executeBody: @Sendable (PraxisReadbackCmpStatusCommand) async throws -> PraxisCmpStatusReadback
+
+  func execute(_ command: PraxisReadbackCmpStatusCommand) async throws -> PraxisCmpStatusReadback {
+    try await executeBody(command)
+  }
+}
+
+private struct StubSmokeCmpProjectUseCase: PraxisSmokeCmpProjectUseCaseProtocol {
+  let executeBody: @Sendable (PraxisSmokeCmpProjectCommand) async throws -> PraxisCmpProjectSmoke
+
+  func execute(_ command: PraxisSmokeCmpProjectCommand) async throws -> PraxisCmpProjectSmoke {
+    try await executeBody(command)
+  }
+}
+
 private struct StubInspectMpUseCase: PraxisInspectMpUseCaseProtocol {
   let executeBody: @Sendable () async throws -> PraxisMpInspection
 
@@ -153,6 +242,17 @@ private func makeThrowingRuntimeInterface(
   resumeRunError: Error? = nil,
   inspectTapError: Error? = nil,
   inspectCmpError: Error? = nil,
+  openCmpSessionError: Error? = nil,
+  readbackCmpProjectError: Error? = nil,
+  bootstrapCmpProjectError: Error? = nil,
+  ingestCmpFlowError: Error? = nil,
+  commitCmpFlowError: Error? = nil,
+  resolveCmpFlowError: Error? = nil,
+  materializeCmpFlowError: Error? = nil,
+  dispatchCmpFlowError: Error? = nil,
+  requestCmpHistoryError: Error? = nil,
+  readbackCmpStatusError: Error? = nil,
+  smokeCmpProjectError: Error? = nil,
   inspectMpError: Error? = nil,
   buildCapabilityCatalogError: Error? = nil
 ) -> PraxisRuntimeInterfaceSession {
@@ -196,9 +296,77 @@ private func makeThrowingRuntimeInterface(
       throw RuntimeInterfaceUnexpectedInvocationError(operation: "buildCapabilityCatalog")
     }
   )
+  let cmpFacade = PraxisCmpFacade(
+    openCmpSessionUseCase: StubOpenCmpSessionUseCase { _ in
+      if let openCmpSessionError {
+        throw openCmpSessionError
+      }
+      throw RuntimeInterfaceUnexpectedInvocationError(operation: "openCmpSession")
+    },
+    readbackCmpProjectUseCase: StubReadbackCmpProjectUseCase { _ in
+      if let readbackCmpProjectError {
+        throw readbackCmpProjectError
+      }
+      throw RuntimeInterfaceUnexpectedInvocationError(operation: "readbackCmpProject")
+    },
+    bootstrapCmpProjectUseCase: StubBootstrapCmpProjectUseCase { _ in
+      if let bootstrapCmpProjectError {
+        throw bootstrapCmpProjectError
+      }
+      throw RuntimeInterfaceUnexpectedInvocationError(operation: "bootstrapCmpProject")
+    },
+    ingestCmpFlowUseCase: StubIngestCmpFlowUseCase { _ in
+      if let ingestCmpFlowError {
+        throw ingestCmpFlowError
+      }
+      throw RuntimeInterfaceUnexpectedInvocationError(operation: "ingestCmpFlow")
+    },
+    commitCmpFlowUseCase: StubCommitCmpFlowUseCase { _ in
+      if let commitCmpFlowError {
+        throw commitCmpFlowError
+      }
+      throw RuntimeInterfaceUnexpectedInvocationError(operation: "commitCmpFlow")
+    },
+    resolveCmpFlowUseCase: StubResolveCmpFlowUseCase { _ in
+      if let resolveCmpFlowError {
+        throw resolveCmpFlowError
+      }
+      throw RuntimeInterfaceUnexpectedInvocationError(operation: "resolveCmpFlow")
+    },
+    materializeCmpFlowUseCase: StubMaterializeCmpFlowUseCase { _ in
+      if let materializeCmpFlowError {
+        throw materializeCmpFlowError
+      }
+      throw RuntimeInterfaceUnexpectedInvocationError(operation: "materializeCmpFlow")
+    },
+    dispatchCmpFlowUseCase: StubDispatchCmpFlowUseCase { _ in
+      if let dispatchCmpFlowError {
+        throw dispatchCmpFlowError
+      }
+      throw RuntimeInterfaceUnexpectedInvocationError(operation: "dispatchCmpFlow")
+    },
+    requestCmpHistoryUseCase: StubRequestCmpHistoryUseCase { _ in
+      if let requestCmpHistoryError {
+        throw requestCmpHistoryError
+      }
+      throw RuntimeInterfaceUnexpectedInvocationError(operation: "requestCmpHistory")
+    },
+    readbackCmpStatusUseCase: StubReadbackCmpStatusUseCase { _ in
+      if let readbackCmpStatusError {
+        throw readbackCmpStatusError
+      }
+      throw RuntimeInterfaceUnexpectedInvocationError(operation: "readbackCmpStatus")
+    },
+    smokeCmpProjectUseCase: StubSmokeCmpProjectUseCase { _ in
+      if let smokeCmpProjectError {
+        throw smokeCmpProjectError
+      }
+      throw RuntimeInterfaceUnexpectedInvocationError(operation: "smokeCmpProject")
+    }
+  )
 
   return PraxisRuntimeInterfaceSession(
-    runtimeFacade: .init(runFacade: runFacade, inspectionFacade: inspectionFacade),
+    runtimeFacade: .init(runFacade: runFacade, inspectionFacade: inspectionFacade, cmpFacade: cmpFacade),
     blueprint: PraxisRuntimePresentationBridgeModule.bootstrap
   )
 }
@@ -279,6 +447,201 @@ struct HostRuntimeInterfaceTests {
     #expect(response.snapshot?.recoveredEventCount == 1)
     #expect(response.snapshot?.pendingIntentID == nil)
     #expect(response.events.map(\.name) == ["run.recovered"])
+  }
+
+  @Test
+  func runtimeInterfaceRoutesCmpSessionAndProjectRequests() async throws {
+    let runtimeInterface = try PraxisRuntimeBridgeFactory.makeRuntimeInterface(
+      hostAdapters: PraxisHostAdapterRegistry.localDefaults()
+    )
+
+    let sessionResponse = await runtimeInterface.handle(
+      .openCmpSession(
+        .init(
+          payloadSummary: "Open local CMP session",
+          projectID: "cmp.local-runtime",
+          sessionID: "cmp.session.test"
+        )
+      )
+    )
+    let readbackResponse = await runtimeInterface.handle(
+      .readbackCmpProject(
+        .init(
+          payloadSummary: "Read back local CMP project",
+          projectID: "cmp.local-runtime"
+        )
+      )
+    )
+    let statusReadbackResponse = await runtimeInterface.handle(
+      .readbackCmpStatus(
+        .init(
+          payloadSummary: "Read back CMP status",
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local"
+        )
+      )
+    )
+    let bootstrapResponse = await runtimeInterface.handle(
+      .bootstrapCmpProject(
+        .init(
+          payloadSummary: "Bootstrap local CMP project",
+          projectID: "cmp.local-runtime",
+          agentIDs: ["runtime.local", "checker.local"]
+        )
+      )
+    )
+    let ingestResponse = await runtimeInterface.handle(
+      .ingestCmpFlow(
+        .init(
+          payloadSummary: "Ingest local CMP flow",
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          sessionID: "cmp.flow.session",
+          taskSummary: "Capture one runtime material",
+          materials: [
+            .init(kind: .userInput, ref: "payload:user:cmp")
+          ],
+          requiresActiveSync: true
+        )
+      )
+    )
+    let commitResponse = await runtimeInterface.handle(
+      .commitCmpFlow(
+        .init(
+          payloadSummary: "Commit local CMP flow",
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          sessionID: "cmp.flow.session",
+          eventIDs: ["evt.cmp.1"],
+          changeSummary: "Commit accepted flow event",
+          syncIntent: .toParent
+        )
+      )
+    )
+    _ = await runtimeInterface.handle(
+      .runGoal(
+        .init(
+          payloadSummary: "Seed projection for resolve",
+          goalID: "goal.cmp-flow-resolve",
+          goalTitle: "CMP Flow Resolve Seed",
+          sessionID: "session.cmp-flow-resolve"
+        )
+      )
+    )
+    let resolveResponse = await runtimeInterface.handle(
+      .resolveCmpFlow(
+        .init(
+          payloadSummary: "Resolve local CMP flow",
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local"
+        )
+      )
+    )
+    let materializeResponse = await runtimeInterface.handle(
+      .materializeCmpFlow(
+        .init(
+          payloadSummary: "Materialize local CMP flow",
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          targetAgentID: "checker.local",
+          packageKind: .runtimeFill,
+          fidelityLabel: .highSignal
+        )
+      )
+    )
+    let materializeSnapshot = try #require(materializeResponse.snapshot)
+    let materializePackageID = try #require(materializeResponse.events.first?.intentID)
+    let contextPackage = PraxisCmpContextPackage(
+      id: .init(rawValue: materializePackageID),
+      sourceProjectionID: .init(rawValue: "projection.seed.runtime.local"),
+      sourceSnapshotID: .init(rawValue: "projection.seed.runtime.local:checked"),
+      sourceAgentID: "runtime.local",
+      targetAgentID: "checker.local",
+      kind: .runtimeFill,
+      packageRef: "context://cmp.local-runtime/projection.seed.runtime.local/checker.local/runtimeFill",
+      fidelityLabel: .highSignal,
+      createdAt: "2026-04-11T00:00:00Z",
+      sourceSectionIDs: [.init(rawValue: "projection.seed.runtime.local:section")]
+    )
+    let dispatchResponse = await runtimeInterface.handle(
+      .dispatchCmpFlow(
+        .init(
+          payloadSummary: "Dispatch local CMP flow",
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          contextPackage: contextPackage,
+          targetKind: .peer,
+          reason: "Forward runtime fill to checker"
+        )
+      )
+    )
+    let historyResponse = await runtimeInterface.handle(
+      .requestCmpHistory(
+        .init(
+          payloadSummary: "Request local CMP history",
+          projectID: "cmp.local-runtime",
+          requesterAgentID: "checker.local",
+          reason: "Recover high-signal context",
+          query: .init(
+            snapshotID: .init(rawValue: "projection.seed.runtime.local:checked"),
+            packageKindHint: .historicalReply
+          )
+        )
+      )
+    )
+    let smokeResponse = await runtimeInterface.handle(
+      .smokeCmpProject(
+        .init(
+          payloadSummary: "Smoke local CMP project",
+          projectID: "cmp.local-runtime"
+        )
+      )
+    )
+
+    #expect(sessionResponse.status == .success)
+    #expect(sessionResponse.snapshot?.kind == .cmpSession)
+    #expect(sessionResponse.snapshot?.projectID == "cmp.local-runtime")
+    #expect(sessionResponse.events.map(\.name) == ["cmp.session.opened"])
+    #expect(readbackResponse.status == .success)
+    #expect(readbackResponse.snapshot?.kind == .cmpProject)
+    #expect(readbackResponse.snapshot?.projectID == "cmp.local-runtime")
+    #expect(statusReadbackResponse.status == .success)
+    #expect(statusReadbackResponse.snapshot?.kind == .cmpStatus)
+    #expect(statusReadbackResponse.snapshot?.title == "CMP Status cmp.local-runtime")
+    #expect(statusReadbackResponse.events.map(\.name) == ["cmp.status.readback"])
+    #expect(bootstrapResponse.status == .success)
+    #expect(bootstrapResponse.snapshot?.kind == .cmpBootstrap)
+    #expect(bootstrapResponse.snapshot?.title == "CMP Bootstrap cmp.local-runtime")
+    #expect(bootstrapResponse.events.map(\.name) == ["cmp.project.bootstrapped"])
+    #expect(ingestResponse.status == .success)
+    #expect(ingestResponse.snapshot?.kind == .cmpFlow)
+    #expect(ingestResponse.snapshot?.title == "CMP Ingest cmp.local-runtime")
+    #expect(ingestResponse.snapshot?.sessionID == .init(rawValue: "cmp.flow.session"))
+    #expect(ingestResponse.events.map(\.name) == ["cmp.flow.ingested"])
+    #expect(ingestResponse.events.first?.sessionID == .init(rawValue: "cmp.flow.session"))
+    #expect(commitResponse.status == .success)
+    #expect(commitResponse.snapshot?.kind == .cmpFlow)
+    #expect(commitResponse.snapshot?.title == "CMP Commit cmp.local-runtime")
+    #expect(commitResponse.events.map(\.name) == ["cmp.flow.committed"])
+    #expect(resolveResponse.status == .success)
+    #expect(resolveResponse.snapshot?.kind == .cmpFlow)
+    #expect(resolveResponse.snapshot?.title == "CMP Resolve cmp.local-runtime")
+    #expect(resolveResponse.events.map(\.name) == ["cmp.flow.resolved"])
+    #expect(materializeResponse.status == .success)
+    #expect(materializeSnapshot.kind == .cmpFlow)
+    #expect(materializeSnapshot.title == "CMP Materialize cmp.local-runtime")
+    #expect(materializeResponse.events.map(\.name) == ["cmp.flow.materialized"])
+    #expect(dispatchResponse.status == .success)
+    #expect(dispatchResponse.snapshot?.kind == .cmpFlow)
+    #expect(dispatchResponse.snapshot?.title == "CMP Dispatch cmp.local-runtime")
+    #expect(dispatchResponse.events.map(\.name) == ["cmp.flow.dispatched"])
+    #expect(historyResponse.status == .success)
+    #expect(historyResponse.snapshot?.kind == .cmpFlow)
+    #expect(historyResponse.snapshot?.title == "CMP History cmp.local-runtime")
+    #expect(historyResponse.events.map(\.name) == ["cmp.flow.history_requested"])
+    #expect(smokeResponse.status == .success)
+    #expect(smokeResponse.snapshot?.kind == .smoke)
+    #expect(smokeResponse.snapshot?.title == "CMP Smoke cmp.local-runtime")
   }
 
   @Test
@@ -591,6 +954,104 @@ struct HostRuntimeInterfaceTests {
     #expect(responseJSON.contains(#""snapshot":{"#))
     #expect(decodedRequest == request)
     #expect(decodedResponse == response)
+  }
+
+  @Test
+  func runtimeInterfaceCodecEncodesCmpProjectRequestsAsNestedPayloads() throws {
+    let codec = PraxisJSONRuntimeInterfaceCodec()
+    let request = PraxisRuntimeInterfaceRequest.readbackCmpProject(
+      .init(
+        payloadSummary: "Read back project",
+        projectID: "cmp.local-runtime"
+      )
+    )
+
+    let requestData = try codec.encode(request)
+    let requestJSON = String(decoding: requestData, as: UTF8.self)
+    let decodedRequest = try codec.decodeRequest(requestData)
+
+    #expect(
+      requestJSON ==
+        #"{"kind":"readbackCmpProject","readbackCmpProject":{"payloadSummary":"Read back project","projectID":"cmp.local-runtime"}}"#
+    )
+    #expect(decodedRequest == request)
+  }
+
+  @Test
+  func runtimeInterfaceCodecEncodesCmpBootstrapRequestsAsNestedPayloads() throws {
+    let codec = PraxisJSONRuntimeInterfaceCodec()
+    let request = PraxisRuntimeInterfaceRequest.bootstrapCmpProject(
+      .init(
+        payloadSummary: "Bootstrap project",
+        projectID: "cmp.local-runtime",
+        agentIDs: ["runtime.local", "checker.local"],
+        defaultAgentID: "runtime.local",
+        repoName: "praxis",
+        defaultBranchName: "main",
+        databaseName: "cmp_local_runtime",
+        namespaceRoot: "cmp/cmp.local-runtime"
+      )
+    )
+
+    let requestData = try codec.encode(request)
+    let decodedRequest = try codec.decodeRequest(requestData)
+
+    #expect(decodedRequest == request)
+  }
+
+  @Test
+  func runtimeInterfaceCodecEncodesCmpFlowRequestsAsNestedPayloads() throws {
+    let codec = PraxisJSONRuntimeInterfaceCodec()
+    let ingestRequest = PraxisRuntimeInterfaceRequest.ingestCmpFlow(
+      .init(
+        payloadSummary: "Ingest flow",
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        sessionID: "cmp.flow.session",
+        taskSummary: "Capture input",
+        materials: [
+          .init(kind: .userInput, ref: "payload:user:cmp")
+        ],
+        requiresActiveSync: true
+      )
+    )
+    let historyRequest = PraxisRuntimeInterfaceRequest.requestCmpHistory(
+      .init(
+        payloadSummary: "Request history",
+        projectID: "cmp.local-runtime",
+        requesterAgentID: "checker.local",
+        reason: "Recover context",
+        query: .init(
+          snapshotID: .init(rawValue: "projection.runtime.local:checked"),
+          packageKindHint: .historicalReply
+        )
+      )
+    )
+
+    let ingestData = try codec.encode(ingestRequest)
+    let historyData = try codec.encode(historyRequest)
+    let decodedIngestRequest = try codec.decodeRequest(ingestData)
+    let decodedHistoryRequest = try codec.decodeRequest(historyData)
+
+    #expect(decodedIngestRequest == ingestRequest)
+    #expect(decodedHistoryRequest == historyRequest)
+  }
+
+  @Test
+  func runtimeInterfaceCodecEncodesCmpStatusRequestsAsNestedPayloads() throws {
+    let codec = PraxisJSONRuntimeInterfaceCodec()
+    let request = PraxisRuntimeInterfaceRequest.readbackCmpStatus(
+      .init(
+        payloadSummary: "Read back status",
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local"
+      )
+    )
+
+    let requestData = try codec.encode(request)
+    let decodedRequest = try codec.decodeRequest(requestData)
+
+    #expect(decodedRequest == request)
   }
 
   @Test

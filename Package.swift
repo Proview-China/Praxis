@@ -424,6 +424,13 @@ let package = Package(
       dependencies: [
         "PraxisCoreTypes",
         "PraxisCapabilityContracts",
+        "PraxisCmpDelivery",
+        "PraxisCmpDbModel",
+        "PraxisCmpFiveAgent",
+        "PraxisCmpGitModel",
+        "PraxisCmpMqModel",
+        "PraxisCmpProjection",
+        "PraxisCmpSections",
         "PraxisCmpTypes",
         "PraxisRuntimeComposition",
         "PraxisTapTypes",
@@ -444,6 +451,7 @@ let package = Package(
     .target(
       name: "PraxisRuntimeInterface",
       dependencies: [
+        "PraxisCmpTypes",
         "PraxisCoreTypes",
         "PraxisGoal",
         "PraxisRun",

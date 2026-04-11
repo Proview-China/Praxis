@@ -1,3 +1,4 @@
+import PraxisCmpTypes
 import PraxisRun
 import PraxisRuntimeFacades
 import PraxisSession
@@ -24,6 +25,17 @@ public enum PraxisRuntimeInterfaceCommandKind: String, Sendable, Equatable, Coda
   case runGoal
   case resumeRun
   case inspectTap
+  case openCmpSession
+  case readbackCmpProject
+  case readbackCmpStatus
+  case bootstrapCmpProject
+  case ingestCmpFlow
+  case commitCmpFlow
+  case resolveCmpFlow
+  case materializeCmpFlow
+  case dispatchCmpFlow
+  case requestCmpHistory
+  case smokeCmpProject
   case inspectCmp
   case inspectMp
   case buildCapabilityCatalog
@@ -74,11 +86,275 @@ public struct PraxisRuntimeInterfaceResumeRunRequestPayload: Sendable, Equatable
   }
 }
 
+public struct PraxisRuntimeInterfaceOpenCmpSessionRequestPayload: Sendable, Equatable, Codable {
+  public let payloadSummary: String
+  public let projectID: String
+  public let sessionID: String?
+
+  public init(
+    payloadSummary: String,
+    projectID: String,
+    sessionID: String? = nil
+  ) {
+    self.payloadSummary = payloadSummary
+    self.projectID = projectID
+    self.sessionID = sessionID
+  }
+}
+
+public struct PraxisRuntimeInterfaceCmpProjectRequestPayload: Sendable, Equatable, Codable {
+  public let payloadSummary: String
+  public let projectID: String
+
+  public init(payloadSummary: String, projectID: String) {
+    self.payloadSummary = payloadSummary
+    self.projectID = projectID
+  }
+}
+
+public struct PraxisRuntimeInterfaceCmpStatusRequestPayload: Sendable, Equatable, Codable {
+  public let payloadSummary: String
+  public let projectID: String
+  public let agentID: String?
+
+  public init(
+    payloadSummary: String,
+    projectID: String,
+    agentID: String? = nil
+  ) {
+    self.payloadSummary = payloadSummary
+    self.projectID = projectID
+    self.agentID = agentID
+  }
+}
+
+public struct PraxisRuntimeInterfaceBootstrapCmpProjectRequestPayload: Sendable, Equatable, Codable {
+  public let payloadSummary: String
+  public let projectID: String
+  public let agentIDs: [String]
+  public let defaultAgentID: String?
+  public let repoName: String?
+  public let repoRootPath: String?
+  public let defaultBranchName: String?
+  public let databaseName: String?
+  public let namespaceRoot: String?
+
+  public init(
+    payloadSummary: String,
+    projectID: String,
+    agentIDs: [String] = [],
+    defaultAgentID: String? = nil,
+    repoName: String? = nil,
+    repoRootPath: String? = nil,
+    defaultBranchName: String? = nil,
+    databaseName: String? = nil,
+    namespaceRoot: String? = nil
+  ) {
+    self.payloadSummary = payloadSummary
+    self.projectID = projectID
+    self.agentIDs = agentIDs
+    self.defaultAgentID = defaultAgentID
+    self.repoName = repoName
+    self.repoRootPath = repoRootPath
+    self.defaultBranchName = defaultBranchName
+    self.databaseName = databaseName
+    self.namespaceRoot = namespaceRoot
+  }
+}
+
+public struct PraxisRuntimeInterfaceIngestCmpFlowRequestPayload: Sendable, Equatable, Codable {
+  public let payloadSummary: String
+  public let projectID: String
+  public let agentID: String
+  public let sessionID: String
+  public let runID: String?
+  public let lineageID: String?
+  public let parentAgentID: String?
+  public let taskSummary: String
+  public let materials: [PraxisCmpRuntimeContextMaterial]
+  public let requiresActiveSync: Bool
+
+  public init(
+    payloadSummary: String,
+    projectID: String,
+    agentID: String,
+    sessionID: String,
+    runID: String? = nil,
+    lineageID: String? = nil,
+    parentAgentID: String? = nil,
+    taskSummary: String,
+    materials: [PraxisCmpRuntimeContextMaterial],
+    requiresActiveSync: Bool = false
+  ) {
+    self.payloadSummary = payloadSummary
+    self.projectID = projectID
+    self.agentID = agentID
+    self.sessionID = sessionID
+    self.runID = runID
+    self.lineageID = lineageID
+    self.parentAgentID = parentAgentID
+    self.taskSummary = taskSummary
+    self.materials = materials
+    self.requiresActiveSync = requiresActiveSync
+  }
+}
+
+public struct PraxisRuntimeInterfaceCommitCmpFlowRequestPayload: Sendable, Equatable, Codable {
+  public let payloadSummary: String
+  public let projectID: String
+  public let agentID: String
+  public let sessionID: String
+  public let runID: String?
+  public let lineageID: String?
+  public let parentAgentID: String?
+  public let eventIDs: [String]
+  public let baseRef: String?
+  public let changeSummary: String
+  public let syncIntent: PraxisCmpContextSyncIntent
+
+  public init(
+    payloadSummary: String,
+    projectID: String,
+    agentID: String,
+    sessionID: String,
+    runID: String? = nil,
+    lineageID: String? = nil,
+    parentAgentID: String? = nil,
+    eventIDs: [String],
+    baseRef: String? = nil,
+    changeSummary: String,
+    syncIntent: PraxisCmpContextSyncIntent
+  ) {
+    self.payloadSummary = payloadSummary
+    self.projectID = projectID
+    self.agentID = agentID
+    self.sessionID = sessionID
+    self.runID = runID
+    self.lineageID = lineageID
+    self.parentAgentID = parentAgentID
+    self.eventIDs = eventIDs
+    self.baseRef = baseRef
+    self.changeSummary = changeSummary
+    self.syncIntent = syncIntent
+  }
+}
+
+public struct PraxisRuntimeInterfaceResolveCmpFlowRequestPayload: Sendable, Equatable, Codable {
+  public let payloadSummary: String
+  public let projectID: String
+  public let agentID: String
+  public let lineageID: String?
+  public let branchRef: String?
+
+  public init(
+    payloadSummary: String,
+    projectID: String,
+    agentID: String,
+    lineageID: String? = nil,
+    branchRef: String? = nil
+  ) {
+    self.payloadSummary = payloadSummary
+    self.projectID = projectID
+    self.agentID = agentID
+    self.lineageID = lineageID
+    self.branchRef = branchRef
+  }
+}
+
+public struct PraxisRuntimeInterfaceMaterializeCmpFlowRequestPayload: Sendable, Equatable, Codable {
+  public let payloadSummary: String
+  public let projectID: String
+  public let agentID: String
+  public let targetAgentID: String
+  public let snapshotID: String?
+  public let projectionID: String?
+  public let packageKind: PraxisCmpContextPackageKind
+  public let fidelityLabel: PraxisCmpContextPackageFidelityLabel?
+
+  public init(
+    payloadSummary: String,
+    projectID: String,
+    agentID: String,
+    targetAgentID: String,
+    snapshotID: String? = nil,
+    projectionID: String? = nil,
+    packageKind: PraxisCmpContextPackageKind,
+    fidelityLabel: PraxisCmpContextPackageFidelityLabel? = nil
+  ) {
+    self.payloadSummary = payloadSummary
+    self.projectID = projectID
+    self.agentID = agentID
+    self.targetAgentID = targetAgentID
+    self.snapshotID = snapshotID
+    self.projectionID = projectionID
+    self.packageKind = packageKind
+    self.fidelityLabel = fidelityLabel
+  }
+}
+
+public struct PraxisRuntimeInterfaceDispatchCmpFlowRequestPayload: Sendable, Equatable, Codable {
+  public let payloadSummary: String
+  public let projectID: String
+  public let agentID: String
+  public let contextPackage: PraxisCmpContextPackage
+  public let targetKind: PraxisCmpDispatchTargetKind
+  public let reason: String
+
+  public init(
+    payloadSummary: String,
+    projectID: String,
+    agentID: String,
+    contextPackage: PraxisCmpContextPackage,
+    targetKind: PraxisCmpDispatchTargetKind,
+    reason: String
+  ) {
+    self.payloadSummary = payloadSummary
+    self.projectID = projectID
+    self.agentID = agentID
+    self.contextPackage = contextPackage
+    self.targetKind = targetKind
+    self.reason = reason
+  }
+}
+
+public struct PraxisRuntimeInterfaceRequestCmpHistoryPayload: Sendable, Equatable, Codable {
+  public let payloadSummary: String
+  public let projectID: String
+  public let requesterAgentID: String
+  public let reason: String
+  public let query: PraxisCmpHistoricalContextQuery
+
+  public init(
+    payloadSummary: String,
+    projectID: String,
+    requesterAgentID: String,
+    reason: String,
+    query: PraxisCmpHistoricalContextQuery
+  ) {
+    self.payloadSummary = payloadSummary
+    self.projectID = projectID
+    self.requesterAgentID = requesterAgentID
+    self.reason = reason
+    self.query = query
+  }
+}
+
 public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
   case inspectArchitecture
   case runGoal(PraxisRuntimeInterfaceRunGoalRequestPayload)
   case resumeRun(PraxisRuntimeInterfaceResumeRunRequestPayload)
   case inspectTap
+  case openCmpSession(PraxisRuntimeInterfaceOpenCmpSessionRequestPayload)
+  case readbackCmpProject(PraxisRuntimeInterfaceCmpProjectRequestPayload)
+  case readbackCmpStatus(PraxisRuntimeInterfaceCmpStatusRequestPayload)
+  case bootstrapCmpProject(PraxisRuntimeInterfaceBootstrapCmpProjectRequestPayload)
+  case ingestCmpFlow(PraxisRuntimeInterfaceIngestCmpFlowRequestPayload)
+  case commitCmpFlow(PraxisRuntimeInterfaceCommitCmpFlowRequestPayload)
+  case resolveCmpFlow(PraxisRuntimeInterfaceResolveCmpFlowRequestPayload)
+  case materializeCmpFlow(PraxisRuntimeInterfaceMaterializeCmpFlowRequestPayload)
+  case dispatchCmpFlow(PraxisRuntimeInterfaceDispatchCmpFlowRequestPayload)
+  case requestCmpHistory(PraxisRuntimeInterfaceRequestCmpHistoryPayload)
+  case smokeCmpProject(PraxisRuntimeInterfaceCmpProjectRequestPayload)
   case inspectCmp
   case inspectMp
   case buildCapabilityCatalog
@@ -93,6 +369,28 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
       return .resumeRun
     case .inspectTap:
       return .inspectTap
+    case .openCmpSession:
+      return .openCmpSession
+    case .readbackCmpProject:
+      return .readbackCmpProject
+    case .readbackCmpStatus:
+      return .readbackCmpStatus
+    case .bootstrapCmpProject:
+      return .bootstrapCmpProject
+    case .ingestCmpFlow:
+      return .ingestCmpFlow
+    case .commitCmpFlow:
+      return .commitCmpFlow
+    case .resolveCmpFlow:
+      return .resolveCmpFlow
+    case .materializeCmpFlow:
+      return .materializeCmpFlow
+    case .dispatchCmpFlow:
+      return .dispatchCmpFlow
+    case .requestCmpHistory:
+      return .requestCmpHistory
+    case .smokeCmpProject:
+      return .smokeCmpProject
     case .inspectCmp:
       return .inspectCmp
     case .inspectMp:
@@ -108,6 +406,28 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
       return payload.payloadSummary
     case .resumeRun(let payload):
       return payload.payloadSummary
+    case .openCmpSession(let payload):
+      return payload.payloadSummary
+    case .readbackCmpProject(let payload):
+      return payload.payloadSummary
+    case .readbackCmpStatus(let payload):
+      return payload.payloadSummary
+    case .bootstrapCmpProject(let payload):
+      return payload.payloadSummary
+    case .ingestCmpFlow(let payload):
+      return payload.payloadSummary
+    case .commitCmpFlow(let payload):
+      return payload.payloadSummary
+    case .resolveCmpFlow(let payload):
+      return payload.payloadSummary
+    case .materializeCmpFlow(let payload):
+      return payload.payloadSummary
+    case .dispatchCmpFlow(let payload):
+      return payload.payloadSummary
+    case .requestCmpHistory(let payload):
+      return payload.payloadSummary
+    case .smokeCmpProject(let payload):
+      return payload.payloadSummary
     case .inspectArchitecture, .inspectTap, .inspectCmp, .inspectMp, .buildCapabilityCatalog:
       return ""
     }
@@ -117,7 +437,13 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
     switch self {
     case .runGoal(let payload):
       return payload.sessionID
-    case .inspectArchitecture, .resumeRun, .inspectTap, .inspectCmp, .inspectMp, .buildCapabilityCatalog:
+    case .openCmpSession(let payload):
+      return payload.sessionID
+    case .ingestCmpFlow(let payload):
+      return payload.sessionID
+    case .commitCmpFlow(let payload):
+      return payload.sessionID
+    case .inspectArchitecture, .resumeRun, .inspectTap, .readbackCmpProject, .readbackCmpStatus, .bootstrapCmpProject, .resolveCmpFlow, .materializeCmpFlow, .dispatchCmpFlow, .requestCmpHistory, .smokeCmpProject, .inspectCmp, .inspectMp, .buildCapabilityCatalog:
       return nil
     }
   }
@@ -126,7 +452,40 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
     switch self {
     case .resumeRun(let payload):
       return payload.runID
-    case .inspectArchitecture, .runGoal, .inspectTap, .inspectCmp, .inspectMp, .buildCapabilityCatalog:
+    case .ingestCmpFlow(let payload):
+      return payload.runID
+    case .commitCmpFlow(let payload):
+      return payload.runID
+    case .inspectArchitecture, .runGoal, .inspectTap, .openCmpSession, .readbackCmpProject, .readbackCmpStatus, .bootstrapCmpProject, .resolveCmpFlow, .materializeCmpFlow, .dispatchCmpFlow, .requestCmpHistory, .smokeCmpProject, .inspectCmp, .inspectMp, .buildCapabilityCatalog:
+      return nil
+    }
+  }
+
+  public var projectID: String? {
+    switch self {
+    case .openCmpSession(let payload):
+      return payload.projectID
+    case .readbackCmpProject(let payload):
+      return payload.projectID
+    case .readbackCmpStatus(let payload):
+      return payload.projectID
+    case .bootstrapCmpProject(let payload):
+      return payload.projectID
+    case .ingestCmpFlow(let payload):
+      return payload.projectID
+    case .commitCmpFlow(let payload):
+      return payload.projectID
+    case .resolveCmpFlow(let payload):
+      return payload.projectID
+    case .materializeCmpFlow(let payload):
+      return payload.projectID
+    case .dispatchCmpFlow(let payload):
+      return payload.projectID
+    case .requestCmpHistory(let payload):
+      return payload.projectID
+    case .smokeCmpProject(let payload):
+      return payload.projectID
+    case .inspectArchitecture, .runGoal, .resumeRun, .inspectTap, .inspectCmp, .inspectMp, .buildCapabilityCatalog:
       return nil
     }
   }
@@ -135,11 +494,23 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
     case kind
     case runGoal
     case resumeRun
+    case openCmpSession
+    case readbackCmpProject
+    case readbackCmpStatus
+    case bootstrapCmpProject
+    case ingestCmpFlow
+    case commitCmpFlow
+    case resolveCmpFlow
+    case materializeCmpFlow
+    case dispatchCmpFlow
+    case requestCmpHistory
+    case smokeCmpProject
     case payloadSummary
     case goalID
     case goalTitle
     case sessionID
     case runID
+    case projectID
   }
 
   public init(from decoder: Decoder) throws {
@@ -175,6 +546,83 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
       }
     case .inspectTap:
       self = .inspectTap
+    case .openCmpSession:
+      self = .openCmpSession(
+        try container.decode(
+          PraxisRuntimeInterfaceOpenCmpSessionRequestPayload.self,
+          forKey: .openCmpSession
+        )
+      )
+    case .readbackCmpProject:
+      self = .readbackCmpProject(
+        try container.decode(
+          PraxisRuntimeInterfaceCmpProjectRequestPayload.self,
+          forKey: .readbackCmpProject
+        )
+      )
+    case .readbackCmpStatus:
+      self = .readbackCmpStatus(
+        try container.decode(
+          PraxisRuntimeInterfaceCmpStatusRequestPayload.self,
+          forKey: .readbackCmpStatus
+        )
+      )
+    case .bootstrapCmpProject:
+      self = .bootstrapCmpProject(
+        try container.decode(
+          PraxisRuntimeInterfaceBootstrapCmpProjectRequestPayload.self,
+          forKey: .bootstrapCmpProject
+        )
+      )
+    case .ingestCmpFlow:
+      self = .ingestCmpFlow(
+        try container.decode(
+          PraxisRuntimeInterfaceIngestCmpFlowRequestPayload.self,
+          forKey: .ingestCmpFlow
+        )
+      )
+    case .commitCmpFlow:
+      self = .commitCmpFlow(
+        try container.decode(
+          PraxisRuntimeInterfaceCommitCmpFlowRequestPayload.self,
+          forKey: .commitCmpFlow
+        )
+      )
+    case .resolveCmpFlow:
+      self = .resolveCmpFlow(
+        try container.decode(
+          PraxisRuntimeInterfaceResolveCmpFlowRequestPayload.self,
+          forKey: .resolveCmpFlow
+        )
+      )
+    case .materializeCmpFlow:
+      self = .materializeCmpFlow(
+        try container.decode(
+          PraxisRuntimeInterfaceMaterializeCmpFlowRequestPayload.self,
+          forKey: .materializeCmpFlow
+        )
+      )
+    case .dispatchCmpFlow:
+      self = .dispatchCmpFlow(
+        try container.decode(
+          PraxisRuntimeInterfaceDispatchCmpFlowRequestPayload.self,
+          forKey: .dispatchCmpFlow
+        )
+      )
+    case .requestCmpHistory:
+      self = .requestCmpHistory(
+        try container.decode(
+          PraxisRuntimeInterfaceRequestCmpHistoryPayload.self,
+          forKey: .requestCmpHistory
+        )
+      )
+    case .smokeCmpProject:
+      self = .smokeCmpProject(
+        try container.decode(
+          PraxisRuntimeInterfaceCmpProjectRequestPayload.self,
+          forKey: .smokeCmpProject
+        )
+      )
     case .inspectCmp:
       self = .inspectCmp
     case .inspectMp:
@@ -193,6 +641,28 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
       try container.encode(payload, forKey: .runGoal)
     case .resumeRun(let payload):
       try container.encode(payload, forKey: .resumeRun)
+    case .openCmpSession(let payload):
+      try container.encode(payload, forKey: .openCmpSession)
+    case .readbackCmpProject(let payload):
+      try container.encode(payload, forKey: .readbackCmpProject)
+    case .readbackCmpStatus(let payload):
+      try container.encode(payload, forKey: .readbackCmpStatus)
+    case .bootstrapCmpProject(let payload):
+      try container.encode(payload, forKey: .bootstrapCmpProject)
+    case .ingestCmpFlow(let payload):
+      try container.encode(payload, forKey: .ingestCmpFlow)
+    case .commitCmpFlow(let payload):
+      try container.encode(payload, forKey: .commitCmpFlow)
+    case .resolveCmpFlow(let payload):
+      try container.encode(payload, forKey: .resolveCmpFlow)
+    case .materializeCmpFlow(let payload):
+      try container.encode(payload, forKey: .materializeCmpFlow)
+    case .dispatchCmpFlow(let payload):
+      try container.encode(payload, forKey: .dispatchCmpFlow)
+    case .requestCmpHistory(let payload):
+      try container.encode(payload, forKey: .requestCmpHistory)
+    case .smokeCmpProject(let payload):
+      try container.encode(payload, forKey: .smokeCmpProject)
     case .inspectArchitecture, .inspectTap, .inspectCmp, .inspectMp, .buildCapabilityCatalog:
       break
     }
@@ -202,6 +672,12 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
 public enum PraxisRuntimeInterfaceSnapshotKind: String, Sendable, Equatable, Codable {
   case architecture
   case run
+  case cmpSession
+  case cmpProject
+  case cmpStatus
+  case cmpBootstrap
+  case cmpFlow
+  case smoke
   case inspection
   case catalog
 }
@@ -210,6 +686,7 @@ public struct PraxisRuntimeInterfaceSnapshot: Sendable, Equatable, Codable {
   public let kind: PraxisRuntimeInterfaceSnapshotKind
   public let title: String
   public let summary: String
+  public let projectID: String?
   public let runID: PraxisRunID?
   public let sessionID: PraxisSessionID?
   public let phase: PraxisRunPhase?
@@ -223,6 +700,7 @@ public struct PraxisRuntimeInterfaceSnapshot: Sendable, Equatable, Codable {
     kind: PraxisRuntimeInterfaceSnapshotKind,
     title: String,
     summary: String,
+    projectID: String? = nil,
     runID: PraxisRunID? = nil,
     sessionID: PraxisSessionID? = nil,
     phase: PraxisRunPhase? = nil,
@@ -235,6 +713,7 @@ public struct PraxisRuntimeInterfaceSnapshot: Sendable, Equatable, Codable {
     self.kind = kind
     self.title = title
     self.summary = summary
+    self.projectID = projectID
     self.runID = runID
     self.sessionID = sessionID
     self.phase = phase

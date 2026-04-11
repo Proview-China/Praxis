@@ -122,6 +122,51 @@ public actor PraxisFakeProjectionStore: PraxisProjectionStoreContract {
   }
 }
 
+/// In-memory fake CMP context package descriptor store.
+public actor PraxisFakeCmpContextPackageStore: PraxisCmpContextPackageStoreContract {
+  private var descriptors: [PraxisCmpContextPackageDescriptor]
+
+  public init(seedDescriptors: [PraxisCmpContextPackageDescriptor] = []) {
+    self.descriptors = seedDescriptors
+  }
+
+  public func save(_ descriptor: PraxisCmpContextPackageDescriptor) async throws -> PraxisCmpContextPackageStoreWriteReceipt {
+    descriptors.removeAll { $0.projectID == descriptor.projectID && $0.packageID == descriptor.packageID }
+    descriptors.append(descriptor)
+    return PraxisCmpContextPackageStoreWriteReceipt(
+      packageID: descriptor.packageID,
+      status: descriptor.status,
+      storedAt: descriptor.updatedAt
+    )
+  }
+
+  public func describe(_ query: PraxisCmpContextPackageQuery) async throws -> [PraxisCmpContextPackageDescriptor] {
+    descriptors
+      .filter { descriptor in
+        guard descriptor.projectID == query.projectID else {
+          return false
+        }
+        if let packageID = query.packageID, descriptor.packageID != packageID {
+          return false
+        }
+        if let sourceAgentID = query.sourceAgentID, descriptor.sourceAgentID != sourceAgentID {
+          return false
+        }
+        if let targetAgentID = query.targetAgentID, descriptor.targetAgentID != targetAgentID {
+          return false
+        }
+        if let sourceSnapshotID = query.sourceSnapshotID, descriptor.sourceSnapshotID != sourceSnapshotID {
+          return false
+        }
+        if let packageKind = query.packageKind, descriptor.packageKind != packageKind {
+          return false
+        }
+        return true
+      }
+      .sorted { $0.updatedAt > $1.updatedAt }
+  }
+}
+
 /// Spy bus that records every published message for assertions.
 public actor PraxisSpyMessageBus: PraxisMessageBusContract {
   private var publishedMessages: [PraxisPublishedMessage] = []

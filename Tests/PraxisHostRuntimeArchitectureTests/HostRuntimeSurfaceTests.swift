@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import PraxisCheckpoint
+import PraxisCmpTypes
 import PraxisCoreTypes
 import PraxisGoal
 import PraxisInfraContracts
@@ -200,6 +201,201 @@ struct HostRuntimeSurfaceTests {
     #expect(runState.events.map(\.name) == ["run.started", "run.follow_up_ready"])
     #expect(bridgeEvents.map(\.name) == ["run.started", "run.follow_up_ready"])
     #expect(bridgeEvents.last?.intentID == "evt.created.run:session.cli.goal:cli.goal:model")
+  }
+
+  @Test
+  func cmpFacadeExposesNeutralSessionBootstrapReadbackAndSmokeSnapshots() async throws {
+    let hostAdapters = PraxisHostAdapterRegistry.localDefaults()
+    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(
+      hostAdapters: hostAdapters
+    )
+
+    let session = try await runtimeFacade.cmpFacade.openSession(
+      .init(projectID: "cmp.local-runtime", sessionID: "cmp.session.surface")
+    )
+    let bootstrap = try await runtimeFacade.cmpFacade.bootstrapProject(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentIDs: ["runtime.local", "checker.local"],
+        defaultAgentID: "runtime.local"
+      )
+    )
+    let ingest = try await runtimeFacade.cmpFacade.ingestFlow(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        sessionID: "cmp.flow.session",
+        taskSummary: "Capture one runtime material",
+        materials: [
+          .init(kind: .userInput, ref: "payload:user:cmp")
+        ],
+        requiresActiveSync: true
+      )
+    )
+    let commit = try await runtimeFacade.cmpFacade.commitFlow(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        sessionID: "cmp.flow.session",
+        eventIDs: ["evt.cmp.1"],
+        changeSummary: "Commit one flow event",
+        syncIntent: .toParent
+      )
+    )
+    _ = try await runtimeFacade.runFacade.runGoal(
+      .init(
+        goal: .init(
+          normalizedGoal: .init(
+            id: .init(rawValue: "goal.cmp-flow-surface"),
+            title: "CMP Flow Surface Goal",
+            summary: "Seed projection for flow resolve"
+          ),
+          intentSummary: "Seed projection for flow resolve"
+        ),
+        sessionID: .init(rawValue: "session.cmp-flow-surface")
+      )
+    )
+    let resolve = try await runtimeFacade.cmpFacade.resolveFlow(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local"
+      )
+    )
+    let resolvedSnapshotID = try #require(resolve.snapshotID)
+    let materialize = try await runtimeFacade.cmpFacade.materializeFlow(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        snapshotID: resolvedSnapshotID,
+        packageKind: .runtimeFill,
+        fidelityLabel: .highSignal
+      )
+    )
+    let dispatchPackage = PraxisCmpContextPackage(
+      id: .init(rawValue: materialize.packageID),
+      sourceProjectionID: .init(rawValue: "projection.runtime.local"),
+      sourceSnapshotID: .init(rawValue: resolvedSnapshotID),
+      sourceAgentID: "runtime.local",
+      targetAgentID: "checker.local",
+      kind: .runtimeFill,
+      packageRef: "context://cmp.local-runtime/projection.runtime.local/checker.local/runtimeFill",
+      fidelityLabel: .highSignal,
+      createdAt: "2026-04-11T00:00:00Z",
+      sourceSectionIDs: [.init(rawValue: "projection.runtime.local:section")]
+    )
+    let dispatch = try await runtimeFacade.cmpFacade.dispatchFlow(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        contextPackage: dispatchPackage,
+        targetKind: .peer,
+        reason: "Forward runtime fill to checker"
+      )
+    )
+    let history = try await runtimeFacade.cmpFacade.requestHistory(
+      .init(
+        projectID: "cmp.local-runtime",
+        requesterAgentID: "checker.local",
+        reason: "Recover runtime fill",
+        query: .init(
+          snapshotID: .init(rawValue: resolvedSnapshotID),
+          packageKindHint: .runtimeFill
+        )
+      )
+    )
+    let statusPanel = try await runtimeFacade.cmpFacade.readbackStatus(
+      .init(projectID: "cmp.local-runtime", agentID: "runtime.local")
+    )
+    let checkerStatusPanel = try await runtimeFacade.cmpFacade.readbackStatus(
+      .init(projectID: "cmp.local-runtime", agentID: "checker.local")
+    )
+    let readback = try await runtimeFacade.cmpFacade.readbackProject(.init(projectID: "cmp.local-runtime"))
+    let smoke = try await runtimeFacade.cmpFacade.smokeProject(.init(projectID: "cmp.local-runtime"))
+
+    #expect(session.projectID == "cmp.local-runtime")
+    #expect(session.hostProfile.executionStyle == "local-first")
+    #expect(session.summary.contains("host-neutral CMP session"))
+    #expect(bootstrap.projectSummary.projectID == "cmp.local-runtime")
+    #expect(bootstrap.projectSummary.componentStatuses["git"] == .ready)
+    #expect(bootstrap.gitSummary.contains("2 branch runtimes"))
+    #expect(bootstrap.persistenceSummary.contains("bootstrap statements"))
+    #expect(ingest.projectID == "cmp.local-runtime")
+    #expect(ingest.sessionID == "cmp.flow.session")
+    #expect(ingest.acceptedEventCount == 1)
+    #expect(ingest.nextAction == "commit_context_delta")
+    #expect(commit.projectID == "cmp.local-runtime")
+    #expect(commit.activeLineStage == "candidateReady")
+    #expect(commit.snapshotCandidateID != nil)
+    #expect(resolve.projectID == "cmp.local-runtime")
+    #expect(resolve.found)
+    #expect(resolve.snapshotID != nil)
+    #expect(materialize.projectID == "cmp.local-runtime")
+    #expect(materialize.targetAgentID == "checker.local")
+    #expect(materialize.packageKind == "runtimeFill")
+    #expect(materialize.selectedSectionCount > 0)
+    #expect(dispatch.projectID == "cmp.local-runtime")
+    #expect(dispatch.targetAgentID == "checker.local")
+    #expect(dispatch.status == "delivered")
+    #expect(history.projectID == "cmp.local-runtime")
+    #expect(history.requesterAgentID == "checker.local")
+    #expect(history.found)
+    #expect(history.packageID != nil)
+    #expect(statusPanel.projectID == "cmp.local-runtime")
+    #expect(statusPanel.agentID == "runtime.local")
+    #expect(statusPanel.executionStyle == "automatic")
+    #expect(statusPanel.readbackPriority == "git_first")
+    #expect(statusPanel.packageCount >= 1)
+    #expect(statusPanel.roleCounts["dispatcher"] == 1)
+    #expect(statusPanel.latestPackageID != nil)
+    #expect(checkerStatusPanel.projectID == "cmp.local-runtime")
+    #expect(checkerStatusPanel.agentID == "checker.local")
+    #expect(checkerStatusPanel.packageCount >= 1)
+    #expect(checkerStatusPanel.latestPackageID == materialize.packageID)
+    #expect(checkerStatusPanel.latestDispatchStatus == "published")
+    #expect(readback.projectSummary.projectID == "cmp.local-runtime")
+    #expect(readback.projectSummary.hostProfile.structuredStore == "sqlite")
+    #expect(readback.persistenceSummary.contains("Checkpoint and journal persistence"))
+    #expect(smoke.projectID == "cmp.local-runtime")
+    #expect(smoke.smokeResult.checks.count == 5)
+
+    let runtimeLineage = try await hostAdapters.lineageStore?.describe(
+      .init(lineageID: .init(rawValue: "lineage.cmp.local-runtime.runtime.local"))
+    )
+    let deliveryTruth = try await hostAdapters.deliveryTruthStore?.lookup(
+      .init(packageID: .init(rawValue: materialize.packageID))
+    ) ?? []
+    #expect(runtimeLineage?.summary == "CMP bootstrap lineage runtime.local at depth 0.")
+    #expect(deliveryTruth.count == 1)
+    #expect(deliveryTruth.first?.status == .published)
+  }
+
+  @Test
+  func cmpFacadeBootstrapUsesDefaultAgentIDWhenExplicitAgentsAreMissing() async throws {
+    let hostAdapters = PraxisHostAdapterRegistry.localDefaults()
+    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(
+      hostAdapters: hostAdapters
+    )
+
+    let bootstrap = try await runtimeFacade.cmpFacade.bootstrapProject(
+      .init(
+        projectID: "cmp.default-agent-only",
+        agentIDs: [],
+        defaultAgentID: "checker.local"
+      )
+    )
+
+    let checkerLineage = try await hostAdapters.lineageStore?.describe(
+      .init(lineageID: .init(rawValue: "lineage.cmp.default-agent-only.checker.local"))
+    )
+    let runtimeLineage = try await hostAdapters.lineageStore?.describe(
+      .init(lineageID: .init(rawValue: "lineage.cmp.default-agent-only.runtime.local"))
+    )
+
+    #expect(bootstrap.projectSummary.projectID == "cmp.default-agent-only")
+    #expect(bootstrap.gitSummary.contains("1 branch runtimes"))
+    #expect(checkerLineage?.summary == "CMP bootstrap lineage checker.local at depth 0.")
+    #expect(runtimeLineage == nil)
   }
 
   @Test
@@ -649,7 +845,7 @@ struct HostRuntimeSurfaceTests {
     #expect(deliveryTruthRecords.first?.status == .published)
     #expect(deliveryTruthRecords.first?.packageID == .init(rawValue: "package.\(started.runID.rawValue)"))
     #expect(lineageDescriptor?.branchRef == "local/session.local-runtime-truth")
-    #expect(cmpSnapshot.hostRuntimeSummary.contains("sqlite persistence (1 projections)"))
+    #expect(cmpSnapshot.hostRuntimeSummary.contains("sqlite persistence (1 projections, 0 packages)"))
     #expect(cmpSnapshot.hostRuntimeSummary.contains("sqlite delivery truth (1 records)"))
     #expect(cmpSnapshot.hostRuntimeSummary.contains("lineage store (ready)"))
   }
@@ -720,11 +916,33 @@ struct HostRuntimeSurfaceTests {
     let lineageDescriptor = try await secondRegistry.lineageStore?.describe(
       .init(lineageID: .init(rawValue: "lineage.local"))
     )
+    let packageStore = PraxisLocalCmpContextPackageStore(fileURL: rootDirectory.appendingPathComponent("runtime.sqlite3", isDirectory: false))
+    _ = try await packageStore.save(
+      .init(
+        projectID: "cmp.local-runtime",
+        packageID: .init(rawValue: "package.local"),
+        sourceProjectionID: .init(rawValue: "projection.local"),
+        sourceSnapshotID: .init(rawValue: "snapshot.local"),
+        sourceAgentID: "runtime.local",
+        targetAgentID: "checker.local",
+        packageKind: .runtimeFill,
+        fidelityLabel: .highSignal,
+        packageRef: "context://cmp.local-runtime/projection.local/checker.local/runtimeFill",
+        status: .materialized,
+        sourceSectionIDs: [.init(rawValue: "section.local")],
+        createdAt: "2026-04-11T03:00:00Z",
+        updatedAt: "2026-04-11T03:00:00Z"
+      )
+    )
+    let packageDescriptors = try await secondRegistry.cmpContextPackageStore?.describe(
+      .init(projectID: "cmp.local-runtime", targetAgentID: "checker.local")
+    )
 
     #expect(rangedRead?.content == "beta\nrelease")
     #expect(rangedRead?.revisionToken != nil)
     #expect(searchMatches?.first?.path == "notes/runtime.txt")
     #expect(lineageDescriptor?.branchRef == "cmp/local")
+    #expect(packageDescriptors?.first?.packageID == .init(rawValue: "package.local"))
   }
 
   @Test
