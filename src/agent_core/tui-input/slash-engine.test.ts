@@ -1,0 +1,33 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import {
+  applySlashSuggestion,
+  computeSlashState,
+  DEFAULT_PRAXIS_SLASH_COMMANDS,
+} from "./slash-engine.js";
+
+test("computeSlashState returns ranked suggestions for slash prefixes", () => {
+  const state = computeSlashState("/st", DEFAULT_PRAXIS_SLASH_COMMANDS);
+  assert.equal(state.active, true);
+  assert.equal(state.suggestions[0]?.command.name, "status");
+});
+
+test("computeSlashState includes alias matches", () => {
+  const state = computeSlashState("/qui", DEFAULT_PRAXIS_SLASH_COMMANDS);
+  assert.equal(state.suggestions[0]?.command.name, "exit");
+});
+
+test("computeSlashState only activates when first character is slash", () => {
+  const state = computeSlashState(" /st", DEFAULT_PRAXIS_SLASH_COMMANDS);
+  assert.equal(state.active, false);
+  assert.equal(state.suggestions.length, 0);
+});
+
+test("applySlashSuggestion replaces current command token and keeps trailing content", () => {
+  const suggestion = computeSlashState("/sta foo", DEFAULT_PRAXIS_SLASH_COMMANDS).suggestions[0];
+  assert.ok(suggestion);
+  const applied = applySlashSuggestion("/sta foo", suggestion);
+  assert.equal(applied.nextInput, "/status foo");
+  assert.equal(applied.nextCursorOffset, applied.nextInput.length);
+});

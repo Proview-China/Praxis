@@ -1539,6 +1539,36 @@ function buildBlockedBrowserPageNativeReply(summary: BrowserTurnSummary): string
   ].filter((line): line is string => Boolean(line)).join("\n");
 }
 
+function browserTaskWantsPageTitle(userMessage: string): boolean {
+  return /(页面标题|page title|title)/iu.test(userMessage);
+}
+
+function browserPartialCanCompleteTask(params: {
+  userMessage: string;
+  summary: BrowserTurnSummary;
+}): boolean {
+  const { userMessage, summary } = params;
+  if (summary.activeObstruction) {
+    return false;
+  }
+  if (browserTaskWantsGoldPrice(userMessage)) {
+    if (!summary.goldPriceUsdPerOunce) {
+      return false;
+    }
+    if (browserTaskRequiresPageNativeEvidence(userMessage)) {
+      return Boolean(summary.verifiedSourceUrl && summary.goldPriceUsdPerOunce && summary.goldPriceObservedAt);
+    }
+    return Boolean(summary.verifiedSourceUrl && summary.goldPriceUsdPerOunce);
+  }
+  if (browserTaskWantsPageTitle(userMessage)) {
+    return Boolean(summary.examplePageTitle || summary.verifiedSourceTitle || summary.googleSearchTitle);
+  }
+  if (browserTaskRequiresPageNativeEvidence(userMessage)) {
+    return Boolean(summary.verifiedSourceUrl && (summary.goldPriceUsdPerOunce || summary.goldPriceObservedAt));
+  }
+  return false;
+}
+
 function extractFirstMatch(text: string, pattern: RegExp): string | undefined {
   const match = text.match(pattern);
   return match?.[1]?.trim();
@@ -1770,7 +1800,11 @@ function deriveTerminalCoreTaskStatus(params: {
     return "blocked";
   }
   if (status === "partial") {
-    return params.capabilityKey === "browser.playwright" ? "incomplete" : "completed";
+    return params.capabilityKey === "browser.playwright"
+      || params.capabilityKey === "search.web"
+      || params.capabilityKey === "search.ground"
+      ? "incomplete"
+      : "completed";
   }
   if (params.forceFinalAnswer || status === "failed") {
     return "exhausted";
@@ -1984,9 +2018,19 @@ async function runCoreTurn(
     });
 
     const toolResultCapabilityKey = resolvedToolExecution.capabilityKey || capabilityRequest.capabilityKey;
+    const summarizedToolOutput =
+      (toolResultCapabilityKey === "search.web" || toolResultCapabilityKey === "search.ground")
+      && resolvedToolExecution.output
+      && typeof resolvedToolExecution.output === "object"
+        ? {
+          ...(resolvedToolExecution.output as Record<string, unknown>),
+          status: resolvedToolExecution.status,
+          error: resolvedToolExecution.error,
+        }
+        : resolvedToolExecution.output ?? {};
     const toolResultSummary = summarizeToolOutputForCore(
       toolResultCapabilityKey,
-      resolvedToolExecution.output ?? {},
+      summarizedToolOutput,
       {
         preserveBody: state.uiMode === "direct",
       },
@@ -2096,6 +2140,13 @@ async function runCoreTurn(
     const followupRawAnswer = followup.answer?.trim() ?? "";
     const followupEnvelope = deriveActionEnvelopeFromRaw(followupRawAnswer)
       ?? (!forceFinalAnswer ? deriveCapabilityEnvelopeFromTapRequest(followupRawAnswer) : undefined);
+    const mustKeepBrowserBlocked =
+      (toolResultCapabilityKey === "search.ground"
+        || toolResultCapabilityKey === "browser.playwright")
+      && shouldKeepBrowserTaskBlockedByObstruction({
+        userMessage,
+        summary: browserTurnSummary,
+      });
 
     if (!forceFinalAnswer && followupEnvelope?.action === "capability_call" && followupEnvelope.capabilityRequest) {
       latestTaskStatus = normalizeCoreTaskStatus(followupEnvelope);
@@ -2108,7 +2159,23 @@ async function runCoreTurn(
     }
 
     if (!forceFinalAnswer && followupEnvelope?.action === "reply") {
-      latestTaskStatus = normalizeCoreTaskStatus(followupEnvelope);
+      const requestedTaskStatus = normalizeCoreTaskStatus(followupEnvelope);
+      latestTaskStatus = mustKeepBrowserBlocked
+        ? "blocked"
+        : toolResultCapabilityKey === "browser.playwright"
+          && resolvedToolExecution.status === "partial"
+          && requestedTaskStatus === "completed"
+          ? browserPartialCanCompleteTask({
+            userMessage,
+            summary: browserTurnSummary,
+          })
+            ? "completed"
+            : "incomplete"
+          : (toolResultCapabilityKey === "search.web" || toolResultCapabilityKey === "search.ground")
+            && resolvedToolExecution.status === "partial"
+            && requestedTaskStatus === "completed"
+            ? "incomplete"
+          : requestedTaskStatus;
       if (latestTaskStatus === "incomplete" && incompleteReplyRecoveries < maxIncompleteReplyRecoveries) {
         incompleteReplyRecoveries += 1;
         pendingIncompleteReplyText = extractResponseTextMaybe(followupEnvelope.responseText);
@@ -2149,13 +2216,6 @@ async function runCoreTurn(
         || looksLikeInterimPromise(followupAnswer)
         || answerClaimsSpreadsheetRowsUnavailable(followupAnswer)
       );
-    const mustKeepBrowserBlocked =
-      (toolResultCapabilityKey === "search.ground"
-        || toolResultCapabilityKey === "browser.playwright")
-      && shouldKeepBrowserTaskBlockedByObstruction({
-        userMessage,
-        summary: browserTurnSummary,
-      });
     const effectiveFollowupAnswer = mustKeepBrowserBlocked
       ? buildBlockedBrowserPageNativeReply(browserTurnSummary)
       : shouldPreferSpreadsheetAnswer
@@ -2176,12 +2236,19 @@ async function runCoreTurn(
     }
     latestTaskStatus = mustKeepBrowserBlocked
       ? "blocked"
+      : toolResultCapabilityKey === "browser.playwright" && resolvedToolExecution.status === "partial"
+        ? browserPartialCanCompleteTask({
+          userMessage,
+          summary: browserTurnSummary,
+        })
+          ? "completed"
+          : "incomplete"
       : shouldPreferSpreadsheetAnswer
         ? "completed"
         : followupEnvelope?.action === "reply"
           ? normalizeCoreTaskStatus(followupEnvelope)
-          : toolResultCapabilityKey === "search.ground"
-        && (resolvedToolExecution.status === "success" || resolvedToolExecution.status === "partial")
+        : toolResultCapabilityKey === "search.ground"
+        && resolvedToolExecution.status === "success"
         && !isEmptyCorePlaceholderAnswer(effectiveFollowupAnswer)
             ? "completed"
             : deriveTerminalCoreTaskStatus({
@@ -2282,6 +2349,13 @@ async function handleUserTurn(
 
   state.transcript.push({ role: "user", text: userMessage });
   state.transcript.push({ role: "assistant", text: core.answer });
+  const turnResultCoreLog =
+    state.uiMode === "direct"
+      ? {
+        ...core,
+        answer: core.answer,
+      }
+      : trimStructuredValue(core, 5_000);
   state.lastTurn = {
     cmp: state.latestCmp ?? previousCmp ?? {
       agentId: options.enableCmpSync === false ? "cmp-sidecar-skipped" : "cmp-sidecar-pending",
@@ -2306,7 +2380,7 @@ async function handleUserTurn(
   await state.logger.log("turn_result", {
     turnIndex: state.turnIndex,
     cmp: trimStructuredValue(state.lastTurn.cmp, 4_000),
-    core: trimStructuredValue(core, 5_000),
+    core: turnResultCoreLog,
     transcriptTail: trimStructuredValue(state.transcript.slice(-8), 2_000),
   });
 
