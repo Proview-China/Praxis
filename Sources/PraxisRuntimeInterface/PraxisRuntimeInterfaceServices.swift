@@ -416,6 +416,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
         summary: roles.summary,
         projectID: roles.projectID,
         latestDispatchStatus: roles.latestDispatchStatus,
+        roleCounts: roles.roleCounts,
         roleStages: roles.roleStages
       ),
       events: [
@@ -511,6 +512,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
         summary: status.summary,
         projectID: status.projectID,
         latestDispatchStatus: status.latestDispatchStatus,
+        roleCounts: status.roleCounts,
         roleStages: status.roleStages
       ),
       events: [

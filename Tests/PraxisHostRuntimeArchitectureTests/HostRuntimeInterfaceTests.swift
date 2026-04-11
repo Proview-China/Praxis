@@ -1130,6 +1130,7 @@ struct HostRuntimeInterfaceTests {
     #expect(rolesReadbackResponse.status == .success)
     #expect(rolesReadbackResponse.snapshot?.kind == .cmpRoles)
     #expect(rolesReadbackResponse.snapshot?.title == "CMP Roles cmp.local-runtime")
+    #expect(rolesReadbackResponse.snapshot?.roleCounts?[.dispatcher] == 1)
     #expect(rolesReadbackResponse.snapshot?.roleStages?[.dispatcher] == .rejected)
     #expect(rolesReadbackResponse.events.map(\.name) == ["cmp.roles.readback"])
     #expect(controlReadbackResponse.status == .success)
@@ -1155,6 +1156,7 @@ struct HostRuntimeInterfaceTests {
     #expect(statusReadbackResponse.status == .success)
     #expect(statusReadbackResponse.snapshot?.kind == .cmpStatus)
     #expect(statusReadbackResponse.snapshot?.title == "CMP Status cmp.local-runtime")
+    #expect(statusReadbackResponse.snapshot?.roleCounts?[.dispatcher] == 1)
     #expect(statusReadbackResponse.snapshot?.roleStages?[.dispatcher] == .rejected)
     #expect(statusReadbackResponse.events.map(\.name) == ["cmp.status.readback"])
     #expect(bootstrapResponse.status == .success)
@@ -1192,11 +1194,13 @@ struct HostRuntimeInterfaceTests {
     #expect(dispatchResponse.events.first?.intentID != nil)
     #expect(checkerRolesAfterDispatchResponse.snapshot?.kind == .cmpRoles)
     #expect(checkerRolesAfterDispatchResponse.snapshot?.latestDispatchStatus == .rejected)
+    #expect(checkerRolesAfterDispatchResponse.snapshot?.roleCounts?[.dispatcher] == 1)
     #expect(checkerRolesAfterDispatchResponse.snapshot?.roleStages?[.dispatcher] == .rejected)
     #expect(checkerControlAfterDispatchResponse.snapshot?.kind == .cmpControl)
     #expect(checkerControlAfterDispatchResponse.snapshot?.latestDispatchStatus == .rejected)
     #expect(checkerStatusAfterDispatchResponse.snapshot?.kind == .cmpStatus)
     #expect(checkerStatusAfterDispatchResponse.snapshot?.latestDispatchStatus == .rejected)
+    #expect(checkerStatusAfterDispatchResponse.snapshot?.roleCounts?[.dispatcher] == 1)
     #expect(checkerStatusAfterDispatchResponse.snapshot?.roleStages?[.dispatcher] == .rejected)
     #expect(historyResponse.status == .success)
     #expect(historyResponse.snapshot?.kind == .cmpFlow)
@@ -1334,6 +1338,7 @@ struct HostRuntimeInterfaceTests {
     #expect(rolesResponse.status == .success)
     #expect(rolesResponse.snapshot?.kind == .cmpRoles)
     #expect(rolesResponse.snapshot?.latestDispatchStatus == .retryScheduled)
+    #expect(rolesResponse.snapshot?.roleCounts?[.dispatcher] == 1)
     #expect(rolesResponse.snapshot?.roleStages?[.dispatcher] == .retryScheduled)
     #expect(controlResponse.status == .success)
     #expect(controlResponse.snapshot?.kind == .cmpControl)
@@ -1341,6 +1346,7 @@ struct HostRuntimeInterfaceTests {
     #expect(statusResponse.status == .success)
     #expect(statusResponse.snapshot?.kind == .cmpStatus)
     #expect(statusResponse.snapshot?.latestDispatchStatus == .retryScheduled)
+    #expect(statusResponse.snapshot?.roleCounts?[.dispatcher] == 1)
     #expect(statusResponse.snapshot?.roleStages?[.dispatcher] == .retryScheduled)
   }
 
@@ -3050,6 +3056,7 @@ struct HostRuntimeInterfaceTests {
         targetKind: .peer,
         dispatchStatus: .delivered,
         latestDispatchStatus: .retryScheduled,
+        roleCounts: .init(counts: [.dispatcher: 1]),
         roleStages: .init(stages: [.dispatcher: .retryScheduled])
       )
     )
@@ -3064,6 +3071,7 @@ struct HostRuntimeInterfaceTests {
     #expect(responseJSON.contains(#""targetKind":"peer""#))
     #expect(responseJSON.contains(#""dispatchStatus":"delivered""#))
     #expect(responseJSON.contains(#""latestDispatchStatus":"retryScheduled""#))
+    #expect(responseJSON.contains(#""roleCounts":{"dispatcher":1}"#))
     #expect(responseJSON.contains(#""roleStages":{"dispatcher":"retryScheduled"}"#))
     #expect(decodedResponse == response)
   }
@@ -3073,6 +3081,44 @@ struct HostRuntimeInterfaceTests {
     let codec = PraxisJSONRuntimeInterfaceCodec()
     let responseJSON =
       #"{"error":null,"events":[],"snapshot":{"kind":"cmpRoles","projectID":"cmp.local-runtime","roleStages":{"dispatcher":"broken_stage"},"summary":"Typed CMP roles snapshot","title":"CMP Roles cmp.local-runtime"},"status":"success"}"#
+
+    #expect(throws: DecodingError.self) {
+      _ = try codec.decodeResponse(Data(responseJSON.utf8))
+    }
+  }
+
+  @Test
+  func runtimeInterfaceCodecRoundTripsCmpRoleCountParityFieldsAsStableRawValues() throws {
+    let codec = PraxisJSONRuntimeInterfaceCodec()
+    let response = PraxisRuntimeInterfaceResponse.success(
+      snapshot: .init(
+        kind: .cmpStatus,
+        title: "CMP Status cmp.local-runtime",
+        summary: "Typed CMP status snapshot",
+        projectID: "cmp.local-runtime",
+        latestDispatchStatus: .retryScheduled,
+        roleCounts: .init(counts: [.dispatcher: 1]),
+        roleStages: .init(stages: [.dispatcher: .retryScheduled])
+      )
+    )
+
+    let responseData = try codec.encode(response)
+    let responseJSON = String(decoding: responseData, as: UTF8.self)
+    let decodedResponse = try codec.decodeResponse(responseData)
+
+    #expect(responseJSON.contains(#""roleCounts":{"dispatcher":1}"#))
+    #expect(responseJSON.contains(#""roleStages":{"dispatcher":"retryScheduled"}"#))
+    #expect(decodedResponse.snapshot?.kind == .cmpStatus)
+    #expect(decodedResponse.snapshot?.roleCounts?[.dispatcher] == 1)
+    #expect(decodedResponse.snapshot?.roleStages?[.dispatcher] == .retryScheduled)
+    #expect(decodedResponse == response)
+  }
+
+  @Test
+  func runtimeInterfaceCodecRejectsUnknownTypedCmpRoleCountFields() throws {
+    let codec = PraxisJSONRuntimeInterfaceCodec()
+    let responseJSON =
+      #"{"error":null,"events":[],"snapshot":{"kind":"cmpStatus","projectID":"cmp.local-runtime","roleCounts":{"ghost":1},"roleStages":{"dispatcher":"retryScheduled"},"summary":"Typed CMP status snapshot","title":"CMP Status cmp.local-runtime"},"status":"success"}"#
 
     #expect(throws: DecodingError.self) {
       _ = try codec.decodeResponse(Data(responseJSON.utf8))
