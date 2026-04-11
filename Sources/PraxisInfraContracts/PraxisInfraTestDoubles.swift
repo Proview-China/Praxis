@@ -290,6 +290,10 @@ public struct PraxisStubLineageStore: PraxisLineageStoreContract, Sendable {
     self.descriptors = descriptors
   }
 
+  public func save(_ descriptor: PraxisLineageDescriptor) async throws {
+    _ = descriptor
+  }
+
   public func describe(lineageID: PraxisCmpLineageID) async throws -> String {
     descriptors.first { $0.lineageID == lineageID }?.summary ?? "Unknown lineage \(lineageID.rawValue)"
   }

@@ -65,7 +65,7 @@
 - 但当前 Swift 仍然没有承接 TS 的完整 live/runtime 深度：
   - provider live inference 仍默认是 scaffold surface
   - browser grounding / multimodal user-io 仍默认是 scaffold surface
-  - 本地持久化仍是 JSON-backed baseline，而不是正式 SQLite schema
+  - 本地持久化已切到 SQLite-backed single-file baseline，但还没有进入正式 schema versioning / migration policy
 
 ### 2.3 当前验证状态
 
@@ -74,7 +74,7 @@
 - `swift test` 通过
 - Swift package tests 已切换到 `Swift Testing`
 - 当前 `swift test` 快照为：
-  - `125` tests
+  - `128` tests
   - `39` suites
 - `npm run typecheck` 当前未全绿：
   - `src/agent_core/live-agent-chat.ts:1690` 存在 TypeScript 参数个数错误
@@ -513,10 +513,23 @@ Core 禁止直接依赖：
   - 已补入真实 workspace reader/searcher/writer
   - 已补入最小 system git executor
   - 已补入 local lineage store
+- 本地 structured persistence 已从多份 JSON 文件收敛为单一 SQLite-backed runtime store：
+  - checkpoint
+  - journal
+  - projection
+  - delivery truth
+  - embedding metadata
+  - semantic memory
+  - lineage
 - `PraxisInspectCmpUseCase` 当前也不再只看“adapter 是否存在”，而是开始读取：
   - workspace 读写检索状态
   - git repository verify 状态
   - projection 引用到的 lineage resolution 状态
+- `PraxisRunGoalUseCase` / `PraxisResumeRunUseCase` 已开始把本地 runtime 真相写回宿主持久化：
+  - projection descriptor
+  - lineage descriptor
+  - delivery truth
+  - message bus publication side effect
 - 这意味着当前 Wave 6 已进入“最小 local runtime 闭环”阶段，而不是只停留在 neutral bridge / facade 可调用
 - 这些覆盖已经足以支撑后续多语言 UI / shell / CLI adapter 继续演进，不需要现在就把 Swift CLI / SwiftUI 做成主产品面，也不需要现在就把完整 FFI target、C ABI、字符串/内存管理策略一次性做死
 - 当前阶段应刻意保留的弹性包括：

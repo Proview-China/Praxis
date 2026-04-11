@@ -1,4 +1,5 @@
 import Foundation
+import SQLite3
 import PraxisCapabilityResults
 import PraxisCheckpoint
 import PraxisCmpTypes
@@ -12,23 +13,11 @@ import PraxisWorkspaceContracts
 
 private struct PraxisLocalRuntimePaths: Sendable {
   let rootDirectory: URL
-  let checkpointsFileURL: URL
-  let journalFileURL: URL
-  let projectionsFileURL: URL
-  let deliveryTruthFileURL: URL
-  let embeddingsFileURL: URL
-  let semanticMemoryFileURL: URL
-  let lineageFileURL: URL
+  let databaseFileURL: URL
 
   init(rootDirectory: URL) {
     self.rootDirectory = rootDirectory
-    checkpointsFileURL = rootDirectory.appendingPathComponent("checkpoints.json", isDirectory: false)
-    journalFileURL = rootDirectory.appendingPathComponent("journal.json", isDirectory: false)
-    projectionsFileURL = rootDirectory.appendingPathComponent("projections.json", isDirectory: false)
-    deliveryTruthFileURL = rootDirectory.appendingPathComponent("delivery-truth.json", isDirectory: false)
-    embeddingsFileURL = rootDirectory.appendingPathComponent("embeddings.json", isDirectory: false)
-    semanticMemoryFileURL = rootDirectory.appendingPathComponent("semantic-memory.json", isDirectory: false)
-    lineageFileURL = rootDirectory.appendingPathComponent("lineages.json", isDirectory: false)
+    databaseFileURL = rootDirectory.appendingPathComponent("runtime.sqlite3", isDirectory: false)
   }
 
   static func resolveRootDirectory(_ explicitRootDirectory: URL?) -> URL {
@@ -46,25 +35,222 @@ private struct PraxisLocalRuntimePaths: Sendable {
   }
 }
 
-private enum PraxisLocalJSONFileIO {
-  static func load<Value: Decodable>(_ type: Value.Type, from fileURL: URL) throws -> Value? {
-    guard FileManager.default.fileExists(atPath: fileURL.path) else {
-      return nil
-    }
-    let data = try Data(contentsOf: fileURL)
-    return try JSONDecoder().decode(type, from: data)
+private let sqliteTransientDestructor = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+private let localSQLiteSchemaLock = NSLock()
+
+private func localRuntimeEncodeJSON<Value: Encodable>(_ value: Value) throws -> String {
+  let encoder = JSONEncoder()
+  encoder.outputFormatting = [.sortedKeys]
+  let data = try encoder.encode(value)
+  guard let string = String(data: data, encoding: .utf8) else {
+    throw PraxisError.invariantViolation("Failed to encode local runtime SQLite payload as UTF-8 JSON.")
+  }
+  return string
+}
+
+private func localRuntimeDecodeJSON<Value: Decodable>(_ type: Value.Type, from string: String) throws -> Value {
+  guard let data = string.data(using: .utf8) else {
+    throw PraxisError.invalidInput("Local runtime SQLite payload is not valid UTF-8 JSON.")
+  }
+  return try JSONDecoder().decode(type, from: data)
+}
+
+private func localSQLiteErrorMessage(_ database: OpaquePointer?) -> String {
+  guard let database, let messagePointer = sqlite3_errmsg(database) else {
+    return "Unknown SQLite error."
+  }
+  return String(cString: messagePointer)
+}
+
+private func localSQLiteBindText(
+  _ value: String?,
+  at index: Int32,
+  in statement: OpaquePointer?,
+  database: OpaquePointer?
+) throws {
+  let code: Int32
+  if let value {
+    code = sqlite3_bind_text(statement, index, value, -1, sqliteTransientDestructor)
+  } else {
+    code = sqlite3_bind_null(statement, index)
+  }
+  guard code == SQLITE_OK else {
+    throw PraxisError.invariantViolation("Failed to bind SQLite text value: \(localSQLiteErrorMessage(database)).")
+  }
+}
+
+private func localSQLiteBindInteger(
+  _ value: Int?,
+  at index: Int32,
+  in statement: OpaquePointer?,
+  database: OpaquePointer?
+) throws {
+  let code: Int32
+  if let value {
+    code = sqlite3_bind_int64(statement, index, sqlite3_int64(value))
+  } else {
+    code = sqlite3_bind_null(statement, index)
+  }
+  guard code == SQLITE_OK else {
+    throw PraxisError.invariantViolation("Failed to bind SQLite integer value: \(localSQLiteErrorMessage(database)).")
+  }
+}
+
+private func localSQLitePrepareStatement(
+  _ sql: String,
+  database: OpaquePointer?
+) throws -> OpaquePointer? {
+  var statement: OpaquePointer?
+  let code = sqlite3_prepare_v2(database, sql, -1, &statement, nil)
+  guard code == SQLITE_OK else {
+    throw PraxisError.invariantViolation("Failed to prepare SQLite statement: \(localSQLiteErrorMessage(database)). SQL: \(sql)")
+  }
+  return statement
+}
+
+private func localSQLiteExecute(
+  _ sql: String,
+  database: OpaquePointer?
+) throws {
+  let code = sqlite3_exec(database, sql, nil, nil, nil)
+  guard code == SQLITE_OK else {
+    throw PraxisError.invariantViolation("Failed to execute SQLite statement: \(localSQLiteErrorMessage(database)). SQL: \(sql)")
+  }
+}
+
+private func localSQLiteText(
+  from statement: OpaquePointer?,
+  at index: Int32
+) -> String? {
+  guard let value = sqlite3_column_text(statement, index) else {
+    return nil
+  }
+  return String(cString: value)
+}
+
+private func localSQLiteInteger(
+  from statement: OpaquePointer?,
+  at index: Int32
+) -> Int? {
+  guard sqlite3_column_type(statement, index) != SQLITE_NULL else {
+    return nil
+  }
+  return Int(sqlite3_column_int64(statement, index))
+}
+
+private func localSQLiteEnsureSchema(database: OpaquePointer?) throws {
+  let statements = [
+    """
+    CREATE TABLE IF NOT EXISTS checkpoints (
+      pointer_key TEXT PRIMARY KEY,
+      checkpoint_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      tier TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      last_sequence INTEGER,
+      record_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS journal_events (
+      sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      run_reference TEXT,
+      correlation_id TEXT,
+      type TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      metadata_json TEXT
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_journal_events_session_sequence ON journal_events(session_id, sequence);",
+    "CREATE INDEX IF NOT EXISTS idx_journal_events_session_run_sequence ON journal_events(session_id, run_reference, sequence);",
+    """
+    CREATE TABLE IF NOT EXISTS projections (
+      project_id TEXT NOT NULL,
+      projection_id TEXT NOT NULL,
+      lineage_id TEXT,
+      agent_id TEXT,
+      updated_at TEXT,
+      descriptor_json TEXT NOT NULL,
+      PRIMARY KEY (project_id, projection_id)
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_projections_project_updated_at ON projections(project_id, updated_at DESC);",
+    """
+    CREATE TABLE IF NOT EXISTS delivery_truth (
+      delivery_id TEXT PRIMARY KEY,
+      package_id TEXT,
+      topic TEXT NOT NULL,
+      target_agent_id TEXT,
+      status TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      record_json TEXT NOT NULL
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_delivery_truth_topic_updated_at ON delivery_truth(topic, updated_at DESC);",
+    """
+    CREATE TABLE IF NOT EXISTS embeddings (
+      embedding_id TEXT PRIMARY KEY,
+      storage_key TEXT NOT NULL,
+      record_json TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS semantic_memory (
+      memory_id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      agent_id TEXT NOT NULL,
+      scope_level TEXT NOT NULL,
+      freshness_status TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      storage_key TEXT NOT NULL,
+      record_json TEXT NOT NULL
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_semantic_memory_project_id ON semantic_memory(project_id);",
+    """
+    CREATE TABLE IF NOT EXISTS lineages (
+      lineage_id TEXT PRIMARY KEY,
+      branch_ref TEXT NOT NULL,
+      parent_lineage_id TEXT,
+      descriptor_json TEXT NOT NULL
+    );
+    """
+  ]
+
+  for statement in statements {
+    try localSQLiteExecute(statement, database: database)
+  }
+}
+
+private func withLocalSQLiteDatabase<Result>(
+  at fileURL: URL,
+  _ body: (OpaquePointer?) throws -> Result
+) throws -> Result {
+  try FileManager.default.createDirectory(
+    at: fileURL.deletingLastPathComponent(),
+    withIntermediateDirectories: true
+  )
+
+  var database: OpaquePointer?
+  let openCode = sqlite3_open_v2(
+    fileURL.path,
+    &database,
+    SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX,
+    nil
+  )
+  guard openCode == SQLITE_OK else {
+    defer { sqlite3_close(database) }
+    throw PraxisError.invariantViolation("Failed to open local runtime SQLite database at \(fileURL.path): \(localSQLiteErrorMessage(database))")
   }
 
-  static func save<Value: Encodable>(_ value: Value, to fileURL: URL) throws {
-    try FileManager.default.createDirectory(
-      at: fileURL.deletingLastPathComponent(),
-      withIntermediateDirectories: true
-    )
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-    let data = try encoder.encode(value)
-    try data.write(to: fileURL, options: .atomic)
-  }
+  defer { sqlite3_close(database) }
+  sqlite3_busy_timeout(database, 2_000)
+  localSQLiteSchemaLock.lock()
+  defer { localSQLiteSchemaLock.unlock() }
+  try localSQLiteEnsureSchema(database: database)
+  return try body(database)
 }
 
 private func localRuntimeNow() -> String {
@@ -400,20 +586,64 @@ public actor PraxisLocalWorkspaceWriter: PraxisWorkspaceWriter {
   }
 }
 
+private func localCheckpointPointerKey(_ pointer: PraxisCheckpointPointer) -> String {
+  "\(pointer.sessionID.rawValue)|\(pointer.checkpointID.rawValue)"
+}
+
+private func localJournalMetadataJSONString(_ metadata: [String: PraxisValue]?) throws -> String? {
+  guard let metadata else {
+    return nil
+  }
+  return try localRuntimeEncodeJSON(metadata)
+}
+
 public actor PraxisLocalCheckpointStore: PraxisCheckpointStoreContract {
   private let fileURL: URL
-  private var records: [PraxisCheckpointRecord] = []
-  private var didLoad = false
 
   public init(fileURL: URL) {
     self.fileURL = fileURL
   }
 
   public func save(_ record: PraxisCheckpointRecord) async throws -> PraxisCheckpointSaveReceipt {
-    try loadIfNeeded()
-    records.removeAll { $0.pointer == record.pointer }
-    records.append(record)
-    try persist()
+    let recordJSON = try localRuntimeEncodeJSON(record)
+    let pointerKey = localCheckpointPointerKey(record.pointer)
+    try withLocalSQLiteDatabase(at: fileURL) { database in
+      let statement = try localSQLitePrepareStatement(
+        """
+        INSERT INTO checkpoints (
+          pointer_key,
+          checkpoint_id,
+          session_id,
+          tier,
+          created_at,
+          last_sequence,
+          record_json,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(pointer_key) DO UPDATE SET
+          checkpoint_id = excluded.checkpoint_id,
+          session_id = excluded.session_id,
+          tier = excluded.tier,
+          created_at = excluded.created_at,
+          last_sequence = excluded.last_sequence,
+          record_json = excluded.record_json,
+          updated_at = excluded.updated_at;
+        """,
+        database: database
+      )
+      defer { sqlite3_finalize(statement) }
+      try localSQLiteBindText(pointerKey, at: 1, in: statement, database: database)
+      try localSQLiteBindText(record.pointer.checkpointID.rawValue, at: 2, in: statement, database: database)
+      try localSQLiteBindText(record.pointer.sessionID.rawValue, at: 3, in: statement, database: database)
+      try localSQLiteBindText(record.snapshot.tier.rawValue, at: 4, in: statement, database: database)
+      try localSQLiteBindText(record.snapshot.createdAt, at: 5, in: statement, database: database)
+      try localSQLiteBindInteger(record.snapshot.lastCursor?.sequence, at: 6, in: statement, database: database)
+      try localSQLiteBindText(recordJSON, at: 7, in: statement, database: database)
+      try localSQLiteBindText(localRuntimeNow(), at: 8, in: statement, database: database)
+      guard sqlite3_step(statement) == SQLITE_DONE else {
+        throw PraxisError.invariantViolation("Failed to persist checkpoint record: \(localSQLiteErrorMessage(database)).")
+      }
+    }
     return PraxisCheckpointSaveReceipt(
       pointer: record.pointer,
       tier: record.snapshot.tier,
@@ -422,107 +652,193 @@ public actor PraxisLocalCheckpointStore: PraxisCheckpointStoreContract {
   }
 
   public func load(pointer: PraxisCheckpointPointer) async throws -> PraxisCheckpointRecord? {
-    try loadIfNeeded()
-    return records.last { $0.pointer == pointer }
-  }
-
-  private func loadIfNeeded() throws {
-    guard !didLoad else {
-      return
+    try withLocalSQLiteDatabase(at: fileURL) { database in
+      let statement = try localSQLitePrepareStatement(
+        "SELECT record_json FROM checkpoints WHERE pointer_key = ? LIMIT 1;",
+        database: database
+      )
+      defer { sqlite3_finalize(statement) }
+      try localSQLiteBindText(localCheckpointPointerKey(pointer), at: 1, in: statement, database: database)
+      switch sqlite3_step(statement) {
+      case SQLITE_ROW:
+        guard let recordJSON = localSQLiteText(from: statement, at: 0) else {
+          return nil
+        }
+        return try localRuntimeDecodeJSON(PraxisCheckpointRecord.self, from: recordJSON)
+      case SQLITE_DONE:
+        return nil
+      default:
+        throw PraxisError.invariantViolation("Failed to load checkpoint record: \(localSQLiteErrorMessage(database)).")
+      }
     }
-    records = try PraxisLocalJSONFileIO.load([PraxisCheckpointRecord].self, from: fileURL) ?? []
-    didLoad = true
-  }
-
-  private func persist() throws {
-    try PraxisLocalJSONFileIO.save(
-      records.sorted {
-        $0.pointer.checkpointID.rawValue < $1.pointer.checkpointID.rawValue
-      },
-      to: fileURL
-    )
   }
 }
 
 public actor PraxisLocalJournalStore: PraxisJournalStoreContract {
   private let fileURL: URL
-  private var events: [PraxisJournalEvent] = []
-  private var didLoad = false
 
   public init(fileURL: URL) {
     self.fileURL = fileURL
   }
 
   public func append(_ batch: PraxisJournalRecordBatch) async throws -> PraxisJournalAppendReceipt {
-    try loadIfNeeded()
-    let startingSequence = (events.last?.sequence ?? 0) + 1
-    let appendedEvents = batch.events.enumerated().map { offset, event in
-      PraxisJournalEvent(
-        sequence: startingSequence + offset,
-        sessionID: event.sessionID,
-        runReference: event.runReference,
-        correlationID: event.correlationID,
-        type: event.type,
-        summary: event.summary,
-        metadata: event.metadata
-      )
+    guard !batch.events.isEmpty else {
+      return PraxisJournalAppendReceipt(appendedCount: 0, lastCursor: nil)
     }
-    events.append(contentsOf: appendedEvents)
-    try persist()
+
+    let lastSequence: Int? = try withLocalSQLiteDatabase(at: fileURL) { database in
+      try localSQLiteExecute("BEGIN IMMEDIATE TRANSACTION;", database: database)
+      do {
+        var lastInsertedSequence: Int?
+        for event in batch.events {
+          let statement = try localSQLitePrepareStatement(
+            """
+            INSERT INTO journal_events (
+              session_id,
+              run_reference,
+              correlation_id,
+              type,
+              summary,
+              metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?);
+            """,
+            database: database
+          )
+          defer { sqlite3_finalize(statement) }
+          try localSQLiteBindText(event.sessionID.rawValue, at: 1, in: statement, database: database)
+          try localSQLiteBindText(event.runReference, at: 2, in: statement, database: database)
+          try localSQLiteBindText(event.correlationID, at: 3, in: statement, database: database)
+          try localSQLiteBindText(event.type, at: 4, in: statement, database: database)
+          try localSQLiteBindText(event.summary, at: 5, in: statement, database: database)
+          try localSQLiteBindText(try localJournalMetadataJSONString(event.metadata), at: 6, in: statement, database: database)
+          guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw PraxisError.invariantViolation("Failed to append journal event: \(localSQLiteErrorMessage(database)).")
+          }
+          lastInsertedSequence = Int(sqlite3_last_insert_rowid(database))
+        }
+        try localSQLiteExecute("COMMIT;", database: database)
+        return lastInsertedSequence
+      } catch {
+        try? localSQLiteExecute("ROLLBACK;", database: database)
+        throw error
+      }
+    }
+
     return PraxisJournalAppendReceipt(
-      appendedCount: appendedEvents.count,
-      lastCursor: appendedEvents.last.map { .init(sequence: $0.sequence) }
+      appendedCount: batch.events.count,
+      lastCursor: lastSequence.map(PraxisJournalCursor.init(sequence:))
     )
   }
 
   public func read(_ request: PraxisJournalSliceRequest) async throws -> PraxisJournalSlice {
-    try loadIfNeeded()
-    let filteredEvents = events.filter { event in
-      guard event.sessionID.rawValue == request.sessionID else {
-        return false
+    try withLocalSQLiteDatabase(at: fileURL) { database in
+      var clauses = ["session_id = ?"]
+      if request.runReference != nil {
+        clauses.append("run_reference = ?")
       }
-      if let runReference = request.runReference, event.runReference != runReference {
-        return false
+      if request.afterCursor != nil {
+        clauses.append("sequence > ?")
       }
-      if let afterCursor = request.afterCursor, event.sequence <= afterCursor.sequence {
-        return false
-      }
-      return true
-    }
-    let sliceEvents = Array(filteredEvents.prefix(request.limit))
-    return PraxisJournalSlice(
-      events: sliceEvents,
-      nextCursor: sliceEvents.last.map { .init(sequence: $0.sequence) }
-    )
-  }
 
-  private func loadIfNeeded() throws {
-    guard !didLoad else {
-      return
-    }
-    events = try PraxisLocalJSONFileIO.load([PraxisJournalEvent].self, from: fileURL) ?? []
-    didLoad = true
-  }
+      let statement = try localSQLitePrepareStatement(
+        """
+        SELECT sequence, session_id, run_reference, correlation_id, type, summary, metadata_json
+        FROM journal_events
+        WHERE \(clauses.joined(separator: " AND "))
+        ORDER BY sequence ASC
+        LIMIT ?;
+        """,
+        database: database
+      )
+      defer { sqlite3_finalize(statement) }
 
-  private func persist() throws {
-    try PraxisLocalJSONFileIO.save(events, to: fileURL)
+      var bindingIndex: Int32 = 1
+      try localSQLiteBindText(request.sessionID, at: bindingIndex, in: statement, database: database)
+      bindingIndex += 1
+      if let runReference = request.runReference {
+        try localSQLiteBindText(runReference, at: bindingIndex, in: statement, database: database)
+        bindingIndex += 1
+      }
+      if let afterSequence = request.afterCursor?.sequence {
+        try localSQLiteBindInteger(afterSequence, at: bindingIndex, in: statement, database: database)
+        bindingIndex += 1
+      }
+      try localSQLiteBindInteger(request.limit, at: bindingIndex, in: statement, database: database)
+
+      var events: [PraxisJournalEvent] = []
+      while true {
+        let code = sqlite3_step(statement)
+        switch code {
+        case SQLITE_ROW:
+          let metadata: [String: PraxisValue]?
+          if let metadataJSON = localSQLiteText(from: statement, at: 6) {
+            metadata = try localRuntimeDecodeJSON([String: PraxisValue].self, from: metadataJSON)
+          } else {
+            metadata = nil
+          }
+          events.append(
+            PraxisJournalEvent(
+              sequence: localSQLiteInteger(from: statement, at: 0) ?? 0,
+              sessionID: .init(rawValue: localSQLiteText(from: statement, at: 1) ?? request.sessionID),
+              runReference: localSQLiteText(from: statement, at: 2),
+              correlationID: localSQLiteText(from: statement, at: 3),
+              type: localSQLiteText(from: statement, at: 4) ?? "",
+              summary: localSQLiteText(from: statement, at: 5) ?? "",
+              metadata: metadata
+            )
+          )
+        case SQLITE_DONE:
+          return PraxisJournalSlice(
+            events: events,
+            nextCursor: events.last.map { PraxisJournalCursor(sequence: $0.sequence) }
+          )
+        default:
+          throw PraxisError.invariantViolation("Failed to read journal events: \(localSQLiteErrorMessage(database)).")
+        }
+      }
+    }
   }
 }
 
 public actor PraxisLocalProjectionStore: PraxisProjectionStoreContract {
   private let fileURL: URL
-  private var descriptors: [PraxisProjectionRecordDescriptor] = []
-  private var didLoad = false
 
   public init(fileURL: URL) {
     self.fileURL = fileURL
   }
 
   public func save(_ descriptor: PraxisProjectionRecordDescriptor) async throws -> PraxisProjectionStoreWriteReceipt {
-    try loadIfNeeded()
-    descriptors.removeAll { $0.projectID == descriptor.projectID && $0.projectionID == descriptor.projectionID }
-    descriptors.append(descriptor)
-    try persist()
+    let descriptorJSON = try localRuntimeEncodeJSON(descriptor)
+    try withLocalSQLiteDatabase(at: fileURL) { database in
+      let statement = try localSQLitePrepareStatement(
+        """
+        INSERT INTO projections (
+          project_id,
+          projection_id,
+          lineage_id,
+          agent_id,
+          updated_at,
+          descriptor_json
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(project_id, projection_id) DO UPDATE SET
+          lineage_id = excluded.lineage_id,
+          agent_id = excluded.agent_id,
+          updated_at = excluded.updated_at,
+          descriptor_json = excluded.descriptor_json;
+        """,
+        database: database
+      )
+      defer { sqlite3_finalize(statement) }
+      try localSQLiteBindText(descriptor.projectID, at: 1, in: statement, database: database)
+      try localSQLiteBindText(descriptor.projectionID.rawValue, at: 2, in: statement, database: database)
+      try localSQLiteBindText(descriptor.lineageID?.rawValue, at: 3, in: statement, database: database)
+      try localSQLiteBindText(descriptor.agentID, at: 4, in: statement, database: database)
+      try localSQLiteBindText(descriptor.updatedAt, at: 5, in: statement, database: database)
+      try localSQLiteBindText(descriptorJSON, at: 6, in: statement, database: database)
+      guard sqlite3_step(statement) == SQLITE_DONE else {
+        throw PraxisError.invariantViolation("Failed to persist projection descriptor: \(localSQLiteErrorMessage(database)).")
+      }
+    }
     return PraxisProjectionStoreWriteReceipt(
       projectionID: descriptor.projectionID,
       storageKey: descriptor.storageKey,
@@ -531,47 +847,49 @@ public actor PraxisLocalProjectionStore: PraxisProjectionStoreContract {
   }
 
   public func describe(projectId: String) async throws -> PraxisProjectionRecordDescriptor {
-    try loadIfNeeded()
-    guard let descriptor = descriptors
-      .filter({ $0.projectID == projectId })
-      .sorted(by: { ($0.updatedAt ?? "") > ($1.updatedAt ?? "") })
-      .first else {
+    let descriptors = try await describe(.init(projectID: projectId))
+    guard let descriptor = descriptors.first else {
       throw PraxisCmpValidationError.invalid("Projection descriptor for project \(projectId) is missing.")
     }
     return descriptor
   }
 
   public func describe(_ query: PraxisProjectionDescriptorQuery) async throws -> [PraxisProjectionRecordDescriptor] {
-    try loadIfNeeded()
-    return descriptors
-      .filter { descriptor in
-        guard descriptor.projectID == query.projectID else {
-          return false
+    try withLocalSQLiteDatabase(at: fileURL) { database in
+      let statement = try localSQLitePrepareStatement(
+        """
+        SELECT descriptor_json
+        FROM projections
+        WHERE project_id = ?
+        ORDER BY COALESCE(updated_at, '') DESC, projection_id ASC;
+        """,
+        database: database
+      )
+      defer { sqlite3_finalize(statement) }
+      try localSQLiteBindText(query.projectID, at: 1, in: statement, database: database)
+
+      var descriptors: [PraxisProjectionRecordDescriptor] = []
+      while true {
+        let code = sqlite3_step(statement)
+        switch code {
+        case SQLITE_ROW:
+          guard let descriptorJSON = localSQLiteText(from: statement, at: 0) else {
+            continue
+          }
+          let descriptor = try localRuntimeDecodeJSON(PraxisProjectionRecordDescriptor.self, from: descriptorJSON)
+          guard query.projectionID == nil || descriptor.projectionID == query.projectionID,
+                query.lineageID == nil || descriptor.lineageID == query.lineageID,
+                query.agentID == nil || descriptor.agentID == query.agentID else {
+            continue
+          }
+          descriptors.append(descriptor)
+        case SQLITE_DONE:
+          return descriptors
+        default:
+          throw PraxisError.invariantViolation("Failed to read projection descriptors: \(localSQLiteErrorMessage(database)).")
         }
-        if let projectionID = query.projectionID, descriptor.projectionID != projectionID {
-          return false
-        }
-        if let lineageID = query.lineageID, descriptor.lineageID != lineageID {
-          return false
-        }
-        if let agentID = query.agentID, descriptor.agentID != agentID {
-          return false
-        }
-        return true
       }
-      .sorted { ($0.updatedAt ?? "") > ($1.updatedAt ?? "") }
-  }
-
-  private func loadIfNeeded() throws {
-    guard !didLoad else {
-      return
     }
-    descriptors = try PraxisLocalJSONFileIO.load([PraxisProjectionRecordDescriptor].self, from: fileURL) ?? []
-    didLoad = true
-  }
-
-  private func persist() throws {
-    try PraxisLocalJSONFileIO.save(descriptors, to: fileURL)
   }
 }
 
@@ -603,18 +921,47 @@ public actor PraxisLocalMessageBus: PraxisMessageBusContract {
 
 public actor PraxisLocalDeliveryTruthStore: PraxisDeliveryTruthStoreContract {
   private let fileURL: URL
-  private var records: [PraxisDeliveryTruthRecord] = []
-  private var didLoad = false
 
   public init(fileURL: URL) {
     self.fileURL = fileURL
   }
 
   public func save(_ record: PraxisDeliveryTruthRecord) async throws -> PraxisDeliveryTruthUpsertReceipt {
-    try loadIfNeeded()
-    records.removeAll { $0.id == record.id }
-    records.append(record)
-    try persist()
+    let recordJSON = try localRuntimeEncodeJSON(record)
+    try withLocalSQLiteDatabase(at: fileURL) { database in
+      let statement = try localSQLitePrepareStatement(
+        """
+        INSERT INTO delivery_truth (
+          delivery_id,
+          package_id,
+          topic,
+          target_agent_id,
+          status,
+          updated_at,
+          record_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(delivery_id) DO UPDATE SET
+          package_id = excluded.package_id,
+          topic = excluded.topic,
+          target_agent_id = excluded.target_agent_id,
+          status = excluded.status,
+          updated_at = excluded.updated_at,
+          record_json = excluded.record_json;
+        """,
+        database: database
+      )
+      defer { sqlite3_finalize(statement) }
+      try localSQLiteBindText(record.id, at: 1, in: statement, database: database)
+      try localSQLiteBindText(record.packageID?.rawValue, at: 2, in: statement, database: database)
+      try localSQLiteBindText(record.topic, at: 3, in: statement, database: database)
+      try localSQLiteBindText(record.targetAgentID, at: 4, in: statement, database: database)
+      try localSQLiteBindText(record.status.rawValue, at: 5, in: statement, database: database)
+      try localSQLiteBindText(record.updatedAt, at: 6, in: statement, database: database)
+      try localSQLiteBindText(recordJSON, at: 7, in: statement, database: database)
+      guard sqlite3_step(statement) == SQLITE_DONE else {
+        throw PraxisError.invariantViolation("Failed to persist delivery truth record: \(localSQLiteErrorMessage(database)).")
+      }
+    }
     return PraxisDeliveryTruthUpsertReceipt(
       deliveryID: record.id,
       status: record.status,
@@ -623,106 +970,190 @@ public actor PraxisLocalDeliveryTruthStore: PraxisDeliveryTruthStoreContract {
   }
 
   public func lookup(deliveryID: String) async throws -> PraxisDeliveryTruthRecord? {
-    try loadIfNeeded()
-    return records.last { $0.id == deliveryID }
+    try withLocalSQLiteDatabase(at: fileURL) { database in
+      let statement = try localSQLitePrepareStatement(
+        "SELECT record_json FROM delivery_truth WHERE delivery_id = ? LIMIT 1;",
+        database: database
+      )
+      defer { sqlite3_finalize(statement) }
+      try localSQLiteBindText(deliveryID, at: 1, in: statement, database: database)
+      switch sqlite3_step(statement) {
+      case SQLITE_ROW:
+        guard let recordJSON = localSQLiteText(from: statement, at: 0) else {
+          return nil
+        }
+        return try localRuntimeDecodeJSON(PraxisDeliveryTruthRecord.self, from: recordJSON)
+      case SQLITE_DONE:
+        return nil
+      default:
+        throw PraxisError.invariantViolation("Failed to load delivery truth record: \(localSQLiteErrorMessage(database)).")
+      }
+    }
   }
 
   public func lookup(_ query: PraxisDeliveryTruthQuery) async throws -> [PraxisDeliveryTruthRecord] {
-    try loadIfNeeded()
-    return records.filter { record in
-      if let deliveryID = query.deliveryID, record.id != deliveryID {
-        return false
-      }
-      if let packageID = query.packageID, record.packageID != packageID {
-        return false
-      }
-      if let topic = query.topic, record.topic != topic {
-        return false
-      }
-      if let targetAgentID = query.targetAgentID, record.targetAgentID != targetAgentID {
-        return false
-      }
-      return true
-    }
-  }
+    try withLocalSQLiteDatabase(at: fileURL) { database in
+      let statement = try localSQLitePrepareStatement(
+        "SELECT record_json FROM delivery_truth ORDER BY updated_at DESC, delivery_id ASC;",
+        database: database
+      )
+      defer { sqlite3_finalize(statement) }
 
-  private func loadIfNeeded() throws {
-    guard !didLoad else {
-      return
+      var records: [PraxisDeliveryTruthRecord] = []
+      while true {
+        let code = sqlite3_step(statement)
+        switch code {
+        case SQLITE_ROW:
+          guard let recordJSON = localSQLiteText(from: statement, at: 0) else {
+            continue
+          }
+          let record = try localRuntimeDecodeJSON(PraxisDeliveryTruthRecord.self, from: recordJSON)
+          guard query.deliveryID == nil || record.id == query.deliveryID,
+                query.packageID == nil || record.packageID == query.packageID,
+                query.topic == nil || record.topic == query.topic,
+                query.targetAgentID == nil || record.targetAgentID == query.targetAgentID else {
+            continue
+          }
+          records.append(record)
+        case SQLITE_DONE:
+          return records
+        default:
+          throw PraxisError.invariantViolation("Failed to read delivery truth records: \(localSQLiteErrorMessage(database)).")
+        }
+      }
     }
-    records = try PraxisLocalJSONFileIO.load([PraxisDeliveryTruthRecord].self, from: fileURL) ?? []
-    didLoad = true
-  }
-
-  private func persist() throws {
-    try PraxisLocalJSONFileIO.save(records, to: fileURL)
   }
 }
 
 public actor PraxisLocalEmbeddingStore: PraxisEmbeddingStoreContract {
   private let fileURL: URL
-  private var records: [PraxisEmbeddingRecord] = []
-  private var didLoad = false
 
   public init(fileURL: URL) {
     self.fileURL = fileURL
   }
 
   public func save(_ record: PraxisEmbeddingRecord) async throws -> PraxisEmbeddingStoreWriteReceipt {
-    try loadIfNeeded()
-    records.removeAll { $0.id == record.id }
-    records.append(record)
-    try persist()
+    let recordJSON = try localRuntimeEncodeJSON(record)
+    try withLocalSQLiteDatabase(at: fileURL) { database in
+      let statement = try localSQLitePrepareStatement(
+        """
+        INSERT INTO embeddings (embedding_id, storage_key, record_json)
+        VALUES (?, ?, ?)
+        ON CONFLICT(embedding_id) DO UPDATE SET
+          storage_key = excluded.storage_key,
+          record_json = excluded.record_json;
+        """,
+        database: database
+      )
+      defer { sqlite3_finalize(statement) }
+      try localSQLiteBindText(record.id, at: 1, in: statement, database: database)
+      try localSQLiteBindText(record.storageKey, at: 2, in: statement, database: database)
+      try localSQLiteBindText(recordJSON, at: 3, in: statement, database: database)
+      guard sqlite3_step(statement) == SQLITE_DONE else {
+        throw PraxisError.invariantViolation("Failed to persist embedding record: \(localSQLiteErrorMessage(database)).")
+      }
+    }
     return PraxisEmbeddingStoreWriteReceipt(embeddingID: record.id, storageKey: record.storageKey)
   }
 
   public func load(embeddingID: String) async throws -> PraxisEmbeddingRecord? {
-    try loadIfNeeded()
-    return records.last { $0.id == embeddingID }
-  }
-
-  private func loadIfNeeded() throws {
-    guard !didLoad else {
-      return
+    try withLocalSQLiteDatabase(at: fileURL) { database in
+      let statement = try localSQLitePrepareStatement(
+        "SELECT record_json FROM embeddings WHERE embedding_id = ? LIMIT 1;",
+        database: database
+      )
+      defer { sqlite3_finalize(statement) }
+      try localSQLiteBindText(embeddingID, at: 1, in: statement, database: database)
+      switch sqlite3_step(statement) {
+      case SQLITE_ROW:
+        guard let recordJSON = localSQLiteText(from: statement, at: 0) else {
+          return nil
+        }
+        return try localRuntimeDecodeJSON(PraxisEmbeddingRecord.self, from: recordJSON)
+      case SQLITE_DONE:
+        return nil
+      default:
+        throw PraxisError.invariantViolation("Failed to load embedding record: \(localSQLiteErrorMessage(database)).")
+      }
     }
-    records = try PraxisLocalJSONFileIO.load([PraxisEmbeddingRecord].self, from: fileURL) ?? []
-    didLoad = true
-  }
-
-  private func persist() throws {
-    try PraxisLocalJSONFileIO.save(records, to: fileURL)
   }
 }
 
 public actor PraxisLocalSemanticMemoryStore: PraxisSemanticMemoryStoreContract {
   private let fileURL: URL
-  private var records: [PraxisSemanticMemoryRecord] = []
-  private var didLoad = false
 
   public init(fileURL: URL) {
     self.fileURL = fileURL
   }
 
   public func save(_ record: PraxisSemanticMemoryRecord) async throws -> PraxisSemanticMemoryWriteReceipt {
-    try loadIfNeeded()
-    records.removeAll { $0.id == record.id }
-    records.append(record)
-    try persist()
+    let recordJSON = try localRuntimeEncodeJSON(record)
+    try withLocalSQLiteDatabase(at: fileURL) { database in
+      let statement = try localSQLitePrepareStatement(
+        """
+        INSERT INTO semantic_memory (
+          memory_id,
+          project_id,
+          agent_id,
+          scope_level,
+          freshness_status,
+          summary,
+          storage_key,
+          record_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(memory_id) DO UPDATE SET
+          project_id = excluded.project_id,
+          agent_id = excluded.agent_id,
+          scope_level = excluded.scope_level,
+          freshness_status = excluded.freshness_status,
+          summary = excluded.summary,
+          storage_key = excluded.storage_key,
+          record_json = excluded.record_json;
+        """,
+        database: database
+      )
+      defer { sqlite3_finalize(statement) }
+      try localSQLiteBindText(record.id, at: 1, in: statement, database: database)
+      try localSQLiteBindText(record.projectID, at: 2, in: statement, database: database)
+      try localSQLiteBindText(record.agentID, at: 3, in: statement, database: database)
+      try localSQLiteBindText(record.scopeLevel.rawValue, at: 4, in: statement, database: database)
+      try localSQLiteBindText(record.freshnessStatus.rawValue, at: 5, in: statement, database: database)
+      try localSQLiteBindText(record.summary, at: 6, in: statement, database: database)
+      try localSQLiteBindText(record.storageKey, at: 7, in: statement, database: database)
+      try localSQLiteBindText(recordJSON, at: 8, in: statement, database: database)
+      guard sqlite3_step(statement) == SQLITE_DONE else {
+        throw PraxisError.invariantViolation("Failed to persist semantic memory record: \(localSQLiteErrorMessage(database)).")
+      }
+    }
     return PraxisSemanticMemoryWriteReceipt(memoryID: record.id, storageKey: record.storageKey)
   }
 
   public func load(memoryID: String) async throws -> PraxisSemanticMemoryRecord? {
-    try loadIfNeeded()
-    return records.last { $0.id == memoryID }
+    try withLocalSQLiteDatabase(at: fileURL) { database in
+      let statement = try localSQLitePrepareStatement(
+        "SELECT record_json FROM semantic_memory WHERE memory_id = ? LIMIT 1;",
+        database: database
+      )
+      defer { sqlite3_finalize(statement) }
+      try localSQLiteBindText(memoryID, at: 1, in: statement, database: database)
+      switch sqlite3_step(statement) {
+      case SQLITE_ROW:
+        guard let recordJSON = localSQLiteText(from: statement, at: 0) else {
+          return nil
+        }
+        return try localRuntimeDecodeJSON(PraxisSemanticMemoryRecord.self, from: recordJSON)
+      case SQLITE_DONE:
+        return nil
+      default:
+        throw PraxisError.invariantViolation("Failed to load semantic memory record: \(localSQLiteErrorMessage(database)).")
+      }
+    }
   }
 
   public func search(_ request: PraxisSemanticMemorySearchRequest) async throws -> [PraxisSemanticMemoryRecord] {
-    try loadIfNeeded()
+    let records = try loadRecords(projectID: request.projectID)
     return records
       .filter { record in
-        guard record.projectID == request.projectID else {
-          return false
-        }
         guard request.scopeLevels.contains(record.scopeLevel) else {
           return false
         }
@@ -740,11 +1171,7 @@ public actor PraxisLocalSemanticMemoryStore: PraxisSemanticMemoryStoreContract {
   }
 
   public func bundle(_ request: PraxisSemanticMemoryBundleRequest) async throws -> PraxisSemanticMemoryBundle {
-    try loadIfNeeded()
-    let filteredRecords = records.filter { record in
-      guard record.projectID == request.projectID else {
-        return false
-      }
+    let filteredRecords = try loadRecords(projectID: request.projectID).filter { record in
       guard request.scopeLevels.contains(record.scopeLevel) else {
         return false
       }
@@ -776,31 +1203,70 @@ public actor PraxisLocalSemanticMemoryStore: PraxisSemanticMemoryStoreContract {
     )
   }
 
-  private func loadIfNeeded() throws {
-    guard !didLoad else {
-      return
-    }
-    records = try PraxisLocalJSONFileIO.load([PraxisSemanticMemoryRecord].self, from: fileURL) ?? []
-    didLoad = true
-  }
+  private func loadRecords(projectID: String) throws -> [PraxisSemanticMemoryRecord] {
+    try withLocalSQLiteDatabase(at: fileURL) { database in
+      let statement = try localSQLitePrepareStatement(
+        """
+        SELECT record_json
+        FROM semantic_memory
+        WHERE project_id = ?
+        ORDER BY memory_id ASC;
+        """,
+        database: database
+      )
+      defer { sqlite3_finalize(statement) }
+      try localSQLiteBindText(projectID, at: 1, in: statement, database: database)
 
-  private func persist() throws {
-    try PraxisLocalJSONFileIO.save(records, to: fileURL)
+      var records: [PraxisSemanticMemoryRecord] = []
+      while true {
+        let code = sqlite3_step(statement)
+        switch code {
+        case SQLITE_ROW:
+          guard let recordJSON = localSQLiteText(from: statement, at: 0) else {
+            continue
+          }
+          records.append(try localRuntimeDecodeJSON(PraxisSemanticMemoryRecord.self, from: recordJSON))
+        case SQLITE_DONE:
+          return records
+        default:
+          throw PraxisError.invariantViolation("Failed to read semantic memory records: \(localSQLiteErrorMessage(database)).")
+        }
+      }
+    }
   }
 }
 
 public struct PraxisLocalSemanticSearchIndex: PraxisSemanticSearchIndexContract, Sendable {
-  private let semanticMemoryFileURL: URL
+  private let databaseFileURL: URL
 
-  public init(semanticMemoryFileURL: URL) {
-    self.semanticMemoryFileURL = semanticMemoryFileURL
+  public init(databaseFileURL: URL) {
+    self.databaseFileURL = databaseFileURL
   }
 
   public func search(_ request: PraxisSemanticSearchRequest) async throws -> [PraxisSemanticSearchMatch] {
-    let memoryRecords = try PraxisLocalJSONFileIO.load(
-      [PraxisSemanticMemoryRecord].self,
-      from: semanticMemoryFileURL
-    ) ?? []
+    let memoryRecords = try withLocalSQLiteDatabase(at: databaseFileURL) { database in
+      let statement = try localSQLitePrepareStatement(
+        "SELECT record_json FROM semantic_memory ORDER BY memory_id ASC;",
+        database: database
+      )
+      defer { sqlite3_finalize(statement) }
+
+      var records: [PraxisSemanticMemoryRecord] = []
+      while true {
+        let code = sqlite3_step(statement)
+        switch code {
+        case SQLITE_ROW:
+          guard let recordJSON = localSQLiteText(from: statement, at: 0) else {
+            continue
+          }
+          records.append(try localRuntimeDecodeJSON(PraxisSemanticMemoryRecord.self, from: recordJSON))
+        case SQLITE_DONE:
+          return records
+        default:
+          throw PraxisError.invariantViolation("Failed to read semantic memory search records: \(localSQLiteErrorMessage(database)).")
+        }
+      }
+    }
     let normalizedQuery = request.query.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !normalizedQuery.isEmpty else {
       return []
@@ -829,43 +1295,64 @@ public struct PraxisLocalSemanticSearchIndex: PraxisSemanticSearchIndexContract,
 
 public actor PraxisLocalLineageStore: PraxisLineageStoreContract {
   private let fileURL: URL
-  private var descriptors: [PraxisLineageDescriptor] = []
-  private var didLoad = false
 
   public init(fileURL: URL) {
     self.fileURL = fileURL
   }
 
   public func save(_ descriptor: PraxisLineageDescriptor) async throws {
-    try loadIfNeeded()
-    descriptors.removeAll { $0.lineageID == descriptor.lineageID }
-    descriptors.append(descriptor)
-    try persist()
+    let descriptorJSON = try localRuntimeEncodeJSON(descriptor)
+    try withLocalSQLiteDatabase(at: fileURL) { database in
+      let statement = try localSQLitePrepareStatement(
+        """
+        INSERT INTO lineages (
+          lineage_id,
+          branch_ref,
+          parent_lineage_id,
+          descriptor_json
+        ) VALUES (?, ?, ?, ?)
+        ON CONFLICT(lineage_id) DO UPDATE SET
+          branch_ref = excluded.branch_ref,
+          parent_lineage_id = excluded.parent_lineage_id,
+          descriptor_json = excluded.descriptor_json;
+        """,
+        database: database
+      )
+      defer { sqlite3_finalize(statement) }
+      try localSQLiteBindText(descriptor.lineageID.rawValue, at: 1, in: statement, database: database)
+      try localSQLiteBindText(descriptor.branchRef, at: 2, in: statement, database: database)
+      try localSQLiteBindText(descriptor.parentLineageID?.rawValue, at: 3, in: statement, database: database)
+      try localSQLiteBindText(descriptorJSON, at: 4, in: statement, database: database)
+      guard sqlite3_step(statement) == SQLITE_DONE else {
+        throw PraxisError.invariantViolation("Failed to persist lineage descriptor: \(localSQLiteErrorMessage(database)).")
+      }
+    }
   }
 
   public func describe(lineageID: PraxisCmpLineageID) async throws -> String {
-    try loadIfNeeded()
-    return descriptors.first { $0.lineageID == lineageID }?.summary ?? "Unknown lineage \(lineageID.rawValue)"
+    try await describe(.init(lineageID: lineageID))?.summary ?? "Unknown lineage \(lineageID.rawValue)"
   }
 
   public func describe(_ request: PraxisLineageLookupRequest) async throws -> PraxisLineageDescriptor? {
-    try loadIfNeeded()
-    return descriptors.first { $0.lineageID == request.lineageID }
-  }
-
-  private func loadIfNeeded() throws {
-    guard !didLoad else {
-      return
+    try withLocalSQLiteDatabase(at: fileURL) { database in
+      let statement = try localSQLitePrepareStatement(
+        "SELECT descriptor_json FROM lineages WHERE lineage_id = ? LIMIT 1;",
+        database: database
+      )
+      defer { sqlite3_finalize(statement) }
+      try localSQLiteBindText(request.lineageID.rawValue, at: 1, in: statement, database: database)
+      switch sqlite3_step(statement) {
+      case SQLITE_ROW:
+        guard let descriptorJSON = localSQLiteText(from: statement, at: 0) else {
+          return nil
+        }
+        return try localRuntimeDecodeJSON(PraxisLineageDescriptor.self, from: descriptorJSON)
+      case SQLITE_DONE:
+        return nil
+      default:
+        throw PraxisError.invariantViolation("Failed to load lineage descriptor: \(localSQLiteErrorMessage(database)).")
+      }
     }
-    descriptors = try PraxisLocalJSONFileIO.load([PraxisLineageDescriptor].self, from: fileURL) ?? []
-    didLoad = true
-  }
-
-  private func persist() throws {
-    try PraxisLocalJSONFileIO.save(
-      descriptors.sorted { $0.lineageID.rawValue < $1.lineageID.rawValue },
-      to: fileURL
-    )
   }
 }
 
@@ -1221,15 +1708,15 @@ public extension PraxisHostAdapterRegistry {
       gitAvailabilityProbe: PraxisSystemGitAvailabilityProbe(),
       gitExecutor: PraxisSystemGitExecutor(),
       processSupervisor: scaffold.processSupervisor,
-      checkpointStore: PraxisLocalCheckpointStore(fileURL: paths.checkpointsFileURL),
-      journalStore: PraxisLocalJournalStore(fileURL: paths.journalFileURL),
-      projectionStore: PraxisLocalProjectionStore(fileURL: paths.projectionsFileURL),
+      checkpointStore: PraxisLocalCheckpointStore(fileURL: paths.databaseFileURL),
+      journalStore: PraxisLocalJournalStore(fileURL: paths.databaseFileURL),
+      projectionStore: PraxisLocalProjectionStore(fileURL: paths.databaseFileURL),
       messageBus: PraxisLocalMessageBus(),
-      deliveryTruthStore: PraxisLocalDeliveryTruthStore(fileURL: paths.deliveryTruthFileURL),
-      embeddingStore: PraxisLocalEmbeddingStore(fileURL: paths.embeddingsFileURL),
-      semanticSearchIndex: PraxisLocalSemanticSearchIndex(semanticMemoryFileURL: paths.semanticMemoryFileURL),
-      semanticMemoryStore: PraxisLocalSemanticMemoryStore(fileURL: paths.semanticMemoryFileURL),
-      lineageStore: PraxisLocalLineageStore(fileURL: paths.lineageFileURL),
+      deliveryTruthStore: PraxisLocalDeliveryTruthStore(fileURL: paths.databaseFileURL),
+      embeddingStore: PraxisLocalEmbeddingStore(fileURL: paths.databaseFileURL),
+      semanticSearchIndex: PraxisLocalSemanticSearchIndex(databaseFileURL: paths.databaseFileURL),
+      semanticMemoryStore: PraxisLocalSemanticMemoryStore(fileURL: paths.databaseFileURL),
+      lineageStore: PraxisLocalLineageStore(fileURL: paths.databaseFileURL),
       userInputDriver: scaffold.userInputDriver,
       permissionDriver: scaffold.permissionDriver,
       terminalPresenter: scaffold.terminalPresenter,

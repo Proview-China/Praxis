@@ -606,6 +606,55 @@ struct HostRuntimeSurfaceTests {
   }
 
   @Test
+  func localRuntimeRunAndResumePersistCmpProjectionDeliveryAndLineageTruth() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-local-runtime-truth-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: registry)
+    let goal = PraxisCompiledGoal(
+      normalizedGoal: .init(
+        id: .init(rawValue: "goal.local-runtime-truth"),
+        title: "Local Runtime Truth",
+        summary: "Persist local runtime CMP facts"
+      ),
+      intentSummary: "Persist local runtime CMP facts"
+    )
+
+    let started = try await runtimeFacade.runFacade.runGoal(
+      .init(
+        goal: goal,
+        sessionID: .init(rawValue: "session.local-runtime-truth")
+      )
+    )
+    let resumed = try await runtimeFacade.runFacade.resumeRun(.init(runID: started.runID))
+    let projectionDescriptors = try await registry.projectionStore?.describe(
+      .init(projectID: "cmp.local-runtime")
+    ) ?? []
+    let deliveryTruthRecords = try await registry.deliveryTruthStore?.lookup(
+      .init(topic: "cmp.delivery")
+    ) ?? []
+    let lineageDescriptor = try await registry.lineageStore?.describe(
+      .init(lineageID: .init(rawValue: "lineage.session.local-runtime-truth"))
+    )
+    let cmpSnapshot = try await runtimeFacade.inspectionFacade.inspectCmp()
+
+    #expect(started.followUpAction?.kind.rawValue == "model_inference")
+    #expect(resumed.followUpAction?.kind.rawValue == "internal_step")
+    #expect(projectionDescriptors.count == 1)
+    #expect(projectionDescriptors.first?.projectionID == .init(rawValue: "projection.\(started.runID.rawValue)"))
+    #expect(projectionDescriptors.first?.storageKey == "sqlite://cmp.local-runtime/\(started.runID.rawValue)")
+    #expect(deliveryTruthRecords.count == 1)
+    #expect(deliveryTruthRecords.first?.status == .published)
+    #expect(deliveryTruthRecords.first?.packageID == .init(rawValue: "package.\(started.runID.rawValue)"))
+    #expect(lineageDescriptor?.branchRef == "local/session.local-runtime-truth")
+    #expect(cmpSnapshot.hostRuntimeSummary.contains("sqlite persistence (1 projections)"))
+    #expect(cmpSnapshot.hostRuntimeSummary.contains("sqlite delivery truth (1 records)"))
+    #expect(cmpSnapshot.hostRuntimeSummary.contains("lineage store (ready)"))
+  }
+
+  @Test
   func localDefaultsProvideRealWorkspaceAndLineageAdapters() async throws {
     let rootDirectory = FileManager.default.temporaryDirectory
       .appendingPathComponent("praxis-local-workspace-\(UUID().uuidString)", isDirectory: true)
@@ -660,7 +709,7 @@ struct HostRuntimeSurfaceTests {
       .init(query: "release", kind: .fullText, maxResults: 5)
     )
 
-    let lineageStore = PraxisLocalLineageStore(fileURL: rootDirectory.appendingPathComponent("lineages.json", isDirectory: false))
+    let lineageStore = PraxisLocalLineageStore(fileURL: rootDirectory.appendingPathComponent("runtime.sqlite3", isDirectory: false))
     try await lineageStore.save(
       .init(
         lineageID: .init(rawValue: "lineage.local"),
@@ -705,7 +754,7 @@ struct HostRuntimeSurfaceTests {
         summary: "Local runtime projection"
       )
     )
-    let lineageStore = PraxisLocalLineageStore(fileURL: rootDirectory.appendingPathComponent("lineages.json", isDirectory: false))
+    let lineageStore = PraxisLocalLineageStore(fileURL: rootDirectory.appendingPathComponent("runtime.sqlite3", isDirectory: false))
     try await lineageStore.save(
       .init(
         lineageID: .init(rawValue: "lineage.local"),

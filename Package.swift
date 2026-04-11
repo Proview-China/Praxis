@@ -424,6 +424,7 @@ let package = Package(
       dependencies: [
         "PraxisCoreTypes",
         "PraxisCapabilityContracts",
+        "PraxisCmpTypes",
         "PraxisRuntimeComposition",
         "PraxisTapTypes",
         "PraxisTapGovernance",

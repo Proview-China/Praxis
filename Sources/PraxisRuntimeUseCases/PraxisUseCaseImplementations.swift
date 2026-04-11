@@ -1,6 +1,7 @@
 import PraxisCapabilityContracts
 import PraxisCapabilityPlanning
 import PraxisCheckpoint
+import PraxisCmpTypes
 import PraxisCoreTypes
 import PraxisInfraContracts
 import PraxisJournal
@@ -23,6 +24,8 @@ private let tapInspectionCheckpointPointer = PraxisCheckpointPointer(
 )
 private let checkpointReplayPageSize = 50
 private let runIdentityCodec = PraxisRunIdentityCodec()
+private let cmpLocalRuntimeProjectID = "cmp.local-runtime"
+private let cmpLocalRuntimeDeliveryTopic = "cmp.delivery"
 
 private struct PraxisContractBackedJournalReader: PraxisJournalReading {
   let store: any PraxisJournalStoreContract
@@ -697,6 +700,137 @@ private func mpMultimodalSummary(from dependencies: PraxisDependencyGraph) -> St
   return "Multimodal host chips: \(chips.joined(separator: ", "))"
 }
 
+private func cmpLocalRuntimeLineageID(for sessionID: PraxisSessionID) -> PraxisCmpLineageID {
+  .init(rawValue: "lineage.\(sessionID.rawValue)")
+}
+
+private func cmpLocalRuntimeProjectionID(for runID: PraxisRunID) -> PraxisCmpProjectionID {
+  .init(rawValue: "projection.\(runID.rawValue)")
+}
+
+private func cmpLocalRuntimePackageID(for runID: PraxisRunID) -> PraxisCmpPackageID {
+  .init(rawValue: "package.\(runID.rawValue)")
+}
+
+private func cmpLocalRuntimeDeliveryID(for runID: PraxisRunID) -> String {
+  "delivery.\(runID.rawValue)"
+}
+
+private func cmpLocalRuntimeStorageKey(for runID: PraxisRunID) -> String {
+  "sqlite://cmp.local-runtime/\(runID.rawValue)"
+}
+
+private func cmpLocalRuntimeMetadata(
+  runID: PraxisRunID,
+  sessionID: PraxisSessionID,
+  checkpointReference: String,
+  phase: PraxisRunPhase,
+  goalTitle: String,
+  followUpAction: PraxisRunFollowUpAction?
+) -> [String: PraxisValue] {
+  var metadata: [String: PraxisValue] = [
+    "runID": .string(runID.rawValue),
+    "sessionID": .string(sessionID.rawValue),
+    "checkpointReference": .string(checkpointReference),
+    "phase": .string(phase.rawValue),
+    "goalTitle": .string(goalTitle),
+  ]
+  if let followUpAction {
+    metadata["followUpKind"] = .string(followUpAction.kind.rawValue)
+    if let intentID = followUpAction.intentID {
+      metadata["followUpIntentID"] = .string(intentID)
+    }
+  }
+  return metadata
+}
+
+private func persistCmpLocalRuntimeTruth(
+  dependencies: PraxisDependencyGraph,
+  runID: PraxisRunID,
+  sessionID: PraxisSessionID,
+  goalTitle: String,
+  phase: PraxisRunPhase,
+  checkpointReference: String,
+  timestamp: String,
+  followUpAction: PraxisRunFollowUpAction?
+) async throws {
+  let lineageID = cmpLocalRuntimeLineageID(for: sessionID)
+  let projectionID = cmpLocalRuntimeProjectionID(for: runID)
+  let packageID = cmpLocalRuntimePackageID(for: runID)
+  let metadata = cmpLocalRuntimeMetadata(
+    runID: runID,
+    sessionID: sessionID,
+    checkpointReference: checkpointReference,
+    phase: phase,
+    goalTitle: goalTitle,
+    followUpAction: followUpAction
+  )
+
+  if let lineageStore = dependencies.hostAdapters.lineageStore {
+    try await lineageStore.save(
+      .init(
+        lineageID: lineageID,
+        branchRef: "local/\(sessionID.rawValue)",
+        summary: "Local runtime lineage for session \(sessionID.rawValue)."
+      )
+    )
+  }
+
+  if let projectionStore = dependencies.hostAdapters.projectionStore {
+    _ = try await projectionStore.save(
+      .init(
+        projectID: cmpLocalRuntimeProjectID,
+        projectionID: projectionID,
+        lineageID: lineageID,
+        agentID: "runtime.local",
+        visibilityLevel: .localOnly,
+        storageKey: cmpLocalRuntimeStorageKey(for: runID),
+        updatedAt: timestamp,
+        summary: "Run \(runID.rawValue) is \(phase.rawValue) for \(goalTitle).",
+        metadata: metadata
+      )
+    )
+  }
+
+  let publishedToBus: Bool
+  if let followUpAction,
+     let messageBus = dependencies.hostAdapters.messageBus {
+    _ = try await messageBus.publish(
+      .init(
+        topic: cmpLocalRuntimeDeliveryTopic,
+        payloadSummary: followUpAction.reason,
+        projectID: cmpLocalRuntimeProjectID,
+        publishedAt: timestamp,
+        metadata: metadata
+      )
+    )
+    publishedToBus = true
+  } else {
+    publishedToBus = false
+  }
+
+  if let deliveryTruthStore = dependencies.hostAdapters.deliveryTruthStore {
+    let status: PraxisDeliveryTruthStatus = if followUpAction == nil {
+      .acknowledged
+    } else if publishedToBus {
+      .published
+    } else {
+      .pending
+    }
+    _ = try await deliveryTruthStore.save(
+      .init(
+        id: cmpLocalRuntimeDeliveryID(for: runID),
+        packageID: packageID,
+        topic: cmpLocalRuntimeDeliveryTopic,
+        targetAgentID: "runtime.local",
+        status: status,
+        payloadSummary: followUpAction?.reason ?? "Run \(runID.rawValue) reached \(phase.rawValue).",
+        updatedAt: timestamp
+      )
+    )
+  }
+}
+
 public final class PraxisRunGoalUseCase: PraxisRunGoalUseCaseProtocol {
   public let dependencies: PraxisDependencyGraph
 
@@ -760,6 +894,18 @@ public final class PraxisRunGoalUseCase: PraxisRunGoalUseCaseProtocol {
       _ = try await checkpointStore.save(.init(pointer: checkpointPointer, snapshot: snapshot))
     }
 
+    let followUpAction = runFollowUpAction(from: advanced.decision.nextAction)
+    try await persistCmpLocalRuntimeTruth(
+      dependencies: dependencies,
+      runID: runID,
+      sessionID: sessionID,
+      goalTitle: command.goal.normalizedGoal.title,
+      phase: advanced.run.phase,
+      checkpointReference: checkpointPointer.checkpointID.rawValue,
+      timestamp: createdAt,
+      followUpAction: followUpAction
+    )
+
     return PraxisRunExecution(
       runID: runID,
       sessionID: sessionID,
@@ -767,7 +913,7 @@ public final class PraxisRunGoalUseCase: PraxisRunGoalUseCaseProtocol {
       tickCount: advanced.run.tickCount,
       journalSequence: journalReceipt?.lastCursor?.sequence,
       checkpointReference: checkpointPointer.checkpointID.rawValue,
-      followUpAction: runFollowUpAction(from: advanced.decision.nextAction)
+      followUpAction: followUpAction
     )
   }
 }
@@ -865,6 +1011,16 @@ public final class PraxisResumeRunUseCase: PraxisResumeRunUseCaseProtocol {
         )
       )
       _ = try await checkpointStore.save(.init(pointer: pointer, snapshot: replayedSnapshot))
+      try await persistCmpLocalRuntimeTruth(
+        dependencies: dependencies,
+        runID: command.runID,
+        sessionID: sessionID,
+        goalTitle: restoredSessionHeader.title,
+        phase: replayedRun.phase,
+        checkpointReference: pointer.checkpointID.rawValue,
+        timestamp: replayedSnapshot.createdAt ?? runtimeNow(),
+        followUpAction: nil
+      )
 
       return PraxisRunExecution(
         runID: command.runID,
@@ -917,6 +1073,16 @@ public final class PraxisResumeRunUseCase: PraxisResumeRunUseCaseProtocol {
       )
     )
     _ = try await checkpointStore.save(.init(pointer: pointer, snapshot: updatedSnapshot))
+    try await persistCmpLocalRuntimeTruth(
+      dependencies: dependencies,
+      runID: command.runID,
+      sessionID: sessionID,
+      goalTitle: restoredSessionHeader.title,
+      phase: resumedRun.phase,
+      checkpointReference: pointer.checkpointID.rawValue,
+      timestamp: resumedAt,
+      followUpAction: followUpAction
+    )
 
     return PraxisRunExecution(
       runID: command.runID,

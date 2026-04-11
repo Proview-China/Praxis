@@ -144,6 +144,12 @@ public protocol PraxisSemanticMemoryStoreContract: Sendable {
 
 /// Resolves lineage descriptors from host persistence.
 public protocol PraxisLineageStoreContract: Sendable {
+  /// Saves a lineage descriptor for later projection and recovery lookups.
+  ///
+  /// - Parameter descriptor: Lineage descriptor to persist.
+  /// - Returns: None.
+  func save(_ descriptor: PraxisLineageDescriptor) async throws
+
   /// Returns a human-readable lineage summary.
   ///
   /// - Parameter lineageID: Lineage identifier to describe.
