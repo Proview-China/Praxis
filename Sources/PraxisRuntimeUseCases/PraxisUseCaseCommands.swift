@@ -123,9 +123,9 @@ public struct PraxisTapStatusReadback: Sendable, Equatable, Codable {
   public let agentID: String?
   public let summary: String
   public let readinessSummary: String
-  public let tapMode: String
-  public let riskLevel: String
-  public let humanGateState: String
+  public let tapMode: PraxisTapMode
+  public let riskLevel: PraxisTapRiskLevel
+  public let humanGateState: PraxisHumanGateState
   public let availableCapabilityCount: Int
   public let availableCapabilityIDs: [String]
   public let pendingApprovalCount: Int
@@ -139,9 +139,9 @@ public struct PraxisTapStatusReadback: Sendable, Equatable, Codable {
     agentID: String? = nil,
     summary: String,
     readinessSummary: String,
-    tapMode: String,
-    riskLevel: String,
-    humanGateState: String,
+    tapMode: PraxisTapMode,
+    riskLevel: PraxisTapRiskLevel,
+    humanGateState: PraxisHumanGateState,
     availableCapabilityCount: Int,
     availableCapabilityIDs: [String],
     pendingApprovalCount: Int,
@@ -179,14 +179,25 @@ public struct PraxisReadbackTapHistoryCommand: Sendable, Equatable, Codable {
   }
 }
 
+public enum PraxisCmpPeerApprovalOutcome: String, Sendable, Codable {
+  case baselineApproved = "baseline_approved"
+  case reviewRequired = "review_required"
+  case redirectedToProvisioning = "redirected_to_provisioning"
+  case escalatedToHuman = "escalated_to_human"
+  case denied
+  case approvedByHuman = "approved_by_human"
+  case rejectedByHuman = "rejected_by_human"
+  case gateReleased = "gate_released"
+}
+
 public struct PraxisTapHistoryEntry: Sendable, Equatable, Codable {
   public let agentID: String
   public let targetAgentID: String
   public let capabilityKey: String
-  public let requestedTier: String
-  public let route: String
-  public let outcome: String
-  public let humanGateState: String
+  public let requestedTier: PraxisTapCapabilityTier
+  public let route: PraxisReviewerRoute
+  public let outcome: PraxisCmpPeerApprovalOutcome
+  public let humanGateState: PraxisHumanGateState
   public let updatedAt: String
   public let decisionSummary: String
 
@@ -194,10 +205,10 @@ public struct PraxisTapHistoryEntry: Sendable, Equatable, Codable {
     agentID: String,
     targetAgentID: String,
     capabilityKey: String,
-    requestedTier: String,
-    route: String,
-    outcome: String,
-    humanGateState: String,
+    requestedTier: PraxisTapCapabilityTier,
+    route: PraxisReviewerRoute,
+    outcome: PraxisCmpPeerApprovalOutcome,
+    humanGateState: PraxisHumanGateState,
     updatedAt: String,
     decisionSummary: String
   ) {
@@ -1137,11 +1148,11 @@ public struct PraxisCmpPeerApproval: Sendable, Equatable, Codable {
   public let capabilityKey: String
   public let requestedTier: PraxisTapCapabilityTier
   public let summary: String
-  public let route: String
-  public let outcome: String
-  public let tapMode: String
-  public let riskLevel: String
-  public let humanGateState: String
+  public let route: PraxisReviewerRoute
+  public let outcome: PraxisCmpPeerApprovalOutcome
+  public let tapMode: PraxisTapMode
+  public let riskLevel: PraxisTapRiskLevel
+  public let humanGateState: PraxisHumanGateState
   public let requestedAt: String
   public let decisionSummary: String
 
@@ -1152,11 +1163,11 @@ public struct PraxisCmpPeerApproval: Sendable, Equatable, Codable {
     capabilityKey: String,
     requestedTier: PraxisTapCapabilityTier,
     summary: String,
-    route: String,
-    outcome: String,
-    tapMode: String,
-    riskLevel: String,
-    humanGateState: String,
+    route: PraxisReviewerRoute,
+    outcome: PraxisCmpPeerApprovalOutcome,
+    tapMode: PraxisTapMode,
+    riskLevel: PraxisTapRiskLevel,
+    humanGateState: PraxisHumanGateState,
     requestedAt: String,
     decisionSummary: String
   ) {
@@ -1230,11 +1241,11 @@ public struct PraxisCmpPeerApprovalReadback: Sendable, Equatable, Codable {
   public let capabilityKey: String?
   public let requestedTier: PraxisTapCapabilityTier?
   public let summary: String
-  public let route: String?
-  public let outcome: String?
-  public let tapMode: String?
-  public let riskLevel: String?
-  public let humanGateState: String?
+  public let route: PraxisReviewerRoute?
+  public let outcome: PraxisCmpPeerApprovalOutcome?
+  public let tapMode: PraxisTapMode?
+  public let riskLevel: PraxisTapRiskLevel?
+  public let humanGateState: PraxisHumanGateState?
   public let requestedAt: String?
   public let decisionSummary: String?
   public let found: Bool
@@ -1247,11 +1258,11 @@ public struct PraxisCmpPeerApprovalReadback: Sendable, Equatable, Codable {
     capabilityKey: String? = nil,
     requestedTier: PraxisTapCapabilityTier? = nil,
     summary: String,
-    route: String? = nil,
-    outcome: String? = nil,
-    tapMode: String? = nil,
-    riskLevel: String? = nil,
-    humanGateState: String? = nil,
+    route: PraxisReviewerRoute? = nil,
+    outcome: PraxisCmpPeerApprovalOutcome? = nil,
+    tapMode: PraxisTapMode? = nil,
+    riskLevel: PraxisTapRiskLevel? = nil,
+    humanGateState: PraxisHumanGateState? = nil,
     requestedAt: String? = nil,
     decisionSummary: String? = nil,
     found: Bool,

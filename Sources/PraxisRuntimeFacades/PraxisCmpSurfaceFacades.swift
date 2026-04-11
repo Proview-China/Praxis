@@ -106,6 +106,7 @@ public final class PraxisCmpProjectFacade: Sendable {
     case .conflicted:
       gitStatus = .degraded
     }
+    let gitComponentStatus: PraxisCmpProjectComponentStatus = gitStatus == .ready ? .ready : .degraded
 
     return PraxisCmpProjectBootstrapSnapshot(
       summary: bootstrap.summary,
@@ -113,7 +114,8 @@ public final class PraxisCmpProjectFacade: Sendable {
         projectID: bootstrap.projectID,
         hostProfile: mapCmpHostProfile(bootstrap.hostProfile),
         componentStatuses: .init(statuses: [
-          .gitExecutor: gitStatus == .ready ? .ready : .degraded,
+          .gitProbe: gitComponentStatus,
+          .gitExecutor: gitComponentStatus,
           .structuredStore: bootstrap.dbReceipt.missingTargetCount == 0 ? .ready : .degraded,
           .messageBus: bootstrap.mqReceipts.isEmpty ? .missing : .ready,
           .lineageStore: bootstrap.lineages.isEmpty ? .missing : .ready,
@@ -357,7 +359,7 @@ public final class PraxisCmpRolesFacade: Sendable {
       agentID: approval.agentID,
       targetAgentID: approval.targetAgentID,
       capabilityKey: approval.capabilityKey,
-      requestedTier: approval.requestedTier.rawValue,
+      requestedTier: approval.requestedTier,
       route: approval.route,
       outcome: approval.outcome,
       tapMode: approval.tapMode,
@@ -376,7 +378,7 @@ public final class PraxisCmpRolesFacade: Sendable {
       agentID: approval.agentID,
       targetAgentID: approval.targetAgentID,
       capabilityKey: approval.capabilityKey,
-      requestedTier: approval.requestedTier.rawValue,
+      requestedTier: approval.requestedTier,
       route: approval.route,
       outcome: approval.outcome,
       tapMode: approval.tapMode,
@@ -471,7 +473,7 @@ public final class PraxisCmpReadbackFacade: Sendable {
       agentID: readback.agentID,
       targetAgentID: readback.targetAgentID,
       capabilityKey: readback.capabilityKey,
-      requestedTier: readback.requestedTier?.rawValue,
+      requestedTier: readback.requestedTier,
       route: readback.route,
       outcome: readback.outcome,
       tapMode: readback.tapMode,

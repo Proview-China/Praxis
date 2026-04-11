@@ -11,6 +11,8 @@ import PraxisMpTypes
 import PraxisRun
 import PraxisSession
 import PraxisState
+import PraxisTapReview
+import PraxisTapTypes
 @testable import PraxisRuntimeComposition
 @testable import PraxisRuntimeFacades
 @testable import PraxisRuntimeInterface
@@ -1493,11 +1495,11 @@ struct HostRuntimeInterfaceTests {
             capabilityKey: command.capabilityKey,
             requestedTier: command.requestedTier,
             summary: "Approval snapshot summary for \(command.capabilityKey).",
-            route: "humanReview",
-            outcome: "escalated_to_human",
-            tapMode: "restricted",
-            riskLevel: "normal",
-            humanGateState: "waitingApproval",
+            route: .humanReview,
+            outcome: .escalatedToHuman,
+            tapMode: .restricted,
+            riskLevel: .normal,
+            humanGateState: .waitingApproval,
             requestedAt: "2026-04-11T12:00:00Z",
             decisionSummary: "Escalated \(command.capabilityKey) to human review."
           )
@@ -1510,11 +1512,11 @@ struct HostRuntimeInterfaceTests {
             capabilityKey: command.capabilityKey,
             requestedTier: .b1,
             summary: "Approval decision snapshot for \(command.capabilityKey).",
-            route: "humanReview",
-            outcome: "approved_by_human",
-            tapMode: "restricted",
-            riskLevel: "normal",
-            humanGateState: "approved",
+            route: .humanReview,
+            outcome: .approvedByHuman,
+            tapMode: .restricted,
+            riskLevel: .normal,
+            humanGateState: .approved,
             requestedAt: "2026-04-11T12:05:00Z",
             decisionSummary: command.decisionSummary
           )
@@ -1527,11 +1529,11 @@ struct HostRuntimeInterfaceTests {
             capabilityKey: command.capabilityKey,
             requestedTier: .b1,
             summary: "Approval readback summary for \(command.capabilityKey ?? "unknown").",
-            route: "humanReview",
-            outcome: "approved_by_human",
-            tapMode: "restricted",
-            riskLevel: "normal",
-            humanGateState: "approved",
+            route: .humanReview,
+            outcome: .approvedByHuman,
+            tapMode: .restricted,
+            riskLevel: .normal,
+            humanGateState: .approved,
             requestedAt: "2026-04-11T12:05:00Z",
             decisionSummary: "Approved by reviewer.local.",
             found: true,

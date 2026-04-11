@@ -14,6 +14,7 @@ import PraxisRuntimeComposition
 import PraxisRuntimeGateway
 import PraxisRuntimeUseCases
 import PraxisSession
+import PraxisTapReview
 import PraxisTapTypes
 import PraxisToolingContracts
 import PraxisUserIOContracts
@@ -1246,11 +1247,11 @@ struct PraxisRuntimeUseCasesTests {
     #expect(updatedControl.control.fallbackPolicy == .registryOnly)
     #expect(updatedControl.control.recoveryPreference == .resumeLatest)
     #expect(updatedControl.control.automation["autoDispatch"] == false)
-    #expect(requestedApproval.route == "humanReview")
-    #expect(requestedApproval.outcome == "escalated_to_human")
-    #expect(requestedApproval.humanGateState == "waitingApproval")
-    #expect(decidedApproval.outcome == "approved_by_human")
-    #expect(decidedApproval.humanGateState == "approved")
+    #expect(requestedApproval.route == .humanReview)
+    #expect(requestedApproval.outcome == .escalatedToHuman)
+    #expect(requestedApproval.humanGateState == .waitingApproval)
+    #expect(decidedApproval.outcome == .approvedByHuman)
+    #expect(decidedApproval.humanGateState == .approved)
     #expect(decidedApproval.decisionSummary == "Approved git access for checker")
     #expect(controlReadback.projectID == "cmp.local-runtime")
     #expect(controlReadback.agentID == "checker.local")
@@ -1263,8 +1264,10 @@ struct PraxisRuntimeUseCasesTests {
     #expect(approvalReadback.found)
     #expect(approvalReadback.capabilityKey == "tool.git")
     #expect(approvalReadback.requestedTier == .b1)
-    #expect(approvalReadback.outcome == "approved_by_human")
-    #expect(approvalReadback.humanGateState == "approved")
+    #expect(approvalReadback.route == .humanReview)
+    #expect(approvalReadback.outcome == .approvedByHuman)
+    #expect(approvalReadback.tapMode == .restricted)
+    #expect(approvalReadback.humanGateState == .approved)
     #expect(approvalReadback.decisionSummary == "Approved git access for checker")
     #expect(statusReadback.projectID == "cmp.local-runtime")
     #expect(statusReadback.agentID == "checker.local")
@@ -1274,6 +1277,135 @@ struct PraxisRuntimeUseCasesTests {
     #expect(statusReadback.control.recoveryPreference == .resumeLatest)
     #expect(statusReadback.control.automation["autoDispatch"] == false)
     #expect(statusReadback.roles.isEmpty == false)
+  }
+
+  @Test
+  func tapReadbackUseCasesSurfaceTypedPeerApprovalAndStatusWhileHistoryStaysDisplayOriented() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-runtime-usecases-tap-readback-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+    let dependencies = try makeDependencies(hostAdapters: registry)
+    let updateControlUseCase = PraxisUpdateCmpControlUseCase(dependencies: dependencies)
+    let requestApprovalUseCase = PraxisRequestCmpPeerApprovalUseCase(dependencies: dependencies)
+    let readbackTapStatusUseCase = PraxisReadbackTapStatusUseCase(dependencies: dependencies)
+    let readbackTapHistoryUseCase = PraxisReadbackTapHistoryUseCase(dependencies: dependencies)
+
+    _ = try await updateControlUseCase.execute(
+      PraxisUpdateCmpControlCommand(
+        projectID: "cmp.local-runtime",
+        agentID: "checker.local",
+        executionStyle: .manual,
+        mode: .peerReview,
+        automation: ["autoDispatch": false]
+      )
+    )
+    _ = try await requestApprovalUseCase.execute(
+      PraxisRequestCmpPeerApprovalCommand(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityKey: "tool.shell.exec",
+        requestedTier: .b2,
+        summary: "Escalate shell execution for checker"
+      )
+    )
+
+    let tapStatus = try await readbackTapStatusUseCase.execute(
+      PraxisReadbackTapStatusCommand(projectID: "cmp.local-runtime", agentID: "checker.local")
+    )
+    let tapHistory = try await readbackTapHistoryUseCase.execute(
+      PraxisReadbackTapHistoryCommand(projectID: "cmp.local-runtime", agentID: "checker.local", limit: 10)
+    )
+
+    #expect(tapStatus.tapMode == .restricted)
+    #expect(tapStatus.humanGateState == .waitingApproval)
+    let containsEscalatedApproval = tapHistory.entries.contains { entry in
+      entry.capabilityKey == "tool.shell.exec"
+        && entry.requestedTier == .b2
+        && entry.route == .toolReview
+        && entry.outcome == .redirectedToProvisioning
+        && entry.humanGateState == .waitingApproval
+    }
+    #expect(containsEscalatedApproval)
+  }
+
+  @Test
+  func cmpPeerApprovalReadbackRejectsCorruptedPersistedTypedRawValues() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-runtime-usecases-corrupted-peer-approval-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+    let dependencies = try makeDependencies(hostAdapters: registry)
+    let readbackApprovalUseCase = PraxisReadbackCmpPeerApprovalUseCase(dependencies: dependencies)
+
+    _ = try await registry.cmpPeerApprovalStore?.save(
+      PraxisCmpPeerApprovalDescriptor(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityKey: "tool.git",
+        requestedTier: PraxisTapCapabilityTier.b1.rawValue,
+        tapMode: PraxisTapMode.restricted.rawValue,
+        riskLevel: PraxisTapRiskLevel.normal.rawValue,
+        route: "not_a_real_route",
+        outcome: PraxisReviewRoutingOutcome.escalatedToHuman.rawValue,
+        humanGateState: PraxisHumanGateState.waitingApproval.rawValue,
+        summary: "Persisted corrupted approval",
+        decisionSummary: "Corrupted route should fail decoding",
+        requestedAt: "2026-04-12T00:00:00Z",
+        updatedAt: "2026-04-12T00:00:00Z"
+      )
+    )
+
+    await #expect(throws: PraxisError.self) {
+      try await readbackApprovalUseCase.execute(
+        PraxisReadbackCmpPeerApprovalCommand(
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          targetAgentID: "checker.local",
+          capabilityKey: "tool.git"
+        )
+      )
+    }
+  }
+
+  @Test
+  func tapHistoryReadbackRejectsInvalidPersistedRouteRawValue() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-runtime-usecases-corrupted-tap-history-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+    let dependencies = try makeDependencies(hostAdapters: registry)
+    let readbackTapHistoryUseCase = PraxisReadbackTapHistoryUseCase(dependencies: dependencies)
+
+    _ = try await registry.tapRuntimeEventStore?.append(
+      PraxisTapRuntimeEventRecord(
+        eventID: "tap.invalid.route",
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        eventKind: "peer_approval_requested",
+        capabilityKey: "tool.git",
+        summary: "Corrupted TAP route",
+        createdAt: "2026-04-12T00:00:00Z",
+        metadata: [
+          "requestedTier": .string(PraxisTapCapabilityTier.b1.rawValue),
+          "route": .string("not_a_real_route"),
+          "outcome": .string(PraxisReviewRoutingOutcome.escalatedToHuman.rawValue),
+          "humanGateState": .string(PraxisHumanGateState.waitingApproval.rawValue),
+        ]
+      )
+    )
+
+    await #expect(throws: PraxisError.self) {
+      try await readbackTapHistoryUseCase.execute(
+        PraxisReadbackTapHistoryCommand(projectID: "cmp.local-runtime", agentID: "checker.local", limit: 10)
+      )
+    }
   }
 
   @Test

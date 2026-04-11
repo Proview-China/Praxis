@@ -1826,8 +1826,17 @@ private func dispatchCmpFlow(
       detail: "topic=\(topicName), autoDispatch=\(autoDispatchEnabled), pendingApprovalCount=\(pendingApprovals.count)",
       createdAt: createdAt,
       metadata: [
-        "route": .string("tapBridge"),
-        "outcome": .string("dispatch_blocked"),
+        "requestedTier": .string(PraxisTapCapabilityTier.b0.rawValue),
+        "route": .string(
+          pendingApprovals.isEmpty
+            ? PraxisReviewerRoute.toolReview.rawValue
+            : PraxisReviewerRoute.humanReview.rawValue
+        ),
+        "outcome": .string(
+          pendingApprovals.isEmpty
+            ? PraxisReviewRoutingOutcome.reviewRequired.rawValue
+            : PraxisReviewRoutingOutcome.escalatedToHuman.rawValue
+        ),
         "humanGateState": .string(
           pendingApprovals.isEmpty
             ? PraxisHumanGateState.notRequired.rawValue
@@ -1932,8 +1941,9 @@ private func dispatchCmpFlow(
     detail: "topic=\(topicName), status=\(receipt.status.rawValue)",
     createdAt: publishedAt?.acceptedAt ?? createdAt,
     metadata: [
-      "route": .string("tapBridge"),
-      "outcome": .string("dispatch_released"),
+      "requestedTier": .string(PraxisTapCapabilityTier.b0.rawValue),
+      "route": .string(PraxisReviewerRoute.autoApprove.rawValue),
+      "outcome": .string(PraxisCmpPeerApprovalOutcome.gateReleased.rawValue),
       "humanGateState": .string(PraxisHumanGateState.notRequired.rawValue),
       "targetAgentID": .string(command.contextPackage.targetAgentID),
       "packageID": .string(command.contextPackage.id.rawValue),
@@ -2008,8 +2018,9 @@ private func retryCmpDispatch(
     detail: "targetKind=\(targetKind.rawValue), reason=\(retryReason)",
     createdAt: createdAt,
     metadata: [
-      "route": .string("tapBridge"),
-      "outcome": .string("dispatch_retry_requested"),
+      "requestedTier": .string(PraxisTapCapabilityTier.b0.rawValue),
+      "route": .string(PraxisReviewerRoute.toolReview.rawValue),
+      "outcome": .string(PraxisReviewRoutingOutcome.reviewRequired.rawValue),
       "humanGateState": .string(PraxisHumanGateState.notRequired.rawValue),
       "targetAgentID": .string(contextPackage.targetAgentID),
       "packageID": .string(command.packageID),
@@ -2457,6 +2468,94 @@ private func cmpPeerApprovalState(from outcome: PraxisReviewRoutingOutcome) -> P
   }
 }
 
+private func cmpPeerApprovalOutcome(from outcome: PraxisReviewRoutingOutcome) -> PraxisCmpPeerApprovalOutcome {
+  switch outcome {
+  case .baselineApproved:
+    return .baselineApproved
+  case .reviewRequired:
+    return .reviewRequired
+  case .redirectedToProvisioning:
+    return .redirectedToProvisioning
+  case .escalatedToHuman:
+    return .escalatedToHuman
+  case .denied:
+    return .denied
+  }
+}
+
+private func cmpDecodedPeerApprovalEnum<Value>(
+  rawValue: String,
+  fieldName: String,
+  descriptor: PraxisCmpPeerApprovalDescriptor,
+  as _: Value.Type = Value.self
+) throws -> Value where Value: RawRepresentable, Value.RawValue == String {
+  guard let value = Value(rawValue: rawValue) else {
+    throw PraxisError.invalidInput(
+      "CMP peer approval descriptor for project \(descriptor.projectID), agent \(descriptor.agentID), target \(descriptor.targetAgentID), capability \(descriptor.capabilityKey) contains invalid \(fieldName) raw value '\(rawValue)' at \(descriptor.updatedAt)."
+    )
+  }
+  return value
+}
+
+private func cmpPeerApprovalSurfaceFields(
+  from descriptor: PraxisCmpPeerApprovalDescriptor
+) throws -> (
+  requestedTier: PraxisTapCapabilityTier,
+  tapMode: PraxisTapMode,
+  riskLevel: PraxisTapRiskLevel,
+  route: PraxisReviewerRoute,
+  outcome: PraxisCmpPeerApprovalOutcome,
+  humanGateState: PraxisHumanGateState
+) {
+  (
+    requestedTier: try cmpDecodedPeerApprovalEnum(
+      rawValue: descriptor.requestedTier,
+      fieldName: "requestedTier",
+      descriptor: descriptor
+    ),
+    tapMode: try cmpDecodedPeerApprovalEnum(
+      rawValue: descriptor.tapMode,
+      fieldName: "tapMode",
+      descriptor: descriptor
+    ),
+    riskLevel: try cmpDecodedPeerApprovalEnum(
+      rawValue: descriptor.riskLevel,
+      fieldName: "riskLevel",
+      descriptor: descriptor
+    ),
+    route: try cmpDecodedPeerApprovalEnum(
+      rawValue: descriptor.route,
+      fieldName: "route",
+      descriptor: descriptor
+    ),
+    outcome: try cmpDecodedPeerApprovalEnum(
+      rawValue: descriptor.outcome,
+      fieldName: "outcome",
+      descriptor: descriptor
+    ),
+    humanGateState: try cmpDecodedPeerApprovalEnum(
+      rawValue: descriptor.humanGateState,
+      fieldName: "humanGateState",
+      descriptor: descriptor
+    )
+  )
+}
+
+private func cmpPeerApprovalTapMode(from canonicalMode: PraxisTapCanonicalMode) -> PraxisTapMode {
+  switch canonicalMode {
+  case .bapr:
+    return .bapr
+  case .yolo:
+    return .yolo
+  case .permissive:
+    return .permissive
+  case .standard:
+    return .standard
+  case .restricted:
+    return .restricted
+  }
+}
+
 private func cmpPeerApprovalProfile(
   projectID: String,
   agentID: String,
@@ -2477,6 +2576,7 @@ private func cmpPeerApprovalDescriptor(
   command: PraxisRequestCmpPeerApprovalCommand,
   capabilityKey: String,
   routing: PraxisReviewRoutingResult,
+  riskLevel: PraxisTapRiskLevel,
   humanGateState: PraxisHumanGateState,
   requestedAt: String
 ) -> PraxisCmpPeerApprovalDescriptor {
@@ -2486,10 +2586,10 @@ private func cmpPeerApprovalDescriptor(
     targetAgentID: command.targetAgentID,
     capabilityKey: capabilityKey,
     requestedTier: command.requestedTier.rawValue,
-    tapMode: routing.policy.mode.rawValue,
-    riskLevel: routing.decision.riskLevel?.rawValue ?? "normal",
+    tapMode: cmpPeerApprovalTapMode(from: routing.policy.mode).rawValue,
+    riskLevel: riskLevel.rawValue,
     route: routing.decision.route.rawValue,
-    outcome: routing.outcome.rawValue,
+    outcome: cmpPeerApprovalOutcome(from: routing.outcome).rawValue,
     humanGateState: humanGateState.rawValue,
     summary: command.summary,
     decisionSummary: routing.decision.summary,
@@ -2528,14 +2628,14 @@ private func cmpResolvedPeerApprovalDescriptor(
 
 private func cmpPeerApprovalResolution(
   _ decision: PraxisCmpPeerApprovalDecision
-) -> (outcome: String, humanGateState: PraxisHumanGateState, eventKind: String) {
+) -> (outcome: PraxisCmpPeerApprovalOutcome, humanGateState: PraxisHumanGateState, eventKind: String) {
   switch decision {
   case .approve:
-    return ("approved_by_human", .approved, "peer_approval_approved")
+    return (.approvedByHuman, .approved, "peer_approval_approved")
   case .reject:
-    return ("rejected_by_human", .rejected, "peer_approval_rejected")
+    return (.rejectedByHuman, .rejected, "peer_approval_rejected")
   case .release:
-    return ("gate_released", .approved, "gate_released")
+    return (.gateReleased, .approved, "gate_released")
   }
 }
 
@@ -2543,7 +2643,7 @@ private func cmpPeerApprovalReadback(
   query: PraxisReadbackCmpPeerApprovalCommand,
   descriptor: PraxisCmpPeerApprovalDescriptor?,
   dependencies: PraxisDependencyGraph
-) -> PraxisCmpPeerApprovalReadback {
+) throws -> PraxisCmpPeerApprovalReadback {
   var issues: [String] = []
   if dependencies.hostAdapters.cmpPeerApprovalStore == nil {
     issues.append("CMP peer approval store adapter is still missing from HostRuntime composition.")
@@ -2577,18 +2677,20 @@ private func cmpPeerApprovalReadback(
     )
   }
 
+  let fields = try cmpPeerApprovalSurfaceFields(from: descriptor)
+
   return PraxisCmpPeerApprovalReadback(
     projectID: descriptor.projectID,
     agentID: descriptor.agentID,
     targetAgentID: descriptor.targetAgentID,
     capabilityKey: descriptor.capabilityKey,
-    requestedTier: PraxisTapCapabilityTier(rawValue: descriptor.requestedTier),
-    summary: "CMP peer approval readback reconstructed the latest TAP-routed approval state from host-backed review truth without coupling callers to CLI or GUI.",
-    route: descriptor.route,
-    outcome: descriptor.outcome,
-    tapMode: descriptor.tapMode,
-    riskLevel: descriptor.riskLevel,
-    humanGateState: descriptor.humanGateState,
+    requestedTier: fields.requestedTier,
+    summary: "CMP peer approval readback reconstructed the latest TAP-routed approval state from host-backed review truth.",
+    route: fields.route,
+    outcome: fields.outcome,
+    tapMode: fields.tapMode,
+    riskLevel: fields.riskLevel,
+    humanGateState: fields.humanGateState,
     requestedAt: descriptor.requestedAt,
     decisionSummary: descriptor.decisionSummary,
     found: true,
@@ -2617,12 +2719,17 @@ private func readbackTapStatus(
   )
   let approvalDescriptors = try await dependencies.hostAdapters.cmpPeerApprovalStore?.describeAll(approvalQuery) ?? []
   let latestApproval = approvalDescriptors.first
-  let pendingApprovalCount = approvalDescriptors.filter { $0.humanGateState == PraxisHumanGateState.waitingApproval.rawValue }.count
-  let approvedApprovalCount = approvalDescriptors.filter { $0.humanGateState == PraxisHumanGateState.approved.rawValue }.count
+  let approvalStates = try approvalDescriptors.map { descriptor in
+    try cmpPeerApprovalSurfaceFields(from: descriptor).humanGateState
+  }
+  let pendingApprovalCount = approvalStates.filter { $0 == PraxisHumanGateState.waitingApproval }.count
+  let approvedApprovalCount = approvalStates.filter { $0 == PraxisHumanGateState.approved }.count
   let humanGateState: PraxisHumanGateState
   if pendingApprovalCount > 0 {
     humanGateState = .waitingApproval
-  } else if let latestApproval, latestApproval.humanGateState == PraxisHumanGateState.rejected.rawValue {
+  } else if let latestApproval,
+    try cmpPeerApprovalSurfaceFields(from: latestApproval).humanGateState == PraxisHumanGateState.rejected
+  {
     humanGateState = .rejected
   } else if approvedApprovalCount > 0 {
     humanGateState = .approved
@@ -2643,11 +2750,11 @@ private func readbackTapStatus(
   return PraxisTapStatusReadback(
     projectID: command.projectID,
     agentID: command.agentID,
-    summary: "TAP status readback summarizes host-backed governance readiness, available capability surfaces, and persisted approval pressure without coupling callers to CLI or GUI.",
+    summary: "TAP status readback summarizes host-backed governance readiness, available capability surfaces, and persisted approval pressure.",
     readinessSummary: readinessSummary,
-    tapMode: tapMode.rawValue,
-    riskLevel: riskLevel.rawValue,
-    humanGateState: humanGateState.rawValue,
+    tapMode: tapMode,
+    riskLevel: riskLevel,
+    humanGateState: humanGateState,
     availableCapabilityCount: capabilityKeys.count,
     availableCapabilityIDs: capabilityKeys,
     pendingApprovalCount: pendingApprovalCount,
@@ -2661,38 +2768,183 @@ private func readbackTapStatus(
 private func tapHistoryEntries(
   from descriptors: [PraxisCmpPeerApprovalDescriptor],
   limit: Int
-) -> [PraxisTapHistoryEntry] {
-  descriptors.prefix(limit).map { descriptor in
-    PraxisTapHistoryEntry(
+) throws -> [PraxisTapHistoryEntry] {
+  try descriptors.prefix(limit).map { descriptor in
+    let fields = try cmpPeerApprovalSurfaceFields(from: descriptor)
+    return PraxisTapHistoryEntry(
       agentID: descriptor.agentID,
       targetAgentID: descriptor.targetAgentID,
       capabilityKey: descriptor.capabilityKey,
-      requestedTier: descriptor.requestedTier,
-      route: descriptor.route,
-      outcome: descriptor.outcome,
-      humanGateState: descriptor.humanGateState,
+      requestedTier: fields.requestedTier,
+      route: fields.route,
+      outcome: fields.outcome,
+      humanGateState: fields.humanGateState,
       updatedAt: descriptor.updatedAt,
       decisionSummary: descriptor.decisionSummary
     )
   }
 }
 
+private func tapHistoryLegacyRequestedTier(for record: PraxisTapRuntimeEventRecord) -> PraxisTapCapabilityTier? {
+  switch record.eventKind {
+  case "control_updated", "dispatch_blocked", "dispatch_released", "dispatch_retry_requested":
+    return .b0
+  default:
+    return nil
+  }
+}
+
+private func tapHistoryLegacyHumanGateState(for record: PraxisTapRuntimeEventRecord) -> PraxisHumanGateState? {
+  switch record.eventKind {
+  case "control_updated", "dispatch_released", "dispatch_retry_requested":
+    return .notRequired
+  case "dispatch_blocked":
+    let pendingApprovalCount = Int(record.metadata["pendingApprovalCount"]?.numberValue ?? 0)
+    return pendingApprovalCount > 0 ? .waitingApproval : .notRequired
+  default:
+    return nil
+  }
+}
+
+private func tapHistoryLegacyRoute(
+  for record: PraxisTapRuntimeEventRecord,
+  humanGateState: PraxisHumanGateState
+) -> PraxisReviewerRoute? {
+  switch record.eventKind {
+  case "control_updated", "dispatch_released":
+    return .autoApprove
+  case "dispatch_retry_requested":
+    return .toolReview
+  case "dispatch_blocked":
+    return humanGateState == .waitingApproval ? .humanReview : .toolReview
+  default:
+    return nil
+  }
+}
+
+private func tapHistoryLegacyOutcome(
+  for record: PraxisTapRuntimeEventRecord,
+  humanGateState: PraxisHumanGateState
+) -> PraxisCmpPeerApprovalOutcome? {
+  switch record.eventKind {
+  case "control_updated":
+    return .baselineApproved
+  case "dispatch_released":
+    return .gateReleased
+  case "dispatch_retry_requested":
+    return .reviewRequired
+  case "dispatch_blocked":
+    return humanGateState == .waitingApproval ? .escalatedToHuman : .reviewRequired
+  default:
+    return nil
+  }
+}
+
+private func tapHistoryInvalidRuntimeEventValue(
+  _ fieldName: String,
+  rawValue: String,
+  record: PraxisTapRuntimeEventRecord
+) -> PraxisError {
+  PraxisError.invalidInput(
+    "TAP runtime event \(record.eventID) for project \(record.projectID) contains invalid \(fieldName) raw value '\(rawValue)' at \(record.createdAt)."
+  )
+}
+
+private func tapHistoryMissingRuntimeEventValue(
+  _ fieldName: String,
+  record: PraxisTapRuntimeEventRecord
+) -> PraxisError {
+  PraxisError.invalidInput(
+    "TAP runtime event \(record.eventID) for project \(record.projectID) is missing required \(fieldName) metadata at \(record.createdAt)."
+  )
+}
+
+private func tapHistoryRequestedTier(from record: PraxisTapRuntimeEventRecord) throws -> PraxisTapCapabilityTier {
+  if let rawValue = record.metadata["requestedTier"]?.stringValue {
+    guard let requestedTier = PraxisTapCapabilityTier(rawValue: rawValue) else {
+      throw tapHistoryInvalidRuntimeEventValue("requestedTier", rawValue: rawValue, record: record)
+    }
+    return requestedTier
+  }
+  if let legacyRequestedTier = tapHistoryLegacyRequestedTier(for: record) {
+    return legacyRequestedTier
+  }
+  throw tapHistoryMissingRuntimeEventValue("requestedTier", record: record)
+}
+
+private func tapHistoryHumanGateState(from record: PraxisTapRuntimeEventRecord) throws -> PraxisHumanGateState {
+  if let rawValue = record.metadata["humanGateState"]?.stringValue {
+    guard let humanGateState = PraxisHumanGateState(rawValue: rawValue) else {
+      throw tapHistoryInvalidRuntimeEventValue("humanGateState", rawValue: rawValue, record: record)
+    }
+    return humanGateState
+  }
+  if let legacyHumanGateState = tapHistoryLegacyHumanGateState(for: record) {
+    return legacyHumanGateState
+  }
+  throw tapHistoryMissingRuntimeEventValue("humanGateState", record: record)
+}
+
+private func tapHistoryRoute(
+  from record: PraxisTapRuntimeEventRecord,
+  humanGateState: PraxisHumanGateState
+) throws -> PraxisReviewerRoute {
+  if let rawValue = record.metadata["route"]?.stringValue {
+    if let route = PraxisReviewerRoute(rawValue: rawValue) {
+      return route
+    }
+    if rawValue == "tapBridge", let legacyRoute = tapHistoryLegacyRoute(for: record, humanGateState: humanGateState) {
+      return legacyRoute
+    }
+    throw tapHistoryInvalidRuntimeEventValue("route", rawValue: rawValue, record: record)
+  }
+  if let legacyRoute = tapHistoryLegacyRoute(for: record, humanGateState: humanGateState) {
+    return legacyRoute
+  }
+  throw tapHistoryMissingRuntimeEventValue("route", record: record)
+}
+
+private func tapHistoryOutcome(
+  from record: PraxisTapRuntimeEventRecord,
+  humanGateState: PraxisHumanGateState
+) throws -> PraxisCmpPeerApprovalOutcome {
+  if let rawValue = record.metadata["outcome"]?.stringValue {
+    if let outcome = PraxisCmpPeerApprovalOutcome(rawValue: rawValue) {
+      return outcome
+    }
+    if [
+      "dispatch_blocked",
+      "dispatch_released",
+      "dispatch_retry_requested",
+    ].contains(rawValue),
+      let legacyOutcome = tapHistoryLegacyOutcome(for: record, humanGateState: humanGateState)
+    {
+      return legacyOutcome
+    }
+    throw tapHistoryInvalidRuntimeEventValue("outcome", rawValue: rawValue, record: record)
+  }
+  if let legacyOutcome = tapHistoryLegacyOutcome(for: record, humanGateState: humanGateState) {
+    return legacyOutcome
+  }
+  throw tapHistoryMissingRuntimeEventValue("outcome", record: record)
+}
+
 private func tapHistoryEntries(
   from records: [PraxisTapRuntimeEventRecord],
   limit: Int
-) -> [PraxisTapHistoryEntry] {
-  records.prefix(limit).map { record in
-    let metadata = record.metadata
+) throws -> [PraxisTapHistoryEntry] {
+  try records.prefix(limit).map { record in
+    let humanGateState = try tapHistoryHumanGateState(from: record)
     return PraxisTapHistoryEntry(
       agentID: record.agentID,
-      targetAgentID: record.targetAgentID ?? metadata["targetAgentID"]?.stringValue ?? record.agentID,
-      capabilityKey: record.capabilityKey ?? metadata["capabilityKey"]?.stringValue ?? record.eventKind,
-      requestedTier: metadata["requestedTier"]?.stringValue ?? "B0",
-      route: metadata["route"]?.stringValue ?? record.eventKind,
-      outcome: metadata["outcome"]?.stringValue ?? "recorded",
-      humanGateState: metadata["humanGateState"]?.stringValue ?? "notRequired",
+      targetAgentID: record.targetAgentID ?? record.metadata["targetAgentID"]?.stringValue ?? record.agentID,
+      capabilityKey: record.capabilityKey ?? record.metadata["capabilityKey"]?.stringValue ?? record.eventKind,
+      requestedTier: try tapHistoryRequestedTier(from: record),
+      route: try tapHistoryRoute(from: record, humanGateState: humanGateState),
+      outcome: try tapHistoryOutcome(from: record, humanGateState: humanGateState),
+      humanGateState: humanGateState,
       updatedAt: record.createdAt,
-      decisionSummary: metadata["decisionSummary"]?.stringValue ?? record.detail ?? record.summary
+      decisionSummary: record.metadata["decisionSummary"]?.stringValue ?? record.detail ?? record.summary
     )
   }
 }
@@ -2742,7 +2994,9 @@ private func cmpPendingPeerApprovalDescriptors(
       capabilityKey: nil
     )
   ) ?? []
-  return descriptors.filter { $0.humanGateState == PraxisHumanGateState.waitingApproval.rawValue }
+  return try descriptors.filter { descriptor in
+    try cmpPeerApprovalSurfaceFields(from: descriptor).humanGateState == PraxisHumanGateState.waitingApproval
+  }
 }
 
 private func readbackTapHistory(
@@ -2780,13 +3034,13 @@ private func readbackTapHistory(
   let scopeSummary = command.agentID.map { " scoped to \($0)" } ?? ""
   let totalCount = eventRecords.isEmpty ? descriptors.count : eventRecords.count
   let entries = eventRecords.isEmpty
-    ? tapHistoryEntries(from: descriptors, limit: clampedLimit)
-    : tapHistoryEntries(from: eventRecords, limit: clampedLimit)
+    ? try tapHistoryEntries(from: descriptors, limit: clampedLimit)
+    : try tapHistoryEntries(from: eventRecords, limit: clampedLimit)
   let summary: String
   if eventRecords.isEmpty {
-    summary = "TAP history readback reconstructed recent host-backed approval activity\(scopeSummary) without coupling callers to CLI or GUI."
+    summary = "TAP history readback reconstructed recent host-backed approval activity\(scopeSummary)."
   } else {
-    summary = "TAP history readback replayed append-only host-backed TAP runtime events\(scopeSummary) without coupling callers to CLI or GUI."
+    summary = "TAP history readback replayed append-only host-backed TAP runtime events\(scopeSummary)."
   }
 
   return PraxisTapHistoryReadback(
@@ -2839,19 +3093,22 @@ private func requestCmpPeerApproval(
   )
   let requestedAt = runtimeNow()
   let humanGateState = cmpPeerApprovalState(from: routing.outcome)
+  let surfaceTapMode = cmpPeerApprovalTapMode(from: routing.policy.mode)
+  let surfaceRiskLevel = routing.decision.riskLevel ?? risk.riskLevel
   let descriptor = cmpPeerApprovalDescriptor(
     command: command,
     capabilityKey: capabilityKey,
     routing: routing,
+    riskLevel: surfaceRiskLevel,
     humanGateState: humanGateState,
     requestedAt: requestedAt
   )
   let eventMetadata: [String: PraxisValue] = [
     "requestedTier": .string(command.requestedTier.rawValue),
     "route": .string(routing.decision.route.rawValue),
-    "outcome": .string(routing.outcome.rawValue),
-    "tapMode": .string(routing.policy.mode.rawValue),
-    "riskLevel": .string(routing.decision.riskLevel?.rawValue ?? risk.riskLevel.rawValue),
+    "outcome": .string(cmpPeerApprovalOutcome(from: routing.outcome).rawValue),
+    "tapMode": .string(surfaceTapMode.rawValue),
+    "riskLevel": .string(surfaceRiskLevel.rawValue),
     "humanGateState": .string(humanGateState.rawValue),
     "decisionSummary": .string(routing.decision.summary),
     "targetAgentID": .string(command.targetAgentID),
@@ -2907,12 +3164,12 @@ private func requestCmpPeerApproval(
     targetAgentID: command.targetAgentID,
     capabilityKey: capabilityKey,
     requestedTier: command.requestedTier,
-    summary: "CMP peer approval routed a host-neutral TAP review request and persisted the latest approval state without coupling callers to CLI or GUI.",
-    route: routing.decision.route.rawValue,
-    outcome: routing.outcome.rawValue,
-    tapMode: routing.policy.mode.rawValue,
-    riskLevel: routing.decision.riskLevel?.rawValue ?? risk.riskLevel.rawValue,
-    humanGateState: humanGateState.rawValue,
+    summary: "CMP peer approval routed a host-neutral TAP review request and persisted the latest approval state.",
+    route: routing.decision.route,
+    outcome: cmpPeerApprovalOutcome(from: routing.outcome),
+    tapMode: surfaceTapMode,
+    riskLevel: surfaceRiskLevel,
+    humanGateState: humanGateState,
     requestedAt: requestedAt,
     decisionSummary: routing.decision.summary
   )
@@ -2934,7 +3191,8 @@ private func decideCmpPeerApproval(
     capabilityKey: capabilityKey,
     dependencies: dependencies
   )
-  guard existingDescriptor.humanGateState == PraxisHumanGateState.waitingApproval.rawValue else {
+  let existingFields = try cmpPeerApprovalSurfaceFields(from: existingDescriptor)
+  guard existingFields.humanGateState == PraxisHumanGateState.waitingApproval else {
     throw PraxisError.invalidInput(
       "CMP peer approval gate is already resolved for \(command.projectID), \(command.agentID), \(command.targetAgentID), \(capabilityKey)."
     )
@@ -2950,7 +3208,7 @@ private func decideCmpPeerApproval(
     tapMode: existingDescriptor.tapMode,
     riskLevel: existingDescriptor.riskLevel,
     route: existingDescriptor.route,
-    outcome: resolution.outcome,
+    outcome: resolution.outcome.rawValue,
     humanGateState: resolution.humanGateState.rawValue,
     summary: existingDescriptor.summary,
     decisionSummary: command.decisionSummary,
@@ -2981,7 +3239,7 @@ private func decideCmpPeerApproval(
     metadata: [
       "requestedTier": .string(existingDescriptor.requestedTier),
       "route": .string(existingDescriptor.route),
-      "outcome": .string(resolution.outcome),
+      "outcome": .string(resolution.outcome.rawValue),
       "tapMode": .string(existingDescriptor.tapMode),
       "riskLevel": .string(existingDescriptor.riskLevel),
       "humanGateState": .string(resolution.humanGateState.rawValue),
@@ -2991,19 +3249,20 @@ private func decideCmpPeerApproval(
     ],
     dependencies: dependencies
   )
+  let updatedFields = try cmpPeerApprovalSurfaceFields(from: updatedDescriptor)
 
   return PraxisCmpPeerApproval(
     projectID: updatedDescriptor.projectID,
     agentID: updatedDescriptor.agentID,
     targetAgentID: updatedDescriptor.targetAgentID,
     capabilityKey: updatedDescriptor.capabilityKey,
-    requestedTier: PraxisTapCapabilityTier(rawValue: updatedDescriptor.requestedTier) ?? .b0,
-    summary: "CMP peer approval decision persisted an explicit host-neutral TAP resolution without coupling callers to CLI or GUI.",
-    route: updatedDescriptor.route,
-    outcome: updatedDescriptor.outcome,
-    tapMode: updatedDescriptor.tapMode,
-    riskLevel: updatedDescriptor.riskLevel,
-    humanGateState: updatedDescriptor.humanGateState,
+    requestedTier: updatedFields.requestedTier,
+    summary: "CMP peer approval decision persisted an explicit host-neutral TAP resolution.",
+    route: updatedFields.route,
+    outcome: updatedFields.outcome,
+    tapMode: updatedFields.tapMode,
+    riskLevel: updatedFields.riskLevel,
+    humanGateState: updatedFields.humanGateState,
     requestedAt: updatedDescriptor.requestedAt,
     decisionSummary: updatedDescriptor.decisionSummary
   )
@@ -3023,7 +3282,7 @@ private func readbackCmpPeerApproval(
       capabilityKey: capabilityKey
     )
   )
-  return cmpPeerApprovalReadback(query: command, descriptor: descriptor, dependencies: dependencies)
+  return try cmpPeerApprovalReadback(query: command, descriptor: descriptor, dependencies: dependencies)
 }
 
 private struct PraxisCmpReadbackScope {
@@ -3383,6 +3642,10 @@ private func updateCmpControl(
     detail: "autoDispatch=\(resolvedControl.automation["autoDispatch"] ?? true), mode=\(resolvedControl.mode.rawValue), executionStyle=\(resolvedControl.executionStyle.rawValue)",
     createdAt: updatedAt,
     metadata: [
+      "requestedTier": .string(PraxisTapCapabilityTier.b0.rawValue),
+      "route": .string(PraxisReviewerRoute.autoApprove.rawValue),
+      "outcome": .string(PraxisReviewRoutingOutcome.baselineApproved.rawValue),
+      "humanGateState": .string(PraxisHumanGateState.notRequired.rawValue),
       "tapMode": .string(cmpTapMode(for: resolvedControl.mode).rawValue),
       "executionStyle": .string(resolvedControl.executionStyle.rawValue),
       "mode": .string(resolvedControl.mode.rawValue),

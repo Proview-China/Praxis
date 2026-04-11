@@ -14,6 +14,7 @@ import PraxisRuntimeFacades
 import PraxisRuntimeGateway
 import PraxisRuntimeUseCases
 import PraxisSession
+import PraxisTapReview
 import PraxisTapTypes
 import PraxisToolingContracts
 
@@ -227,6 +228,7 @@ struct PraxisRuntimeFacadesTests {
     #expect(session.sessionID == "cmp.session.split")
     #expect(bootstrap.projectSummary.projectID == "cmp.local-runtime")
     #expect(bootstrap.projectSummary.hostProfile.executionStyle == .localFirst)
+    #expect(bootstrap.projectSummary.componentStatuses[.gitProbe] == .ready)
     #expect(bootstrap.projectSummary.componentStatuses[.gitExecutor] == .ready)
     #expect(projectReadback.projectSummary.projectID == "cmp.local-runtime")
     #expect(projectReadback.projectSummary.hostProfile.semanticIndex == .localSemanticIndex)
@@ -254,8 +256,16 @@ struct PraxisRuntimeFacadesTests {
     #expect(!rolesReadback.summary.contains("CLI"))
     #expect(!rolesReadback.summary.contains("GUI"))
     #expect(requestedApproval.capabilityKey == "tool.shell.exec")
+    #expect(requestedApproval.requestedTier == .b2)
+    #expect(requestedApproval.route == .toolReview)
+    #expect(requestedApproval.outcome == .redirectedToProvisioning)
+    #expect(requestedApproval.humanGateState == .waitingApproval)
     #expect(approvalReadback.found)
     #expect(approvalReadback.capabilityKey == "tool.shell.exec")
+    #expect(approvalReadback.requestedTier == .b2)
+    #expect(approvalReadback.route == .toolReview)
+    #expect(approvalReadback.outcome == .redirectedToProvisioning)
+    #expect(approvalReadback.humanGateState == .waitingApproval)
     #expect(statusReadback.projectID == "cmp.local-runtime")
     #expect(statusReadback.executionStyle == .guided)
     #expect(statusReadback.latestDispatchStatus == .delivered)
@@ -389,6 +399,254 @@ struct PraxisRuntimeFacadesTests {
     }
     #expect(throws: DecodingError.self) {
       try decodeFacadeTestJSON(PraxisCmpStatusPanelSnapshot.self, from: invalidStatusJSON)
+    }
+  }
+
+  @Test
+  func tapSnapshotsRoundTripTypedStatusWhileHistoryStaysDisplayOriented() throws {
+    let statusSnapshot = PraxisTapStatusSnapshot(
+      summary: "TAP status snapshot",
+      readinessSummary: "One approval is waiting.",
+      projectID: "cmp.local-runtime",
+      agentID: "checker.local",
+      tapMode: .restricted,
+      riskLevel: .dangerous,
+      humanGateState: .waitingApproval,
+      availableCapabilityCount: 2,
+      availableCapabilityIDs: ["tool.git", "tool.shell.exec"],
+      pendingApprovalCount: 1,
+      approvedApprovalCount: 0,
+      latestCapabilityKey: "tool.shell.exec",
+      latestDecisionSummary: "Waiting on explicit approval."
+    )
+    let historySnapshot = PraxisTapHistorySnapshot(
+      summary: "TAP history snapshot",
+      projectID: "cmp.local-runtime",
+      agentID: "checker.local",
+      totalCount: 2,
+      entries: [
+        .init(
+          agentID: "runtime.local",
+          targetAgentID: "checker.local",
+          capabilityKey: "tool.shell.exec",
+          requestedTier: .b2,
+          route: .humanReview,
+          outcome: .escalatedToHuman,
+          humanGateState: .waitingApproval,
+          updatedAt: "2026-04-12T00:00:00Z",
+          decisionSummary: "Waiting on human review."
+        ),
+        .init(
+          agentID: "runtime.local",
+          targetAgentID: "checker.local",
+          capabilityKey: "dispatch_released",
+          requestedTier: .b0,
+          route: .autoApprove,
+          outcome: .baselineApproved,
+          humanGateState: .notRequired,
+          updatedAt: "2026-04-12T00:05:00Z",
+          decisionSummary: "Dispatch released."
+        ),
+      ]
+    )
+
+    let encodedStatus = try encodeFacadeTestJSON(statusSnapshot)
+    let encodedHistory = try encodeFacadeTestJSON(historySnapshot)
+    let decodedStatus = try decodeFacadeTestJSON(PraxisTapStatusSnapshot.self, from: encodedStatus)
+    let decodedHistory = try decodeFacadeTestJSON(PraxisTapHistorySnapshot.self, from: encodedHistory)
+
+    #expect(encodedStatus.contains(#""tapMode":"restricted""#))
+    #expect(encodedStatus.contains(#""riskLevel":"dangerous""#))
+    #expect(encodedStatus.contains(#""humanGateState":"waitingApproval""#))
+    #expect(encodedHistory.contains(#""requestedTier":"B2""#))
+    #expect(encodedHistory.contains(#""route":"humanReview""#))
+    #expect(encodedHistory.contains(#""outcome":"escalated_to_human""#))
+    #expect(decodedStatus.tapMode == .restricted)
+    #expect(decodedStatus.riskLevel == .dangerous)
+    #expect(decodedStatus.humanGateState == .waitingApproval)
+    #expect(decodedHistory.entries.first?.requestedTier == .b2)
+    #expect(decodedHistory.entries.first?.route == .humanReview)
+    #expect(decodedHistory.entries.first?.outcome == .escalatedToHuman)
+
+    let invalidStatusJSON =
+      #"{"agentID":"checker.local","approvedApprovalCount":0,"availableCapabilityCount":2,"availableCapabilityIDs":["tool.git"],"humanGateState":"waitingApproval","latestCapabilityKey":"tool.git","latestDecisionSummary":"Waiting","pendingApprovalCount":1,"projectID":"cmp.local-runtime","readinessSummary":"One approval is waiting.","riskLevel":"dangerous","summary":"TAP status snapshot","tapMode":"not_a_real_mode"}"#
+
+    #expect(throws: DecodingError.self) {
+      try decodeFacadeTestJSON(PraxisTapStatusSnapshot.self, from: invalidStatusJSON)
+    }
+  }
+
+  @Test
+  func cmpPeerApprovalSnapshotsRoundTripTypedEnumsAndRejectInvalidRawValues() throws {
+    let approvalSnapshot = PraxisCmpPeerApprovalSnapshot(
+      summary: "CMP peer approval snapshot",
+      projectID: "cmp.local-runtime",
+      agentID: "runtime.local",
+      targetAgentID: "checker.local",
+      capabilityKey: "tool.shell.exec",
+      requestedTier: .b2,
+      route: .humanReview,
+      outcome: .escalatedToHuman,
+      tapMode: .restricted,
+      riskLevel: .risky,
+      humanGateState: .waitingApproval,
+      requestedAt: "2026-04-12T00:00:00Z",
+      decisionSummary: "Waiting on human review."
+    )
+    let readbackSnapshot = PraxisCmpPeerApprovalReadbackSnapshot(
+      summary: "CMP peer approval readback snapshot",
+      projectID: "cmp.local-runtime",
+      agentID: "runtime.local",
+      targetAgentID: "checker.local",
+      capabilityKey: "tool.shell.exec",
+      requestedTier: .b2,
+      route: .humanReview,
+      outcome: .escalatedToHuman,
+      tapMode: .restricted,
+      riskLevel: .risky,
+      humanGateState: .waitingApproval,
+      requestedAt: "2026-04-12T00:00:00Z",
+      decisionSummary: "Waiting on human review.",
+      found: true
+    )
+
+    let encodedApproval = try encodeFacadeTestJSON(approvalSnapshot)
+    let encodedReadback = try encodeFacadeTestJSON(readbackSnapshot)
+    let decodedApproval = try decodeFacadeTestJSON(PraxisCmpPeerApprovalSnapshot.self, from: encodedApproval)
+    let decodedReadback = try decodeFacadeTestJSON(PraxisCmpPeerApprovalReadbackSnapshot.self, from: encodedReadback)
+
+    #expect(encodedApproval.contains(#""requestedTier":"B2""#))
+    #expect(encodedApproval.contains(#""route":"humanReview""#))
+    #expect(encodedApproval.contains(#""outcome":"escalated_to_human""#))
+    #expect(encodedApproval.contains(#""tapMode":"restricted""#))
+    #expect(encodedApproval.contains(#""riskLevel":"risky""#))
+    #expect(decodedApproval.requestedTier == .b2)
+    #expect(decodedApproval.route == .humanReview)
+    #expect(decodedApproval.outcome == .escalatedToHuman)
+    #expect(decodedApproval.tapMode == .restricted)
+    #expect(decodedApproval.riskLevel == .risky)
+    #expect(decodedReadback.humanGateState == .waitingApproval)
+
+    let invalidApprovalJSON =
+      #"{"agentID":"runtime.local","capabilityKey":"tool.shell.exec","decisionSummary":"Waiting","humanGateState":"waitingApproval","outcome":"escalated_to_human","projectID":"cmp.local-runtime","requestedAt":"2026-04-12T00:00:00Z","requestedTier":"B2","riskLevel":"risky","route":"not_a_real_route","summary":"CMP peer approval snapshot","tapMode":"restricted","targetAgentID":"checker.local"}"#
+    let invalidReadbackJSON =
+      #"{"agentID":"runtime.local","capabilityKey":"tool.shell.exec","decisionSummary":"Waiting","found":true,"humanGateState":"waitingApproval","outcome":"escalated_to_human","projectID":"cmp.local-runtime","requestedAt":"2026-04-12T00:00:00Z","requestedTier":"B2","riskLevel":"risky","route":"humanReview","summary":"CMP peer approval readback snapshot","tapMode":"not_a_real_mode","targetAgentID":"checker.local"}"#
+
+    #expect(throws: DecodingError.self) {
+      try decodeFacadeTestJSON(PraxisCmpPeerApprovalSnapshot.self, from: invalidApprovalJSON)
+    }
+    #expect(throws: DecodingError.self) {
+      try decodeFacadeTestJSON(PraxisCmpPeerApprovalReadbackSnapshot.self, from: invalidReadbackJSON)
+    }
+  }
+
+  @Test
+  func cmpPeerApprovalAndTapStatusSnapshotsRoundTripTypedFields() throws {
+    let approval = PraxisCmpPeerApprovalSnapshot(
+      summary: "CMP peer approval snapshot",
+      projectID: "cmp.local-runtime",
+      agentID: "runtime.local",
+      targetAgentID: "checker.local",
+      capabilityKey: "tool.git",
+      requestedTier: .b1,
+      route: .humanReview,
+      outcome: .baselineApproved,
+      tapMode: .restricted,
+      riskLevel: .dangerous,
+      humanGateState: .approved,
+      requestedAt: "2026-04-12T00:00:00Z",
+      decisionSummary: "Approved git access for checker"
+    )
+    let readback = PraxisCmpPeerApprovalReadbackSnapshot(
+      summary: "CMP peer approval readback snapshot",
+      projectID: "cmp.local-runtime",
+      agentID: "runtime.local",
+      targetAgentID: "checker.local",
+      capabilityKey: "tool.shell.exec",
+      requestedTier: .b2,
+      route: .humanReview,
+      outcome: .escalatedToHuman,
+      tapMode: .restricted,
+      riskLevel: .risky,
+      humanGateState: .waitingApproval,
+      requestedAt: "2026-04-12T00:05:00Z",
+      decisionSummary: "Waiting for approval",
+      found: true
+    )
+    let status = PraxisTapStatusSnapshot(
+      summary: "TAP status snapshot",
+      readinessSummary: "1 capability, 1 pending approval.",
+      projectID: "cmp.local-runtime",
+      agentID: "checker.local",
+      tapMode: .restricted,
+      riskLevel: .risky,
+      humanGateState: .waitingApproval,
+      availableCapabilityCount: 1,
+      availableCapabilityIDs: ["tool.shell.exec"],
+      pendingApprovalCount: 1,
+      approvedApprovalCount: 0,
+      latestCapabilityKey: "tool.shell.exec",
+      latestDecisionSummary: "Waiting for approval"
+    )
+
+    let encodedApproval = try encodeFacadeTestJSON(approval)
+    let encodedReadback = try encodeFacadeTestJSON(readback)
+    let encodedStatus = try encodeFacadeTestJSON(status)
+    let decodedApproval = try decodeFacadeTestJSON(PraxisCmpPeerApprovalSnapshot.self, from: encodedApproval)
+    let decodedReadback = try decodeFacadeTestJSON(PraxisCmpPeerApprovalReadbackSnapshot.self, from: encodedReadback)
+    let decodedStatus = try decodeFacadeTestJSON(PraxisTapStatusSnapshot.self, from: encodedStatus)
+
+    #expect(encodedApproval.contains(#""requestedTier":"B1""#))
+    #expect(encodedApproval.contains(#""route":"humanReview""#))
+    #expect(encodedApproval.contains(#""outcome":"baseline_approved""#))
+    #expect(encodedReadback.contains(#""outcome":"escalated_to_human""#))
+    #expect(encodedStatus.contains(#""tapMode":"restricted""#))
+    #expect(encodedStatus.contains(#""riskLevel":"risky""#))
+    #expect(encodedStatus.contains(#""humanGateState":"waitingApproval""#))
+    #expect(decodedApproval.requestedTier == .b1)
+    #expect(decodedApproval.route == .humanReview)
+    #expect(decodedApproval.outcome == .baselineApproved)
+    #expect(decodedApproval.tapMode == .restricted)
+    #expect(decodedApproval.riskLevel == .dangerous)
+    #expect(decodedApproval.humanGateState == .approved)
+    #expect(decodedReadback.requestedTier == .b2)
+    #expect(decodedReadback.route == .humanReview)
+    #expect(decodedReadback.outcome == .escalatedToHuman)
+    #expect(decodedReadback.tapMode == .restricted)
+    #expect(decodedReadback.riskLevel == .risky)
+    #expect(decodedReadback.humanGateState == .waitingApproval)
+    #expect(decodedStatus.tapMode == .restricted)
+    #expect(decodedStatus.riskLevel == .risky)
+    #expect(decodedStatus.humanGateState == .waitingApproval)
+  }
+
+  @Test
+  func cmpPeerApprovalAndTapStatusSnapshotsRejectUnknownTypedRawValues() throws {
+    let invalidApprovalRouteJSON =
+      #"{"agentID":"runtime.local","capabilityKey":"tool.git","decisionSummary":"Approved git access for checker","humanGateState":"approved","outcome":"baseline_approved","projectID":"cmp.local-runtime","requestedAt":"2026-04-12T00:00:00Z","requestedTier":"B1","riskLevel":"dangerous","route":"not_a_real_route","summary":"CMP peer approval snapshot","tapMode":"restricted","targetAgentID":"checker.local"}"#
+    let invalidApprovalOutcomeJSON =
+      #"{"agentID":"runtime.local","capabilityKey":"tool.git","decisionSummary":"Approved git access for checker","humanGateState":"approved","outcome":"not_a_real_outcome","projectID":"cmp.local-runtime","requestedAt":"2026-04-12T00:00:00Z","requestedTier":"B1","riskLevel":"dangerous","route":"humanReview","summary":"CMP peer approval snapshot","tapMode":"restricted","targetAgentID":"checker.local"}"#
+    let invalidStatusTapModeJSON =
+      #"{"agentID":"checker.local","approvedApprovalCount":0,"availableCapabilityCount":1,"availableCapabilityIDs":["tool.shell.exec"],"humanGateState":"waitingApproval","latestCapabilityKey":"tool.shell.exec","latestDecisionSummary":"Waiting for approval","pendingApprovalCount":1,"projectID":"cmp.local-runtime","readinessSummary":"1 capability, 1 pending approval.","riskLevel":"risky","summary":"TAP status snapshot","tapMode":"not_a_real_mode"}"#
+    let invalidStatusRiskLevelJSON =
+      #"{"agentID":"checker.local","approvedApprovalCount":0,"availableCapabilityCount":1,"availableCapabilityIDs":["tool.shell.exec"],"humanGateState":"waitingApproval","latestCapabilityKey":"tool.shell.exec","latestDecisionSummary":"Waiting for approval","pendingApprovalCount":1,"projectID":"cmp.local-runtime","readinessSummary":"1 capability, 1 pending approval.","riskLevel":"not_a_real_risk","summary":"TAP status snapshot","tapMode":"restricted"}"#
+    let invalidStatusHumanGateStateJSON =
+      #"{"agentID":"checker.local","approvedApprovalCount":0,"availableCapabilityCount":1,"availableCapabilityIDs":["tool.shell.exec"],"humanGateState":"not_a_real_gate_state","latestCapabilityKey":"tool.shell.exec","latestDecisionSummary":"Waiting for approval","pendingApprovalCount":1,"projectID":"cmp.local-runtime","readinessSummary":"1 capability, 1 pending approval.","riskLevel":"risky","summary":"TAP status snapshot","tapMode":"restricted"}"#
+
+    #expect(throws: DecodingError.self) {
+      try decodeFacadeTestJSON(PraxisCmpPeerApprovalSnapshot.self, from: invalidApprovalRouteJSON)
+    }
+    #expect(throws: DecodingError.self) {
+      try decodeFacadeTestJSON(PraxisCmpPeerApprovalSnapshot.self, from: invalidApprovalOutcomeJSON)
+    }
+    #expect(throws: DecodingError.self) {
+      try decodeFacadeTestJSON(PraxisTapStatusSnapshot.self, from: invalidStatusTapModeJSON)
+    }
+    #expect(throws: DecodingError.self) {
+      try decodeFacadeTestJSON(PraxisTapStatusSnapshot.self, from: invalidStatusRiskLevelJSON)
+    }
+    #expect(throws: DecodingError.self) {
+      try decodeFacadeTestJSON(PraxisTapStatusSnapshot.self, from: invalidStatusHumanGateStateJSON)
     }
   }
 

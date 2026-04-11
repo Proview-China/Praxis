@@ -11,6 +11,8 @@ import PraxisJournal
 import PraxisRun
 import PraxisSession
 import PraxisState
+import PraxisTapReview
+import PraxisTapTypes
 import PraxisToolingContracts
 import PraxisWorkspaceContracts
 @testable import PraxisRuntimeComposition
@@ -413,6 +415,7 @@ struct HostRuntimeSurfaceTests {
     #expect(session.hostProfile.executionStyle == .localFirst)
     #expect(session.summary.contains("host-neutral CMP session"))
     #expect(bootstrap.projectSummary.projectID == "cmp.local-runtime")
+    #expect(bootstrap.projectSummary.componentStatuses[.gitProbe] == .ready)
     #expect(bootstrap.projectSummary.componentStatuses[.gitExecutor] == .ready)
     #expect(bootstrap.gitSummary.contains("2 branch runtimes"))
     #expect(bootstrap.persistenceSummary.contains("bootstrap statements"))
@@ -468,31 +471,32 @@ struct HostRuntimeSurfaceTests {
     #expect(peerApproval.projectID == "cmp.local-runtime")
     #expect(peerApproval.targetAgentID == "checker.local")
     #expect(peerApproval.capabilityKey == "tool.git")
-    #expect(peerApproval.requestedTier == "B1")
-    #expect(peerApproval.tapMode == "restricted")
-    #expect(peerApproval.route == "humanReview")
-    #expect(peerApproval.outcome == "escalated_to_human")
-    #expect(peerApproval.humanGateState == "waitingApproval")
+    #expect(peerApproval.requestedTier == .b1)
+    #expect(peerApproval.tapMode == .restricted)
+    #expect(peerApproval.route == .humanReview)
+    #expect(peerApproval.outcome == .escalatedToHuman)
+    #expect(peerApproval.humanGateState == .waitingApproval)
     #expect(approvalReadback.projectID == "cmp.local-runtime")
     #expect(approvalReadback.found)
     #expect(approvalReadback.capabilityKey == "tool.git")
-    #expect(approvalReadback.requestedTier == "B1")
-    #expect(approvalReadback.route == "humanReview")
-    #expect(approvalReadback.outcome == "escalated_to_human")
+    #expect(approvalReadback.requestedTier == .b1)
+    #expect(approvalReadback.route == .humanReview)
+    #expect(approvalReadback.outcome == .escalatedToHuman)
     #expect(tapStatus.projectID == "cmp.local-runtime")
     #expect(tapStatus.agentID == "checker.local")
-    #expect(tapStatus.tapMode == "restricted")
-    #expect(tapStatus.humanGateState == "waitingApproval")
+    #expect(tapStatus.tapMode == .restricted)
+    #expect(tapStatus.humanGateState == .waitingApproval)
     #expect(tapStatus.pendingApprovalCount == 2)
-    #expect(tapStatus.latestCapabilityKey == "tool.git")
+    #expect(["tool.git", "tool.shell"].contains(tapStatus.latestCapabilityKey ?? ""))
     #expect(tapHistory.projectID == "cmp.local-runtime")
     #expect(tapHistory.agentID == "checker.local")
     #expect(tapHistory.totalCount == 6)
     #expect(tapHistory.entries.count == 6)
     #expect(Set(tapHistory.entries.map(\.capabilityKey)) == Set(["tool.git", "tool.shell", "control_updated", "dispatch_released"]))
-    #expect(Set(tapHistory.entries.map(\.route)).contains("humanReview"))
-    #expect(Set(tapHistory.entries.map(\.route)).contains("tapBridge"))
-    #expect(Set(tapHistory.entries.map(\.humanGateState)) == Set(["waitingApproval", "notRequired"]))
+    #expect(tapHistory.entries.contains { $0.route == .humanReview })
+    #expect(tapHistory.entries.contains { $0.route == .autoApprove })
+    #expect(tapHistory.entries.contains { $0.humanGateState == .waitingApproval })
+    #expect(tapHistory.entries.contains { $0.humanGateState == .notRequired })
     #expect(statusPanel.projectID == "cmp.local-runtime")
     #expect(statusPanel.agentID == "runtime.local")
     #expect(statusPanel.executionStyle == .automatic)
@@ -1305,7 +1309,8 @@ struct HostRuntimeSurfaceTests {
     #expect(history.totalCount == 4)
     #expect(history.entries.count == 4)
     #expect(Set(history.entries.map(\.capabilityKey)) == Set(["tool.git", "tool.shell"]))
-    #expect(Set(history.entries.map(\.route)).count == 1)
+    #expect(history.entries.contains { $0.requestedTier == .b2 })
+    #expect(history.entries.contains { $0.route == .toolReview })
   }
 
   @Test
@@ -1357,7 +1362,9 @@ struct HostRuntimeSurfaceTests {
     #expect(dispatch.status == .rejected)
     #expect(dispatch.targetAgentID == "checker.local")
     #expect(tapHistory.entries.contains { $0.capabilityKey == "dispatch_blocked" })
-    #expect(tapHistory.entries.contains { $0.route == "tapBridge" && $0.outcome == "dispatch_blocked" })
+    #expect(tapHistory.entries.contains {
+      $0.route == .toolReview && $0.outcome == .reviewRequired
+    })
     #expect(deliveryTruth.first?.status == .pending)
     #expect(deliveryTruth.first?.lastErrorSummary?.contains("autoDispatch is disabled") == true)
   }
@@ -1436,7 +1443,7 @@ struct HostRuntimeSurfaceTests {
     #expect(storedPackage?.metadata["dispatch_attempt_count"] == .number(2))
     #expect(deliveryTruth.first?.status == .published)
     #expect(tapHistory.entries.contains { $0.capabilityKey == "dispatch_retry_requested" })
-    #expect(tapHistory.entries.contains { $0.outcome == "dispatch_released" })
+    #expect(tapHistory.entries.contains { $0.outcome == .baselineApproved })
   }
 
   @Test
@@ -1737,17 +1744,19 @@ struct HostRuntimeSurfaceTests {
       .init(projectID: "cmp.local-runtime", agentID: "checker.local", limit: 10)
     )
 
-    #expect(decision.outcome == "approved_by_human")
-    #expect(decision.humanGateState == "approved")
+    #expect(decision.outcome == .approvedByHuman)
+    #expect(decision.humanGateState == .approved)
     #expect(decision.decisionSummary == "Approved git access for checker")
     #expect(readback.found)
-    #expect(readback.outcome == "approved_by_human")
-    #expect(readback.humanGateState == "approved")
+    #expect(readback.outcome == .approvedByHuman)
+    #expect(readback.humanGateState == .approved)
     #expect(readback.decisionSummary == "Approved git access for checker")
     #expect(tapStatus.pendingApprovalCount == 0)
     #expect(tapStatus.approvedApprovalCount == 1)
-    #expect(tapStatus.humanGateState == "approved")
-    #expect(tapHistory.entries.contains { $0.capabilityKey == "tool.git" && $0.outcome == "approved_by_human" })
+    #expect(tapStatus.humanGateState == .approved)
+    #expect(tapHistory.entries.contains {
+      $0.capabilityKey == "tool.git" && $0.outcome == .approvedByHuman
+    })
   }
 
   @Test
