@@ -9,7 +9,7 @@
   - `packageKind -> PraxisCmpContextPackageKind`
   - `targetKind -> PraxisCmpDispatchTargetKind`
   - flow `status -> PraxisCmpDispatchStatus`
-  - readback `latestDispatchStatus -> PraxisCmpDispatchStatus`
+  - readback `latestDispatchStatus -> PraxisCmpLatestDispatchStatus`
 - runtime interface snapshot 现在会显式携带 typed CMP flow/readback 字段，并继续通过稳定 raw value JSON 编解码往返，不再只靠 summary 文案传达状态真相。
 
 一句白话：
@@ -19,6 +19,7 @@
 ## 语义收紧
 
 - `latestDispatchStatus` 不再直接透传 delivery truth 的底层词表，也不再盲信 package metadata。
+- 最终收口时，这个字段没有继续复用 `PraxisCmpDispatchStatus`，而是单独提升成只服务 readback/interface 的 `PraxisCmpLatestDispatchStatus`，避免把 `retryScheduled` 压扁成 `.rejected`。
 - HostRuntime 现在会同时看：
   - package metadata 里的 `last_dispatch_status`
   - 最新 delivery truth record
@@ -46,15 +47,15 @@
   - `swift test --filter HostRuntimeInterfaceTests`
   - `swift test`
 - 结果：
-  - `236 tests / 52 suites` 通过
+  - `242 tests / 52 suites` 通过
 - 复审结果：
-  - 第一轮有 3 个 findings
+  - 第一轮有关于 `retryScheduled` 语义压扁和 recovery interface 未贯通的 findings
   - 修复后复审 `无 findings`
 
 ## 残余限制
 
 - `roleStages` 这次仍然是 `[String: String]` 容器，只是值域已收紧到 CMP-neutral 词表；没有顺带重做成 typed 容器。
-- `latestDispatchStatus` 的“谁更新”判断依赖 `updatedAt` 使用可按时间顺序比较的标准时间戳格式；当前仓库和测试都满足这个前提，但这次没有为非规范时间串补额外防御层。
+- `latestDispatchStatus` 的“谁更新”判断优先依赖 dispatch 专用时间 `last_dispatch_updated_at`；旧数据缺失时才 fallback 到 descriptor `updatedAt`，因此对历史记录仍存在兼容路径限制。
 - project recovery 的 `status` / `packageKind` 仍然保持原状，这次没有把 recovery surface 一并 typed 化。
 - `latestStage` 这类角色阶段字段仍未建模为 typed contract，本包只处理了 dispatcher readback 不再漏出 delivery truth 原词表。
 

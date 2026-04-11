@@ -8,6 +8,9 @@
   - `PraxisCmpProjectRecoverySnapshot.status -> PraxisCmpRecoveryStatus`
   - `PraxisCmpProjectRecoverySnapshot.packageKind -> PraxisCmpContextPackageKind`
 - `use case result -> facade snapshot` 这条链路已经贯通，`packageKind` 不再在 facade 层降成 raw string。
+- 后续修复已把 recovery 的关键 typed 字段继续贯通到 `RuntimeInterface`：
+  - `recoveryStatus`
+  - `packageKind`
 - 新增最小 typed enum `PraxisCmpRecoveryStatus`，当前只承接现有实现事实里的两种成功态结果：
   - `aligned`
   - `degraded`
@@ -24,7 +27,7 @@
   - `hydratedRecoverySummary`
 - 这些文案没有被抬成业务真相；状态真相现在由 typed enum 承担。
 - `recoverySource` 这次刻意没动，避免在同一小包里继续扩大 surface。
-- 当前 recovery interface response 仍然只返回通用 snapshot/event，不直接暴露 recovery detail 字段，所以这次没有去扩 `PraxisRuntimeInterface`。
+- 当时这份小包本身没有扩 `PraxisRuntimeInterface`；但后续同日收尾已把 `recoveryStatus` / `packageKind` 贯通到 interface snapshot，对外不再只剩 summary 文本。
 
 ## 测试
 
@@ -45,6 +48,7 @@
 - `PraxisCmpRecoveryStatus` 当前只覆盖现实现有两种 recovery 结果；如果以后 recovery 语义扩展，需要显式扩 enum 和测试，而不是重新退回字符串。
 - recovery surface 里的 `recoverySource` 仍是字符串，这次没有继续 typed 化。
 - 这轮没有把 recovery detail 投到 `PraxisRuntimeInterfaceSnapshot`；如果未来要对 interface 暴露 recovery 详情，必须直接沿用 typed surface，不能再把 `status` / `packageKind` 降回字符串。
+- 目前 `RuntimeInterface` 已能看到 `recoveryStatus` / `packageKind`，但 `recoverySource`、`snapshotID`、`packageID`、projection 计数等更丰富 detail 仍主要停留在 facade/use case 层。
 - 当前测试已覆盖 `aligned` 和 codec/reject-unknown，但还没有单独打穿一个真实 `.degraded` 集成路径来钉住该分支。
 
 ## 下一包入口
