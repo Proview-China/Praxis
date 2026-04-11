@@ -403,7 +403,9 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
         kind: .cmpProject,
         title: "CMP Project \(readback.projectSummary.projectID)",
         summary: readback.summary,
-        projectID: readback.projectSummary.projectID
+        projectID: readback.projectSummary.projectID,
+        hostProfile: readback.projectSummary.hostProfile,
+        componentStatuses: readback.projectSummary.componentStatuses
       )
     )
   }
@@ -530,7 +532,9 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
         kind: .cmpBootstrap,
         title: "CMP Bootstrap \(bootstrap.projectSummary.projectID)",
         summary: bootstrap.summary,
-        projectID: bootstrap.projectSummary.projectID
+        projectID: bootstrap.projectSummary.projectID,
+        hostProfile: bootstrap.projectSummary.hostProfile,
+        componentStatuses: bootstrap.projectSummary.componentStatuses
       ),
       events: [
         .init(

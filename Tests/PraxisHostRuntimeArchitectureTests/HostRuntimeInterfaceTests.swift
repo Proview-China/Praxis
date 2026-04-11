@@ -1119,6 +1119,10 @@ struct HostRuntimeInterfaceTests {
     #expect(readbackResponse.status == .success)
     #expect(readbackResponse.snapshot?.kind == .cmpProject)
     #expect(readbackResponse.snapshot?.projectID == "cmp.local-runtime")
+    #expect(readbackResponse.snapshot?.hostProfile?.executionStyle == .localFirst)
+    #expect(readbackResponse.snapshot?.hostProfile?.semanticIndex == .localSemanticIndex)
+    #expect(readbackResponse.snapshot?.componentStatuses?[.structuredStore] == .ready)
+    #expect(readbackResponse.snapshot?.componentStatuses?[.gitExecutor] == .ready)
     #expect(tapStatusResponse.status == .success)
     #expect(tapStatusResponse.snapshot?.kind == .tapStatus)
     #expect(tapStatusResponse.snapshot?.title == "TAP Status cmp.local-runtime")
@@ -1162,6 +1166,10 @@ struct HostRuntimeInterfaceTests {
     #expect(bootstrapResponse.status == .success)
     #expect(bootstrapResponse.snapshot?.kind == .cmpBootstrap)
     #expect(bootstrapResponse.snapshot?.title == "CMP Bootstrap cmp.local-runtime")
+    #expect(bootstrapResponse.snapshot?.hostProfile?.executionStyle == .localFirst)
+    #expect(bootstrapResponse.snapshot?.hostProfile?.messageTransport == .inProcessActorBus)
+    #expect(bootstrapResponse.snapshot?.componentStatuses?[.gitProbe] == .ready)
+    #expect(bootstrapResponse.snapshot?.componentStatuses?[.lineageStore] == .ready)
     #expect(bootstrapResponse.events.map(\.name) == ["cmp.project.bootstrapped"])
     #expect(ingestResponse.status == .success)
     #expect(ingestResponse.snapshot?.kind == .cmpFlow)
@@ -3077,10 +3085,61 @@ struct HostRuntimeInterfaceTests {
   }
 
   @Test
+  func runtimeInterfaceCodecRoundTripsTypedCmpProjectSurfaceAsStableRawValues() throws {
+    let codec = PraxisJSONRuntimeInterfaceCodec()
+    let response = PraxisRuntimeInterfaceResponse.success(
+      snapshot: .init(
+        kind: .cmpProject,
+        title: "CMP Project cmp.local-runtime",
+        summary: "Typed CMP project snapshot",
+        projectID: "cmp.local-runtime",
+        hostProfile: .init(
+          executionStyle: .localFirst,
+          structuredStore: .sqlite,
+          deliveryStore: .sqlite,
+          messageTransport: .inProcessActorBus,
+          gitAccess: .systemGit,
+          semanticIndex: .localSemanticIndex
+        ),
+        componentStatuses: .init(
+          statuses: [
+            .structuredStore: .ready,
+            .gitExecutor: .degraded,
+          ]
+        )
+      )
+    )
+
+    let responseData = try codec.encode(response)
+    let responseJSON = String(decoding: responseData, as: UTF8.self)
+    let decodedResponse = try codec.decodeResponse(responseData)
+
+    #expect(responseJSON.contains(#""hostProfile":{"deliveryStore":"sqlite","executionStyle":"local-first","gitAccess":"system_git","messageTransport":"in_process_actor_bus","semanticIndex":"local_semantic_index","structuredStore":"sqlite"}"#))
+    #expect(responseJSON.contains(#""componentStatuses":{"gitExecutor":"degraded","structuredStore":"ready"}"#))
+    #expect(decodedResponse.snapshot?.kind == .cmpProject)
+    #expect(decodedResponse.snapshot?.hostProfile?.executionStyle == .localFirst)
+    #expect(decodedResponse.snapshot?.hostProfile?.gitAccess == .systemGit)
+    #expect(decodedResponse.snapshot?.componentStatuses?[.structuredStore] == .ready)
+    #expect(decodedResponse.snapshot?.componentStatuses?[.gitExecutor] == .degraded)
+    #expect(decodedResponse == response)
+  }
+
+  @Test
   func runtimeInterfaceCodecRejectsUnknownTypedCmpRoleStageFields() throws {
     let codec = PraxisJSONRuntimeInterfaceCodec()
     let responseJSON =
       #"{"error":null,"events":[],"snapshot":{"kind":"cmpRoles","projectID":"cmp.local-runtime","roleStages":{"dispatcher":"broken_stage"},"summary":"Typed CMP roles snapshot","title":"CMP Roles cmp.local-runtime"},"status":"success"}"#
+
+    #expect(throws: DecodingError.self) {
+      _ = try codec.decodeResponse(Data(responseJSON.utf8))
+    }
+  }
+
+  @Test
+  func runtimeInterfaceCodecRejectsUnknownTypedCmpProjectHostProfileFields() throws {
+    let codec = PraxisJSONRuntimeInterfaceCodec()
+    let responseJSON =
+      #"{"error":null,"events":[],"snapshot":{"componentStatuses":{"structuredStore":"ready"},"hostProfile":{"deliveryStore":"sqlite","executionStyle":"local-first","gitAccess":"system_git","messageTransport":"broken_transport","semanticIndex":"local_semantic_index","structuredStore":"sqlite"},"kind":"cmpProject","projectID":"cmp.local-runtime","summary":"Typed CMP project snapshot","title":"CMP Project cmp.local-runtime"},"status":"success"}"#
 
     #expect(throws: DecodingError.self) {
       _ = try codec.decodeResponse(Data(responseJSON.utf8))

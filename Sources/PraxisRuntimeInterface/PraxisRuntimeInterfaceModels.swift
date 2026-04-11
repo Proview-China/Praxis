@@ -1563,6 +1563,8 @@ public struct PraxisRuntimeInterfaceSnapshot: Sendable, Equatable, Codable {
   public let title: String
   public let summary: String
   public let projectID: String?
+  public let hostProfile: PraxisLocalRuntimeHostProfile?
+  public let componentStatuses: PraxisCmpProjectComponentStatusMap?
   public let runID: PraxisRunID?
   public let sessionID: PraxisSessionID?
   public let phase: PraxisRunPhase?
@@ -1586,6 +1588,8 @@ public struct PraxisRuntimeInterfaceSnapshot: Sendable, Equatable, Codable {
     title: String,
     summary: String,
     projectID: String? = nil,
+    hostProfile: PraxisLocalRuntimeHostProfile? = nil,
+    componentStatuses: PraxisCmpProjectComponentStatusMap? = nil,
     runID: PraxisRunID? = nil,
     sessionID: PraxisSessionID? = nil,
     phase: PraxisRunPhase? = nil,
@@ -1608,6 +1612,8 @@ public struct PraxisRuntimeInterfaceSnapshot: Sendable, Equatable, Codable {
     self.title = title
     self.summary = summary
     self.projectID = projectID
+    self.hostProfile = hostProfile
+    self.componentStatuses = componentStatuses
     self.runID = runID
     self.sessionID = sessionID
     self.phase = phase
