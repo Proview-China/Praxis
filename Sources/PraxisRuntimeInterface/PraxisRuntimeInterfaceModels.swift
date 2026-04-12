@@ -417,7 +417,7 @@ public struct PraxisRuntimeInterfaceRecoverCmpProjectRequestPayload: Sendable, E
   public let reason: String
   public let lineageID: String?
   public let branchRef: String?
-  public let snapshotID: String?
+  public let snapshotID: PraxisRuntimeInterfaceReferenceID?
   public let packageKind: PraxisCmpContextPackageKind
   public let fidelityLabel: PraxisCmpContextPackageFidelityLabel?
 
@@ -429,7 +429,7 @@ public struct PraxisRuntimeInterfaceRecoverCmpProjectRequestPayload: Sendable, E
     reason: String,
     lineageID: String? = nil,
     branchRef: String? = nil,
-    snapshotID: String? = nil,
+    snapshotID: PraxisRuntimeInterfaceReferenceID? = nil,
     packageKind: PraxisCmpContextPackageKind = .historicalReply,
     fidelityLabel: PraxisCmpContextPackageFidelityLabel? = nil
   ) {
@@ -550,8 +550,8 @@ public struct PraxisRuntimeInterfaceMaterializeCmpFlowRequestPayload: Sendable, 
   public let projectID: String
   public let agentID: String
   public let targetAgentID: String
-  public let snapshotID: String?
-  public let projectionID: String?
+  public let snapshotID: PraxisRuntimeInterfaceReferenceID?
+  public let projectionID: PraxisRuntimeInterfaceReferenceID?
   public let packageKind: PraxisCmpContextPackageKind
   public let fidelityLabel: PraxisCmpContextPackageFidelityLabel?
 
@@ -560,8 +560,8 @@ public struct PraxisRuntimeInterfaceMaterializeCmpFlowRequestPayload: Sendable, 
     projectID: String,
     agentID: String,
     targetAgentID: String,
-    snapshotID: String? = nil,
-    projectionID: String? = nil,
+    snapshotID: PraxisRuntimeInterfaceReferenceID? = nil,
+    projectionID: PraxisRuntimeInterfaceReferenceID? = nil,
     packageKind: PraxisCmpContextPackageKind,
     fidelityLabel: PraxisCmpContextPackageFidelityLabel? = nil
   ) {
@@ -605,14 +605,14 @@ public struct PraxisRuntimeInterfaceRetryCmpDispatchRequestPayload: Sendable, Eq
   public let payloadSummary: String
   public let projectID: String
   public let agentID: String
-  public let packageID: String
+  public let packageID: PraxisRuntimeInterfaceReferenceID
   public let reason: String?
 
   public init(
     payloadSummary: String,
     projectID: String,
     agentID: String,
-    packageID: String,
+    packageID: PraxisRuntimeInterfaceReferenceID,
     reason: String? = nil
   ) {
     self.payloadSummary = payloadSummary
@@ -724,7 +724,7 @@ public struct PraxisRuntimeInterfaceMpIngestRequestPayload: Sendable, Equatable,
   public let sessionID: String?
   public let scopeLevel: PraxisMpScopeLevel
   public let summary: String
-  public let checkedSnapshotRef: String
+  public let checkedSnapshotRef: PraxisRuntimeInterfaceReferenceID
   public let branchRef: String
   public let storageKey: String?
   public let memoryKind: PraxisMpMemoryKind
@@ -742,7 +742,7 @@ public struct PraxisRuntimeInterfaceMpIngestRequestPayload: Sendable, Equatable,
     sessionID: String? = nil,
     scopeLevel: PraxisMpScopeLevel = .agentIsolated,
     summary: String,
-    checkedSnapshotRef: String,
+    checkedSnapshotRef: PraxisRuntimeInterfaceReferenceID,
     branchRef: String,
     storageKey: String? = nil,
     memoryKind: PraxisMpMemoryKind = .semantic,
@@ -1611,7 +1611,7 @@ public struct PraxisRuntimeInterfaceSnapshot: Sendable, Equatable, Codable {
   public let phase: PraxisRunPhase?
   public let tickCount: Int?
   public let lifecycleDisposition: PraxisRunLifecycleDisposition?
-  public let checkpointReference: String?
+  public let checkpointReference: PraxisRuntimeInterfaceReferenceID?
   public let pendingIntentID: PraxisRuntimeInterfaceReferenceID?
   public let recoveredEventCount: Int?
   public let nextAction: PraxisCmpFlowIngestNextAction?
@@ -1651,7 +1651,7 @@ public struct PraxisRuntimeInterfaceSnapshot: Sendable, Equatable, Codable {
     phase: PraxisRunPhase? = nil,
     tickCount: Int? = nil,
     lifecycleDisposition: PraxisRunLifecycleDisposition? = nil,
-    checkpointReference: String? = nil,
+    checkpointReference: PraxisRuntimeInterfaceReferenceID? = nil,
     pendingIntentID: PraxisRuntimeInterfaceReferenceID? = nil,
     recoveredEventCount: Int? = nil,
     nextAction: PraxisCmpFlowIngestNextAction? = nil,

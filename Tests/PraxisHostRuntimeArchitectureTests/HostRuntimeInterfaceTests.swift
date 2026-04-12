@@ -806,6 +806,10 @@ struct HostRuntimeInterfaceTests {
     #expect(response.snapshot?.phase == .running)
     #expect(response.snapshot?.lifecycleDisposition == .started)
     #expect(
+      response.snapshot?.checkpointReference ==
+        runtimeInterfaceReferenceID("checkpoint.run:session.runtime-interface:goal.runtime-interface")
+    )
+    #expect(
       response.snapshot?.pendingIntentID ==
         runtimeInterfaceReferenceID("evt.created.run:session.runtime-interface:goal.runtime-interface:model")
     )
@@ -827,7 +831,7 @@ struct HostRuntimeInterfaceTests {
           phase: .running,
           tickCount: 1,
           journalSequence: 1,
-          checkpointReference: "checkpoint.blank-reference",
+          checkpointReference: "   ",
           followUpAction: .init(
             kind: .modelInference,
             reason: "Continue with normalized blank reference.",
@@ -860,6 +864,7 @@ struct HostRuntimeInterfaceTests {
     )
 
     #expect(response.status == .success)
+    #expect(response.snapshot?.checkpointReference == nil)
     #expect(response.snapshot?.pendingIntentID == nil)
     #expect(response.events.map(\.name) == [.runStarted, .runFollowUpReady])
     #expect(response.events.last?.intentID == nil)
@@ -1358,7 +1363,7 @@ struct HostRuntimeInterfaceTests {
           agentID: "runtime.local",
           targetAgentID: "checker.local",
           reason: "Recover package-only history",
-          snapshotID: "snapshot.interface.package-only"
+          snapshotID: runtimeInterfaceReferenceID("snapshot.interface.package-only")
         )
       )
     )
@@ -1521,7 +1526,7 @@ struct HostRuntimeInterfaceTests {
           payloadSummary: "Retry blocked dispatch",
           projectID: "cmp.local-runtime",
           agentID: "runtime.local",
-          packageID: packageID
+          packageID: runtimeInterfaceReferenceID(packageID)
         )
       )
     )
@@ -2021,7 +2026,7 @@ struct HostRuntimeInterfaceTests {
           agentID: "runtime.local",
           sessionID: "mp.session",
           summary: "Host runtime onboarding note",
-          checkedSnapshotRef: "snapshot.mp.1",
+          checkedSnapshotRef: runtimeInterfaceReferenceID("snapshot.mp.1"),
           branchRef: "main"
         )
       )
@@ -2474,7 +2479,7 @@ struct HostRuntimeInterfaceTests {
             payloadSummary: "Missing retry agent",
             projectID: "cmp.local-runtime",
             agentID: "",
-            packageID: "package.retry"
+            packageID: runtimeInterfaceReferenceID("package.retry")
           )
         )
       ),
@@ -2486,7 +2491,7 @@ struct HostRuntimeInterfaceTests {
             payloadSummary: "Missing retry package",
             projectID: "cmp.local-runtime",
             agentID: "runtime.local",
-            packageID: "   "
+            packageID: runtimeInterfaceReferenceID("   ")
           )
         )
       ),
@@ -2671,6 +2676,20 @@ struct HostRuntimeInterfaceTests {
         )
       ),
       (
+        "Field checkedSnapshotRef must not be empty.",
+        nil,
+        .ingestMp(
+          .init(
+            payloadSummary: "Empty MP checked snapshot reference",
+            projectID: "mp.local-runtime",
+            agentID: "runtime.local",
+            summary: "Capture MP note",
+            checkedSnapshotRef: runtimeInterfaceReferenceID("   "),
+            branchRef: "main"
+          )
+        )
+      ),
+      (
         "Field reason must not be empty.",
         nil,
         .requestCmpHistory(
@@ -2789,7 +2808,7 @@ struct HostRuntimeInterfaceTests {
           payloadSummary: "Retry missing package",
           projectID: "cmp.local-runtime",
           agentID: "runtime.local",
-          packageID: "package.missing"
+          packageID: runtimeInterfaceReferenceID("package.missing")
         )
       )
     )
@@ -2799,7 +2818,7 @@ struct HostRuntimeInterfaceTests {
           payloadSummary: "Retry archived package",
           projectID: "cmp.local-runtime",
           agentID: "runtime.local",
-          packageID: "package.archived"
+          packageID: runtimeInterfaceReferenceID("package.archived")
         )
       )
     )
@@ -2935,7 +2954,7 @@ struct HostRuntimeInterfaceTests {
           payloadSummary: "Retry corrupted dispatch metadata",
           projectID: "cmp.local-runtime",
           agentID: "runtime.local",
-          packageID: "projection.runtime.local:checker.local:runtimeFill"
+          packageID: runtimeInterfaceReferenceID("projection.runtime.local:checker.local:runtimeFill")
         )
       )
     )
@@ -3185,7 +3204,7 @@ struct HostRuntimeInterfaceTests {
         phase: .running,
         tickCount: 2,
         lifecycleDisposition: .resumed,
-        checkpointReference: "checkpoint.run:session.codec:goal.codec",
+        checkpointReference: runtimeInterfaceReferenceID("checkpoint.run:session.codec:goal.codec"),
         pendingIntentID: runtimeInterfaceReferenceID("evt.resumed.run:session.codec:goal.codec:resume"),
         recoveredEventCount: 1
       ),
@@ -3215,10 +3234,76 @@ struct HostRuntimeInterfaceTests {
     #expect(responseJSON.contains(#""status":"success""#))
     #expect(!responseJSON.contains(#""error":"#))
     #expect(responseJSON.contains(#""snapshot":{"#))
+    #expect(responseJSON.contains(#""checkpointReference":"checkpoint.run:session.codec:goal.codec""#))
     #expect(responseJSON.contains(#""pendingIntentID":"evt.resumed.run:session.codec:goal.codec:resume""#))
     #expect(responseJSON.contains(#""intentID":"evt.resumed.run:session.codec:goal.codec:resume""#))
+    #expect(decodedResponse.snapshot?.checkpointReference == runtimeInterfaceReferenceID("checkpoint.run:session.codec:goal.codec"))
     #expect(decodedRequest == request)
     #expect(decodedResponse == response)
+  }
+
+  @Test
+  func runtimeInterfaceCodecRoundTripsTypedReferenceContinuationRequestsAsStableStrings() throws {
+    let codec = PraxisJSONRuntimeInterfaceCodec()
+    let recoverRequest = PraxisRuntimeInterfaceRequest.recoverCmpProject(
+      .init(
+        payloadSummary: "Recover typed snapshot reference",
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        reason: "Recover from typed reference",
+        snapshotID: runtimeInterfaceReferenceID("snapshot.runtime.recover")
+      )
+    )
+    let materializeRequest = PraxisRuntimeInterfaceRequest.materializeCmpFlow(
+      .init(
+        payloadSummary: "Materialize typed references",
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        snapshotID: runtimeInterfaceReferenceID("snapshot.runtime.materialize"),
+        projectionID: runtimeInterfaceReferenceID("projection.runtime.materialize"),
+        packageKind: .runtimeFill,
+        fidelityLabel: .highSignal
+      )
+    )
+    let ingestRequest = PraxisRuntimeInterfaceRequest.ingestMp(
+      .init(
+        payloadSummary: "Ingest typed snapshot reference",
+        projectID: "mp.local-runtime",
+        agentID: "runtime.local",
+        sessionID: "mp.session",
+        summary: "Store typed reference memory",
+        checkedSnapshotRef: runtimeInterfaceReferenceID("snapshot.mp.runtime"),
+        branchRef: "main"
+      )
+    )
+
+    let recoverData = try codec.encode(recoverRequest)
+    let materializeData = try codec.encode(materializeRequest)
+    let ingestData = try codec.encode(ingestRequest)
+    let recoverJSON = String(decoding: recoverData, as: UTF8.self)
+    let materializeJSON = String(decoding: materializeData, as: UTF8.self)
+    let ingestJSON = String(decoding: ingestData, as: UTF8.self)
+    let decodedRecover = try codec.decodeRequest(recoverData)
+    let decodedMaterialize = try codec.decodeRequest(materializeData)
+    let decodedIngest = try codec.decodeRequest(ingestData)
+
+    #expect(
+      recoverJSON ==
+        #"{"kind":"recoverCmpProject","recoverCmpProject":{"agentID":"runtime.local","packageKind":"historicalReply","payloadSummary":"Recover typed snapshot reference","projectID":"cmp.local-runtime","reason":"Recover from typed reference","snapshotID":"snapshot.runtime.recover","targetAgentID":"checker.local"}}"#
+    )
+    #expect(
+      materializeJSON ==
+        #"{"kind":"materializeCmpFlow","materializeCmpFlow":{"agentID":"runtime.local","fidelityLabel":"highSignal","packageKind":"runtimeFill","payloadSummary":"Materialize typed references","projectID":"cmp.local-runtime","projectionID":"projection.runtime.materialize","snapshotID":"snapshot.runtime.materialize","targetAgentID":"checker.local"}}"#
+    )
+    #expect(
+      ingestJSON ==
+        #"{"ingestMp":{"agentID":"runtime.local","branchRef":"main","checkedSnapshotRef":"snapshot.mp.runtime","confidence":"medium","memoryKind":"semantic","payloadSummary":"Ingest typed snapshot reference","projectID":"mp.local-runtime","scopeLevel":"agent_isolated","sessionID":"mp.session","sourceRefs":[],"summary":"Store typed reference memory","tags":[]},"kind":"ingestMp"}"#
+    )
+    #expect(decodedRecover == recoverRequest)
+    #expect(decodedMaterialize == materializeRequest)
+    #expect(decodedIngest == ingestRequest)
   }
 
   @Test
@@ -3665,7 +3750,7 @@ struct HostRuntimeInterfaceTests {
         payloadSummary: "Retry dispatch",
         projectID: "cmp.local-runtime",
         agentID: "runtime.local",
-        packageID: "projection.runtime.local:checker.local:runtimeFill",
+        packageID: runtimeInterfaceReferenceID("projection.runtime.local:checker.local:runtimeFill"),
         reason: "Retry after approval"
       )
     )

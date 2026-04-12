@@ -30,6 +30,35 @@ private func runtimeInterfaceReferenceID(
   return PraxisRuntimeInterfaceReferenceID(rawValue: normalized)
 }
 
+private func normalizedRuntimeInterfaceReferenceID(
+  _ value: PraxisRuntimeInterfaceReferenceID?
+) -> PraxisRuntimeInterfaceReferenceID? {
+  guard let value else {
+    return nil
+  }
+  return runtimeInterfaceReferenceID(from: value.rawValue)
+}
+
+private func requireRuntimeInterfaceReferenceIDField(
+  _ value: PraxisRuntimeInterfaceReferenceID,
+  named field: String
+) throws -> PraxisRuntimeInterfaceReferenceID {
+  guard let normalized = normalizedRuntimeInterfaceReferenceID(value) else {
+    throw PraxisRuntimeInterfaceError.missingRequiredField(field)
+  }
+  return normalized
+}
+
+private func requireRuntimeInterfaceTextReferenceID(
+  _ value: PraxisRuntimeInterfaceReferenceID,
+  named field: String
+) throws -> PraxisRuntimeInterfaceReferenceID {
+  guard let normalized = normalizedRuntimeInterfaceReferenceID(value) else {
+    throw PraxisError.invalidInput("Field \(field) must not be empty.")
+  }
+  return normalized
+}
+
 private func requireRuntimeInterfaceCapabilityID(
   _ value: PraxisCapabilityID,
   named field: String
@@ -375,7 +404,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
       phase: summary.phase,
       tickCount: summary.tickCount,
       lifecycleDisposition: summary.lifecycleDisposition,
-      checkpointReference: summary.checkpointReference,
+      checkpointReference: runtimeInterfaceReferenceID(from: summary.checkpointReference),
       pendingIntentID: runtimeInterfaceReferenceID(from: summary.followUpAction?.intentID),
       recoveredEventCount: summary.recoveredEventCount
     )
@@ -965,6 +994,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
       let agentID = try requireRuntimeInterfaceField(payload.agentID, named: "agentID")
       let targetAgentID = try requireRuntimeInterfaceField(payload.targetAgentID, named: "targetAgentID")
       let reason = try requireRuntimeInterfaceText(payload.reason, named: "reason")
+      let snapshotID = normalizedRuntimeInterfaceReferenceID(payload.snapshotID)
       let recovery = try await runtimeFacade.cmpProjectFacade.recoverProject(
         .init(
           projectID: projectID,
@@ -973,7 +1003,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
           reason: reason,
           lineageID: payload.lineageID,
           branchRef: payload.branchRef,
-          snapshotID: payload.snapshotID,
+          snapshotID: snapshotID?.rawValue,
           packageKind: payload.packageKind,
           fidelityLabel: payload.fidelityLabel
         )
@@ -1036,13 +1066,15 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
       let projectID = try requireRuntimeInterfaceField(payload.projectID, named: "projectID")
       let agentID = try requireRuntimeInterfaceField(payload.agentID, named: "agentID")
       let targetAgentID = try requireRuntimeInterfaceField(payload.targetAgentID, named: "targetAgentID")
+      let snapshotID = normalizedRuntimeInterfaceReferenceID(payload.snapshotID)
+      let projectionID = normalizedRuntimeInterfaceReferenceID(payload.projectionID)
       let materialize = try await runtimeFacade.cmpFlowFacade.materializeFlow(
         .init(
           projectID: projectID,
           agentID: agentID,
           targetAgentID: targetAgentID,
-          snapshotID: payload.snapshotID,
-          projectionID: payload.projectionID,
+          snapshotID: snapshotID?.rawValue,
+          projectionID: projectionID?.rawValue,
           packageKind: payload.packageKind,
           fidelityLabel: payload.fidelityLabel
         )
@@ -1065,12 +1097,12 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
     case .retryCmpDispatch(let payload):
       let projectID = try requireRuntimeInterfaceField(payload.projectID, named: "projectID")
       let agentID = try requireRuntimeInterfaceField(payload.agentID, named: "agentID")
-      let packageID = try requireRuntimeInterfaceField(payload.packageID, named: "packageID")
+      let packageID = try requireRuntimeInterfaceReferenceIDField(payload.packageID, named: "packageID")
       let dispatch = try await runtimeFacade.cmpFlowFacade.retryDispatch(
         .init(
           projectID: projectID,
           agentID: agentID,
-          packageID: packageID,
+          packageID: packageID.rawValue,
           reason: payload.reason
         )
       )
@@ -1177,7 +1209,10 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
       let projectID = try requireRuntimeInterfaceField(payload.projectID, named: "projectID")
       let agentID = try requireRuntimeInterfaceField(payload.agentID, named: "agentID")
       let summary = try requireRuntimeInterfaceText(payload.summary, named: "summary")
-      let checkedSnapshotRef = try requireRuntimeInterfaceText(payload.checkedSnapshotRef, named: "checkedSnapshotRef")
+      let checkedSnapshotRef = try requireRuntimeInterfaceTextReferenceID(
+        payload.checkedSnapshotRef,
+        named: "checkedSnapshotRef"
+      )
       let branchRef = try requireRuntimeInterfaceText(payload.branchRef, named: "branchRef")
       let ingest = try await runtimeFacade.mpFacade.ingest(
         .init(
@@ -1186,7 +1221,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
           sessionID: payload.sessionID,
           scopeLevel: payload.scopeLevel,
           summary: summary,
-          checkedSnapshotRef: checkedSnapshotRef,
+          checkedSnapshotRef: checkedSnapshotRef.rawValue,
           branchRef: branchRef,
           storageKey: payload.storageKey,
           memoryKind: payload.memoryKind,
