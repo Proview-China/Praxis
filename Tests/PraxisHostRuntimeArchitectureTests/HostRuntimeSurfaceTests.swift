@@ -344,7 +344,7 @@ struct HostRuntimeSurfaceTests {
         projectID: "cmp.local-runtime",
         agentID: "runtime.local",
         sessionID: "cmp.flow.session",
-        eventIDs: ["evt.cmp.1"],
+        eventIDs: [.init(rawValue: "evt.cmp.1")],
         changeSummary: "Commit one flow event",
         syncIntent: .toParent
       )
@@ -380,9 +380,9 @@ struct HostRuntimeSurfaceTests {
       )
     )
     let dispatchPackage = PraxisCmpContextPackage(
-      id: .init(rawValue: materialize.packageID),
+      id: materialize.packageID,
       sourceProjectionID: .init(rawValue: "projection.runtime.local"),
-      sourceSnapshotID: .init(rawValue: resolvedSnapshotID),
+      sourceSnapshotID: resolvedSnapshotID,
       sourceAgentID: "runtime.local",
       targetAgentID: "checker.local",
       kind: .runtimeFill,
@@ -406,7 +406,7 @@ struct HostRuntimeSurfaceTests {
         requesterAgentID: "checker.local",
         reason: "Recover runtime fill",
         query: .init(
-          snapshotID: .init(rawValue: resolvedSnapshotID),
+          snapshotID: resolvedSnapshotID,
           packageKindHint: .runtimeFill
         )
       )
@@ -514,7 +514,7 @@ struct HostRuntimeSurfaceTests {
     #expect(rolesPanel.agentID == "checker.local")
     #expect(rolesPanel.roleCounts[.dispatcher] == 1)
     #expect(rolesPanel.roleStages[.dispatcher] == .delivered)
-    #expect(rolesPanel.latestPackageID == materialize.packageID)
+    #expect(rolesPanel.latestPackageID == materialize.packageID.rawValue)
     #expect(!rolesPanel.summary.contains("CLI"))
     #expect(!rolesPanel.summary.contains("GUI"))
     #expect(controlPanel.projectID == "cmp.local-runtime")
@@ -569,7 +569,7 @@ struct HostRuntimeSurfaceTests {
     #expect(checkerStatusPanel.projectID == "cmp.local-runtime")
     #expect(checkerStatusPanel.agentID == "checker.local")
     #expect(checkerStatusPanel.packageCount >= 1)
-    #expect(checkerStatusPanel.latestPackageID == materialize.packageID)
+    #expect(checkerStatusPanel.latestPackageID == materialize.packageID.rawValue)
     #expect(checkerStatusPanel.latestDispatchStatus == .delivered)
     #expect(checkerStatusPanel.roleStages[.dispatcher] == .delivered)
     #expect(readback.projectSummary.projectID == "cmp.local-runtime")
@@ -594,7 +594,7 @@ struct HostRuntimeSurfaceTests {
       .init(lineageID: .init(rawValue: "lineage.cmp.local-runtime.runtime.local"))
     )
     let deliveryTruth = try await hostAdapters.deliveryTruthStore?.lookup(
-      .init(packageID: .init(rawValue: materialize.packageID))
+      .init(packageID: materialize.packageID)
     ) ?? []
     #expect(runtimeLineage?.summary == "CMP bootstrap lineage runtime.local at depth 0.")
     #expect(deliveryTruth.count == 1)
@@ -663,7 +663,7 @@ struct HostRuntimeSurfaceTests {
         agentID: "runtime.local",
         targetAgentID: "checker.local",
         reason: "Recover package-only historical context",
-        snapshotID: "snapshot.package-only"
+        snapshotID: .init(rawValue: "snapshot.package-only")
       )
     )
 
@@ -671,8 +671,8 @@ struct HostRuntimeSurfaceTests {
     #expect(recovery.foundHistoricalContext)
     #expect(recovery.sourceAgentID == "archivist.local")
     #expect(recovery.targetAgentID == "checker.local")
-    #expect(recovery.snapshotID == "snapshot.package-only")
-    #expect(recovery.packageID == "package.package-only")
+    #expect(recovery.snapshotID == .init(rawValue: "snapshot.package-only"))
+    #expect(recovery.packageID == .init(rawValue: "package.package-only"))
     #expect(recovery.packageKind == .historicalReply)
     #expect(recovery.status == .aligned)
     #expect(recovery.missingProjectionCount == 0)
@@ -730,8 +730,8 @@ struct HostRuntimeSurfaceTests {
     #expect(recovery.recoverySource == .historicalSnapshot)
     #expect(recovery.foundHistoricalContext)
     #expect(recovery.sourceAgentID == "runtime.local")
-    #expect(recovery.snapshotID == "\(descriptor.projectionID.rawValue):checked")
-    #expect(recovery.packageID == "\(descriptor.projectionID.rawValue):checker.local:historicalReply")
+    #expect(recovery.snapshotID == .init(rawValue: "\(descriptor.projectionID.rawValue):checked"))
+    #expect(recovery.packageID == .init(rawValue: "\(descriptor.projectionID.rawValue):checker.local:historicalReply"))
     #expect(recovery.packageKind == .historicalReply)
     #expect(recovery.status == .aligned)
     #expect(recovery.resumableProjectionCount == 1)
@@ -759,7 +759,7 @@ struct HostRuntimeSurfaceTests {
           agentID: "runtime.local",
           targetAgentID: "checker.local",
           reason: "Reject exact snapshot miss",
-          snapshotID: "snapshot.missing"
+          snapshotID: .init(rawValue: "snapshot.missing")
         )
       )
       Issue.record("Recovering an exact snapshot miss should fail instead of materializing a different checked snapshot.")
@@ -783,8 +783,8 @@ struct HostRuntimeSurfaceTests {
       status: .aligned,
       recoverySource: .historicalContext,
       foundHistoricalContext: true,
-      snapshotID: "snapshot.recovery.codec",
-      packageID: "package.recovery.codec",
+      snapshotID: .init(rawValue: "snapshot.recovery.codec"),
+      packageID: .init(rawValue: "package.recovery.codec"),
       packageKind: .historicalReply,
       projectionRecoverySummary: "Projection is resumable.",
       hydratedRecoverySummary: "Hydrated recovery can resume 1 projection(s).",
@@ -1522,7 +1522,7 @@ struct HostRuntimeSurfaceTests {
       .init(
         projectID: "cmp.local-runtime",
         agentID: "runtime.local",
-        packageID: contextPackage.id.rawValue
+        packageID: contextPackage.id
       )
     )
     let storedPackage = try await registry.cmpContextPackageStore?.describe(
@@ -1584,7 +1584,7 @@ struct HostRuntimeSurfaceTests {
         .init(
           projectID: "cmp.local-runtime",
           agentID: "runtime.local",
-          packageID: contextPackage.id.rawValue
+          packageID: contextPackage.id
         )
       )
       Issue.record("Retrying an already dispatched package should fail.")
@@ -1634,7 +1634,7 @@ struct HostRuntimeSurfaceTests {
         .init(
           projectID: "cmp.local-runtime",
           agentID: "runtime.local",
-          packageID: "projection.runtime.local:checker.local:runtimeFill"
+          packageID: .init(rawValue: "projection.runtime.local:checker.local:runtimeFill")
         )
       )
       Issue.record("Retrying a package with corrupted persisted dispatch target metadata should fail.")

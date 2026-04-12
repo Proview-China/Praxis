@@ -1,5 +1,6 @@
 import Foundation
 import PraxisCapabilityContracts
+import PraxisCmpTypes
 import PraxisGoal
 import PraxisCoreTypes
 import PraxisRuntimeFacades
@@ -24,6 +25,15 @@ private func runtimeInterfaceReferenceID(
     return nil
   }
   return PraxisRuntimeInterfaceReferenceID(rawValue: rawValue)
+}
+
+private func runtimeInterfaceReferenceID<ID: PraxisIdentifier>(
+  from identifier: ID?
+) -> PraxisRuntimeInterfaceReferenceID? {
+  guard let identifier else {
+    return nil
+  }
+  return PraxisRuntimeInterfaceReferenceID(rawValue: identifier.rawValue)
 }
 
 private func requireRuntimeInterfaceReferenceIDField(
@@ -752,7 +762,9 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
   }
 
   private func response(from history: PraxisCmpFlowHistorySnapshot) -> PraxisRuntimeInterfaceResponse {
-    .success(
+    let historyReference = runtimeInterfaceReferenceID(from: history.packageID)
+      ?? runtimeInterfaceReferenceID(from: history.snapshotID)
+    return .success(
       snapshot: .init(
         kind: .cmpFlow,
         title: "CMP History \(history.projectID)",
@@ -763,7 +775,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
         .init(
           name: .cmpFlowHistoryRequested,
           detail: history.summary,
-          intentID: runtimeInterfaceReferenceID(from: history.packageID ?? history.snapshotID)
+          intentID: historyReference
         )
       ]
     )
@@ -988,7 +1000,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
           reason: reason,
           lineageID: payload.lineageID,
           branchRef: payload.branchRef,
-          snapshotID: payload.snapshotID?.rawValue,
+          snapshotID: payload.snapshotID.map { .init(rawValue: $0.rawValue) },
           packageKind: payload.packageKind,
           fidelityLabel: payload.fidelityLabel
         )
@@ -1028,7 +1040,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
           runID: payload.runID,
           lineageID: payload.lineageID,
           parentAgentID: payload.parentAgentID,
-          eventIDs: eventIDs.map(\.rawValue),
+          eventIDs: eventIDs.map { .init(rawValue: $0.rawValue) },
           baseRef: payload.baseRef,
           changeSummary: changeSummary,
           syncIntent: payload.syncIntent
@@ -1056,8 +1068,8 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
           projectID: projectID,
           agentID: agentID,
           targetAgentID: targetAgentID,
-          snapshotID: payload.snapshotID?.rawValue,
-          projectionID: payload.projectionID?.rawValue,
+          snapshotID: payload.snapshotID.map { .init(rawValue: $0.rawValue) },
+          projectionID: payload.projectionID.map { .init(rawValue: $0.rawValue) },
           packageKind: payload.packageKind,
           fidelityLabel: payload.fidelityLabel
         )
@@ -1085,7 +1097,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
         .init(
           projectID: projectID,
           agentID: agentID,
-          packageID: packageID.rawValue,
+          packageID: .init(rawValue: packageID.rawValue),
           reason: payload.reason
         )
       )
@@ -1204,7 +1216,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
           sessionID: payload.sessionID,
           scopeLevel: payload.scopeLevel,
           summary: summary,
-          checkedSnapshotRef: checkedSnapshotRef.rawValue,
+          checkedSnapshotRef: .init(rawValue: checkedSnapshotRef.rawValue),
           branchRef: branchRef,
           storageKey: payload.storageKey,
           memoryKind: payload.memoryKind,

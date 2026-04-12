@@ -222,7 +222,7 @@ public final class PraxisIngestMpUseCase: PraxisIngestMpUseCaseProtocol {
           persistedAt: timestamp,
           storageKey: storageKey
         ),
-        checkedSnapshotRef: command.checkedSnapshotRef,
+        checkedSnapshotRef: command.checkedSnapshotRef.rawValue,
         branchRef: command.branchRef,
         scope: loweringService.scopeDescriptor(from: command),
         memoryKind: command.memoryKind,

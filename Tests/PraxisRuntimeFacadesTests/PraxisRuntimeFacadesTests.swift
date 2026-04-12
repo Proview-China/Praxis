@@ -134,7 +134,7 @@ struct PraxisRuntimeFacadesTests {
         projectID: "cmp.local-runtime",
         agentID: "runtime.local",
         sessionID: "cmp.flow.split",
-        eventIDs: ["evt.split.1"],
+        eventIDs: [.init(rawValue: "evt.split.1")],
         changeSummary: "Commit one split-facade event",
         syncIntent: .toParent
       )
@@ -172,9 +172,9 @@ struct PraxisRuntimeFacadesTests {
         projectID: "cmp.local-runtime",
         agentID: "runtime.local",
         contextPackage: PraxisCmpContextPackage(
-          id: .init(rawValue: materialize.packageID),
+          id: materialize.packageID,
           sourceProjectionID: .init(rawValue: "projection.runtime.local"),
-          sourceSnapshotID: .init(rawValue: try #require(resolve.snapshotID)),
+          sourceSnapshotID: try #require(resolve.snapshotID),
           sourceAgentID: "runtime.local",
           targetAgentID: "checker.local",
           kind: .runtimeFill,
@@ -245,13 +245,17 @@ struct PraxisRuntimeFacadesTests {
     #expect(ingest.acceptedEventCount == 1)
     #expect(ingest.nextAction == .commitContextDelta)
     #expect(commit.projectID == "cmp.local-runtime")
-    #expect(!commit.deltaID.isEmpty)
+    #expect(commit.deltaID.rawValue.hasPrefix("delta."))
+    #expect(commit.snapshotCandidateID?.rawValue.isEmpty == false)
     #expect(commit.activeLineStage == .candidateReady)
     #expect(resolve.found)
+    #expect(resolve.snapshotID?.rawValue.isEmpty == false)
     #expect(resolve.qualityLabel == .usable)
     #expect(materialize.packageKind == .runtimeFill)
+    #expect(materialize.packageID.rawValue.contains("checker.local"))
     #expect(dispatch.targetKind == .peer)
     #expect(dispatch.status == .delivered)
+    #expect(dispatch.dispatchID.rawValue.contains(materialize.packageID.rawValue))
     #expect(controlUpdate.executionStyle == .guided)
     #expect(controlUpdate.fallbackPolicy == .registryOnly)
     #expect(controlUpdate.recoveryPreference == .resumeLatest)
@@ -1046,7 +1050,7 @@ struct PraxisRuntimeFacadesTests {
         agentID: "runtime.local",
         sessionID: "mp.session",
         summary: "Host runtime onboarding note",
-        checkedSnapshotRef: "snapshot.mp.1",
+        checkedSnapshotRef: .init(rawValue: "snapshot.mp.1"),
         branchRef: "main",
         observedAt: "2026-04-11T10:00:00Z"
       )

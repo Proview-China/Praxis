@@ -1442,7 +1442,7 @@ struct HostRuntimeInterfaceTests {
     let runtimeInterface = makeStubbedRuntimeInterface(
       cmpFacade: makeStubCmpFacade(
         recoverCmpProject: { command in
-          guard command.snapshotID == "   " else {
+          guard command.snapshotID == .init(rawValue: "   ") else {
             throw PraxisError.invalidInput("recoverCmpProject snapshotID was normalized unexpectedly.")
           }
           throw PraxisError.invalidInput("recoverCmpProject preserved blank snapshotID.")
@@ -1473,10 +1473,10 @@ struct HostRuntimeInterfaceTests {
     let runtimeInterface = makeStubbedRuntimeInterface(
       cmpFacade: makeStubCmpFacade(
         materializeCmpFlow: { command in
-          guard command.snapshotID == "   " else {
+          guard command.snapshotID == .init(rawValue: "   ") else {
             throw PraxisError.invalidInput("materializeCmpFlow snapshotID was normalized unexpectedly.")
           }
-          guard command.projectionID == "\t" else {
+          guard command.projectionID == .init(rawValue: "\t") else {
             throw PraxisError.invalidInput("materializeCmpFlow projectionID was normalized unexpectedly.")
           }
           throw PraxisError.invalidInput("materializeCmpFlow preserved blank continuation references.")
@@ -1676,13 +1676,16 @@ struct HostRuntimeInterfaceTests {
   func runtimeInterfacePreservesOpaqueIncomingReferencesWithoutTrimming() async throws {
     let cmpFacade = makeStubCmpFacade(
       commitCmpFlow: { command in
-        guard command.eventIDs == [" evt.cmp.1 ", "\tevt.cmp.2\t"] else {
+        guard command.eventIDs == [
+          .init(rawValue: " evt.cmp.1 "),
+          .init(rawValue: "\tevt.cmp.2\t"),
+        ] else {
           throw PraxisError.invalidInput("commitCmpFlow eventIDs were normalized unexpectedly.")
         }
         throw PraxisError.invalidInput("commitCmpFlow preserved padded eventIDs.")
       },
       retryCmpDispatch: { command in
-        guard command.packageID == " package.retry " else {
+        guard command.packageID == .init(rawValue: " package.retry ") else {
           throw PraxisError.invalidInput("retryCmpDispatch packageID was normalized unexpectedly.")
         }
         throw PraxisError.invalidInput("retryCmpDispatch preserved padded packageID.")
@@ -1694,7 +1697,7 @@ struct HostRuntimeInterfaceTests {
         inspectionFacade: makeUnexpectedInspectionFacade(),
         mpFacade: makeStubMpFacade(
           ingestMp: { command in
-            guard command.checkedSnapshotRef == " snapshot.mp.runtime " else {
+            guard command.checkedSnapshotRef == .init(rawValue: " snapshot.mp.runtime ") else {
               throw PraxisError.invalidInput("ingestMp checkedSnapshotRef was normalized unexpectedly.")
             }
             throw PraxisError.invalidInput("ingestMp preserved padded checkedSnapshotRef.")
@@ -3517,6 +3520,260 @@ struct HostRuntimeInterfaceTests {
     #expect(decodedRecover == recoverRequest)
     #expect(decodedMaterialize == materializeRequest)
     #expect(decodedIngest == ingestRequest)
+  }
+
+  @Test
+  func runtimeInterfaceMapsOpaqueReferencesIntoTypedCmpAndMpDomainIDs() async throws {
+    let recoverSnapshotID = PraxisCmpSnapshotID(rawValue: "snapshot.runtime.recover")
+    let materializeSnapshotID = PraxisCmpSnapshotID(rawValue: "snapshot.runtime.materialize")
+    let materializeProjectionID = PraxisCmpProjectionID(rawValue: "projection.runtime.materialize")
+    let retryPackageID = PraxisCmpPackageID(rawValue: "package.runtime.retry")
+    let checkedSnapshotRef = PraxisCmpSnapshotID(rawValue: "snapshot.mp.runtime")
+    let committedEventIDs: [PraxisCmpEventID] = [
+      .init(rawValue: "evt.runtime.1"),
+      .init(rawValue: "evt.runtime.2"),
+    ]
+
+    let cmpFacade = makeStubCmpFacade(
+      recoverCmpProject: { command in
+        #expect(command.snapshotID == recoverSnapshotID)
+        return PraxisCmpProjectRecovery(
+          projectID: command.projectID,
+          sourceAgentID: command.agentID,
+          targetAgentID: command.targetAgentID,
+          summary: "Recovered CMP project context.",
+          status: .aligned,
+          recoverySource: .historicalContext,
+          foundHistoricalContext: true,
+          snapshotID: command.snapshotID,
+          packageID: .init(rawValue: "package.runtime.recover"),
+          packageKind: command.packageKind,
+          hydratedRecoverySummary: "Hydrated recovery can resume 1 projection(s).",
+          resumableProjectionCount: 1,
+          missingProjectionCount: 0,
+          issues: []
+        )
+      },
+      commitCmpFlow: { command in
+        #expect(command.eventIDs == committedEventIDs)
+        let delta = PraxisCmpContextDelta(
+          id: .init(rawValue: "delta.runtime.commit"),
+          agentID: command.agentID,
+          eventRefs: command.eventIDs,
+          changeSummary: command.changeSummary,
+          createdAt: "2026-04-13T00:00:00Z",
+          syncIntent: command.syncIntent
+        )
+        return PraxisCmpFlowCommit(
+          projectID: command.projectID,
+          agentID: command.agentID,
+          summary: "Committed CMP flow delta.",
+          result: .init(
+            status: .accepted,
+            delta: delta,
+            snapshotCandidateID: .init(rawValue: "snapshot.runtime.candidate")
+          ),
+          snapshotCandidate: .init(
+            id: .init(rawValue: "snapshot.runtime.candidate"),
+            lineageID: .init(rawValue: "lineage.runtime"),
+            agentID: command.agentID,
+            branchRef: "cmp/runtime.local",
+            commitRef: "commit.runtime",
+            deltaRefs: [delta.id],
+            createdAt: "2026-04-13T00:00:00Z",
+            status: .pending
+          ),
+          activeLine: .init(
+            lineageID: .init(rawValue: "lineage.runtime"),
+            stage: .candidateReady,
+            latestEventID: command.eventIDs.last,
+            deltaID: delta.id,
+            updatedAt: "2026-04-13T00:00:00Z"
+          )
+        )
+      },
+      materializeCmpFlow: { command in
+        #expect(command.snapshotID == materializeSnapshotID)
+        #expect(command.projectionID == materializeProjectionID)
+        let contextPackage = PraxisCmpContextPackage(
+          id: .init(rawValue: "package.runtime.materialize"),
+          sourceProjectionID: try #require(command.projectionID),
+          sourceSnapshotID: command.snapshotID,
+          sourceAgentID: command.agentID,
+          targetAgentID: command.targetAgentID,
+          kind: command.packageKind,
+          packageRef: "context://cmp.local-runtime/projection.runtime.materialize/checker.local/runtimeFill",
+          fidelityLabel: command.fidelityLabel ?? .highSignal,
+          createdAt: "2026-04-13T00:00:00Z",
+          sourceSectionIDs: [.init(rawValue: "projection.runtime.materialize:section")]
+        )
+        return PraxisCmpFlowMaterialize(
+          projectID: command.projectID,
+          agentID: command.agentID,
+          summary: "Materialized CMP flow package.",
+          result: .init(status: .materialized, contextPackage: contextPackage),
+          materializationPlan: .init(
+            projectionID: try #require(command.projectionID),
+            targetAgentID: command.targetAgentID,
+            packageKind: command.packageKind,
+            selectedSectionIDs: [.init(rawValue: "projection.runtime.materialize:section")],
+            summary: "Selected one section."
+          )
+        )
+      },
+      retryCmpDispatch: { command in
+        #expect(command.packageID == retryPackageID)
+        return PraxisCmpFlowDispatch(
+          projectID: command.projectID,
+          agentID: command.agentID,
+          summary: "Retried CMP dispatch.",
+          result: .init(
+            status: .dispatched,
+            receipt: .init(
+              id: .init(rawValue: "dispatch.runtime.retry"),
+              packageID: command.packageID,
+              sourceAgentID: command.agentID,
+              targetAgentID: "checker.local",
+              targetKind: .peer,
+              status: .delivered,
+              createdAt: "2026-04-13T00:00:00Z",
+              deliveredAt: "2026-04-13T00:00:01Z"
+            )
+          ),
+          deliveryPlan: .init(
+            contextPackage: .init(
+              id: command.packageID,
+              sourceProjectionID: .init(rawValue: "projection.runtime.materialize"),
+              sourceSnapshotID: .init(rawValue: "snapshot.runtime.materialize"),
+              sourceAgentID: command.agentID,
+              targetAgentID: "checker.local",
+              kind: .runtimeFill,
+              packageRef: "context://cmp.local-runtime/projection.runtime.materialize/checker.local/runtimeFill",
+              fidelityLabel: .highSignal,
+              createdAt: "2026-04-13T00:00:00Z",
+              sourceSectionIDs: [.init(rawValue: "projection.runtime.materialize:section")]
+            ),
+            instructions: [
+              .init(
+                packageID: command.packageID,
+                sourceAgentID: command.agentID,
+                targetAgentID: "checker.local",
+                targetKind: .peer,
+                reason: command.reason ?? "Retry dispatch.",
+                summary: "Retry dispatch."
+              )
+            ]
+          )
+        )
+      }
+    )
+    let mpFacade = makeStubMpFacade(
+      ingestMp: { command in
+        #expect(command.checkedSnapshotRef == checkedSnapshotRef)
+        return PraxisMpIngestResult(
+          projectID: command.projectID,
+          agentID: command.agentID,
+          sessionID: command.sessionID,
+          summary: "MP ingest stored 1 record update(s).",
+          primaryMemoryID: "memory.primary",
+          storageKey: "memory/primary",
+          updatedMemoryIDs: ["memory.primary"],
+          supersededMemoryIDs: [],
+          staleMemoryIDs: [],
+          decision: .keep,
+          freshnessStatus: .fresh,
+          alignmentStatus: .aligned,
+          issues: []
+        )
+      }
+    )
+    let runtimeInterface = PraxisRuntimeInterfaceSession(
+      runtimeFacade: .init(
+        runFacade: makeUnexpectedRunFacade(),
+        inspectionFacade: makeUnexpectedInspectionFacade(),
+        mpFacade: mpFacade,
+        cmpSessionFacade: cmpFacade.sessionFacade,
+        cmpProjectFacade: cmpFacade.projectFacade,
+        cmpFlowFacade: cmpFacade.flowFacade,
+        cmpRolesFacade: cmpFacade.rolesFacade,
+        cmpControlFacade: cmpFacade.controlFacade,
+        cmpReadbackFacade: cmpFacade.readbackFacade
+      ),
+      blueprint: PraxisRuntimePresentationBridgeModule.bootstrap
+    )
+
+    let recoverResponse = await runtimeInterface.handle(
+      PraxisRuntimeInterfaceRequest.recoverCmpProject(
+        PraxisRuntimeInterfaceRecoverCmpProjectRequestPayload(
+          payloadSummary: "Recover typed snapshot reference",
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          targetAgentID: "checker.local",
+          reason: "Recover from typed reference",
+          snapshotID: runtimeInterfaceReferenceID(recoverSnapshotID.rawValue)
+        )
+      )
+    )
+    let commitResponse = await runtimeInterface.handle(
+      PraxisRuntimeInterfaceRequest.commitCmpFlow(
+        PraxisRuntimeInterfaceCommitCmpFlowRequestPayload(
+          payloadSummary: "Commit typed interface event references",
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          sessionID: "cmp.flow.runtime",
+          eventIDs: committedEventIDs.map { runtimeInterfaceReferenceID($0.rawValue) },
+          changeSummary: "Commit interface flow",
+          syncIntent: PraxisCmpContextSyncIntent.toParent
+        )
+      )
+    )
+    let materializeResponse = await runtimeInterface.handle(
+      PraxisRuntimeInterfaceRequest.materializeCmpFlow(
+        PraxisRuntimeInterfaceMaterializeCmpFlowRequestPayload(
+          payloadSummary: "Materialize typed references",
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          targetAgentID: "checker.local",
+          snapshotID: runtimeInterfaceReferenceID(materializeSnapshotID.rawValue),
+          projectionID: runtimeInterfaceReferenceID(materializeProjectionID.rawValue),
+          packageKind: PraxisCmpContextPackageKind.runtimeFill,
+          fidelityLabel: PraxisCmpContextPackageFidelityLabel.highSignal
+        )
+      )
+    )
+    let retryResponse = await runtimeInterface.handle(
+      PraxisRuntimeInterfaceRequest.retryCmpDispatch(
+        PraxisRuntimeInterfaceRetryCmpDispatchRequestPayload(
+          payloadSummary: "Retry typed dispatch package",
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          packageID: runtimeInterfaceReferenceID(retryPackageID.rawValue)
+        )
+      )
+    )
+    let ingestResponse = await runtimeInterface.handle(
+      PraxisRuntimeInterfaceRequest.ingestMp(
+        PraxisRuntimeInterfaceMpIngestRequestPayload(
+          payloadSummary: "Ingest typed snapshot reference",
+          projectID: "mp.local-runtime",
+          agentID: "runtime.local",
+          sessionID: "mp.session",
+          summary: "Store typed reference memory",
+          checkedSnapshotRef: runtimeInterfaceReferenceID(checkedSnapshotRef.rawValue),
+          branchRef: "main"
+        )
+      )
+    )
+
+    #expect(recoverResponse.status == .success)
+    #expect(recoverResponse.events.first?.intentID == runtimeInterfaceReferenceID("package.runtime.recover"))
+    #expect(commitResponse.status == .success)
+    #expect(commitResponse.events.first?.intentID == runtimeInterfaceReferenceID("delta.runtime.commit"))
+    #expect(materializeResponse.status == .success)
+    #expect(materializeResponse.events.first?.intentID == runtimeInterfaceReferenceID("package.runtime.materialize"))
+    #expect(retryResponse.status == .success)
+    #expect(retryResponse.events.first?.intentID == runtimeInterfaceReferenceID("dispatch.runtime.retry"))
+    #expect(ingestResponse.status == .success)
   }
 
   @Test

@@ -1394,7 +1394,7 @@ private func commitCmpFlow(
     id: .init(rawValue: "delta.\(UUID().uuidString.lowercased())"),
     agentID: command.agentID,
     baseRef: command.baseRef,
-    eventRefs: command.eventIDs.map(PraxisCmpEventID.init(rawValue:)),
+    eventRefs: command.eventIDs,
     changeSummary: command.changeSummary,
     createdAt: createdAt,
     syncIntent: command.syncIntent,
@@ -1668,8 +1668,8 @@ private func materializeCmpFlow(
     projectID: command.projectID,
     agentID: command.agentID,
     lineageID: nil,
-    projectionID: command.projectionID.map(PraxisCmpProjectionID.init(rawValue:)),
-    snapshotID: command.snapshotID.map(PraxisCmpSnapshotID.init(rawValue:)),
+    projectionID: command.projectionID,
+    snapshotID: command.snapshotID,
     dependencies: dependencies
   )
   guard let descriptor else {
@@ -1966,20 +1966,19 @@ private func retryCmpDispatch(
   command: PraxisRetryCmpDispatchCommand,
   dependencies: PraxisDependencyGraph
 ) async throws -> PraxisCmpFlowDispatch {
-  let packageID = PraxisCmpPackageID(rawValue: command.packageID)
   let packageDescriptor = try await cmpProjectPackageDescriptors(
     projectID: command.projectID,
-    packageID: packageID,
+    packageID: command.packageID,
     dependencies: dependencies
   ).first
   guard let packageDescriptor else {
     throw PraxisError.invalidInput(
-      "CMP package was not found for project \(command.projectID) and package \(command.packageID)."
+      "CMP package was not found for project \(command.projectID) and package \(command.packageID.rawValue)."
     )
   }
   guard packageDescriptor.sourceAgentID == command.agentID else {
     throw PraxisError.invalidInput(
-      "CMP dispatch retry requires source agent \(packageDescriptor.sourceAgentID) but received \(command.agentID) for package \(command.packageID)."
+      "CMP dispatch retry requires source agent \(packageDescriptor.sourceAgentID) but received \(command.agentID) for package \(command.packageID.rawValue)."
     )
   }
   let blockedByTapGate = packageDescriptor.metadata["blocked_by_tap_gate"]?.boolValue ?? false
@@ -1991,23 +1990,23 @@ private func retryCmpDispatch(
         blockedByTapGate,
         lastDispatchStatus == .rejected else {
     throw PraxisError.invalidInput(
-      "CMP dispatch retry is not available for package \(command.packageID) with status \(packageDescriptor.status.rawValue)."
+      "CMP dispatch retry is not available for package \(command.packageID.rawValue) with status \(packageDescriptor.status.rawValue)."
     )
   }
   guard let targetKindRaw = cmpPackageMetadataString(packageDescriptor.metadata, key: "dispatch_target_kind") else {
     throw PraxisError.invalidInput(
-      "CMP dispatch retry requires persisted dispatch_target_kind metadata for package \(command.packageID)."
+      "CMP dispatch retry requires persisted dispatch_target_kind metadata for package \(command.packageID.rawValue)."
     )
   }
   guard let targetKind = PraxisCmpDispatchTargetKind(rawValue: targetKindRaw) else {
     throw PraxisError.invalidInput(
-      "CMP dispatch retry received invalid dispatch_target_kind \(targetKindRaw) for package \(command.packageID)."
+      "CMP dispatch retry received invalid dispatch_target_kind \(targetKindRaw) for package \(command.packageID.rawValue)."
     )
   }
 
   let retryReason = command.reason
     ?? cmpPackageMetadataString(packageDescriptor.metadata, key: "dispatch_reason")
-    ?? "Retry dispatch package \(command.packageID) through the neutral flow surface."
+    ?? "Retry dispatch package \(command.packageID.rawValue) through the neutral flow surface."
   let contextPackage = cmpContextPackage(from: packageDescriptor)
   let createdAt = runtimeNow()
   try await appendTapRuntimeEvent(
@@ -2016,7 +2015,7 @@ private func retryCmpDispatch(
     targetAgentID: contextPackage.targetAgentID,
     eventKind: .dispatchRetryRequested,
     capabilityKey: packageDescriptor.metadata["capabilityKey"]?.stringValue,
-    summary: "CMP retry requested for package \(command.packageID) toward \(contextPackage.targetAgentID).",
+    summary: "CMP retry requested for package \(command.packageID.rawValue) toward \(contextPackage.targetAgentID).",
     detail: "targetKind=\(targetKind.rawValue), reason=\(retryReason)",
     createdAt: createdAt,
     metadata: [
@@ -2025,9 +2024,9 @@ private func retryCmpDispatch(
       "outcome": .string(PraxisReviewRoutingOutcome.reviewRequired.rawValue),
       "humanGateState": .string(PraxisHumanGateState.notRequired.rawValue),
       "targetAgentID": .string(contextPackage.targetAgentID),
-      "packageID": .string(command.packageID),
+      "packageID": .string(command.packageID.rawValue),
       "targetKind": .string(targetKind.rawValue),
-      "decisionSummary": .string("Retry requested for package \(command.packageID)."),
+      "decisionSummary": .string("Retry requested for package \(command.packageID.rawValue)."),
     ],
     dependencies: dependencies
   )
@@ -2140,7 +2139,7 @@ private func recoverCmpProject(
 ) async throws -> PraxisCmpProjectRecovery {
   let projectionMaterializer = PraxisProjectionMaterializer()
   let historyQuery = PraxisCmpHistoricalContextQuery(
-    snapshotID: command.snapshotID.map(PraxisCmpSnapshotID.init(rawValue:)),
+    snapshotID: command.snapshotID,
     lineageID: command.lineageID.map(PraxisCmpLineageID.init(rawValue:)),
     branchRef: command.branchRef,
     packageKindHint: command.packageKind
@@ -2173,7 +2172,7 @@ private func recoverCmpProject(
     if recoveredSnapshot == nil {
       if let requestedSnapshotID = command.snapshotID {
         throw PraxisError.invalidInput(
-          "CMP project recover could not resolve requested snapshot \(requestedSnapshotID) for \(command.projectID) without falling back to a different checked snapshot."
+          "CMP project recover could not resolve requested snapshot \(requestedSnapshotID.rawValue) for \(command.projectID) without falling back to a different checked snapshot."
         )
       }
       let resolve = try await resolveCmpFlow(
@@ -2200,7 +2199,7 @@ private func recoverCmpProject(
         projectID: command.projectID,
         agentID: sourceAgentID,
         targetAgentID: command.targetAgentID,
-        snapshotID: snapshot.id.rawValue,
+        snapshotID: snapshot.id,
         projectionID: nil,
         packageKind: command.packageKind,
         fidelityLabel: command.fidelityLabel
@@ -2226,7 +2225,7 @@ private func recoverCmpProject(
     if let snapshotID = command.snapshotID,
        !cmpProjectionDescriptorMatchesSnapshotID(
          descriptor,
-         snapshotID: .init(rawValue: snapshotID)
+         snapshotID: snapshotID
        ) {
       return false
     }
@@ -2312,8 +2311,8 @@ private func recoverCmpProject(
     status: status,
     recoverySource: recoverySource,
     foundHistoricalContext: history.result.found,
-    snapshotID: recoveredSnapshot?.id.rawValue ?? recoveredPackage.sourceSnapshotID?.rawValue,
-    packageID: recoveredPackage.id.rawValue,
+    snapshotID: recoveredSnapshot?.id ?? recoveredPackage.sourceSnapshotID,
+    packageID: recoveredPackage.id,
     packageKind: recoveredPackage.kind,
     projectionRecoverySummary: projectionRecoveryPlan?.summary,
     hydratedRecoverySummary: hydratedRecoverySummary,

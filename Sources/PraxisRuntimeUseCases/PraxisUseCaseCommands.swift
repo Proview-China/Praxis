@@ -475,7 +475,7 @@ public struct PraxisRecoverCmpProjectCommand: Sendable, Equatable, Codable {
   public let reason: String
   public let lineageID: String?
   public let branchRef: String?
-  public let snapshotID: String?
+  public let snapshotID: PraxisCmpSnapshotID?
   public let packageKind: PraxisCmpContextPackageKind
   public let fidelityLabel: PraxisCmpContextPackageFidelityLabel?
 
@@ -486,7 +486,7 @@ public struct PraxisRecoverCmpProjectCommand: Sendable, Equatable, Codable {
     reason: String,
     lineageID: String? = nil,
     branchRef: String? = nil,
-    snapshotID: String? = nil,
+    snapshotID: PraxisCmpSnapshotID? = nil,
     packageKind: PraxisCmpContextPackageKind = .historicalReply,
     fidelityLabel: PraxisCmpContextPackageFidelityLabel? = nil
   ) {
@@ -510,8 +510,8 @@ public struct PraxisCmpProjectRecovery: Sendable, Equatable, Codable {
   public let status: PraxisCmpRecoveryStatus
   public let recoverySource: PraxisCmpRecoverySource
   public let foundHistoricalContext: Bool
-  public let snapshotID: String?
-  public let packageID: String
+  public let snapshotID: PraxisCmpSnapshotID?
+  public let packageID: PraxisCmpPackageID
   public let packageKind: PraxisCmpContextPackageKind
   public let projectionRecoverySummary: String?
   public let hydratedRecoverySummary: String
@@ -527,8 +527,8 @@ public struct PraxisCmpProjectRecovery: Sendable, Equatable, Codable {
     status: PraxisCmpRecoveryStatus,
     recoverySource: PraxisCmpRecoverySource,
     foundHistoricalContext: Bool,
-    snapshotID: String? = nil,
-    packageID: String,
+    snapshotID: PraxisCmpSnapshotID? = nil,
+    packageID: PraxisCmpPackageID,
     packageKind: PraxisCmpContextPackageKind,
     projectionRecoverySummary: String? = nil,
     hydratedRecoverySummary: String,
@@ -629,7 +629,7 @@ public struct PraxisCommitCmpFlowCommand: Sendable, Equatable, Codable {
   public let runID: String?
   public let lineageID: String?
   public let parentAgentID: String?
-  public let eventIDs: [String]
+  public let eventIDs: [PraxisCmpEventID]
   public let baseRef: String?
   public let changeSummary: String
   public let syncIntent: PraxisCmpContextSyncIntent
@@ -641,7 +641,7 @@ public struct PraxisCommitCmpFlowCommand: Sendable, Equatable, Codable {
     runID: String? = nil,
     lineageID: String? = nil,
     parentAgentID: String? = nil,
-    eventIDs: [String],
+    eventIDs: [PraxisCmpEventID],
     baseRef: String? = nil,
     changeSummary: String,
     syncIntent: PraxisCmpContextSyncIntent
@@ -729,8 +729,8 @@ public struct PraxisMaterializeCmpFlowCommand: Sendable, Equatable, Codable {
   public let projectID: String
   public let agentID: String
   public let targetAgentID: String
-  public let snapshotID: String?
-  public let projectionID: String?
+  public let snapshotID: PraxisCmpSnapshotID?
+  public let projectionID: PraxisCmpProjectionID?
   public let packageKind: PraxisCmpContextPackageKind
   public let fidelityLabel: PraxisCmpContextPackageFidelityLabel?
 
@@ -738,8 +738,8 @@ public struct PraxisMaterializeCmpFlowCommand: Sendable, Equatable, Codable {
     projectID: String,
     agentID: String,
     targetAgentID: String,
-    snapshotID: String? = nil,
-    projectionID: String? = nil,
+    snapshotID: PraxisCmpSnapshotID? = nil,
+    projectionID: PraxisCmpProjectionID? = nil,
     packageKind: PraxisCmpContextPackageKind,
     fidelityLabel: PraxisCmpContextPackageFidelityLabel? = nil
   ) {
@@ -800,13 +800,13 @@ public struct PraxisDispatchCmpFlowCommand: Sendable, Equatable, Codable {
 public struct PraxisRetryCmpDispatchCommand: Sendable, Equatable, Codable {
   public let projectID: String
   public let agentID: String
-  public let packageID: String
+  public let packageID: PraxisCmpPackageID
   public let reason: String?
 
   public init(
     projectID: String,
     agentID: String,
-    packageID: String,
+    packageID: PraxisCmpPackageID,
     reason: String? = nil
   ) {
     self.projectID = projectID

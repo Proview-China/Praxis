@@ -273,8 +273,8 @@ public struct PraxisCmpProjectRecoverySnapshot: Sendable, Equatable, Codable {
   public let status: PraxisCmpRecoveryStatus
   public let recoverySource: PraxisCmpRecoverySource
   public let foundHistoricalContext: Bool
-  public let snapshotID: String?
-  public let packageID: String
+  public let snapshotID: PraxisCmpSnapshotID?
+  public let packageID: PraxisCmpPackageID
   public let packageKind: PraxisCmpContextPackageKind
   public let projectionRecoverySummary: String?
   public let hydratedRecoverySummary: String
@@ -290,8 +290,8 @@ public struct PraxisCmpProjectRecoverySnapshot: Sendable, Equatable, Codable {
     status: PraxisCmpRecoveryStatus,
     recoverySource: PraxisCmpRecoverySource,
     foundHistoricalContext: Bool,
-    snapshotID: String?,
-    packageID: String,
+    snapshotID: PraxisCmpSnapshotID?,
+    packageID: PraxisCmpPackageID,
     packageKind: PraxisCmpContextPackageKind,
     projectionRecoverySummary: String? = nil,
     hydratedRecoverySummary: String,
@@ -355,8 +355,8 @@ public struct PraxisCmpFlowCommitSnapshot: Sendable, Equatable, Codable {
   public let summary: String
   public let projectID: String
   public let agentID: String
-  public let deltaID: String
-  public let snapshotCandidateID: String?
+  public let deltaID: PraxisCmpDeltaID
+  public let snapshotCandidateID: PraxisCmpSnapshotID?
   public let activeLineStage: PraxisCmpActiveLineStage
   public let branchRef: String
 
@@ -364,8 +364,8 @@ public struct PraxisCmpFlowCommitSnapshot: Sendable, Equatable, Codable {
     summary: String,
     projectID: String,
     agentID: String,
-    deltaID: String,
-    snapshotCandidateID: String?,
+    deltaID: PraxisCmpDeltaID,
+    snapshotCandidateID: PraxisCmpSnapshotID?,
     activeLineStage: PraxisCmpActiveLineStage,
     branchRef: String
   ) {
@@ -384,7 +384,7 @@ public struct PraxisCmpFlowResolveSnapshot: Sendable, Equatable, Codable {
   public let projectID: String
   public let agentID: String
   public let found: Bool
-  public let snapshotID: String?
+  public let snapshotID: PraxisCmpSnapshotID?
   public let branchRef: String?
   public let qualityLabel: PraxisCmpCheckedSnapshotQualityLabel?
 
@@ -393,7 +393,7 @@ public struct PraxisCmpFlowResolveSnapshot: Sendable, Equatable, Codable {
     projectID: String,
     agentID: String,
     found: Bool,
-    snapshotID: String?,
+    snapshotID: PraxisCmpSnapshotID?,
     branchRef: String?,
     qualityLabel: PraxisCmpCheckedSnapshotQualityLabel?
   ) {
@@ -411,7 +411,7 @@ public struct PraxisCmpFlowMaterializeSnapshot: Sendable, Equatable, Codable {
   public let summary: String
   public let projectID: String
   public let agentID: String
-  public let packageID: String
+  public let packageID: PraxisCmpPackageID
   public let targetAgentID: String
   public let packageKind: PraxisCmpContextPackageKind
   public let selectedSectionCount: Int
@@ -420,7 +420,7 @@ public struct PraxisCmpFlowMaterializeSnapshot: Sendable, Equatable, Codable {
     summary: String,
     projectID: String,
     agentID: String,
-    packageID: String,
+    packageID: PraxisCmpPackageID,
     targetAgentID: String,
     packageKind: PraxisCmpContextPackageKind,
     selectedSectionCount: Int
@@ -439,7 +439,7 @@ public struct PraxisCmpFlowDispatchSnapshot: Sendable, Equatable, Codable {
   public let summary: String
   public let projectID: String
   public let agentID: String
-  public let dispatchID: String
+  public let dispatchID: PraxisCmpDispatchReceiptID
   public let targetAgentID: String
   public let targetKind: PraxisCmpDispatchTargetKind
   public let status: PraxisCmpDispatchStatus
@@ -448,7 +448,7 @@ public struct PraxisCmpFlowDispatchSnapshot: Sendable, Equatable, Codable {
     summary: String,
     projectID: String,
     agentID: String,
-    dispatchID: String,
+    dispatchID: PraxisCmpDispatchReceiptID,
     targetAgentID: String,
     targetKind: PraxisCmpDispatchTargetKind,
     status: PraxisCmpDispatchStatus
@@ -468,16 +468,16 @@ public struct PraxisCmpFlowHistorySnapshot: Sendable, Equatable, Codable {
   public let projectID: String
   public let requesterAgentID: String
   public let found: Bool
-  public let snapshotID: String?
-  public let packageID: String?
+  public let snapshotID: PraxisCmpSnapshotID?
+  public let packageID: PraxisCmpPackageID?
 
   public init(
     summary: String,
     projectID: String,
     requesterAgentID: String,
     found: Bool,
-    snapshotID: String?,
-    packageID: String?
+    snapshotID: PraxisCmpSnapshotID?,
+    packageID: PraxisCmpPackageID?
   ) {
     self.summary = summary
     self.projectID = projectID

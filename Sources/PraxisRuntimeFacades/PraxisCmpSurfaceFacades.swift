@@ -218,8 +218,8 @@ public final class PraxisCmpFlowFacade: Sendable {
       summary: commit.summary,
       projectID: commit.projectID,
       agentID: commit.agentID,
-      deltaID: commit.result.delta.id.rawValue,
-      snapshotCandidateID: commit.result.snapshotCandidateID?.rawValue,
+      deltaID: commit.result.delta.id,
+      snapshotCandidateID: commit.result.snapshotCandidateID,
       activeLineStage: commit.activeLine.stage,
       branchRef: commit.snapshotCandidate.branchRef
     )
@@ -232,7 +232,7 @@ public final class PraxisCmpFlowFacade: Sendable {
       projectID: resolve.projectID,
       agentID: resolve.agentID,
       found: resolve.result.found,
-      snapshotID: resolve.snapshot?.id.rawValue,
+      snapshotID: resolve.snapshot?.id,
       branchRef: resolve.snapshot?.branchRef,
       qualityLabel: resolve.snapshot?.qualityLabel
     )
@@ -244,7 +244,7 @@ public final class PraxisCmpFlowFacade: Sendable {
       summary: materialize.summary,
       projectID: materialize.projectID,
       agentID: materialize.agentID,
-      packageID: materialize.result.contextPackage.id.rawValue,
+      packageID: materialize.result.contextPackage.id,
       targetAgentID: materialize.result.contextPackage.targetAgentID,
       packageKind: materialize.result.contextPackage.kind,
       selectedSectionCount: materialize.materializationPlan.selectedSectionIDs.count
@@ -257,7 +257,7 @@ public final class PraxisCmpFlowFacade: Sendable {
       summary: dispatch.summary,
       projectID: dispatch.projectID,
       agentID: dispatch.agentID,
-      dispatchID: dispatch.result.receipt.id.rawValue,
+      dispatchID: dispatch.result.receipt.id,
       targetAgentID: dispatch.result.receipt.targetAgentID,
       targetKind: dispatch.result.receipt.targetKind,
       status: dispatch.result.receipt.status
@@ -270,7 +270,7 @@ public final class PraxisCmpFlowFacade: Sendable {
       summary: dispatch.summary,
       projectID: dispatch.projectID,
       agentID: dispatch.agentID,
-      dispatchID: dispatch.result.receipt.id.rawValue,
+      dispatchID: dispatch.result.receipt.id,
       targetAgentID: dispatch.result.receipt.targetAgentID,
       targetKind: dispatch.result.receipt.targetKind,
       status: dispatch.result.receipt.status
@@ -284,8 +284,8 @@ public final class PraxisCmpFlowFacade: Sendable {
       projectID: history.projectID,
       requesterAgentID: history.requesterAgentID,
       found: history.result.found,
-      snapshotID: history.result.snapshot?.id.rawValue,
-      packageID: history.result.contextPackage?.id.rawValue
+      snapshotID: history.result.snapshot?.id,
+      packageID: history.result.contextPackage?.id
     )
   }
 }

@@ -224,8 +224,8 @@ struct PraxisRuntimeUseCasesTests {
       status: .aligned,
       recoverySource: .historicalContext,
       foundHistoricalContext: true,
-      snapshotID: "snapshot.recovery.codec",
-      packageID: "package.recovery.codec",
+      snapshotID: .init(rawValue: "snapshot.recovery.codec"),
+      packageID: .init(rawValue: "package.recovery.codec"),
       packageKind: .historicalReply,
       projectionRecoverySummary: "Projection is resumable.",
       hydratedRecoverySummary: "Hydrated recovery can resume 1 projection(s).",
@@ -572,7 +572,7 @@ struct PraxisRuntimeUseCasesTests {
       agentID: "runtime.local",
       sessionID: "mp.session",
       summary: "Host runtime onboarding note",
-      checkedSnapshotRef: "snapshot.mp.1",
+      checkedSnapshotRef: .init(rawValue: "snapshot.mp.1"),
       branchRef: "main"
     )
     let ingestScope = loweringService.scopeDescriptor(from: ingestCommand)
@@ -930,12 +930,13 @@ struct PraxisRuntimeUseCasesTests {
         requiresActiveSync: true
       )
     )
+    let committedEventIDs: [PraxisCmpEventID] = [.init(rawValue: "evt.usecases.1")]
     let commit = try await commitFlowUseCase.execute(
       PraxisCommitCmpFlowCommand(
         projectID: "cmp.local-runtime",
         agentID: "runtime.local",
         sessionID: "cmp.flow.usecases",
-        eventIDs: ["evt.usecases.1"],
+        eventIDs: committedEventIDs,
         changeSummary: "Commit one runtime context event",
         syncIntent: .toParent
       )
@@ -993,7 +994,7 @@ struct PraxisRuntimeUseCasesTests {
     #expect(ingest.loweredSections.isEmpty == false)
     #expect(commit.projectID == "cmp.local-runtime")
     #expect(commit.agentID == "runtime.local")
-    #expect(commit.result.delta.eventRefs.map(\.rawValue) == ["evt.usecases.1"])
+    #expect(commit.result.delta.eventRefs == committedEventIDs)
     #expect(commit.activeLine.stage == .candidateReady)
     #expect(commit.snapshotCandidate.deltaRefs == [commit.result.delta.id])
     #expect(resolve.result.status == .resolved)
@@ -1115,7 +1116,7 @@ struct PraxisRuntimeUseCasesTests {
         .init(
           projectID: "cmp.local-runtime",
           agentID: "runtime.local",
-          packageID: "projection.runtime.local:checker.local:runtimeFill"
+          packageID: .init(rawValue: "projection.runtime.local:checker.local:runtimeFill")
         )
       )
       Issue.record("Expected retryCmpDispatch to reject corrupted persisted dispatch target metadata.")
@@ -1169,7 +1170,7 @@ struct PraxisRuntimeUseCasesTests {
         .init(
           projectID: "cmp.local-runtime",
           agentID: "runtime.local",
-          packageID: "projection.runtime.local:checker.local:runtimeFill"
+          packageID: .init(rawValue: "projection.runtime.local:checker.local:runtimeFill")
         )
       )
       Issue.record("Expected retryCmpDispatch to reject corrupted persisted dispatch status metadata.")
@@ -2518,7 +2519,7 @@ struct PraxisRuntimeUseCasesTests {
         agentID: "runtime.local",
         sessionID: "mp.session",
         summary: "Host runtime onboarding note",
-        checkedSnapshotRef: "snapshot.mp.1",
+        checkedSnapshotRef: .init(rawValue: "snapshot.mp.1"),
         branchRef: "main",
         observedAt: "2026-04-11T10:00:00Z"
       )

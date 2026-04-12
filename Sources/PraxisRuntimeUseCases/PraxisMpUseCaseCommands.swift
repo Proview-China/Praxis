@@ -1,3 +1,4 @@
+import PraxisCmpTypes
 import PraxisMpFiveAgent
 import PraxisMpMemory
 import PraxisMpTypes
@@ -187,7 +188,7 @@ public struct PraxisIngestMpCommand: Sendable, Equatable, Codable {
   public let sessionID: String?
   public let scopeLevel: PraxisMpScopeLevel
   public let summary: String
-  public let checkedSnapshotRef: String
+  public let checkedSnapshotRef: PraxisCmpSnapshotID
   public let branchRef: String
   public let storageKey: String?
   public let memoryKind: PraxisMpMemoryKind
@@ -204,7 +205,7 @@ public struct PraxisIngestMpCommand: Sendable, Equatable, Codable {
     sessionID: String? = nil,
     scopeLevel: PraxisMpScopeLevel = .agentIsolated,
     summary: String,
-    checkedSnapshotRef: String,
+    checkedSnapshotRef: PraxisCmpSnapshotID,
     branchRef: String,
     storageKey: String? = nil,
     memoryKind: PraxisMpMemoryKind = .semantic,
