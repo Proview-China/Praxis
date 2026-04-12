@@ -1820,7 +1820,7 @@ private func dispatchCmpFlow(
       projectID: command.projectID,
       agentID: command.agentID,
       targetAgentID: command.contextPackage.targetAgentID,
-      eventKind: "dispatch_blocked",
+      eventKind: .dispatchBlocked,
       capabilityKey: pendingApprovals.first?.capabilityKey,
       summary: gateReason,
       detail: "topic=\(topicName), autoDispatch=\(autoDispatchEnabled), pendingApprovalCount=\(pendingApprovals.count)",
@@ -1936,7 +1936,7 @@ private func dispatchCmpFlow(
     projectID: command.projectID,
     agentID: command.agentID,
     targetAgentID: command.contextPackage.targetAgentID,
-    eventKind: "dispatch_released",
+    eventKind: .dispatchReleased,
     summary: "CMP dispatch released package \(command.contextPackage.id.rawValue) toward \(receipt.targetAgentID).",
     detail: "topic=\(topicName), status=\(receipt.status.rawValue)",
     createdAt: publishedAt?.acceptedAt ?? createdAt,
@@ -2012,7 +2012,7 @@ private func retryCmpDispatch(
     projectID: command.projectID,
     agentID: command.agentID,
     targetAgentID: contextPackage.targetAgentID,
-    eventKind: "dispatch_retry_requested",
+    eventKind: .dispatchRetryRequested,
     capabilityKey: packageDescriptor.metadata["capabilityKey"]?.stringValue,
     summary: "CMP retry requested for package \(command.packageID) toward \(contextPackage.targetAgentID).",
     detail: "targetKind=\(targetKind.rawValue), reason=\(retryReason)",
@@ -2628,14 +2628,14 @@ private func cmpResolvedPeerApprovalDescriptor(
 
 private func cmpPeerApprovalResolution(
   _ decision: PraxisCmpPeerApprovalDecision
-) -> (outcome: PraxisCmpPeerApprovalOutcome, humanGateState: PraxisHumanGateState, eventKind: String) {
+) -> (outcome: PraxisCmpPeerApprovalOutcome, humanGateState: PraxisHumanGateState, eventKind: PraxisTapRuntimeEventKind) {
   switch decision {
   case .approve:
-    return (.approvedByHuman, .approved, "peer_approval_approved")
+    return (.approvedByHuman, .approved, .peerApprovalApproved)
   case .reject:
-    return (.rejectedByHuman, .rejected, "peer_approval_rejected")
+    return (.rejectedByHuman, .rejected, .peerApprovalRejected)
   case .release:
-    return (.gateReleased, .approved, "gate_released")
+    return (.gateReleased, .approved, .gateReleased)
   }
 }
 
@@ -2787,7 +2787,7 @@ private func tapHistoryEntries(
 
 private func tapHistoryLegacyRequestedTier(for record: PraxisTapRuntimeEventRecord) -> PraxisTapCapabilityTier? {
   switch record.eventKind {
-  case "control_updated", "dispatch_blocked", "dispatch_released", "dispatch_retry_requested":
+  case .controlUpdated, .dispatchBlocked, .dispatchReleased, .dispatchRetryRequested:
     return .b0
   default:
     return nil
@@ -2796,9 +2796,9 @@ private func tapHistoryLegacyRequestedTier(for record: PraxisTapRuntimeEventReco
 
 private func tapHistoryLegacyHumanGateState(for record: PraxisTapRuntimeEventRecord) -> PraxisHumanGateState? {
   switch record.eventKind {
-  case "control_updated", "dispatch_released", "dispatch_retry_requested":
+  case .controlUpdated, .dispatchReleased, .dispatchRetryRequested:
     return .notRequired
-  case "dispatch_blocked":
+  case .dispatchBlocked:
     let pendingApprovalCount = Int(record.metadata["pendingApprovalCount"]?.numberValue ?? 0)
     return pendingApprovalCount > 0 ? .waitingApproval : .notRequired
   default:
@@ -2811,11 +2811,11 @@ private func tapHistoryLegacyRoute(
   humanGateState: PraxisHumanGateState
 ) -> PraxisReviewerRoute? {
   switch record.eventKind {
-  case "control_updated", "dispatch_released":
+  case .controlUpdated, .dispatchReleased:
     return .autoApprove
-  case "dispatch_retry_requested":
+  case .dispatchRetryRequested:
     return .toolReview
-  case "dispatch_blocked":
+  case .dispatchBlocked:
     return humanGateState == .waitingApproval ? .humanReview : .toolReview
   default:
     return nil
@@ -2827,13 +2827,13 @@ private func tapHistoryLegacyOutcome(
   humanGateState: PraxisHumanGateState
 ) -> PraxisCmpPeerApprovalOutcome? {
   switch record.eventKind {
-  case "control_updated":
+  case .controlUpdated:
     return .baselineApproved
-  case "dispatch_released":
+  case .dispatchReleased:
     return .gateReleased
-  case "dispatch_retry_requested":
+  case .dispatchRetryRequested:
     return .reviewRequired
-  case "dispatch_blocked":
+  case .dispatchBlocked:
     return humanGateState == .waitingApproval ? .escalatedToHuman : .reviewRequired
   default:
     return nil
@@ -2912,11 +2912,7 @@ private func tapHistoryOutcome(
     if let outcome = PraxisCmpPeerApprovalOutcome(rawValue: rawValue) {
       return outcome
     }
-    if [
-      "dispatch_blocked",
-      "dispatch_released",
-      "dispatch_retry_requested",
-    ].contains(rawValue),
+    if rawValue == record.eventKind.rawValue,
       let legacyOutcome = tapHistoryLegacyOutcome(for: record, humanGateState: humanGateState)
     {
       return legacyOutcome
@@ -2938,7 +2934,7 @@ private func tapHistoryEntries(
     return PraxisTapHistoryEntry(
       agentID: record.agentID,
       targetAgentID: record.targetAgentID ?? record.metadata["targetAgentID"]?.stringValue ?? record.agentID,
-      capabilityKey: record.capabilityKey ?? record.metadata["capabilityKey"]?.stringValue ?? record.eventKind,
+      capabilityKey: record.capabilityKey ?? record.metadata["capabilityKey"]?.stringValue ?? record.eventKind.rawValue,
       requestedTier: try tapHistoryRequestedTier(from: record),
       route: try tapHistoryRoute(from: record, humanGateState: humanGateState),
       outcome: try tapHistoryOutcome(from: record, humanGateState: humanGateState),
@@ -2953,7 +2949,7 @@ private func appendTapRuntimeEvent(
   projectID: String,
   agentID: String,
   targetAgentID: String? = nil,
-  eventKind: String,
+  eventKind: PraxisTapRuntimeEventKind,
   capabilityKey: String? = nil,
   summary: String,
   detail: String? = nil,
@@ -2966,7 +2962,7 @@ private func appendTapRuntimeEvent(
   }
   _ = try await store.append(
     .init(
-      eventID: "tap.\(eventKind).\(UUID().uuidString.lowercased())",
+      eventID: "tap.\(eventKind.rawValue).\(UUID().uuidString.lowercased())",
       projectID: projectID,
       agentID: agentID,
       targetAgentID: targetAgentID,
@@ -3121,7 +3117,7 @@ private func requestCmpPeerApproval(
     projectID: command.projectID,
     agentID: command.agentID,
     targetAgentID: command.targetAgentID,
-    eventKind: "peer_approval_requested",
+    eventKind: .peerApprovalRequested,
     capabilityKey: capabilityKey,
     summary: command.summary,
     detail: routing.decision.summary,
@@ -3129,20 +3125,20 @@ private func requestCmpPeerApproval(
     metadata: eventMetadata,
     dependencies: dependencies
   )
-  let followUpEventKind: String
+  let followUpEventKind: PraxisTapRuntimeEventKind
   let followUpSummary: String
   switch humanGateState {
   case .approved:
-    followUpEventKind = "gate_released"
+    followUpEventKind = .gateReleased
     followUpSummary = "TAP released the gate for \(capabilityKey) without requiring additional human intervention."
   case .rejected:
-    followUpEventKind = "peer_approval_rejected"
+    followUpEventKind = .peerApprovalRejected
     followUpSummary = "TAP rejected \(capabilityKey) for \(command.targetAgentID) under the current risk policy."
   case .waitingApproval:
-    followUpEventKind = "peer_approval_waiting"
+    followUpEventKind = .peerApprovalWaiting
     followUpSummary = "TAP is waiting for human approval before \(command.targetAgentID) can use \(capabilityKey)."
   case .notRequired:
-    followUpEventKind = "gate_released"
+    followUpEventKind = .gateReleased
     followUpSummary = "TAP determined that no additional gate is required for \(capabilityKey)."
   }
   try await appendTapRuntimeEvent(
@@ -3637,7 +3633,7 @@ private func updateCmpControl(
     projectID: command.projectID,
     agentID: command.agentID ?? "project.default",
     targetAgentID: command.agentID,
-    eventKind: "control_updated",
+    eventKind: .controlUpdated,
     summary: "CMP control updated TAP mode \(cmpTapMode(for: resolvedControl.mode).rawValue) and automation gates for \(command.agentID ?? "project.default").",
     detail: "autoDispatch=\(resolvedControl.automation["autoDispatch"] ?? true), mode=\(resolvedControl.mode.rawValue), executionStyle=\(resolvedControl.executionStyle.rawValue)",
     createdAt: updatedAt,

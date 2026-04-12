@@ -1816,7 +1816,7 @@ struct PraxisRuntimeUseCasesTests {
           projectID: "cmp.local-runtime",
           agentID: "runtime.local",
           targetAgentID: "checker.local",
-          eventKind: "peer_approval_requested",
+          eventKind: .peerApprovalRequested,
           capabilityKey: "tool.git",
           summary: "Corrupted TAP \(fieldName)",
           createdAt: "2026-04-12T00:00:00Z",
@@ -1838,6 +1838,92 @@ struct PraxisRuntimeUseCasesTests {
       } catch {
         Issue.record("Expected PraxisError.invalidInput, got \(error).")
       }
+    }
+  }
+
+  @Test
+  func tapHistoryReadbackMapsLegacyEventKindMetadataThroughTypedEventKind() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-runtime-usecases-legacy-tap-history-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+    let dependencies = try makeDependencies(hostAdapters: registry)
+    let readbackTapHistoryUseCase = PraxisReadbackTapHistoryUseCase(dependencies: dependencies)
+
+    _ = try await registry.tapRuntimeEventStore?.append(
+      PraxisTapRuntimeEventRecord(
+        eventID: "tap.legacy.dispatch-blocked",
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        eventKind: .dispatchBlocked,
+        summary: "Dispatch blocked by legacy gate state",
+        createdAt: "2026-04-12T00:00:00Z",
+        metadata: [
+          "requestedTier": .string(PraxisTapCapabilityTier.b0.rawValue),
+          "route": .string("tapBridge"),
+          "outcome": .string(PraxisTapRuntimeEventKind.dispatchBlocked.rawValue),
+          "humanGateState": .string(PraxisHumanGateState.waitingApproval.rawValue),
+        ]
+      )
+    )
+
+    let history = try await readbackTapHistoryUseCase.execute(
+      PraxisReadbackTapHistoryCommand(projectID: "cmp.local-runtime", agentID: "checker.local", limit: 10)
+    )
+
+    #expect(history.entries.count == 1)
+    #expect(history.entries.first?.capabilityKey == PraxisTapRuntimeEventKind.dispatchBlocked.rawValue)
+    #expect(history.entries.first?.route == .humanReview)
+    #expect(history.entries.first?.outcome == .escalatedToHuman)
+  }
+
+  @Test
+  func tapHistoryReadbackRejectsMismatchedLegacyOutcomeEventKindRawValue() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent(
+        "praxis-runtime-usecases-legacy-tap-history-outcome-mismatch-\(UUID().uuidString)",
+        isDirectory: true
+      )
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+    let dependencies = try makeDependencies(hostAdapters: registry)
+    let readbackTapHistoryUseCase = PraxisReadbackTapHistoryUseCase(dependencies: dependencies)
+
+    _ = try await registry.tapRuntimeEventStore?.append(
+      PraxisTapRuntimeEventRecord(
+        eventID: "tap.legacy.dispatch-mismatch",
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        eventKind: .dispatchBlocked,
+        summary: "Dispatch blocked with mismatched legacy outcome raw value",
+        createdAt: "2026-04-12T00:00:00Z",
+        metadata: [
+          "requestedTier": .string(PraxisTapCapabilityTier.b0.rawValue),
+          "route": .string("tapBridge"),
+          "outcome": .string(PraxisTapRuntimeEventKind.dispatchReleased.rawValue),
+          "humanGateState": .string(PraxisHumanGateState.waitingApproval.rawValue),
+        ]
+      )
+    )
+
+    do {
+      _ = try await readbackTapHistoryUseCase.execute(
+        PraxisReadbackTapHistoryCommand(projectID: "cmp.local-runtime", agentID: "checker.local", limit: 10)
+      )
+      Issue.record("Expected invalidInput when legacy TAP outcome raw value does not match the typed event kind.")
+    } catch let error as PraxisError {
+      guard case let .invalidInput(message) = error else {
+        Issue.record("Expected invalidInput, got \(error).")
+        return
+      }
+      #expect(message.contains("outcome"))
+      #expect(message.contains(PraxisTapRuntimeEventKind.dispatchReleased.rawValue))
+    } catch {
+      Issue.record("Expected PraxisError.invalidInput, got \(error).")
     }
   }
 

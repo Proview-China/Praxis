@@ -1270,7 +1270,7 @@ public actor PraxisLocalTapRuntimeEventStore: PraxisTapRuntimeEventStoreContract
       try localSQLiteBindText(record.projectID, at: 2, in: statement, database: database)
       try localSQLiteBindText(record.agentID, at: 3, in: statement, database: database)
       try localSQLiteBindText(record.targetAgentID, at: 4, in: statement, database: database)
-      try localSQLiteBindText(record.eventKind, at: 5, in: statement, database: database)
+      try localSQLiteBindText(record.eventKind.rawValue, at: 5, in: statement, database: database)
       try localSQLiteBindText(record.capabilityKey, at: 6, in: statement, database: database)
       try localSQLiteBindText(record.createdAt, at: 7, in: statement, database: database)
       try localSQLiteBindText(recordJSON, at: 8, in: statement, database: database)

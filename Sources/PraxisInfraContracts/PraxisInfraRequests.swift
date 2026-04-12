@@ -379,12 +379,25 @@ public struct PraxisCmpPeerApprovalStoreWriteReceipt: Sendable, Equatable, Codab
 }
 
 /// Captures a single append-only TAP runtime event for audit and readback flows.
+public enum PraxisTapRuntimeEventKind: String, CaseIterable, Sendable, Codable {
+  case peerApprovalRequested = "peer_approval_requested"
+  case peerApprovalWaiting = "peer_approval_waiting"
+  case peerApprovalApproved = "peer_approval_approved"
+  case peerApprovalRejected = "peer_approval_rejected"
+  case gateReleased = "gate_released"
+  case dispatchBlocked = "dispatch_blocked"
+  case dispatchReleased = "dispatch_released"
+  case dispatchRetryRequested = "dispatch_retry_requested"
+  case controlUpdated = "control_updated"
+}
+
+/// Captures a single append-only TAP runtime event for audit and readback flows.
 public struct PraxisTapRuntimeEventRecord: Sendable, Equatable, Codable {
   public let eventID: String
   public let projectID: String
   public let agentID: String
   public let targetAgentID: String?
-  public let eventKind: String
+  public let eventKind: PraxisTapRuntimeEventKind
   public let capabilityKey: String?
   public let summary: String
   public let detail: String?
@@ -396,7 +409,7 @@ public struct PraxisTapRuntimeEventRecord: Sendable, Equatable, Codable {
     projectID: String,
     agentID: String,
     targetAgentID: String? = nil,
-    eventKind: String,
+    eventKind: PraxisTapRuntimeEventKind,
     capabilityKey: String? = nil,
     summary: String,
     detail: String? = nil,

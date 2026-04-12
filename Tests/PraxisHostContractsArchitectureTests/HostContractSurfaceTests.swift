@@ -96,7 +96,7 @@ struct HostContractSurfaceTests {
       projectID: "project-1",
       agentID: "agent-1",
       targetAgentID: "agent-2",
-      eventKind: "peer_approval_requested",
+      eventKind: .peerApprovalRequested,
       capabilityKey: "tool.git",
       summary: "Request peer approval for tool.git",
       detail: "Capability tool.git requires human approval in restricted mode.",
@@ -114,7 +114,7 @@ struct HostContractSurfaceTests {
     #expect(controlDescriptor.automation["autoDispatch"] == false)
     #expect(peerApprovalDescriptor.tapMode == "restricted")
     #expect(peerApprovalDescriptor.humanGateState == "waitingApproval")
-    #expect(tapRuntimeEvent.eventKind == "peer_approval_requested")
+    #expect(tapRuntimeEvent.eventKind == .peerApprovalRequested)
     #expect(tapRuntimeEvent.metadata["route"] == .string("humanReview"))
   }
 

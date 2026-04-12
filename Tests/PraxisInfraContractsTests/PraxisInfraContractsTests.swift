@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import PraxisCheckpoint
 @testable import PraxisCmpTypes
@@ -314,7 +315,7 @@ struct PraxisInfraContractsTests {
         projectID: "project-1",
         agentID: "agent-1",
         targetAgentID: "agent-2",
-        eventKind: "peer_approval_requested",
+        eventKind: .peerApprovalRequested,
         capabilityKey: "tool.git",
         summary: "Peer approval requested",
         detail: "tool.git requires human review",
@@ -333,7 +334,7 @@ struct PraxisInfraContractsTests {
         projectID: "project-1",
         agentID: "agent-3",
         targetAgentID: "agent-2",
-        eventKind: "peer_approval_requested",
+        eventKind: .peerApprovalRequested,
         capabilityKey: "tool.shell",
         summary: "Peer approval requested",
         detail: "tool.shell requires human review",
@@ -347,6 +348,57 @@ struct PraxisInfraContractsTests {
     #expect(queriedTapEvents.count == 2)
     #expect(queriedTapEvents.first?.eventID == "tap-event-2")
     #expect(queriedTapEvents.last?.capabilityKey == "tool.git")
+  }
+
+  @Test
+  func tapRuntimeEventRecordCodecRoundTripsTypedEventKindAsStableRawValue() throws {
+    let record = PraxisTapRuntimeEventRecord(
+      eventID: "tap-event-1",
+      projectID: "project-1",
+      agentID: "agent-1",
+      targetAgentID: "agent-2",
+      eventKind: .peerApprovalRequested,
+      capabilityKey: "tool.git",
+      summary: "Peer approval requested",
+      detail: "tool.git requires human review",
+      createdAt: "2026-04-10T20:10:04Z",
+      metadata: ["route": .string("humanReview")]
+    )
+
+    let encodedData = try JSONEncoder().encode(record)
+    let encodedString = try #require(String(data: encodedData, encoding: .utf8))
+    let decodedRecord = try JSONDecoder().decode(PraxisTapRuntimeEventRecord.self, from: encodedData)
+
+    #expect(encodedString.contains(#""eventKind":"peer_approval_requested""#))
+    #expect(decodedRecord.eventKind == .peerApprovalRequested)
+  }
+
+  @Test
+  func tapRuntimeEventRecordDecodeRejectsUnknownEventKindRawValue() throws {
+    let data = try JSONSerialization.data(
+      withJSONObject: [
+        "eventID": "tap-event-1",
+        "projectID": "project-1",
+        "agentID": "agent-1",
+        "targetAgentID": "agent-2",
+        "eventKind": "not_a_real_tap_runtime_event_kind",
+        "capabilityKey": "tool.git",
+        "summary": "Peer approval requested",
+        "createdAt": "2026-04-10T20:10:04Z",
+        "metadata": [:],
+      ]
+    )
+
+    do {
+      _ = try JSONDecoder().decode(PraxisTapRuntimeEventRecord.self, from: data)
+      Issue.record("Expected dataCorrupted for unknown eventKind raw value.")
+    } catch let error as DecodingError {
+      guard case let .dataCorrupted(context) = error else {
+        Issue.record("Expected dataCorrupted for unknown eventKind raw value, got \(error).")
+        return
+      }
+      #expect(context.codingPath.map(\.stringValue).contains("eventKind"))
+    }
   }
 
   @Test
