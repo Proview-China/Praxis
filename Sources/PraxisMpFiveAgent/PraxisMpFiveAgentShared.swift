@@ -137,12 +137,40 @@ public enum PraxisMpRoleTelemetryStage: String, Sendable, Equatable, Codable, Ca
       self = .assembleBundle
     }
   }
+
+  public var role: PraxisMpFiveAgentRole {
+    switch self {
+    case .capture, .chunkCandidate, .emitCandidate:
+      .icma
+    case .acceptCandidate, .rewriteDraft, .handoffChecker:
+      .iterator
+    case .inspectCandidate, .judgeAlignment, .emitDecision:
+      .checker
+    case .materialize, .updateLineage, .persistTruth:
+      .dbagent
+    case .search, .rerank, .assembleBundle:
+      .dispatcher
+    }
+  }
 }
 
 public struct PraxisMpRoleStageMap: Sendable, Equatable, Codable {
+  public enum ValidationError: Error, Equatable {
+    case incompatibleStage(role: PraxisMpFiveAgentRole, stage: PraxisMpRoleTelemetryStage)
+  }
+
   public let stages: [PraxisMpFiveAgentRole: PraxisMpRoleTelemetryStage]
 
   public init(stages: [PraxisMpFiveAgentRole: PraxisMpRoleTelemetryStage]) {
+    precondition(
+      (try? Self.validate(stages: stages)) != nil,
+      "Invalid MP role-stage combination."
+    )
+    self.stages = stages
+  }
+
+  public init(validating stages: [PraxisMpFiveAgentRole: PraxisMpRoleTelemetryStage]) throws {
+    try Self.validate(stages: stages)
     self.stages = stages
   }
 
@@ -179,10 +207,11 @@ public struct PraxisMpRoleStageMap: Sendable, Equatable, Codable {
       stages[role] = stage
     }
 
-    self.init(stages: stages)
+    try self.init(validating: stages)
   }
 
   public func encode(to encoder: Encoder) throws {
+    try Self.validate(stages: stages)
     var container = encoder.container(keyedBy: DynamicCodingKey.self)
     for role in stages.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
       let key = DynamicCodingKey(stringValue: role.rawValue)!
@@ -202,6 +231,12 @@ public struct PraxisMpRoleStageMap: Sendable, Equatable, Codable {
     init?(intValue: Int) {
       self.stringValue = String(intValue)
       self.intValue = intValue
+    }
+  }
+
+  private static func validate(stages: [PraxisMpFiveAgentRole: PraxisMpRoleTelemetryStage]) throws {
+    for (role, stage) in stages where stage.role != role {
+      throw ValidationError.incompatibleStage(role: role, stage: stage)
     }
   }
 }

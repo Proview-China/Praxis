@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 import PraxisMpFiveAgent
 import PraxisMpMemory
@@ -5,6 +6,26 @@ import PraxisMpSearch
 import PraxisMpTypes
 
 struct PraxisMpFiveAgentTests {
+  @Test
+  func roleStageMapRejectsManualInvalidRoleStageCombination() throws {
+    #expect(throws: PraxisMpRoleStageMap.ValidationError.self) {
+      _ = try PraxisMpRoleStageMap(validating: [.dispatcher: .capture])
+    }
+  }
+
+  @Test
+  func roleStageMapRoundTripsOnlyValidRoleStageCombinations() throws {
+    let map = try PraxisMpRoleStageMap(validating: [.dispatcher: .assembleBundle])
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+
+    let encoded = try #require(String(data: try encoder.encode(map), encoding: .utf8))
+    let decoded = try JSONDecoder().decode(PraxisMpRoleStageMap.self, from: Data(encoded.utf8))
+
+    #expect(encoded == #"{"dispatcher":"assemble_bundle"}"#)
+    #expect(decoded[.dispatcher] == .assembleBundle)
+  }
+
   @Test
   func fiveAgentRuntimeIngestsAndResolvesFresherMemoryFirst() async {
     let runtime = PraxisMpFiveAgentRuntime()
