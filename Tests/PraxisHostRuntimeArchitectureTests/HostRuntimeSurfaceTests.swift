@@ -183,14 +183,50 @@ struct HostRuntimeSurfaceTests {
     let smoke = PraxisRuntimeSmokeResult(
       summary: "local runtime mostly ready",
       checks: [
-        .init(id: "cmp.host.sqlite", gate: "host", status: .ready, summary: "SQLite host profile ready"),
-        .init(id: "cmp.host.git", gate: "host", status: .degraded, summary: "git may still need first-run installation")
+        .init(id: "cmp.host.sqlite", gate: .host, status: .ready, summary: "SQLite host profile ready"),
+        .init(id: "cmp.host.git", gate: .host, status: .degraded, summary: "git may still need first-run installation")
       ]
     )
 
     #expect(runtimeSummary.hostProfile.executionStyle == .localFirst)
     #expect(runtimeSummary.componentStatuses[.gitExecutor] == .degraded)
     #expect(smoke.checks.count == 2)
+    #expect(smoke.checks.allSatisfy { $0.gate == .host })
+  }
+
+  @Test
+  func runtimeSmokeSurfaceModelsRoundTripTypedGateAndStatusAndRejectUnknownValues() throws {
+    let smoke = PraxisRuntimeSmokeResult(
+      summary: "local runtime mostly ready",
+      checks: [
+        .init(
+          id: "mp.browser.grounding",
+          gate: .browserGrounding,
+          status: .missing,
+          summary: "Browser grounding collector is absent."
+        )
+      ]
+    )
+
+    let encoded = try encodeTestJSON(smoke)
+    let decoded = try decodeTestJSON(PraxisRuntimeSmokeResult.self, from: encoded)
+
+    #expect(encoded.contains(#""gate":"browser-grounding""#))
+    #expect(encoded.contains(#""status":"missing""#))
+    #expect(decoded.checks.first?.gate == .browserGrounding)
+    #expect(decoded.checks.first?.status == .missing)
+
+    let invalidGateJSON =
+      #"{"checks":[{"gate":"broken-gate","id":"mp.browser.grounding","status":"ready","summary":"Browser grounding collector is ready."}],"summary":"local runtime mostly ready"}"#
+    let invalidStatusJSON =
+      #"{"checks":[{"gate":"browser-grounding","id":"mp.browser.grounding","status":"broken-status","summary":"Browser grounding collector is ready."}],"summary":"local runtime mostly ready"}"#
+
+    #expect(throws: DecodingError.self) {
+      try decodeTestJSON(PraxisRuntimeSmokeResult.self, from: invalidGateJSON)
+    }
+    #expect(throws: DecodingError.self) {
+      try decodeTestJSON(PraxisRuntimeSmokeResult.self, from: invalidStatusJSON)
+    }
   }
 
   @Test

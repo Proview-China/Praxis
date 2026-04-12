@@ -946,7 +946,9 @@ struct PraxisRuntimeFacadesTests {
     #expect(readback.scopeBreakdown[PraxisMpScopeLevel.project.rawValue] == 1)
     #expect(smoke.projectID == "mp.local-runtime")
     #expect(smoke.smokeResult.checks.count == 4)
+    #expect(smoke.smokeResult.checks.map(\.gate).contains(.browserGrounding))
     #expect(smoke.smokeResult.checks.map(\.status).contains(.ready))
+    #expect(smoke.smokeResult.checks.first { $0.gate == .semanticSearch }?.status == .ready)
   }
 
   @Test

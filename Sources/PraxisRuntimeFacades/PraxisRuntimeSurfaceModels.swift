@@ -1,4 +1,5 @@
 import PraxisCmpTypes
+import PraxisCoreTypes
 
 public enum PraxisTruthLayerStatus: String, Sendable, Codable {
   case ready
@@ -52,11 +53,16 @@ public struct PraxisCmpProjectLocalRuntimeSummary: Sendable, Equatable, Codable 
 
 public struct PraxisRuntimeSmokeCheck: Sendable, Equatable, Codable, Identifiable {
   public let id: String
-  public let gate: String
-  public let status: PraxisTruthLayerStatus
+  public let gate: PraxisRuntimeSmokeGate
+  public let status: PraxisRuntimeTruthLayerStatus
   public let summary: String
 
-  public init(id: String, gate: String, status: PraxisTruthLayerStatus, summary: String) {
+  public init(
+    id: String,
+    gate: PraxisRuntimeSmokeGate,
+    status: PraxisRuntimeTruthLayerStatus,
+    summary: String
+  ) {
     self.id = id
     self.gate = gate
     self.status = status

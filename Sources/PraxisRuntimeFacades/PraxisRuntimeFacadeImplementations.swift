@@ -66,7 +66,7 @@ private func mapSmokeResult(_ checks: [PraxisRuntimeSmokeCheckRecord], summary: 
       PraxisRuntimeSmokeCheck(
         id: $0.id,
         gate: $0.gate,
-        status: PraxisTruthLayerStatus(rawValue: $0.status) ?? .failed,
+        status: $0.status,
         summary: $0.summary
       )
     }

@@ -6,6 +6,7 @@ import PraxisCmpGitModel
 import PraxisCmpMqModel
 import PraxisCmpSections
 import PraxisCmpTypes
+import PraxisCoreTypes
 import PraxisGoal
 import PraxisRun
 import PraxisTapTypes
@@ -1335,11 +1336,16 @@ public struct PraxisCmpStatusReadback: Sendable, Equatable, Codable {
 
 public struct PraxisRuntimeSmokeCheckRecord: Sendable, Equatable, Codable, Identifiable {
   public let id: String
-  public let gate: String
-  public let status: String
+  public let gate: PraxisRuntimeSmokeGate
+  public let status: PraxisRuntimeTruthLayerStatus
   public let summary: String
 
-  public init(id: String, gate: String, status: String, summary: String) {
+  public init(
+    id: String,
+    gate: PraxisRuntimeSmokeGate,
+    status: PraxisRuntimeTruthLayerStatus,
+    summary: String
+  ) {
     self.id = id
     self.gate = gate
     self.status = status

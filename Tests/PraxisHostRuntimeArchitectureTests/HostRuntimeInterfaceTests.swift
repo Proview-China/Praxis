@@ -1762,10 +1762,10 @@ struct HostRuntimeInterfaceTests {
             projectID: command.projectID,
             summary: "MP smoke checks passed for semantic memory, semantic search, provider inference, and browser grounding.",
             checks: [
-              .init(id: "semantic_memory_store", gate: "semantic_memory_store", status: "ready", summary: "ok"),
-              .init(id: "semantic_search", gate: "semantic_search", status: "ready", summary: "ok"),
-              .init(id: "provider_inference", gate: "provider_inference", status: "ready", summary: "ok"),
-              .init(id: "browser_grounding", gate: "browser_grounding", status: "ready", summary: "ok"),
+              .init(id: "semantic_memory_store", gate: .memoryStore, status: .ready, summary: "ok"),
+              .init(id: "semantic_search", gate: .semanticSearch, status: .ready, summary: "ok"),
+              .init(id: "provider_inference", gate: .providerInference, status: .ready, summary: "ok"),
+              .init(id: "browser_grounding", gate: .browserGrounding, status: .ready, summary: "ok"),
             ]
           )
         },

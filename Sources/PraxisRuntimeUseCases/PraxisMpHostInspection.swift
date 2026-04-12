@@ -1,3 +1,4 @@
+import PraxisCoreTypes
 import PraxisInfraContracts
 import PraxisRuntimeComposition
 
@@ -27,42 +28,42 @@ public struct PraxisMpHostInspectionService: Sendable {
     let checks: [PraxisRuntimeSmokeCheckRecord] = [
       smokeCheck(
         id: "mp.memory.store",
-        gate: "memory-store",
+        gate: .memoryStore,
         ready: hostAdapters.semanticMemoryStore != nil,
-        readyStatus: "ready",
-        missingStatus: "missing",
+        readyStatus: .ready,
+        missingStatus: .missing,
         readySummary: "Semantic memory store is available for MP workflow persistence.",
         fallbackSummary: "Semantic memory store is missing."
       ),
       smokeCheck(
         id: "mp.semantic.search",
-        gate: "semantic-search",
+        gate: .semanticSearch,
         ready: hostAdapters.semanticSearchIndex != nil,
-        readyStatus: "ready",
-        missingStatus: "missing",
+        readyStatus: .ready,
+        missingStatus: .missing,
         readySummary: "Semantic search index is available for MP retrieval reranking.",
         fallbackSummary: "Semantic search index is missing."
       ),
       smokeCheck(
         id: "mp.provider.inference",
-        gate: "provider-inference",
+        gate: .providerInference,
         ready: hostAdapters.providerInferenceExecutor != nil,
-        readyStatus: "ready",
-        missingStatus: "degraded",
+        readyStatus: .ready,
+        missingStatus: .degraded,
         readySummary: "Provider inference surface is available for future MP checker/align enrichment.",
         fallbackSummary: "Provider inference is absent; MP remains local-baseline only."
       ),
       smokeCheck(
         id: "mp.browser.grounding",
-        gate: "browser-grounding",
+        gate: .browserGrounding,
         ready: hostAdapters.browserGroundingCollector != nil,
-        readyStatus: "ready",
-        missingStatus: "degraded",
+        readyStatus: .ready,
+        missingStatus: .degraded,
         readySummary: "Browser grounding collector is wired for future evidence-backed memory capture.",
         fallbackSummary: "Browser grounding collector is absent; browser-backed memory capture remains unavailable."
       ),
     ]
-    let readyChecks = checks.filter { $0.status == "ready" }.count
+    let readyChecks = checks.filter { $0.status == .ready }.count
     return PraxisMpSmoke(
       projectID: projectID,
       summary: diagnosticsService.smokeSummary(
@@ -116,10 +117,10 @@ public struct PraxisMpHostInspectionService: Sendable {
 
   private func smokeCheck(
     id: String,
-    gate: String,
+    gate: PraxisRuntimeSmokeGate,
     ready: Bool,
-    readyStatus: String,
-    missingStatus: String,
+    readyStatus: PraxisRuntimeTruthLayerStatus,
+    missingStatus: PraxisRuntimeTruthLayerStatus,
     readySummary: String,
     fallbackSummary: String
   ) -> PraxisRuntimeSmokeCheckRecord {

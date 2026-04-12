@@ -171,11 +171,41 @@ struct PraxisRuntimeUseCasesTests {
     )
 
     #expect(smoke.summary == "MP smoke reports 3/4 runtime gates ready for project mp.local-runtime.")
-    #expect(smoke.checks.map { $0.gate } == ["memory-store", "semantic-search", "provider-inference", "browser-grounding"])
-    #expect(smoke.checks.first { $0.gate == "memory-store" }?.status == "ready")
-    #expect(smoke.checks.first { $0.gate == "semantic-search" }?.status == "missing")
-    #expect(smoke.checks.first { $0.gate == "provider-inference" }?.status == "ready")
-    #expect(smoke.checks.first { $0.gate == "browser-grounding" }?.status == "ready")
+    #expect(smoke.checks.map(\.gate) == [.memoryStore, .semanticSearch, .providerInference, .browserGrounding])
+    #expect(smoke.checks.first { $0.gate == .memoryStore }?.status == .ready)
+    #expect(smoke.checks.first { $0.gate == .semanticSearch }?.status == .missing)
+    #expect(smoke.checks.first { $0.gate == .providerInference }?.status == .ready)
+    #expect(smoke.checks.first { $0.gate == .browserGrounding }?.status == .ready)
+  }
+
+  @Test
+  func runtimeSmokeCheckRecordRoundTripsTypedGateAndStatusAndRejectsUnknownValues() throws {
+    let record = PraxisRuntimeSmokeCheckRecord(
+      id: "mp.memory.store",
+      gate: .memoryStore,
+      status: .missing,
+      summary: "Semantic memory store is missing."
+    )
+
+    let encoded = try encodeUseCaseTestJSON(record)
+    let decoded = try decodeUseCaseTestJSON(PraxisRuntimeSmokeCheckRecord.self, from: encoded)
+
+    #expect(encoded.contains(#""gate":"memory-store""#))
+    #expect(encoded.contains(#""status":"missing""#))
+    #expect(decoded.gate == .memoryStore)
+    #expect(decoded.status == .missing)
+
+    let invalidGateJSON =
+      #"{"gate":"broken-gate","id":"mp.memory.store","status":"ready","summary":"Semantic memory store is ready."}"#
+    let invalidStatusJSON =
+      #"{"gate":"memory-store","id":"mp.memory.store","status":"broken-status","summary":"Semantic memory store is ready."}"#
+
+    #expect(throws: DecodingError.self) {
+      try decodeUseCaseTestJSON(PraxisRuntimeSmokeCheckRecord.self, from: invalidGateJSON)
+    }
+    #expect(throws: DecodingError.self) {
+      try decodeUseCaseTestJSON(PraxisRuntimeSmokeCheckRecord.self, from: invalidStatusJSON)
+    }
   }
 
   @Test
@@ -1378,6 +1408,103 @@ struct PraxisRuntimeUseCasesTests {
   }
 
   @Test
+  func cmpPeerApprovalDecisionUseCasesPreserveExplicitHumanOutcomesAcrossStatusAndHistory() async throws {
+    let cases: [(
+      decision: PraxisCmpPeerApprovalDecision,
+      outcome: PraxisCmpPeerApprovalOutcome,
+      humanGateState: PraxisHumanGateState,
+      approvedApprovalCount: Int,
+      decisionSummary: String
+    )] = [
+      (.approve, .approvedByHuman, .approved, 1, "Approved git access for checker"),
+      (.reject, .rejectedByHuman, .rejected, 0, "Rejected git access for checker"),
+      (.release, .gateReleased, .approved, 1, "Released git access gate for checker"),
+    ]
+
+    for testCase in cases {
+      let rootDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent(
+          "praxis-runtime-usecases-peer-approval-\(testCase.decision.rawValue)-\(UUID().uuidString)",
+          isDirectory: true
+        )
+      defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+      let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+      let dependencies = try makeDependencies(hostAdapters: registry)
+      let updateControlUseCase = PraxisUpdateCmpControlUseCase(dependencies: dependencies)
+      let requestApprovalUseCase = PraxisRequestCmpPeerApprovalUseCase(dependencies: dependencies)
+      let decideApprovalUseCase = PraxisDecideCmpPeerApprovalUseCase(dependencies: dependencies)
+      let readbackApprovalUseCase = PraxisReadbackCmpPeerApprovalUseCase(dependencies: dependencies)
+      let readbackTapStatusUseCase = PraxisReadbackTapStatusUseCase(dependencies: dependencies)
+      let readbackTapHistoryUseCase = PraxisReadbackTapHistoryUseCase(dependencies: dependencies)
+
+      _ = try await updateControlUseCase.execute(
+        PraxisUpdateCmpControlCommand(
+          projectID: "cmp.local-runtime",
+          agentID: "checker.local",
+          executionStyle: .manual,
+          mode: .peerReview,
+          automation: ["autoDispatch": false]
+        )
+      )
+      _ = try await requestApprovalUseCase.execute(
+        PraxisRequestCmpPeerApprovalCommand(
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          targetAgentID: "checker.local",
+          capabilityKey: "tool.git",
+          requestedTier: .b1,
+          summary: "Escalate git access to checker"
+        )
+      )
+      let decision = try await decideApprovalUseCase.execute(
+        PraxisDecideCmpPeerApprovalCommand(
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          targetAgentID: "checker.local",
+          capabilityKey: "tool.git",
+          decision: testCase.decision,
+          reviewerAgentID: "reviewer.local",
+          decisionSummary: testCase.decisionSummary
+        )
+      )
+      let readback = try await readbackApprovalUseCase.execute(
+        PraxisReadbackCmpPeerApprovalCommand(
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          targetAgentID: "checker.local",
+          capabilityKey: "tool.git"
+        )
+      )
+      let tapStatus = try await readbackTapStatusUseCase.execute(
+        PraxisReadbackTapStatusCommand(projectID: "cmp.local-runtime", agentID: "checker.local")
+      )
+      let tapHistory = try await readbackTapHistoryUseCase.execute(
+        PraxisReadbackTapHistoryCommand(projectID: "cmp.local-runtime", agentID: "checker.local", limit: 10)
+      )
+
+      #expect(decision.outcome == testCase.outcome)
+      #expect(decision.humanGateState == testCase.humanGateState)
+      #expect(decision.decisionSummary == testCase.decisionSummary)
+      #expect(readback.found)
+      #expect(readback.outcome == testCase.outcome)
+      #expect(readback.humanGateState == testCase.humanGateState)
+      #expect(readback.decisionSummary == testCase.decisionSummary)
+      #expect(tapStatus.pendingApprovalCount == 0)
+      #expect(tapStatus.approvedApprovalCount == testCase.approvedApprovalCount)
+      #expect(tapStatus.humanGateState == testCase.humanGateState)
+      #expect(
+        tapHistory.entries.contains {
+          $0.capabilityKey == "tool.git"
+            && $0.outcome == testCase.outcome
+            && $0.humanGateState == testCase.humanGateState
+            && $0.decisionSummary == testCase.decisionSummary
+        }
+      )
+    }
+  }
+
+  @Test
   func tapReadbackUseCasesSurfaceTypedPeerApprovalAndStatusWhileHistoryStaysDisplayOriented() async throws {
     let rootDirectory = FileManager.default.temporaryDirectory
       .appendingPathComponent("praxis-runtime-usecases-tap-readback-\(UUID().uuidString)", isDirectory: true)
@@ -1922,7 +2049,7 @@ struct PraxisRuntimeUseCasesTests {
     #expect(readback.scopeBreakdown[PraxisMpScopeLevel.project.rawValue] == 1)
     #expect(smoke.projectID == "mp.local-runtime")
     #expect(smoke.checks.count == 4)
-    #expect(smoke.checks.map(\.gate).contains("browser-grounding"))
+    #expect(smoke.checks.map(\.gate).contains(.browserGrounding))
   }
 
   @Test
