@@ -1681,15 +1681,51 @@ public struct PraxisRuntimeInterfaceSnapshot: Sendable, Equatable, Codable {
   }
 }
 
+/// Enumerates the stable runtime interface event channels exposed by the host-neutral surface.
+///
+/// This contract is limited to the currently shipped runtime interface event set. It does not
+/// carry CLI, UI, platform, or provider-specific semantics beyond those stable channels.
+public enum PraxisRuntimeInterfaceEventName: String, Sendable, Equatable, Codable, CaseIterable {
+  case cmpSessionOpened = "cmp.session.opened"
+  case tapStatusReadback = "tap.status.readback"
+  case tapHistoryReadback = "tap.history.readback"
+  case cmpRolesReadback = "cmp.roles.readback"
+  case cmpControlReadback = "cmp.control.readback"
+  case cmpControlUpdated = "cmp.control.updated"
+  case cmpPeerApprovalRequested = "cmp.peer_approval.requested"
+  case cmpPeerApprovalDecided = "cmp.peer_approval.decided"
+  case cmpPeerApprovalReadback = "cmp.peer_approval.readback"
+  case cmpStatusReadback = "cmp.status.readback"
+  case cmpProjectBootstrapped = "cmp.project.bootstrapped"
+  case cmpProjectRecovered = "cmp.project.recovered"
+  case cmpFlowIngested = "cmp.flow.ingested"
+  case cmpFlowCommitted = "cmp.flow.committed"
+  case cmpFlowResolved = "cmp.flow.resolved"
+  case cmpFlowMaterialized = "cmp.flow.materialized"
+  case cmpFlowDispatched = "cmp.flow.dispatched"
+  case cmpFlowDispatchRetried = "cmp.flow.dispatch_retried"
+  case cmpFlowHistoryRequested = "cmp.flow.history_requested"
+  case runStarted = "run.started"
+  case runResumed = "run.resumed"
+  case runRecovered = "run.recovered"
+  case runFollowUpReady = "run.follow_up_ready"
+}
+
+extension PraxisRuntimeInterfaceEventName: CustomStringConvertible {
+  public var description: String {
+    rawValue
+  }
+}
+
 public struct PraxisRuntimeInterfaceEvent: Sendable, Equatable, Codable {
-  public let name: String
+  public let name: PraxisRuntimeInterfaceEventName
   public let detail: String
   public let runID: PraxisRunID?
   public let sessionID: PraxisSessionID?
   public let intentID: String?
 
   public init(
-    name: String,
+    name: PraxisRuntimeInterfaceEventName,
     detail: String,
     runID: PraxisRunID? = nil,
     sessionID: PraxisSessionID? = nil,

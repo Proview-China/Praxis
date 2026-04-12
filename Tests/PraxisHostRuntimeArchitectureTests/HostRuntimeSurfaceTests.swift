@@ -919,10 +919,10 @@ struct HostRuntimeSurfaceTests {
 
     #expect(response.status == .success)
     #expect(response.snapshot?.sessionID?.rawValue == "session.ffi-smoke")
-    #expect(response.events.map(\.name) == ["run.started", "run.follow_up_ready"])
+    #expect(response.events.map(\.name) == [.runStarted, .runFollowUpReady])
     #expect(eventEnvelope.status == .success)
     #expect(eventEnvelope.handle == handle)
-    #expect(eventEnvelope.events.map(\.name) == ["run.started", "run.follow_up_ready"])
+    #expect(eventEnvelope.events.map(\.name) == [.runStarted, .runFollowUpReady])
     #expect(eventEnvelope.error == nil)
     #expect(await ffiBridge.activeRuntimeSessionHandles() == [handle])
   }
@@ -1004,7 +1004,7 @@ struct HostRuntimeSurfaceTests {
     #expect(response.status == .success)
     #expect(response.snapshot?.runID?.rawValue == "run:session.legacy-ffi:goal.legacy-ffi")
     #expect(response.snapshot?.sessionID?.rawValue == "session.legacy-ffi")
-    #expect(response.events.map(\.name) == ["run.started", "run.follow_up_ready"])
+    #expect(response.events.map(\.name) == [.runStarted, .runFollowUpReady])
   }
 
   @Test

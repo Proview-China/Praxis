@@ -153,6 +153,8 @@ struct PraxisCLITests {
 
   @Test
   func cliAppCanConsumePortalAgnosticRuntimeInterface() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-cli-neutral-\(UUID().uuidString.lowercased())", isDirectory: true)
     let runtimeInterface = StubRuntimeInterface(
       response: .success(
         snapshot: .init(
@@ -161,13 +163,13 @@ struct PraxisCLITests {
           summary: "Rendered from runtime interface only"
         ),
         events: [
-          .init(name: "neutral.event", detail: "shared contract")
+          .init(name: .cmpStatusReadback, detail: "shared contract")
         ]
       )
     )
 
     let app = PraxisCLIApp(
-      configuration: .init(interactive: false),
+      configuration: .init(interactive: false, stateRootDirectory: rootDirectory),
       runtimeInterface: runtimeInterface
     )
 
@@ -175,7 +177,7 @@ struct PraxisCLITests {
 
     #expect(output.contains("Neutral Snapshot"))
     #expect(output.contains("Rendered from runtime interface only"))
-    #expect(output.contains("neutral.event"))
+    #expect(output.contains("cmp.status.readback"))
   }
 
   @Test
@@ -195,13 +197,13 @@ struct PraxisCLITests {
             pendingIntentID: "intent-1"
           ),
           events: [
-            .init(name: "run.started", detail: "Started running"),
-            .init(name: "run.follow_up_ready", detail: "model_inference: next")
+            .init(name: .runStarted, detail: "Started running"),
+            .init(name: .runFollowUpReady, detail: "model_inference: next")
           ]
         ),
         bufferedEvents: [
-          .init(name: "run.started", detail: "Started running"),
-          .init(name: "run.follow_up_ready", detail: "model_inference: next")
+          .init(name: .runStarted, detail: "Started running"),
+          .init(name: .runFollowUpReady, detail: "model_inference: next")
         ]
       )
     )

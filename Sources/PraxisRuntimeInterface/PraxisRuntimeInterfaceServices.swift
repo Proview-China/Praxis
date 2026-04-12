@@ -379,7 +379,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
       ),
       events: [
         .init(
-          name: "cmp.session.opened",
+          name: .cmpSessionOpened,
           detail: session.summary,
           sessionID: .init(rawValue: session.sessionID)
         )
@@ -403,7 +403,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
       ),
       events: [
         .init(
-          name: "tap.status.readback",
+          name: .tapStatusReadback,
           detail: status.readinessSummary
         )
       ]
@@ -423,7 +423,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
       ),
       events: [
         .init(
-          name: "tap.history.readback",
+          name: .tapHistoryReadback,
           detail: history.summary
         )
       ]
@@ -456,7 +456,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
       ),
       events: [
         .init(
-          name: "cmp.roles.readback",
+          name: .cmpRolesReadback,
           detail: roles.summary
         )
       ]
@@ -474,7 +474,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
       ),
       events: [
         .init(
-          name: "cmp.control.readback",
+          name: .cmpControlReadback,
           detail: control.summary
         )
       ]
@@ -491,7 +491,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
       ),
       events: [
         .init(
-          name: "cmp.control.updated",
+          name: .cmpControlUpdated,
           detail: update.summary
         )
       ]
@@ -499,12 +499,12 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
   }
 
   private func response(from approval: PraxisCmpPeerApprovalSnapshot) -> PraxisRuntimeInterfaceResponse {
-    response(from: approval, eventName: "cmp.peer_approval.requested")
+    response(from: approval, eventName: .cmpPeerApprovalRequested)
   }
 
   private func response(
     from approval: PraxisCmpPeerApprovalSnapshot,
-    eventName: String
+    eventName: PraxisRuntimeInterfaceEventName
   ) -> PraxisRuntimeInterfaceResponse {
     .success(
       snapshot: .init(
@@ -554,7 +554,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
       ),
       events: [
         .init(
-          name: "cmp.peer_approval.readback",
+          name: .cmpPeerApprovalReadback,
           detail: readback.summary
         )
       ]
@@ -575,7 +575,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
       ),
       events: [
         .init(
-          name: "cmp.status.readback",
+          name: .cmpStatusReadback,
           detail: status.summary
         )
       ]
@@ -594,7 +594,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
       ),
       events: [
         .init(
-          name: "cmp.project.bootstrapped",
+          name: .cmpProjectBootstrapped,
           detail: bootstrap.summary
         )
       ]
@@ -613,7 +613,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
       ),
       events: [
         .init(
-          name: "cmp.project.recovered",
+          name: .cmpProjectRecovered,
           detail: recovery.summary,
           intentID: recovery.packageID
         )
@@ -633,7 +633,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
       ),
       events: [
         .init(
-          name: "cmp.flow.ingested",
+          name: .cmpFlowIngested,
           detail: ingest.summary,
           sessionID: .init(rawValue: ingest.sessionID)
         )
@@ -652,7 +652,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
       ),
       events: [
         .init(
-          name: "cmp.flow.committed",
+          name: .cmpFlowCommitted,
           detail: commit.summary,
           intentID: commit.deltaID
         )
@@ -671,7 +671,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
       ),
       events: [
         .init(
-          name: "cmp.flow.resolved",
+          name: .cmpFlowResolved,
           detail: resolve.summary,
           intentID: resolve.snapshotID
         )
@@ -690,7 +690,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
       ),
       events: [
         .init(
-          name: "cmp.flow.materialized",
+          name: .cmpFlowMaterialized,
           detail: materialize.summary,
           intentID: materialize.packageID
         )
@@ -701,7 +701,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
   private func response(
     from dispatch: PraxisCmpFlowDispatchSnapshot,
     titlePrefix: String = "CMP Dispatch",
-    eventName: String = "cmp.flow.dispatched"
+    eventName: PraxisRuntimeInterfaceEventName = .cmpFlowDispatched
   ) -> PraxisRuntimeInterfaceResponse {
     .success(
       snapshot: .init(
@@ -732,7 +732,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
       ),
       events: [
         .init(
-          name: "cmp.flow.history_requested",
+          name: .cmpFlowHistoryRequested,
           detail: history.summary,
           intentID: history.packageID ?? history.snapshotID
         )
@@ -752,14 +752,14 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
   }
 
   private func makeEvents(from summary: PraxisRunSummary) -> [PraxisRuntimeInterfaceEvent] {
-    let lifecycleEventName: String
+    let lifecycleEventName: PraxisRuntimeInterfaceEventName
     switch summary.lifecycleDisposition {
     case .started:
-      lifecycleEventName = "run.started"
+      lifecycleEventName = .runStarted
     case .resumed:
-      lifecycleEventName = "run.resumed"
+      lifecycleEventName = .runResumed
     case .recoveredWithoutResume:
-      lifecycleEventName = "run.recovered"
+      lifecycleEventName = .runRecovered
     }
 
     var mapped: [PraxisRuntimeInterfaceEvent] = [
@@ -775,7 +775,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
     if let followUpAction = summary.followUpAction {
       mapped.append(
         .init(
-          name: "run.follow_up_ready",
+          name: .runFollowUpReady,
           detail: "\(followUpAction.kind.rawValue): \(followUpAction.reason)",
           runID: summary.runID,
           sessionID: summary.sessionID,
@@ -913,7 +913,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
           decisionSummary: decisionSummary
         )
       )
-      return response(from: approval, eventName: "cmp.peer_approval.decided")
+      return response(from: approval, eventName: .cmpPeerApprovalDecided)
     case .readbackCmpPeerApproval(let payload):
       let projectID = try requireRuntimeInterfaceField(payload.projectID, named: "projectID")
       let readback = try await runtimeFacade.cmpReadbackFacade.readbackPeerApproval(
@@ -1063,7 +1063,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
       return response(
         from: dispatch,
         titlePrefix: "CMP Retry Dispatch",
-        eventName: "cmp.flow.dispatch_retried"
+        eventName: .cmpFlowDispatchRetried
       )
     case .requestCmpHistory(let payload):
       let projectID = try requireRuntimeInterfaceField(payload.projectID, named: "projectID")

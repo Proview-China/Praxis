@@ -802,8 +802,8 @@ struct HostRuntimeInterfaceTests {
     #expect(response.snapshot?.phase == .running)
     #expect(response.snapshot?.lifecycleDisposition == .started)
     #expect(response.snapshot?.pendingIntentID == "evt.created.run:session.runtime-interface:goal.runtime-interface:model")
-    #expect(response.events.map(\.name) == ["run.started", "run.follow_up_ready"])
-    #expect(bufferedEvents.map(\.name) == ["run.started", "run.follow_up_ready"])
+    #expect(response.events.map(\.name) == [.runStarted, .runFollowUpReady])
+    #expect(bufferedEvents.map(\.name) == [.runStarted, .runFollowUpReady])
   }
 
   @Test
@@ -851,7 +851,7 @@ struct HostRuntimeInterfaceTests {
     #expect(response.snapshot?.lifecycleDisposition == .recoveredWithoutResume)
     #expect(response.snapshot?.recoveredEventCount == 1)
     #expect(response.snapshot?.pendingIntentID == nil)
-    #expect(response.events.map(\.name) == ["run.recovered"])
+    #expect(response.events.map(\.name) == [.runRecovered])
   }
 
   @Test
@@ -1123,7 +1123,7 @@ struct HostRuntimeInterfaceTests {
     #expect(sessionResponse.status == .success)
     #expect(sessionResponse.snapshot?.kind == .cmpSession)
     #expect(sessionResponse.snapshot?.projectID == "cmp.local-runtime")
-    #expect(sessionResponse.events.map(\.name) == ["cmp.session.opened"])
+    #expect(sessionResponse.events.map(\.name) == [.cmpSessionOpened])
     #expect(readbackResponse.status == .success)
     #expect(readbackResponse.snapshot?.kind == .cmpProject)
     #expect(readbackResponse.snapshot?.projectID == "cmp.local-runtime")
@@ -1137,7 +1137,7 @@ struct HostRuntimeInterfaceTests {
     #expect(tapStatusResponse.snapshot?.tapMode == .restricted)
     #expect(tapStatusResponse.snapshot?.riskLevel == .risky)
     #expect(tapStatusResponse.snapshot?.humanGateState == .waitingApproval)
-    #expect(tapStatusResponse.events.map(\.name) == ["tap.status.readback"])
+    #expect(tapStatusResponse.events.map(\.name) == [.tapStatusReadback])
     #expect(tapHistoryResponse.status == .success)
     #expect(tapHistoryResponse.snapshot?.kind == .tapHistory)
     #expect(tapHistoryResponse.snapshot?.title == "TAP History cmp.local-runtime")
@@ -1147,21 +1147,21 @@ struct HostRuntimeInterfaceTests {
     #expect(tapHistoryResponse.snapshot?.tapHistoryEntries?.first?.route == .humanReview)
     #expect(tapHistoryResponse.snapshot?.tapHistoryEntries?.first?.outcome == .escalatedToHuman)
     #expect(tapHistoryResponse.snapshot?.tapHistoryEntries?.first?.humanGateState == .waitingApproval)
-    #expect(tapHistoryResponse.events.map(\.name) == ["tap.history.readback"])
+    #expect(tapHistoryResponse.events.map(\.name) == [.tapHistoryReadback])
     #expect(rolesReadbackResponse.status == .success)
     #expect(rolesReadbackResponse.snapshot?.kind == .cmpRoles)
     #expect(rolesReadbackResponse.snapshot?.title == "CMP Roles cmp.local-runtime")
     #expect(rolesReadbackResponse.snapshot?.roleCounts?[.dispatcher] == 1)
     #expect(rolesReadbackResponse.snapshot?.roleStages?[.dispatcher] == .rejected)
-    #expect(rolesReadbackResponse.events.map(\.name) == ["cmp.roles.readback"])
+    #expect(rolesReadbackResponse.events.map(\.name) == [.cmpRolesReadback])
     #expect(controlReadbackResponse.status == .success)
     #expect(controlReadbackResponse.snapshot?.kind == .cmpControl)
     #expect(controlReadbackResponse.snapshot?.title == "CMP Control cmp.local-runtime")
-    #expect(controlReadbackResponse.events.map(\.name) == ["cmp.control.readback"])
+    #expect(controlReadbackResponse.events.map(\.name) == [.cmpControlReadback])
     #expect(controlUpdateResponse.status == .success)
     #expect(controlUpdateResponse.snapshot?.kind == .cmpControl)
     #expect(controlUpdateResponse.snapshot?.title == "CMP Control cmp.local-runtime")
-    #expect(controlUpdateResponse.events.map(\.name) == ["cmp.control.updated"])
+    #expect(controlUpdateResponse.events.map(\.name) == [.cmpControlUpdated])
     #expect(approvalRequestResponse.status == .success)
     #expect(approvalRequestResponse.snapshot?.kind == .cmpApproval)
     #expect(approvalRequestResponse.snapshot?.title == "CMP Approval cmp.local-runtime")
@@ -1171,7 +1171,7 @@ struct HostRuntimeInterfaceTests {
     #expect(approvalRequestResponse.snapshot?.tapMode == .restricted)
     #expect(approvalRequestResponse.snapshot?.riskLevel == .normal)
     #expect(approvalRequestResponse.snapshot?.humanGateState == .waitingApproval)
-    #expect(approvalRequestResponse.events.map(\.name) == ["cmp.peer_approval.requested"])
+    #expect(approvalRequestResponse.events.map(\.name) == [.cmpPeerApprovalRequested])
     #expect(approvalDecisionResponse.status == .success)
     #expect(approvalDecisionResponse.snapshot?.kind == .cmpApproval)
     #expect(approvalDecisionResponse.snapshot?.title == "CMP Approval cmp.local-runtime")
@@ -1181,7 +1181,7 @@ struct HostRuntimeInterfaceTests {
     #expect(approvalDecisionResponse.snapshot?.tapMode == .restricted)
     #expect(approvalDecisionResponse.snapshot?.riskLevel == .normal)
     #expect(approvalDecisionResponse.snapshot?.humanGateState == .approved)
-    #expect(approvalDecisionResponse.events.map(\.name) == ["cmp.peer_approval.decided"])
+    #expect(approvalDecisionResponse.events.map(\.name) == [.cmpPeerApprovalDecided])
     #expect(approvalReadbackResponse.status == .success)
     #expect(approvalReadbackResponse.snapshot?.kind == .cmpApproval)
     #expect(approvalReadbackResponse.snapshot?.title == "CMP Approval cmp.local-runtime")
@@ -1191,7 +1191,7 @@ struct HostRuntimeInterfaceTests {
     #expect(approvalReadbackResponse.snapshot?.tapMode == .restricted)
     #expect(approvalReadbackResponse.snapshot?.riskLevel == .normal)
     #expect(approvalReadbackResponse.snapshot?.humanGateState == .approved)
-    #expect(approvalReadbackResponse.events.map(\.name) == ["cmp.peer_approval.readback"])
+    #expect(approvalReadbackResponse.events.map(\.name) == [.cmpPeerApprovalReadback])
     #expect(statusReadbackResponse.status == .success)
     #expect(statusReadbackResponse.snapshot?.kind == .cmpStatus)
     #expect(statusReadbackResponse.snapshot?.title == "CMP Status cmp.local-runtime")
@@ -1199,7 +1199,7 @@ struct HostRuntimeInterfaceTests {
     #expect(statusDispatchedCount > 0)
     #expect(statusReadbackResponse.snapshot?.roleCounts?[.dispatcher] == 1)
     #expect(statusReadbackResponse.snapshot?.roleStages?[.dispatcher] == .rejected)
-    #expect(statusReadbackResponse.events.map(\.name) == ["cmp.status.readback"])
+    #expect(statusReadbackResponse.events.map(\.name) == [.cmpStatusReadback])
     #expect(bootstrapResponse.status == .success)
     #expect(bootstrapResponse.snapshot?.kind == .cmpBootstrap)
     #expect(bootstrapResponse.snapshot?.title == "CMP Bootstrap cmp.local-runtime")
@@ -1207,35 +1207,35 @@ struct HostRuntimeInterfaceTests {
     #expect(bootstrapResponse.snapshot?.hostProfile?.messageTransport == .inProcessActorBus)
     #expect(bootstrapResponse.snapshot?.componentStatuses?[.gitProbe] == .ready)
     #expect(bootstrapResponse.snapshot?.componentStatuses?[.lineageStore] == .ready)
-    #expect(bootstrapResponse.events.map(\.name) == ["cmp.project.bootstrapped"])
+    #expect(bootstrapResponse.events.map(\.name) == [.cmpProjectBootstrapped])
     #expect(ingestResponse.status == .success)
     #expect(ingestResponse.snapshot?.kind == .cmpFlow)
     #expect(ingestResponse.snapshot?.title == "CMP Ingest cmp.local-runtime")
     #expect(ingestResponse.snapshot?.sessionID == .init(rawValue: "cmp.flow.session"))
     #expect(ingestResponse.snapshot?.nextAction == .commitContextDelta)
-    #expect(ingestResponse.events.map(\.name) == ["cmp.flow.ingested"])
+    #expect(ingestResponse.events.map(\.name) == [.cmpFlowIngested])
     #expect(ingestResponse.events.first?.sessionID == .init(rawValue: "cmp.flow.session"))
     #expect(commitResponse.status == .success)
     #expect(commitResponse.snapshot?.kind == .cmpFlow)
     #expect(commitResponse.snapshot?.title == "CMP Commit cmp.local-runtime")
     #expect(commitResponse.snapshot?.activeLineStage == .candidateReady)
-    #expect(commitResponse.events.map(\.name) == ["cmp.flow.committed"])
+    #expect(commitResponse.events.map(\.name) == [.cmpFlowCommitted])
     #expect(resolveResponse.status == .success)
     #expect(resolveResponse.snapshot?.kind == .cmpFlow)
     #expect(resolveResponse.snapshot?.title == "CMP Resolve cmp.local-runtime")
     #expect(resolveResponse.snapshot?.qualityLabel == .usable)
-    #expect(resolveResponse.events.map(\.name) == ["cmp.flow.resolved"])
+    #expect(resolveResponse.events.map(\.name) == [.cmpFlowResolved])
     #expect(materializeResponse.status == .success)
     #expect(materializeSnapshot.kind == .cmpFlow)
     #expect(materializeSnapshot.title == "CMP Materialize cmp.local-runtime")
     #expect(materializeSnapshot.packageKind == .runtimeFill)
-    #expect(materializeResponse.events.map(\.name) == ["cmp.flow.materialized"])
+    #expect(materializeResponse.events.map(\.name) == [.cmpFlowMaterialized])
     #expect(dispatchResponse.status == .success)
     #expect(dispatchResponse.snapshot?.kind == .cmpFlow)
     #expect(dispatchResponse.snapshot?.title == "CMP Dispatch cmp.local-runtime")
     #expect(dispatchResponse.snapshot?.targetKind == .peer)
     #expect(dispatchResponse.snapshot?.dispatchStatus == .rejected)
-    #expect(dispatchResponse.events.map(\.name) == ["cmp.flow.dispatched"])
+    #expect(dispatchResponse.events.map(\.name) == [.cmpFlowDispatched])
     #expect(dispatchResponse.events.first?.detail == dispatchResponse.snapshot?.summary)
     #expect(dispatchResponse.events.first?.intentID != nil)
     #expect(checkerRolesAfterDispatchResponse.snapshot?.kind == .cmpRoles)
@@ -1255,7 +1255,7 @@ struct HostRuntimeInterfaceTests {
     #expect(historyResponse.status == .success)
     #expect(historyResponse.snapshot?.kind == .cmpFlow)
     #expect(historyResponse.snapshot?.title == "CMP History cmp.local-runtime")
-    #expect(historyResponse.events.map(\.name) == ["cmp.flow.history_requested"])
+    #expect(historyResponse.events.map(\.name) == [.cmpFlowHistoryRequested])
     #expect(historyResponse.events.first?.detail == historyResponse.snapshot?.summary)
     #expect(historyResponse.events.first?.intentID == nil)
     #expect(historyResponse.snapshot?.summary.contains("did not find reusable context") == true)
@@ -1310,7 +1310,7 @@ struct HostRuntimeInterfaceTests {
     #expect(response.snapshot?.projectID == "cmp.local-runtime")
     #expect(response.snapshot?.recoveryStatus == .aligned)
     #expect(response.snapshot?.packageKind == .historicalReply)
-    #expect(response.events.map(\.name) == ["cmp.project.recovered"])
+    #expect(response.events.map(\.name) == [.cmpProjectRecovered])
     #expect(response.events.first?.detail == response.snapshot?.summary)
     #expect(response.events.first?.intentID == "package.interface.package-only")
   }
@@ -1478,7 +1478,7 @@ struct HostRuntimeInterfaceTests {
     #expect(retryResponse.snapshot?.title == "CMP Retry Dispatch cmp.local-runtime")
     #expect(retryResponse.snapshot?.targetKind == .peer)
     #expect(retryResponse.snapshot?.dispatchStatus == .delivered)
-    #expect(retryResponse.events.map(\.name) == ["cmp.flow.dispatch_retried"])
+    #expect(retryResponse.events.map(\.name) == [.cmpFlowDispatchRetried])
     #expect(retryResponse.events.first?.detail == retryResponse.snapshot?.summary)
     #expect(retryResponse.events.first?.intentID != nil)
   }
@@ -1518,7 +1518,7 @@ struct HostRuntimeInterfaceTests {
     #expect(response.snapshot?.kind == .cmpFlow)
     #expect(response.snapshot?.title == "CMP Resolve cmp.local-runtime")
     #expect(response.snapshot?.summary == "CMP resolve did not find a checked snapshot for agent runtime.local in project cmp.local-runtime.")
-    #expect(response.events.map(\.name) == ["cmp.flow.resolved"])
+    #expect(response.events.map(\.name) == [.cmpFlowResolved])
     #expect(response.events.first?.detail == response.snapshot?.summary)
     #expect(response.events.first?.intentID == nil)
   }
@@ -1631,7 +1631,7 @@ struct HostRuntimeInterfaceTests {
     #expect(requestResponse.snapshot?.tapMode == .restricted)
     #expect(requestResponse.snapshot?.riskLevel == .normal)
     #expect(requestResponse.snapshot?.humanGateState == .waitingApproval)
-    #expect(requestResponse.events.map(\.name) == ["cmp.peer_approval.requested"])
+    #expect(requestResponse.events.map(\.name) == [.cmpPeerApprovalRequested])
     #expect(requestResponse.events.first?.detail == "Escalated tool.git to human review.")
     #expect(requestResponse.events.first?.detail != requestResponse.snapshot?.summary)
 
@@ -1644,7 +1644,7 @@ struct HostRuntimeInterfaceTests {
     #expect(decideResponse.snapshot?.tapMode == .restricted)
     #expect(decideResponse.snapshot?.riskLevel == .normal)
     #expect(decideResponse.snapshot?.humanGateState == .approved)
-    #expect(decideResponse.events.map(\.name) == ["cmp.peer_approval.decided"])
+    #expect(decideResponse.events.map(\.name) == [.cmpPeerApprovalDecided])
     #expect(decideResponse.events.first?.detail == "Approved by reviewer.local.")
     #expect(decideResponse.events.first?.detail != decideResponse.snapshot?.summary)
 
@@ -1657,7 +1657,7 @@ struct HostRuntimeInterfaceTests {
     #expect(readbackResponse.snapshot?.tapMode == .restricted)
     #expect(readbackResponse.snapshot?.riskLevel == .normal)
     #expect(readbackResponse.snapshot?.humanGateState == .approved)
-    #expect(readbackResponse.events.map(\.name) == ["cmp.peer_approval.readback"])
+    #expect(readbackResponse.events.map(\.name) == [.cmpPeerApprovalReadback])
     #expect(readbackResponse.events.first?.detail == readbackResponse.snapshot?.summary)
   }
 
@@ -2089,7 +2089,7 @@ struct HostRuntimeInterfaceTests {
     #expect(resumed.snapshot?.sessionID?.rawValue == "team:alpha")
     #expect(resumed.snapshot?.phase == .running)
     #expect(resumed.snapshot?.lifecycleDisposition == .resumed)
-    #expect(resumed.events.map(\.name) == ["run.resumed", "run.follow_up_ready"])
+    #expect(resumed.events.map(\.name) == [.runResumed, .runFollowUpReady])
   }
 
   @Test
@@ -3067,8 +3067,8 @@ struct HostRuntimeInterfaceTests {
     #expect(started.status == .success)
     #expect(resumed.status == .success)
     #expect(resumed.snapshot?.runID == started.snapshot?.runID)
-    #expect(firstEvents?.map(\.name) == ["run.started", "run.follow_up_ready"])
-    #expect(secondEvents?.map(\.name) == ["run.resumed", "run.follow_up_ready"])
+    #expect(firstEvents?.map(\.name) == [.runStarted, .runFollowUpReady])
+    #expect(secondEvents?.map(\.name) == [.runResumed, .runFollowUpReady])
 
     #expect(await registry.closeSession(firstHandle))
     #expect(!(await registry.containsSession(firstHandle)))
@@ -3124,7 +3124,7 @@ struct HostRuntimeInterfaceTests {
       ),
       events: [
         .init(
-          name: "run.resumed",
+          name: .runResumed,
           detail: "Resumed running run run:session.codec:goal.codec.",
           runID: .init(rawValue: "run:session.codec:goal.codec"),
           sessionID: .init(rawValue: "session.codec"),
@@ -3150,6 +3150,53 @@ struct HostRuntimeInterfaceTests {
     #expect(responseJSON.contains(#""snapshot":{"#))
     #expect(decodedRequest == request)
     #expect(decodedResponse == response)
+  }
+
+  @Test
+  func runtimeInterfaceCodecRoundTripsTypedEventNamesAsStableRawValues() throws {
+    let codec = PraxisJSONRuntimeInterfaceCodec()
+    let response = PraxisRuntimeInterfaceResponse(
+      status: .success,
+      snapshot: .init(
+        kind: .inspection,
+        title: "Runtime Event Names",
+        summary: "Verify typed runtime interface event names preserve raw JSON values."
+      ),
+      events: [
+        .init(
+          name: .cmpSessionOpened,
+          detail: "Opened CMP session.",
+          sessionID: .init(rawValue: "cmp.session.codec")
+        ),
+        .init(
+          name: .runFollowUpReady,
+          detail: "model_inference: next",
+          runID: .init(rawValue: "run:session.codec:goal.codec"),
+          sessionID: .init(rawValue: "session.codec"),
+          intentID: "evt.follow-up"
+        )
+      ]
+    )
+
+    let responseData = try codec.encode(response)
+    let responseJSON = String(decoding: responseData, as: UTF8.self)
+    let decodedResponse = try codec.decodeResponse(responseData)
+
+    #expect(responseJSON.contains(#""name":"cmp.session.opened""#))
+    #expect(responseJSON.contains(#""name":"run.follow_up_ready""#))
+    #expect(decodedResponse.events.map(\.name) == [.cmpSessionOpened, .runFollowUpReady])
+    #expect(decodedResponse == response)
+  }
+
+  @Test
+  func runtimeInterfaceCodecRejectsUnknownTypedEventNames() throws {
+    let codec = PraxisJSONRuntimeInterfaceCodec()
+    let responseJSON =
+      #"{"error":null,"events":[{"detail":"Unknown runtime event.","name":"run.unknown","runID":"run:session.codec:goal.codec","sessionID":"session.codec"}],"snapshot":{"kind":"inspection","summary":"Verify typed runtime interface event name decoding rejects unknown raw values.","title":"Runtime Event Names"},"status":"success"}"#
+
+    #expect(throws: DecodingError.self) {
+      _ = try codec.decodeResponse(Data(responseJSON.utf8))
+    }
   }
 
   @Test
