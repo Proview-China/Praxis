@@ -23,40 +23,27 @@ private func runtimeInterfaceReferenceID(
   guard let rawValue else {
     return nil
   }
-  let normalized = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
-  guard !normalized.isEmpty else {
-    return nil
-  }
-  return PraxisRuntimeInterfaceReferenceID(rawValue: normalized)
-}
-
-private func normalizedRuntimeInterfaceReferenceID(
-  _ value: PraxisRuntimeInterfaceReferenceID?
-) -> PraxisRuntimeInterfaceReferenceID? {
-  guard let value else {
-    return nil
-  }
-  return runtimeInterfaceReferenceID(from: value.rawValue)
+  return PraxisRuntimeInterfaceReferenceID(rawValue: rawValue)
 }
 
 private func requireRuntimeInterfaceReferenceIDField(
   _ value: PraxisRuntimeInterfaceReferenceID,
   named field: String
 ) throws -> PraxisRuntimeInterfaceReferenceID {
-  guard let normalized = normalizedRuntimeInterfaceReferenceID(value) else {
+  guard !value.rawValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
     throw PraxisRuntimeInterfaceError.missingRequiredField(field)
   }
-  return normalized
+  return value
 }
 
 private func requireRuntimeInterfaceTextReferenceID(
   _ value: PraxisRuntimeInterfaceReferenceID,
   named field: String
 ) throws -> PraxisRuntimeInterfaceReferenceID {
-  guard let normalized = normalizedRuntimeInterfaceReferenceID(value) else {
+  guard !value.rawValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
     throw PraxisError.invalidInput("Field \(field) must not be empty.")
   }
-  return normalized
+  return value
 }
 
 private func requireRuntimeInterfaceCapabilityID(
@@ -107,11 +94,10 @@ private func requireRuntimeInterfaceReferenceIDElements(
   named field: String
 ) throws -> [PraxisRuntimeInterfaceReferenceID] {
   let elements = try requireRuntimeInterfaceElements(value, named: field)
-  let normalized = elements.map { $0.rawValue.trimmingCharacters(in: .whitespacesAndNewlines) }
-  guard normalized.allSatisfy({ !$0.isEmpty }) else {
+  guard elements.allSatisfy({ !$0.rawValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else {
     throw PraxisError.invalidInput("Field \(field) must not contain blank identifiers.")
   }
-  return normalized.map(PraxisRuntimeInterfaceReferenceID.init(rawValue:))
+  return elements
 }
 
 private func runtimeInterfaceDecodingPath(from codingPath: [CodingKey]) -> String {
@@ -994,7 +980,6 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
       let agentID = try requireRuntimeInterfaceField(payload.agentID, named: "agentID")
       let targetAgentID = try requireRuntimeInterfaceField(payload.targetAgentID, named: "targetAgentID")
       let reason = try requireRuntimeInterfaceText(payload.reason, named: "reason")
-      let snapshotID = normalizedRuntimeInterfaceReferenceID(payload.snapshotID)
       let recovery = try await runtimeFacade.cmpProjectFacade.recoverProject(
         .init(
           projectID: projectID,
@@ -1003,7 +988,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
           reason: reason,
           lineageID: payload.lineageID,
           branchRef: payload.branchRef,
-          snapshotID: snapshotID?.rawValue,
+          snapshotID: payload.snapshotID?.rawValue,
           packageKind: payload.packageKind,
           fidelityLabel: payload.fidelityLabel
         )
@@ -1066,15 +1051,13 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
       let projectID = try requireRuntimeInterfaceField(payload.projectID, named: "projectID")
       let agentID = try requireRuntimeInterfaceField(payload.agentID, named: "agentID")
       let targetAgentID = try requireRuntimeInterfaceField(payload.targetAgentID, named: "targetAgentID")
-      let snapshotID = normalizedRuntimeInterfaceReferenceID(payload.snapshotID)
-      let projectionID = normalizedRuntimeInterfaceReferenceID(payload.projectionID)
       let materialize = try await runtimeFacade.cmpFlowFacade.materializeFlow(
         .init(
           projectID: projectID,
           agentID: agentID,
           targetAgentID: targetAgentID,
-          snapshotID: snapshotID?.rawValue,
-          projectionID: projectionID?.rawValue,
+          snapshotID: payload.snapshotID?.rawValue,
+          projectionID: payload.projectionID?.rawValue,
           packageKind: payload.packageKind,
           fidelityLabel: payload.fidelityLabel
         )

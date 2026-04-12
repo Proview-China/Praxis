@@ -260,6 +260,14 @@ private struct StubBootstrapCmpProjectUseCase: PraxisBootstrapCmpProjectUseCaseP
   }
 }
 
+private struct StubRecoverCmpProjectUseCase: PraxisRecoverCmpProjectUseCaseProtocol {
+  let executeBody: @Sendable (PraxisRecoverCmpProjectCommand) async throws -> PraxisCmpProjectRecovery
+
+  func execute(_ command: PraxisRecoverCmpProjectCommand) async throws -> PraxisCmpProjectRecovery {
+    try await executeBody(command)
+  }
+}
+
 private struct StubIngestCmpFlowUseCase: PraxisIngestCmpFlowUseCaseProtocol {
   let executeBody: @Sendable (PraxisIngestCmpFlowCommand) async throws -> PraxisCmpFlowIngest
 
@@ -662,6 +670,52 @@ private func makeUnexpectedMpFacade() -> PraxisMpFacade {
   )
 }
 
+private func makeStubMpFacade(
+  inspectMp: @escaping @Sendable () async throws -> PraxisMpInspection = {
+    throw RuntimeInterfaceUnexpectedInvocationError(operation: "inspectMp")
+  },
+  searchMp: @escaping @Sendable (PraxisSearchMpCommand) async throws -> PraxisMpSearchResult = { _ in
+    throw RuntimeInterfaceUnexpectedInvocationError(operation: "searchMp")
+  },
+  readbackMp: @escaping @Sendable (PraxisReadbackMpCommand) async throws -> PraxisMpReadback = { _ in
+    throw RuntimeInterfaceUnexpectedInvocationError(operation: "readbackMp")
+  },
+  smokeMp: @escaping @Sendable (PraxisSmokeMpCommand) async throws -> PraxisMpSmoke = { _ in
+    throw RuntimeInterfaceUnexpectedInvocationError(operation: "smokeMp")
+  },
+  ingestMp: @escaping @Sendable (PraxisIngestMpCommand) async throws -> PraxisMpIngestResult = { _ in
+    throw RuntimeInterfaceUnexpectedInvocationError(operation: "ingestMp")
+  },
+  alignMp: @escaping @Sendable (PraxisAlignMpCommand) async throws -> PraxisMpAlignResult = { _ in
+    throw RuntimeInterfaceUnexpectedInvocationError(operation: "alignMp")
+  },
+  resolveMp: @escaping @Sendable (PraxisResolveMpCommand) async throws -> PraxisMpResolveResult = { _ in
+    throw RuntimeInterfaceUnexpectedInvocationError(operation: "resolveMp")
+  },
+  requestMpHistory: @escaping @Sendable (PraxisRequestMpHistoryCommand) async throws -> PraxisMpHistoryResult = { _ in
+    throw RuntimeInterfaceUnexpectedInvocationError(operation: "requestMpHistory")
+  },
+  promoteMp: @escaping @Sendable (PraxisPromoteMpCommand) async throws -> PraxisMpPromoteResult = { _ in
+    throw RuntimeInterfaceUnexpectedInvocationError(operation: "promoteMp")
+  },
+  archiveMp: @escaping @Sendable (PraxisArchiveMpCommand) async throws -> PraxisMpArchiveResult = { _ in
+    throw RuntimeInterfaceUnexpectedInvocationError(operation: "archiveMp")
+  }
+) -> PraxisMpFacade {
+  PraxisMpFacade(
+    inspectMpUseCase: StubInspectMpUseCase(executeBody: inspectMp),
+    searchMpUseCase: StubSearchMpUseCase(executeBody: searchMp),
+    readbackMpUseCase: StubReadbackMpUseCase(executeBody: readbackMp),
+    smokeMpUseCase: StubSmokeMpUseCase(executeBody: smokeMp),
+    ingestMpUseCase: StubIngestMpUseCase(executeBody: ingestMp),
+    alignMpUseCase: StubAlignMpUseCase(executeBody: alignMp),
+    resolveMpUseCase: StubResolveMpUseCase(executeBody: resolveMp),
+    requestMpHistoryUseCase: StubRequestMpHistoryUseCase(executeBody: requestMpHistory),
+    promoteMpUseCase: StubPromoteMpUseCase(executeBody: promoteMp),
+    archiveMpUseCase: StubArchiveMpUseCase(executeBody: archiveMp)
+  )
+}
+
 private func makeStubCmpFacade(
   openCmpSession: @escaping @Sendable (PraxisOpenCmpSessionCommand) async throws -> PraxisCmpSession = { _ in
     throw RuntimeInterfaceUnexpectedInvocationError(operation: "openCmpSession")
@@ -671,6 +725,9 @@ private func makeStubCmpFacade(
   },
   bootstrapCmpProject: @escaping @Sendable (PraxisBootstrapCmpProjectCommand) async throws -> PraxisCmpProjectBootstrap = { _ in
     throw RuntimeInterfaceUnexpectedInvocationError(operation: "bootstrapCmpProject")
+  },
+  recoverCmpProject: @escaping @Sendable (PraxisRecoverCmpProjectCommand) async throws -> PraxisCmpProjectRecovery = { _ in
+    throw RuntimeInterfaceUnexpectedInvocationError(operation: "recoverCmpProject")
   },
   ingestCmpFlow: @escaping @Sendable (PraxisIngestCmpFlowCommand) async throws -> PraxisCmpFlowIngest = { _ in
     throw RuntimeInterfaceUnexpectedInvocationError(operation: "ingestCmpFlow")
@@ -722,6 +779,7 @@ private func makeStubCmpFacade(
     openCmpSessionUseCase: StubOpenCmpSessionUseCase(executeBody: openCmpSession),
     readbackCmpProjectUseCase: StubReadbackCmpProjectUseCase(executeBody: readbackCmpProject),
     bootstrapCmpProjectUseCase: StubBootstrapCmpProjectUseCase(executeBody: bootstrapCmpProject),
+    recoverCmpProjectUseCase: StubRecoverCmpProjectUseCase(executeBody: recoverCmpProject),
     ingestCmpFlowUseCase: StubIngestCmpFlowUseCase(executeBody: ingestCmpFlow),
     commitCmpFlowUseCase: StubCommitCmpFlowUseCase(executeBody: commitCmpFlow),
     resolveCmpFlowUseCase: StubResolveCmpFlowUseCase(executeBody: resolveCmpFlow),
@@ -822,7 +880,7 @@ struct HostRuntimeInterfaceTests {
   }
 
   @Test
-  func runtimeInterfaceNormalizesBlankOutgoingReferenceIDsToNil() async throws {
+  func runtimeInterfacePreservesOpaqueOutgoingReferenceIDsWithoutTrimming() async throws {
     let runFacade = PraxisRunFacade(
       runGoalUseCase: StubRunGoalUseCase { command in
         PraxisRunExecution(
@@ -864,10 +922,10 @@ struct HostRuntimeInterfaceTests {
     )
 
     #expect(response.status == .success)
-    #expect(response.snapshot?.checkpointReference == nil)
-    #expect(response.snapshot?.pendingIntentID == nil)
+    #expect(response.snapshot?.checkpointReference == runtimeInterfaceReferenceID("   "))
+    #expect(response.snapshot?.pendingIntentID == runtimeInterfaceReferenceID("   "))
     #expect(response.events.map(\.name) == [.runStarted, .runFollowUpReady])
-    #expect(response.events.last?.intentID == nil)
+    #expect(response.events.last?.intentID == runtimeInterfaceReferenceID("   "))
   }
 
   @Test
@@ -1380,6 +1438,73 @@ struct HostRuntimeInterfaceTests {
   }
 
   @Test
+  func runtimeInterfaceRecoverCmpProjectPreservesBlankOptionalSnapshotReference() async throws {
+    let runtimeInterface = makeStubbedRuntimeInterface(
+      cmpFacade: makeStubCmpFacade(
+        recoverCmpProject: { command in
+          guard command.snapshotID == "   " else {
+            throw PraxisError.invalidInput("recoverCmpProject snapshotID was normalized unexpectedly.")
+          }
+          throw PraxisError.invalidInput("recoverCmpProject preserved blank snapshotID.")
+        }
+      )
+    )
+
+    let response = await runtimeInterface.handle(
+      .recoverCmpProject(
+        .init(
+          payloadSummary: "Recover CMP project with explicit blank reference",
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          targetAgentID: "checker.local",
+          reason: "Preserve blank snapshot selector",
+          snapshotID: runtimeInterfaceReferenceID("   ")
+        )
+      )
+    )
+
+    #expect(response.status == .failure)
+    #expect(response.error?.code == .invalidInput)
+    #expect(response.error?.message == "recoverCmpProject preserved blank snapshotID.")
+  }
+
+  @Test
+  func runtimeInterfaceMaterializeCmpFlowPreservesBlankOptionalContinuationReferences() async throws {
+    let runtimeInterface = makeStubbedRuntimeInterface(
+      cmpFacade: makeStubCmpFacade(
+        materializeCmpFlow: { command in
+          guard command.snapshotID == "   " else {
+            throw PraxisError.invalidInput("materializeCmpFlow snapshotID was normalized unexpectedly.")
+          }
+          guard command.projectionID == "\t" else {
+            throw PraxisError.invalidInput("materializeCmpFlow projectionID was normalized unexpectedly.")
+          }
+          throw PraxisError.invalidInput("materializeCmpFlow preserved blank continuation references.")
+        }
+      )
+    )
+
+    let response = await runtimeInterface.handle(
+      .materializeCmpFlow(
+        .init(
+          payloadSummary: "Materialize CMP flow with explicit blank selectors",
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          targetAgentID: "checker.local",
+          snapshotID: runtimeInterfaceReferenceID("   "),
+          projectionID: runtimeInterfaceReferenceID("\t"),
+          packageKind: .runtimeFill,
+          fidelityLabel: .highSignal
+        )
+      )
+    )
+
+    #expect(response.status == .failure)
+    #expect(response.error?.code == .invalidInput)
+    #expect(response.error?.message == "materializeCmpFlow preserved blank continuation references.")
+  }
+
+  @Test
   func runtimeInterfaceReadbacksPreserveRetryScheduledLatestDispatchStatus() async throws {
     let rootDirectory = FileManager.default.temporaryDirectory
       .appendingPathComponent("praxis-runtime-interface-retry-scheduled-\(UUID().uuidString)", isDirectory: true)
@@ -1545,6 +1670,94 @@ struct HostRuntimeInterfaceTests {
     #expect(retryResponse.events.map(\.name) == [.cmpFlowDispatchRetried])
     #expect(retryResponse.events.first?.detail == retryResponse.snapshot?.summary)
     #expect(retryResponse.events.first?.intentID != nil)
+  }
+
+  @Test
+  func runtimeInterfacePreservesOpaqueIncomingReferencesWithoutTrimming() async throws {
+    let cmpFacade = makeStubCmpFacade(
+      commitCmpFlow: { command in
+        guard command.eventIDs == [" evt.cmp.1 ", "\tevt.cmp.2\t"] else {
+          throw PraxisError.invalidInput("commitCmpFlow eventIDs were normalized unexpectedly.")
+        }
+        throw PraxisError.invalidInput("commitCmpFlow preserved padded eventIDs.")
+      },
+      retryCmpDispatch: { command in
+        guard command.packageID == " package.retry " else {
+          throw PraxisError.invalidInput("retryCmpDispatch packageID was normalized unexpectedly.")
+        }
+        throw PraxisError.invalidInput("retryCmpDispatch preserved padded packageID.")
+      }
+    )
+    let runtimeInterface = PraxisRuntimeInterfaceSession(
+      runtimeFacade: .init(
+        runFacade: makeUnexpectedRunFacade(),
+        inspectionFacade: makeUnexpectedInspectionFacade(),
+        mpFacade: makeStubMpFacade(
+          ingestMp: { command in
+            guard command.checkedSnapshotRef == " snapshot.mp.runtime " else {
+              throw PraxisError.invalidInput("ingestMp checkedSnapshotRef was normalized unexpectedly.")
+            }
+            throw PraxisError.invalidInput("ingestMp preserved padded checkedSnapshotRef.")
+          }
+        ),
+        cmpSessionFacade: cmpFacade.sessionFacade,
+        cmpProjectFacade: cmpFacade.projectFacade,
+        cmpFlowFacade: cmpFacade.flowFacade,
+        cmpRolesFacade: cmpFacade.rolesFacade,
+        cmpControlFacade: cmpFacade.controlFacade,
+        cmpReadbackFacade: cmpFacade.readbackFacade
+      ),
+      blueprint: PraxisRuntimePresentationBridgeModule.bootstrap
+    )
+
+    let commitResponse = await runtimeInterface.handle(
+      .commitCmpFlow(
+        .init(
+          payloadSummary: "Commit CMP flow with padded event IDs",
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          sessionID: "cmp.flow.session",
+          eventIDs: [
+            runtimeInterfaceReferenceID(" evt.cmp.1 "),
+            runtimeInterfaceReferenceID("\tevt.cmp.2\t"),
+          ],
+          changeSummary: "Preserve raw event IDs",
+          syncIntent: .toParent
+        )
+      )
+    )
+    let retryResponse = await runtimeInterface.handle(
+      .retryCmpDispatch(
+        .init(
+          payloadSummary: "Retry CMP dispatch with padded package ID",
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          packageID: runtimeInterfaceReferenceID(" package.retry ")
+        )
+      )
+    )
+    let ingestResponse = await runtimeInterface.handle(
+      .ingestMp(
+        .init(
+          payloadSummary: "Ingest MP with padded snapshot reference",
+          projectID: "mp.local-runtime",
+          agentID: "runtime.local",
+          summary: "Preserve raw checked snapshot reference",
+          checkedSnapshotRef: runtimeInterfaceReferenceID(" snapshot.mp.runtime "),
+          branchRef: "main"
+        )
+      )
+    )
+
+    #expect(commitResponse.status == .failure)
+    #expect(commitResponse.error?.code == .invalidInput)
+    #expect(commitResponse.error?.message == "commitCmpFlow preserved padded eventIDs.")
+    #expect(retryResponse.status == .failure)
+    #expect(retryResponse.error?.code == .invalidInput)
+    #expect(retryResponse.error?.message == "retryCmpDispatch preserved padded packageID.")
+    #expect(ingestResponse.status == .failure)
+    #expect(ingestResponse.error?.code == .invalidInput)
+    #expect(ingestResponse.error?.message == "ingestMp preserved padded checkedSnapshotRef.")
   }
 
   @Test
