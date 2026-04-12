@@ -552,33 +552,18 @@ function parseMouseScrollDelta(inputText: string): number | null {
 }
 
 const TranscriptPane = memo(function TranscriptPane({
-  preludeLines,
-  visibleTranscriptLines,
+  visibleLines,
   viewportLineCount,
 }: {
-  preludeLines: RenderLine[];
-  visibleTranscriptLines: RenderLine[];
+  visibleLines: RenderLine[];
   viewportLineCount: number;
 }): JSX.Element {
-  const fillerCount = Math.max(0, viewportLineCount - visibleTranscriptLines.length);
+  const fillerCount = Math.max(0, viewportLineCount - visibleLines.length);
 
   return (
     <Box flexDirection="column" flexGrow={1} flexShrink={1}>
-      <Box flexDirection="column" flexShrink={0}>
-        {preludeLines.map((line, index) => (
-          <Text key={`prelude-${index}-${line.text}`} color={colorForRenderLine(line.kind)} wrap="truncate-end">
-            {line.segments
-              ? line.segments.map((segment, segmentIndex) => (
-                <Text key={`prelude-${index}-${segmentIndex}-${segment.text}`} color={segment.color}>
-                  {segment.text}
-                </Text>
-              ))
-              : line.text}
-          </Text>
-        ))}
-      </Box>
       <Box flexDirection="column" height={viewportLineCount} flexGrow={1} flexShrink={1}>
-        {visibleTranscriptLines.map((line, index) => (
+        {visibleLines.map((line, index) => (
           <Text key={`body-${index}-${line.text}`} color={colorForRenderLine(line.kind)} wrap="truncate-end">
             {line.segments
               ? line.segments.map((segment, segmentIndex) => (
@@ -1310,10 +1295,10 @@ function PraxisDirectTuiApp(): JSX.Element {
     + 1
     + 1
     + 1;
-  const transcriptViewportLineCount = Math.max(6, terminalRows - footerLineCount - startupPreludeExpandedLines.length);
+  const transcriptViewportLineCount = Math.max(6, terminalRows - footerLineCount);
   const transcriptScrollLines = useMemo(
-    () => expandRenderLinesForWidth(transcriptLines, transcriptLineWidth),
-    [transcriptLineWidth, transcriptLines],
+    () => [...startupPreludeExpandedLines, ...expandRenderLinesForWidth(transcriptLines, transcriptLineWidth)],
+    [startupPreludeExpandedLines, transcriptLineWidth, transcriptLines],
   );
   const maxScrollOffset = Math.max(0, transcriptScrollLines.length - transcriptViewportLineCount);
   useEffect(() => {
@@ -1372,8 +1357,7 @@ function PraxisDirectTuiApp(): JSX.Element {
   return (
     <Box flexDirection="column" paddingX={1} height={terminalRows}>
       <TranscriptPane
-        preludeLines={startupPreludeExpandedLines}
-        visibleTranscriptLines={visibleTranscriptLines}
+        visibleLines={visibleTranscriptLines}
         viewportLineCount={transcriptViewportLineCount}
       />
       <ComposerPane
