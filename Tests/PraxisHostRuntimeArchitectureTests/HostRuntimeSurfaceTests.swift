@@ -414,7 +414,7 @@ struct HostRuntimeSurfaceTests {
         readbackPriority: .packageFirst,
         fallbackPolicy: .registryOnly,
         recoveryPreference: .resumeLatest,
-        automation: ["autoDispatch": false]
+        automation: .init(values: [.autoDispatch: false])
       )
     )
     let rolesPanel = try await runtimeFacade.cmpFacade.readbackRoles(
@@ -503,7 +503,7 @@ struct HostRuntimeSurfaceTests {
     #expect(controlUpdate.mode == .peerReview)
     #expect(controlUpdate.fallbackPolicy == .registryOnly)
     #expect(controlUpdate.recoveryPreference == .resumeLatest)
-    #expect(controlUpdate.automation["autoDispatch"] == false)
+    #expect(controlUpdate.automation[.autoDispatch] == false)
     #expect(rolesPanel.projectID == "cmp.local-runtime")
     #expect(rolesPanel.agentID == "checker.local")
     #expect(rolesPanel.roleCounts[.dispatcher] == 1)
@@ -518,7 +518,7 @@ struct HostRuntimeSurfaceTests {
     #expect(controlPanel.readbackPriority == .packageFirst)
     #expect(controlPanel.fallbackPolicy == .registryOnly)
     #expect(controlPanel.recoveryPreference == .resumeLatest)
-    #expect(controlPanel.automation["autoDispatch"] == false)
+    #expect(controlPanel.automation[.autoDispatch] == false)
     #expect(controlPanel.latestDispatchStatus == .delivered)
     #expect(controlPanel.latestTargetAgentID == "checker.local")
     #expect(!controlPanel.summary.contains("CLI"))
@@ -949,6 +949,19 @@ struct HostRuntimeSurfaceTests {
     #expect(invalidEnumResponse.status == .failure)
     #expect(invalidEnumResponse.error?.code == .invalidInput)
     #expect(invalidEnumResponse.error?.message.contains("executionStyle") == true)
+
+    let invalidAutomationResponseData = try await ffiBridge.handleEncodedRequest(
+      Data(
+        #"{"kind":"updateCmpControl","updateCmpControl":{"payloadSummary":"Invalid control update","projectID":"cmp.local-runtime","agentID":"checker.local","executionStyle":"manual","mode":"peer_review","automation":{"ghost":false}}}"#
+          .utf8
+      ),
+      on: handle
+    )
+    let invalidAutomationResponse = try codec.decodeResponse(invalidAutomationResponseData)
+
+    #expect(invalidAutomationResponse.status == .failure)
+    #expect(invalidAutomationResponse.error?.code == .invalidInput)
+    #expect(invalidAutomationResponse.error?.message.contains("ghost") == true)
 
     #expect(await ffiBridge.closeRuntimeSession(handle))
 
@@ -1411,7 +1424,7 @@ struct HostRuntimeSurfaceTests {
         agentID: "checker.local",
         executionStyle: .manual,
         mode: .peerReview,
-        automation: ["autoDispatch": false]
+        automation: .init(values: [.autoDispatch: false])
       )
     )
 
@@ -1467,7 +1480,7 @@ struct HostRuntimeSurfaceTests {
         agentID: "checker.local",
         executionStyle: .manual,
         mode: .peerReview,
-        automation: ["autoDispatch": false]
+        automation: .init(values: [.autoDispatch: false])
       )
     )
 
@@ -1496,7 +1509,7 @@ struct HostRuntimeSurfaceTests {
       .init(
         projectID: "cmp.local-runtime",
         agentID: "checker.local",
-        automation: ["autoDispatch": true]
+        automation: .init(values: [.autoDispatch: true])
       )
     )
     let retryDispatch = try await runtimeFacade.cmpFacade.retryDispatch(

@@ -232,7 +232,7 @@ public struct PraxisRuntimeInterfaceUpdateCmpControlRequestPayload: Sendable, Eq
   public let readbackPriority: PraxisCmpReadbackPriority?
   public let fallbackPolicy: PraxisCmpFallbackPolicy?
   public let recoveryPreference: PraxisCmpRecoveryPreference?
-  public let automation: [String: Bool]
+  public let automation: PraxisCmpAutomationMap
 
   public init(
     payloadSummary: String,
@@ -243,7 +243,7 @@ public struct PraxisRuntimeInterfaceUpdateCmpControlRequestPayload: Sendable, Eq
     readbackPriority: PraxisCmpReadbackPriority? = nil,
     fallbackPolicy: PraxisCmpFallbackPolicy? = nil,
     recoveryPreference: PraxisCmpRecoveryPreference? = nil,
-    automation: [String: Bool] = [:]
+    automation: PraxisCmpAutomationMap = .empty
   ) {
     self.payloadSummary = payloadSummary
     self.projectID = projectID

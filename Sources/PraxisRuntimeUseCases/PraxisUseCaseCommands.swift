@@ -922,7 +922,7 @@ public struct PraxisCmpControlSurface: Sendable, Equatable, Codable {
   public let readbackPriority: PraxisCmpReadbackPriority
   public let fallbackPolicy: PraxisCmpFallbackPolicy
   public let recoveryPreference: PraxisCmpRecoveryPreference
-  public let automation: [String: Bool]
+  public let automation: PraxisCmpAutomationMap
 
   public init(
     executionStyle: PraxisCmpExecutionStyle,
@@ -930,7 +930,7 @@ public struct PraxisCmpControlSurface: Sendable, Equatable, Codable {
     readbackPriority: PraxisCmpReadbackPriority,
     fallbackPolicy: PraxisCmpFallbackPolicy,
     recoveryPreference: PraxisCmpRecoveryPreference,
-    automation: [String: Bool]
+    automation: PraxisCmpAutomationMap
   ) {
     self.executionStyle = executionStyle
     self.mode = mode
@@ -1069,7 +1069,7 @@ public struct PraxisUpdateCmpControlCommand: Sendable, Equatable, Codable {
   public let readbackPriority: PraxisCmpReadbackPriority?
   public let fallbackPolicy: PraxisCmpFallbackPolicy?
   public let recoveryPreference: PraxisCmpRecoveryPreference?
-  public let automation: [String: Bool]
+  public let automation: PraxisCmpAutomationMap
 
   public init(
     projectID: String,
@@ -1079,7 +1079,7 @@ public struct PraxisUpdateCmpControlCommand: Sendable, Equatable, Codable {
     readbackPriority: PraxisCmpReadbackPriority? = nil,
     fallbackPolicy: PraxisCmpFallbackPolicy? = nil,
     recoveryPreference: PraxisCmpRecoveryPreference? = nil,
-    automation: [String: Bool] = [:]
+    automation: PraxisCmpAutomationMap = .empty
   ) {
     self.projectID = projectID
     self.agentID = agentID

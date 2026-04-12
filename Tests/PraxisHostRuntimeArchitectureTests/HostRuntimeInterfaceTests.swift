@@ -920,7 +920,7 @@ struct HostRuntimeInterfaceTests {
           readbackPriority: .packageFirst,
           fallbackPolicy: .registryOnly,
           recoveryPreference: .resumeLatest,
-          automation: ["autoDispatch": false]
+          automation: .init(values: [.autoDispatch: false])
         )
       )
     )
@@ -1413,7 +1413,7 @@ struct HostRuntimeInterfaceTests {
           agentID: "checker.local",
           executionStyle: .manual,
           mode: .peerReview,
-          automation: ["autoDispatch": false]
+          automation: .init(values: [.autoDispatch: false])
         )
       )
     )
@@ -1447,7 +1447,7 @@ struct HostRuntimeInterfaceTests {
           payloadSummary: "Enable auto dispatch",
           projectID: "cmp.local-runtime",
           agentID: "checker.local",
-          automation: ["autoDispatch": true]
+          automation: .init(values: [.autoDispatch: true])
         )
       )
     )
@@ -2771,7 +2771,7 @@ struct HostRuntimeInterfaceTests {
           payloadSummary: "Update corrupted CMP control",
           projectID: "cmp.local-runtime",
           agentID: "checker.local",
-          automation: ["autoDispatch": true]
+          automation: .init(values: [.autoDispatch: true])
         )
       )
     )
@@ -3606,7 +3606,7 @@ struct HostRuntimeInterfaceTests {
         readbackPriority: .packageFirst,
         fallbackPolicy: .registryOnly,
         recoveryPreference: .resumeLatest,
-        automation: ["autoDispatch": false]
+        automation: .init(values: [.autoDispatch: false])
       )
     )
 
@@ -3626,6 +3626,7 @@ struct HostRuntimeInterfaceTests {
     #expect(updateJSON.contains(#""readbackPriority":"package_first""#))
     #expect(updateJSON.contains(#""fallbackPolicy":"registry_only""#))
     #expect(updateJSON.contains(#""recoveryPreference":"resume_latest""#))
+    #expect(updateJSON.contains(#""automation":{"autoDispatch":false}"#))
   }
 
   @Test
@@ -3656,6 +3657,11 @@ struct HostRuntimeInterfaceTests {
         fieldName: "recoveryPreference",
         json:
           #"{"kind":"updateCmpControl","updateCmpControl":{"payloadSummary":"Invalid control update","projectID":"cmp.local-runtime","agentID":"checker.local","executionStyle":"manual","mode":"peer_review","recoveryPreference":"not_a_real_recovery","automation":{"autoDispatch":false}}}"#
+      ),
+      (
+        fieldName: "ghost",
+        json:
+          #"{"kind":"updateCmpControl","updateCmpControl":{"payloadSummary":"Invalid control update","projectID":"cmp.local-runtime","agentID":"checker.local","executionStyle":"manual","mode":"peer_review","automation":{"ghost":false}}}"#
       ),
     ]
 

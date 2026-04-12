@@ -1757,7 +1757,7 @@ private func dispatchCmpFlow(
     agentID: command.contextPackage.targetAgentID,
     dependencies: dependencies
   )
-  let autoDispatchEnabled = targetControl.automation["autoDispatch"] ?? true
+  let autoDispatchEnabled = targetControl.automation.isEnabled(.autoDispatch)
   let pendingApprovals = try await cmpPendingPeerApprovalDescriptors(
     projectID: command.projectID,
     agentID: command.agentID,
@@ -1778,7 +1778,8 @@ private func dispatchCmpFlow(
   if blockedByTapGate {
     let gateReason: String
     if !autoDispatchEnabled {
-      gateReason = "Dispatch is currently gated because autoDispatch is disabled for \(command.contextPackage.targetAgentID)."
+      gateReason =
+        "Dispatch is currently gated because \(PraxisCmpAutomationKey.autoDispatch.rawValue) is disabled for \(command.contextPackage.targetAgentID)."
     } else {
       gateReason = "Dispatch is currently gated because \(pendingApprovals.count) TAP approval request(s) are still waiting for \(command.contextPackage.targetAgentID)."
     }
@@ -1823,7 +1824,8 @@ private func dispatchCmpFlow(
       eventKind: .dispatchBlocked,
       capabilityKey: pendingApprovals.first?.capabilityKey,
       summary: gateReason,
-      detail: "topic=\(topicName), autoDispatch=\(autoDispatchEnabled), pendingApprovalCount=\(pendingApprovals.count)",
+      detail:
+        "topic=\(topicName), \(PraxisCmpAutomationKey.autoDispatch.rawValue)=\(autoDispatchEnabled), pendingApprovalCount=\(pendingApprovals.count)",
       createdAt: createdAt,
       metadata: [
         "requestedTier": .string(PraxisTapCapabilityTier.b0.rawValue),
@@ -1845,7 +1847,7 @@ private func dispatchCmpFlow(
         "targetAgentID": .string(command.contextPackage.targetAgentID),
         "packageID": .string(command.contextPackage.id.rawValue),
         "pendingApprovalCount": .number(Double(pendingApprovals.count)),
-        "autoDispatch": .bool(autoDispatchEnabled),
+        PraxisCmpAutomationKey.autoDispatch.rawValue: .bool(autoDispatchEnabled),
         "decisionSummary": .string(gateReason),
       ],
       dependencies: dependencies
@@ -2330,16 +2332,36 @@ private func cmpDefaultControlSurface(projectID: String, agentID: String?) -> Pr
     readbackPriority: .gitFirst,
     fallbackPolicy: .gitRebuild,
     recoveryPreference: .reconcile,
-    automation: [
-      "autoIngest": true,
-      "autoCommit": true,
-      "autoResolve": true,
-      "autoMaterialize": true,
-      "autoDispatch": true,
-      "autoReturnToCoreAgent": true,
-      "autoSeedChildren": true,
-    ]
+    automation: .allEnabled
   )
+}
+
+private func cmpAutomationRawValues(from automation: PraxisCmpAutomationMap) -> [String: Bool] {
+  var rawValues: [String: Bool] = [:]
+
+  for key in PraxisCmpAutomationKey.allCases {
+    if let isEnabled = automation[key] {
+      rawValues[key.rawValue] = isEnabled
+    }
+  }
+
+  return rawValues
+}
+
+private func cmpAutomationMap(from descriptor: PraxisCmpControlDescriptor) throws -> PraxisCmpAutomationMap {
+  var typedValues: [PraxisCmpAutomationKey: Bool] = [:]
+
+  for key in descriptor.automation.keys.sorted() {
+    guard let typedKey = PraxisCmpAutomationKey(rawValue: key) else {
+      throw PraxisError.invalidInput(
+        "CMP control descriptor for project \(descriptor.projectID) and agent \(descriptor.agentID ?? "project.default") contains invalid automation key '\(key)' at \(descriptor.updatedAt)."
+      )
+    }
+
+    typedValues[typedKey] = descriptor.automation[key]
+  }
+
+  return PraxisCmpAutomationMap(values: typedValues)
 }
 
 private func cmpControlDescriptor(
@@ -2356,7 +2378,7 @@ private func cmpControlDescriptor(
     readbackPriority: control.readbackPriority.rawValue,
     fallbackPolicy: control.fallbackPolicy.rawValue,
     recoveryPreference: control.recoveryPreference.rawValue,
-    automation: control.automation,
+    automation: cmpAutomationRawValues(from: control.automation),
     updatedAt: updatedAt
   )
 }
@@ -2402,7 +2424,7 @@ private func cmpControlSurface(from descriptor: PraxisCmpControlDescriptor) thro
       fieldName: "recoveryPreference",
       descriptor: descriptor
     ),
-    automation: descriptor.automation
+    automation: try cmpAutomationMap(from: descriptor)
   )
 }
 
@@ -2434,7 +2456,7 @@ private func cmpMergedControlSurface(
     readbackPriority: command.readbackPriority ?? base.readbackPriority,
     fallbackPolicy: command.fallbackPolicy ?? base.fallbackPolicy,
     recoveryPreference: command.recoveryPreference ?? base.recoveryPreference,
-    automation: base.automation.merging(command.automation) { _, new in new }
+    automation: base.automation.merging(command.automation)
   )
 }
 
@@ -3635,7 +3657,8 @@ private func updateCmpControl(
     targetAgentID: command.agentID,
     eventKind: .controlUpdated,
     summary: "CMP control updated TAP mode \(cmpTapMode(for: resolvedControl.mode).rawValue) and automation gates for \(command.agentID ?? "project.default").",
-    detail: "autoDispatch=\(resolvedControl.automation["autoDispatch"] ?? true), mode=\(resolvedControl.mode.rawValue), executionStyle=\(resolvedControl.executionStyle.rawValue)",
+    detail:
+      "\(PraxisCmpAutomationKey.autoDispatch.rawValue)=\(resolvedControl.automation.isEnabled(.autoDispatch)), mode=\(resolvedControl.mode.rawValue), executionStyle=\(resolvedControl.executionStyle.rawValue)",
     createdAt: updatedAt,
     metadata: [
       "requestedTier": .string(PraxisTapCapabilityTier.b0.rawValue),
@@ -3645,7 +3668,9 @@ private func updateCmpControl(
       "tapMode": .string(cmpTapMode(for: resolvedControl.mode).rawValue),
       "executionStyle": .string(resolvedControl.executionStyle.rawValue),
       "mode": .string(resolvedControl.mode.rawValue),
-      "autoDispatch": .bool(resolvedControl.automation["autoDispatch"] ?? true),
+      PraxisCmpAutomationKey.autoDispatch.rawValue: .bool(
+        resolvedControl.automation.isEnabled(.autoDispatch)
+      ),
       "targetAgentID": command.agentID.map(PraxisValue.string) ?? .null,
       "decisionSummary": .string("CMP control updated within the host-neutral runtime surface."),
     ],

@@ -652,7 +652,7 @@ public struct PraxisCmpControlPanelSnapshot: Sendable, Equatable, Codable {
   public let readbackPriority: PraxisCmpReadbackPriority
   public let fallbackPolicy: PraxisCmpFallbackPolicy
   public let recoveryPreference: PraxisCmpRecoveryPreference
-  public let automation: [String: Bool]
+  public let automation: PraxisCmpAutomationMap
   public let latestPackageID: String?
   public let latestDispatchStatus: PraxisCmpLatestDispatchStatus?
   public let latestTargetAgentID: String?
@@ -666,7 +666,7 @@ public struct PraxisCmpControlPanelSnapshot: Sendable, Equatable, Codable {
     readbackPriority: PraxisCmpReadbackPriority,
     fallbackPolicy: PraxisCmpFallbackPolicy,
     recoveryPreference: PraxisCmpRecoveryPreference,
-    automation: [String: Bool],
+    automation: PraxisCmpAutomationMap,
     latestPackageID: String? = nil,
     latestDispatchStatus: PraxisCmpLatestDispatchStatus? = nil,
     latestTargetAgentID: String? = nil
@@ -695,7 +695,7 @@ public struct PraxisCmpControlUpdateSnapshot: Sendable, Equatable, Codable {
   public let readbackPriority: PraxisCmpReadbackPriority
   public let fallbackPolicy: PraxisCmpFallbackPolicy
   public let recoveryPreference: PraxisCmpRecoveryPreference
-  public let automation: [String: Bool]
+  public let automation: PraxisCmpAutomationMap
   public let storedAt: String
 
   public init(
@@ -707,7 +707,7 @@ public struct PraxisCmpControlUpdateSnapshot: Sendable, Equatable, Codable {
     readbackPriority: PraxisCmpReadbackPriority,
     fallbackPolicy: PraxisCmpFallbackPolicy,
     recoveryPreference: PraxisCmpRecoveryPreference,
-    automation: [String: Bool],
+    automation: PraxisCmpAutomationMap,
     storedAt: String
   ) {
     self.summary = summary

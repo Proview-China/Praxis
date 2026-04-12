@@ -188,7 +188,7 @@ struct PraxisRuntimeFacadesTests {
         executionStyle: .guided,
         fallbackPolicy: .registryOnly,
         recoveryPreference: .resumeLatest,
-        automation: ["autoDispatch": false]
+        automation: .init(values: [.autoDispatch: false])
       )
     )
     let controlReadback = try await facade.cmpControlFacade.readbackControl(
@@ -253,7 +253,7 @@ struct PraxisRuntimeFacadesTests {
     #expect(controlReadback.executionStyle == .guided)
     #expect(controlReadback.fallbackPolicy == .registryOnly)
     #expect(controlReadback.recoveryPreference == .resumeLatest)
-    #expect(controlReadback.automation["autoDispatch"] == false)
+    #expect(controlReadback.automation[.autoDispatch] == false)
     #expect(rolesReadback.projectID == "cmp.local-runtime")
     #expect(!rolesReadback.summary.contains("CLI"))
     #expect(!rolesReadback.summary.contains("GUI"))
@@ -280,6 +280,61 @@ struct PraxisRuntimeFacadesTests {
     #expect(checkerControlReadback.latestDispatchStatus == .delivered)
     #expect(!checkerControlReadback.summary.contains("CLI"))
     #expect(!checkerControlReadback.summary.contains("GUI"))
+  }
+
+  @Test
+  func cmpControlSnapshotsRoundTripTypedAutomationMapsAndRejectUnknownAutomationKeys() throws {
+    let automation = PraxisCmpAutomationMap(values: [.autoDispatch: false, .autoResolve: true])
+    let panelSnapshot = PraxisCmpControlPanelSnapshot(
+      summary: "CMP control panel",
+      projectID: "cmp.local-runtime",
+      agentID: "checker.local",
+      executionStyle: .manual,
+      mode: .peerReview,
+      readbackPriority: .packageFirst,
+      fallbackPolicy: .registryOnly,
+      recoveryPreference: .resumeLatest,
+      automation: automation,
+      latestPackageID: "package.runtime",
+      latestDispatchStatus: .delivered,
+      latestTargetAgentID: "checker.local"
+    )
+    let updateSnapshot = PraxisCmpControlUpdateSnapshot(
+      summary: "CMP control update",
+      projectID: "cmp.local-runtime",
+      agentID: "checker.local",
+      executionStyle: .manual,
+      mode: .peerReview,
+      readbackPriority: .packageFirst,
+      fallbackPolicy: .registryOnly,
+      recoveryPreference: .resumeLatest,
+      automation: automation,
+      storedAt: "2026-04-12T00:00:00Z"
+    )
+
+    let encodedPanel = try encodeFacadeTestJSON(panelSnapshot)
+    let encodedUpdate = try encodeFacadeTestJSON(updateSnapshot)
+    let decodedPanel = try decodeFacadeTestJSON(PraxisCmpControlPanelSnapshot.self, from: encodedPanel)
+    let decodedUpdate = try decodeFacadeTestJSON(PraxisCmpControlUpdateSnapshot.self, from: encodedUpdate)
+
+    #expect(encodedPanel.contains(#""automation":{"autoDispatch":false,"autoResolve":true}"#))
+    #expect(encodedUpdate.contains(#""automation":{"autoDispatch":false,"autoResolve":true}"#))
+    #expect(decodedPanel == panelSnapshot)
+    #expect(decodedUpdate == updateSnapshot)
+    #expect(decodedPanel.automation[.autoDispatch] == false)
+    #expect(decodedUpdate.automation[.autoResolve] == true)
+
+    let invalidPanelJSON =
+      #"{"agentID":"checker.local","automation":{"ghost":true},"executionStyle":"manual","fallbackPolicy":"registry_only","latestDispatchStatus":"delivered","latestPackageID":"package.runtime","latestTargetAgentID":"checker.local","mode":"peer_review","projectID":"cmp.local-runtime","readbackPriority":"package_first","recoveryPreference":"resume_latest","summary":"CMP control panel"}"#
+    let invalidUpdateJSON =
+      #"{"agentID":"checker.local","automation":{"ghost":true},"executionStyle":"manual","fallbackPolicy":"registry_only","mode":"peer_review","projectID":"cmp.local-runtime","readbackPriority":"package_first","recoveryPreference":"resume_latest","storedAt":"2026-04-12T00:00:00Z","summary":"CMP control update"}"#
+
+    #expect(throws: DecodingError.self) {
+      try decodeFacadeTestJSON(PraxisCmpControlPanelSnapshot.self, from: invalidPanelJSON)
+    }
+    #expect(throws: DecodingError.self) {
+      try decodeFacadeTestJSON(PraxisCmpControlUpdateSnapshot.self, from: invalidUpdateJSON)
+    }
   }
 
   @Test
