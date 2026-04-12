@@ -28,7 +28,7 @@
 - `swift test --filter PraxisCLITests`
 - `swift test`
 
-Current full-suite snapshot: `324 tests / 53 suites` passing.
+Current full-suite snapshot: `325 tests / 53 suites` passing.
 
 ## Residual risk
 
