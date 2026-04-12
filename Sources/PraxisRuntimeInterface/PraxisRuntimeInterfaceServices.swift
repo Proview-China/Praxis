@@ -1,4 +1,5 @@
 import Foundation
+import PraxisCapabilityContracts
 import PraxisGoal
 import PraxisCoreTypes
 import PraxisRuntimeFacades
@@ -14,6 +15,29 @@ private func requireRuntimeInterfaceField(
     throw PraxisRuntimeInterfaceError.missingRequiredField(field)
   }
   return value
+}
+
+private func requireRuntimeInterfaceCapabilityID(
+  _ value: PraxisCapabilityID,
+  named field: String
+) throws -> PraxisCapabilityID {
+  guard !value.rawValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+    throw PraxisRuntimeInterfaceError.missingRequiredField(field)
+  }
+  return PraxisCapabilityID(rawValue: value.rawValue.trimmingCharacters(in: .whitespacesAndNewlines))
+}
+
+private func optionalRuntimeInterfaceCapabilityID(
+  _ value: PraxisCapabilityID?
+) throws -> PraxisCapabilityID? {
+  guard let value else {
+    return nil
+  }
+  let normalized = value.rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+  guard !normalized.isEmpty else {
+    return nil
+  }
+  return PraxisCapabilityID(rawValue: normalized)
 }
 
 private func requireRuntimeInterfaceText(
@@ -859,7 +883,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
       let projectID = try requireRuntimeInterfaceField(payload.projectID, named: "projectID")
       let agentID = try requireRuntimeInterfaceField(payload.agentID, named: "agentID")
       let targetAgentID = try requireRuntimeInterfaceField(payload.targetAgentID, named: "targetAgentID")
-      let capabilityKey = try requireRuntimeInterfaceField(payload.capabilityKey, named: "capabilityKey")
+      let capabilityKey = try requireRuntimeInterfaceCapabilityID(payload.capabilityKey, named: "capabilityKey")
       let summary = try requireRuntimeInterfaceText(payload.summary, named: "summary")
       let approval = try await runtimeFacade.cmpRolesFacade.requestPeerApproval(
         .init(
@@ -876,7 +900,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
       let projectID = try requireRuntimeInterfaceField(payload.projectID, named: "projectID")
       let agentID = try requireRuntimeInterfaceField(payload.agentID, named: "agentID")
       let targetAgentID = try requireRuntimeInterfaceField(payload.targetAgentID, named: "targetAgentID")
-      let capabilityKey = try requireRuntimeInterfaceField(payload.capabilityKey, named: "capabilityKey")
+      let capabilityKey = try requireRuntimeInterfaceCapabilityID(payload.capabilityKey, named: "capabilityKey")
       let decisionSummary = try requireRuntimeInterfaceText(payload.decisionSummary, named: "decisionSummary")
       let approval = try await runtimeFacade.cmpRolesFacade.decidePeerApproval(
         .init(
@@ -897,7 +921,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
           projectID: projectID,
           agentID: payload.agentID,
           targetAgentID: payload.targetAgentID,
-          capabilityKey: payload.capabilityKey
+          capabilityKey: try optionalRuntimeInterfaceCapabilityID(payload.capabilityKey)
         )
       )
       return response(from: readback)

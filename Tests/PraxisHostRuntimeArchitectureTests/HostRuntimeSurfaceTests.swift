@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import PraxisCapabilityContracts
 import PraxisCheckpoint
 import PraxisCmpFiveAgent
 import PraxisCmpDelivery
@@ -19,6 +20,10 @@ import PraxisWorkspaceContracts
 @testable import PraxisRuntimeFacades
 @testable import PraxisRuntimeInterface
 @testable import PraxisRuntimePresentationBridge
+
+private func capabilityID(_ rawValue: String) -> PraxisCapabilityID {
+  PraxisCapabilityID(rawValue: rawValue)
+}
 
 private func encodeTestJSON<T: Encodable>(_ value: T) throws -> String {
   let encoder = JSONEncoder()
@@ -428,7 +433,7 @@ struct HostRuntimeSurfaceTests {
         projectID: "cmp.local-runtime",
         agentID: "runtime.local",
         targetAgentID: "checker.local",
-        capabilityKey: "tool.git",
+        capabilityKey: .init(rawValue: "tool.git"),
         requestedTier: .b1,
         summary: "Escalate git access to checker"
       )
@@ -438,7 +443,7 @@ struct HostRuntimeSurfaceTests {
         projectID: "cmp.local-runtime",
         agentID: "runtime.local",
         targetAgentID: "checker.local",
-        capabilityKey: "tool.git"
+        capabilityKey: .init(rawValue: "tool.git")
       )
     )
     _ = try await runtimeFacade.cmpFacade.requestPeerApproval(
@@ -446,7 +451,7 @@ struct HostRuntimeSurfaceTests {
         projectID: "cmp.local-runtime",
         agentID: "runtime.local",
         targetAgentID: "checker.local",
-        capabilityKey: "tool.shell",
+        capabilityKey: .init(rawValue: "tool.shell"),
         requestedTier: .b2,
         summary: "Escalate shell access to checker"
       )
@@ -525,7 +530,7 @@ struct HostRuntimeSurfaceTests {
     #expect(!controlPanel.summary.contains("GUI"))
     #expect(peerApproval.projectID == "cmp.local-runtime")
     #expect(peerApproval.targetAgentID == "checker.local")
-    #expect(peerApproval.capabilityKey == "tool.git")
+    #expect(peerApproval.capabilityKey == PraxisCapabilityID(rawValue: "tool.git"))
     #expect(peerApproval.requestedTier == .b1)
     #expect(peerApproval.tapMode == .restricted)
     #expect(peerApproval.route == .humanReview)
@@ -533,7 +538,7 @@ struct HostRuntimeSurfaceTests {
     #expect(peerApproval.humanGateState == .waitingApproval)
     #expect(approvalReadback.projectID == "cmp.local-runtime")
     #expect(approvalReadback.found)
-    #expect(approvalReadback.capabilityKey == "tool.git")
+    #expect(approvalReadback.capabilityKey == PraxisCapabilityID(rawValue: "tool.git"))
     #expect(approvalReadback.requestedTier == .b1)
     #expect(approvalReadback.route == .humanReview)
     #expect(approvalReadback.outcome == .escalatedToHuman)
@@ -542,12 +547,12 @@ struct HostRuntimeSurfaceTests {
     #expect(tapStatus.tapMode == .restricted)
     #expect(tapStatus.humanGateState == .waitingApproval)
     #expect(tapStatus.pendingApprovalCount == 2)
-    #expect(["tool.git", "tool.shell"].contains(tapStatus.latestCapabilityKey ?? ""))
+    #expect(["tool.git", "tool.shell"].contains(tapStatus.latestCapabilityKey?.rawValue ?? ""))
     #expect(tapHistory.projectID == "cmp.local-runtime")
     #expect(tapHistory.agentID == "checker.local")
     #expect(tapHistory.totalCount == 6)
     #expect(tapHistory.entries.count == 6)
-    #expect(Set(tapHistory.entries.map(\.capabilityKey)) == Set(["tool.git", "tool.shell", "control_updated", "dispatch_released"]))
+    #expect(Set(tapHistory.entries.map(\.capabilityKey.rawValue)) == Set(["tool.git", "tool.shell", "control_updated", "dispatch_released"]))
     #expect(tapHistory.entries.contains { $0.route == .humanReview })
     #expect(tapHistory.entries.contains { $0.route == .autoApprove })
     #expect(tapHistory.entries.contains { $0.humanGateState == .waitingApproval })
@@ -1383,7 +1388,7 @@ struct HostRuntimeSurfaceTests {
         projectID: "cmp.local-runtime",
         agentID: "runtime.local",
         targetAgentID: "checker.local",
-        capabilityKey: "tool.git",
+        capabilityKey: .init(rawValue: "tool.git"),
         requestedTier: .b1,
         summary: "Escalate git access to checker"
       )
@@ -1393,7 +1398,7 @@ struct HostRuntimeSurfaceTests {
         projectID: "cmp.local-runtime",
         agentID: "runtime.local",
         targetAgentID: "checker.local",
-        capabilityKey: "tool.shell",
+        capabilityKey: .init(rawValue: "tool.shell"),
         requestedTier: .b2,
         summary: "Escalate shell access to checker"
       )
@@ -1405,7 +1410,7 @@ struct HostRuntimeSurfaceTests {
 
     #expect(history.totalCount == 4)
     #expect(history.entries.count == 4)
-    #expect(Set(history.entries.map(\.capabilityKey)) == Set(["tool.git", "tool.shell"]))
+    #expect(Set(history.entries.map(\.capabilityKey.rawValue)) == Set(["tool.git", "tool.shell"]))
     #expect(history.entries.contains { $0.requestedTier == .b2 })
     #expect(history.entries.contains { $0.route == .toolReview })
   }
@@ -1458,7 +1463,7 @@ struct HostRuntimeSurfaceTests {
 
     #expect(dispatch.status == .rejected)
     #expect(dispatch.targetAgentID == "checker.local")
-    #expect(tapHistory.entries.contains { $0.capabilityKey == "dispatch_blocked" })
+    #expect(tapHistory.entries.contains { $0.capabilityKey == PraxisCapabilityID(rawValue: "dispatch_blocked") })
     #expect(tapHistory.entries.contains {
       $0.route == .toolReview && $0.outcome == .reviewRequired
     })
@@ -1539,7 +1544,7 @@ struct HostRuntimeSurfaceTests {
     #expect(storedPackage?.metadata["dispatch_reason"] == .string("Attempt gated dispatch"))
     #expect(storedPackage?.metadata["dispatch_attempt_count"] == .number(2))
     #expect(deliveryTruth.first?.status == .published)
-    #expect(tapHistory.entries.contains { $0.capabilityKey == "dispatch_retry_requested" })
+    #expect(tapHistory.entries.contains { $0.capabilityKey == PraxisCapabilityID(rawValue: "dispatch_retry_requested") })
     #expect(tapHistory.entries.contains { $0.outcome == .baselineApproved })
   }
 
@@ -1756,7 +1761,7 @@ struct HostRuntimeSurfaceTests {
         projectID: "cmp.local-runtime",
         agentID: "runtime.local",
         targetAgentID: "checker.local",
-        capabilityKey: "  tool.git  ",
+        capabilityKey: .init(rawValue: "  tool.git  "),
         requestedTier: .b1,
         summary: "Escalate git access to checker"
       )
@@ -1766,7 +1771,7 @@ struct HostRuntimeSurfaceTests {
         projectID: "cmp.local-runtime",
         agentID: "runtime.local",
         targetAgentID: "checker.local",
-        capabilityKey: "tool.git",
+        capabilityKey: .init(rawValue: "tool.git"),
         decision: .approve,
         reviewerAgentID: "reviewer.local",
         decisionSummary: "Approved normalized git access"
@@ -1777,7 +1782,7 @@ struct HostRuntimeSurfaceTests {
         projectID: "cmp.local-runtime",
         agentID: "runtime.local",
         targetAgentID: "checker.local",
-        capabilityKey: "tool.git"
+        capabilityKey: .init(rawValue: "tool.git")
       )
     )
     let storedDescriptor = try await registry.cmpPeerApprovalStore?.describe(
@@ -1789,10 +1794,10 @@ struct HostRuntimeSurfaceTests {
       )
     )
 
-    #expect(requested.capabilityKey == "tool.git")
-    #expect(decided.capabilityKey == "tool.git")
+    #expect(requested.capabilityKey == PraxisCapabilityID(rawValue: "tool.git"))
+    #expect(decided.capabilityKey == PraxisCapabilityID(rawValue: "tool.git"))
     #expect(readback.found)
-    #expect(readback.capabilityKey == "tool.git")
+    #expect(readback.capabilityKey == PraxisCapabilityID(rawValue: "tool.git"))
     #expect(storedDescriptor?.capabilityKey == "tool.git")
   }
 
@@ -1810,7 +1815,7 @@ struct HostRuntimeSurfaceTests {
         projectID: "cmp.local-runtime",
         agentID: "runtime.local",
         targetAgentID: "checker.local",
-        capabilityKey: "tool.git",
+        capabilityKey: .init(rawValue: "tool.git"),
         requestedTier: .b1,
         summary: "Escalate git access to checker"
       )
@@ -1820,7 +1825,7 @@ struct HostRuntimeSurfaceTests {
         projectID: "cmp.local-runtime",
         agentID: "runtime.local",
         targetAgentID: "checker.local",
-        capabilityKey: "tool.git",
+        capabilityKey: .init(rawValue: "tool.git"),
         decision: .approve,
         reviewerAgentID: "reviewer.local",
         decisionSummary: "Approved git access for checker"
@@ -1831,7 +1836,7 @@ struct HostRuntimeSurfaceTests {
         projectID: "cmp.local-runtime",
         agentID: "runtime.local",
         targetAgentID: "checker.local",
-        capabilityKey: "tool.git"
+        capabilityKey: .init(rawValue: "tool.git")
       )
     )
     let tapStatus = try await runtimeFacade.inspectionFacade.readbackTapStatus(
@@ -1852,7 +1857,7 @@ struct HostRuntimeSurfaceTests {
     #expect(tapStatus.approvedApprovalCount == 1)
     #expect(tapStatus.humanGateState == .approved)
     #expect(tapHistory.entries.contains {
-      $0.capabilityKey == "tool.git" && $0.outcome == .approvedByHuman
+      $0.capabilityKey == PraxisCapabilityID(rawValue: "tool.git") && $0.outcome == .approvedByHuman
     })
   }
 
@@ -1870,7 +1875,7 @@ struct HostRuntimeSurfaceTests {
         projectID: "cmp.local-runtime",
         agentID: "runtime.local",
         targetAgentID: "checker.local",
-        capabilityKey: "tool.git",
+        capabilityKey: .init(rawValue: "tool.git"),
         requestedTier: .b1,
         summary: "Escalate git access to checker"
       )
@@ -1880,7 +1885,7 @@ struct HostRuntimeSurfaceTests {
         projectID: "cmp.local-runtime",
         agentID: "runtime.local",
         targetAgentID: "checker.local",
-        capabilityKey: "tool.git",
+        capabilityKey: .init(rawValue: "tool.git"),
         decision: .approve,
         reviewerAgentID: "reviewer.local",
         decisionSummary: "Approved git access for checker"
@@ -1893,7 +1898,7 @@ struct HostRuntimeSurfaceTests {
           projectID: "cmp.local-runtime",
           agentID: "runtime.local",
           targetAgentID: "checker.local",
-          capabilityKey: "tool.git",
+          capabilityKey: .init(rawValue: "tool.git"),
           decision: .reject,
           reviewerAgentID: "reviewer.local",
           decisionSummary: "Reject duplicate decision"

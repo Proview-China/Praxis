@@ -1,3 +1,4 @@
+import PraxisCapabilityContracts
 import PraxisCmpDelivery
 import PraxisCmpTypes
 import PraxisMpTypes
@@ -262,7 +263,7 @@ public struct PraxisRuntimeInterfaceRequestCmpPeerApprovalPayload: Sendable, Equ
   public let projectID: String
   public let agentID: String
   public let targetAgentID: String
-  public let capabilityKey: String
+  public let capabilityKey: PraxisCapabilityID
   public let requestedTier: PraxisTapCapabilityTier
   public let summary: String
 
@@ -271,7 +272,7 @@ public struct PraxisRuntimeInterfaceRequestCmpPeerApprovalPayload: Sendable, Equ
     projectID: String,
     agentID: String,
     targetAgentID: String,
-    capabilityKey: String,
+    capabilityKey: PraxisCapabilityID,
     requestedTier: PraxisTapCapabilityTier,
     summary: String
   ) {
@@ -290,14 +291,14 @@ public struct PraxisRuntimeInterfaceReadbackCmpPeerApprovalPayload: Sendable, Eq
   public let projectID: String
   public let agentID: String?
   public let targetAgentID: String?
-  public let capabilityKey: String?
+  public let capabilityKey: PraxisCapabilityID?
 
   public init(
     payloadSummary: String,
     projectID: String,
     agentID: String? = nil,
     targetAgentID: String? = nil,
-    capabilityKey: String? = nil
+    capabilityKey: PraxisCapabilityID? = nil
   ) {
     self.payloadSummary = payloadSummary
     self.projectID = projectID
@@ -312,7 +313,7 @@ public struct PraxisRuntimeInterfaceDecideCmpPeerApprovalPayload: Sendable, Equa
   public let projectID: String
   public let agentID: String
   public let targetAgentID: String
-  public let capabilityKey: String
+  public let capabilityKey: PraxisCapabilityID
   public let decision: PraxisCmpPeerApprovalDecision
   public let reviewerAgentID: String?
   public let decisionSummary: String
@@ -322,7 +323,7 @@ public struct PraxisRuntimeInterfaceDecideCmpPeerApprovalPayload: Sendable, Equa
     projectID: String,
     agentID: String,
     targetAgentID: String,
-    capabilityKey: String,
+    capabilityKey: PraxisCapabilityID,
     decision: PraxisCmpPeerApprovalDecision,
     reviewerAgentID: String? = nil,
     decisionSummary: String
@@ -1566,7 +1567,7 @@ public struct PraxisRuntimeInterfaceSnapshot: Sendable, Equatable, Codable {
   public let projectID: String?
   public let agentID: String?
   public let targetAgentID: String?
-  public let capabilityKey: String?
+  public let capabilityKey: PraxisCapabilityID?
   public let hostProfile: PraxisLocalRuntimeHostProfile?
   public let componentStatuses: PraxisCmpProjectComponentStatusMap?
   public let runID: PraxisRunID?
@@ -1606,7 +1607,7 @@ public struct PraxisRuntimeInterfaceSnapshot: Sendable, Equatable, Codable {
     projectID: String? = nil,
     agentID: String? = nil,
     targetAgentID: String? = nil,
-    capabilityKey: String? = nil,
+    capabilityKey: PraxisCapabilityID? = nil,
     hostProfile: PraxisLocalRuntimeHostProfile? = nil,
     componentStatuses: PraxisCmpProjectComponentStatusMap? = nil,
     runID: PraxisRunID? = nil,

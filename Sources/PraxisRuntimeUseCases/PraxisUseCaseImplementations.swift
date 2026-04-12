@@ -2596,7 +2596,7 @@ private func cmpPeerApprovalProfile(
 
 private func cmpPeerApprovalDescriptor(
   command: PraxisRequestCmpPeerApprovalCommand,
-  capabilityKey: String,
+  capabilityKey: PraxisCapabilityID,
   routing: PraxisReviewRoutingResult,
   riskLevel: PraxisTapRiskLevel,
   humanGateState: PraxisHumanGateState,
@@ -2606,7 +2606,7 @@ private func cmpPeerApprovalDescriptor(
     projectID: command.projectID,
     agentID: command.agentID,
     targetAgentID: command.targetAgentID,
-    capabilityKey: capabilityKey,
+    capabilityKey: capabilityKey.rawValue,
     requestedTier: command.requestedTier.rawValue,
     tapMode: cmpPeerApprovalTapMode(from: routing.policy.mode).rawValue,
     riskLevel: riskLevel.rawValue,
@@ -2630,7 +2630,7 @@ private func cmpResolvedPeerApprovalDescriptor(
   projectID: String,
   agentID: String,
   targetAgentID: String,
-  capabilityKey: String,
+  capabilityKey: PraxisCapabilityID,
   dependencies: PraxisDependencyGraph
 ) async throws -> PraxisCmpPeerApprovalDescriptor {
   guard let descriptor = try await dependencies.hostAdapters.cmpPeerApprovalStore?.describe(
@@ -2638,14 +2638,52 @@ private func cmpResolvedPeerApprovalDescriptor(
       projectID: projectID,
       agentID: agentID,
       targetAgentID: targetAgentID,
-      capabilityKey: capabilityKey
+      capabilityKey: capabilityKey.rawValue
     )
   ) else {
     throw PraxisError.invalidInput(
-      "CMP peer approval request was not found for \(projectID), \(agentID), \(targetAgentID), \(capabilityKey)."
+      "CMP peer approval request was not found for \(projectID), \(agentID), \(targetAgentID), \(capabilityKey.rawValue)."
     )
   }
   return descriptor
+}
+
+private func normalizedCapabilityID(
+  from rawValue: String,
+  fieldName: String,
+  error: @autoclosure () -> PraxisError
+) throws -> PraxisCapabilityID {
+  let normalized = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+  guard !normalized.isEmpty else {
+    throw error()
+  }
+  return PraxisCapabilityID(rawValue: normalized)
+}
+
+private func cmpPeerApprovalCapabilityID(
+  from descriptor: PraxisCmpPeerApprovalDescriptor
+) throws -> PraxisCapabilityID {
+  try normalizedCapabilityID(
+    from: descriptor.capabilityKey,
+    fieldName: "capabilityKey",
+    error: PraxisError.invalidInput(
+      "CMP peer approval descriptor for project \(descriptor.projectID), agent \(descriptor.agentID), target \(descriptor.targetAgentID) contains blank capabilityKey at \(descriptor.updatedAt)."
+    )
+  )
+}
+
+private func optionalCapabilityID(
+  from rawValue: String?,
+  context: String
+) throws -> PraxisCapabilityID? {
+  guard let rawValue else {
+    return nil
+  }
+  let normalized = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+  guard !normalized.isEmpty else {
+    return nil
+  }
+  return PraxisCapabilityID(rawValue: normalized)
 }
 
 private func cmpPeerApprovalResolution(
@@ -2675,7 +2713,7 @@ private func cmpPeerApprovalReadback(
     let scopeSummary = [
       query.agentID,
       query.targetAgentID,
-      query.capabilityKey,
+      query.capabilityKey?.rawValue,
     ]
       .compactMap { value in
         guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
@@ -2700,12 +2738,13 @@ private func cmpPeerApprovalReadback(
   }
 
   let fields = try cmpPeerApprovalSurfaceFields(from: descriptor)
+  let capabilityID = try cmpPeerApprovalCapabilityID(from: descriptor)
 
   return PraxisCmpPeerApprovalReadback(
     projectID: descriptor.projectID,
     agentID: descriptor.agentID,
     targetAgentID: descriptor.targetAgentID,
-    capabilityKey: descriptor.capabilityKey,
+    capabilityKey: capabilityID,
     requestedTier: fields.requestedTier,
     summary: "CMP peer approval readback reconstructed the latest TAP-routed approval state from host-backed review truth.",
     route: fields.route,
@@ -2769,6 +2808,7 @@ private func readbackTapStatus(
 
   let scopeLabel = command.agentID ?? "project scope"
   let readinessSummary = "TAP readiness for \(scopeLabel) currently sees \(capabilityKeys.count) registered capability surface(s), \(pendingApprovalCount) pending approval request(s), and \(approvedApprovalCount) approved request(s)."
+  let latestCapabilityID = try latestApproval.map { try cmpPeerApprovalCapabilityID(from: $0) }
   return PraxisTapStatusReadback(
     projectID: command.projectID,
     agentID: command.agentID,
@@ -2781,7 +2821,7 @@ private func readbackTapStatus(
     availableCapabilityIDs: capabilityKeys,
     pendingApprovalCount: pendingApprovalCount,
     approvedApprovalCount: approvedApprovalCount,
-    latestCapabilityKey: latestApproval?.capabilityKey,
+    latestCapabilityKey: latestCapabilityID,
     latestDecisionSummary: latestApproval?.decisionSummary,
     issues: issues
   )
@@ -2796,7 +2836,7 @@ private func tapHistoryEntries(
     return PraxisTapHistoryEntry(
       agentID: descriptor.agentID,
       targetAgentID: descriptor.targetAgentID,
-      capabilityKey: descriptor.capabilityKey,
+      capabilityKey: try cmpPeerApprovalCapabilityID(from: descriptor),
       requestedTier: fields.requestedTier,
       route: fields.route,
       outcome: fields.outcome,
@@ -2953,10 +2993,26 @@ private func tapHistoryEntries(
 ) throws -> [PraxisTapHistoryEntry] {
   try records.prefix(limit).map { record in
     let humanGateState = try tapHistoryHumanGateState(from: record)
+    let capabilityID =
+      if let capabilityKey = record.capabilityKey {
+        try normalizedCapabilityID(
+          from: capabilityKey,
+          fieldName: "capabilityKey",
+          error: PraxisError.invalidInput("TAP runtime event \(record.eventID) contains blank capabilityKey.")
+        )
+      } else if let metadataCapabilityKey = record.metadata["capabilityKey"]?.stringValue {
+        try normalizedCapabilityID(
+          from: metadataCapabilityKey,
+          fieldName: "capabilityKey",
+          error: PraxisError.invalidInput("TAP runtime event \(record.eventID) metadata contains blank capabilityKey.")
+        )
+      } else {
+        PraxisCapabilityID(rawValue: record.eventKind.rawValue)
+      }
     return PraxisTapHistoryEntry(
       agentID: record.agentID,
       targetAgentID: record.targetAgentID ?? record.metadata["targetAgentID"]?.stringValue ?? record.agentID,
-      capabilityKey: record.capabilityKey ?? record.metadata["capabilityKey"]?.stringValue ?? record.eventKind.rawValue,
+      capabilityKey: capabilityID,
       requestedTier: try tapHistoryRequestedTier(from: record),
       route: try tapHistoryRoute(from: record, humanGateState: humanGateState),
       outcome: try tapHistoryOutcome(from: record, humanGateState: humanGateState),
@@ -3075,10 +3131,11 @@ private func requestCmpPeerApproval(
   command: PraxisRequestCmpPeerApprovalCommand,
   dependencies: PraxisDependencyGraph
 ) async throws -> PraxisCmpPeerApproval {
-  let capabilityKey = command.capabilityKey.trimmingCharacters(in: .whitespacesAndNewlines)
-  guard !capabilityKey.isEmpty else {
-    throw PraxisError.invalidInput("CMP peer approval requires a non-empty capabilityKey.")
-  }
+  let capabilityKey = try normalizedCapabilityID(
+    from: command.capabilityKey.rawValue,
+    fieldName: "capabilityKey",
+    error: PraxisError.invalidInput("CMP peer approval requires a non-empty capabilityKey.")
+  )
 
   let control = try await cmpResolvedControlSurface(
     projectID: command.projectID,
@@ -3094,13 +3151,13 @@ private func requestCmpPeerApproval(
     dependencies: dependencies
   )
   let risk = riskClassifier.classify(
-    capabilityKey: capabilityKey,
+    capabilityKey: capabilityKey.rawValue,
     requestedTier: command.requestedTier
   )
   let routing = reviewEngine.route(
     request: .init(
       reviewKind: .human,
-      capabilityID: .init(rawValue: capabilityKey),
+      capabilityID: capabilityKey,
       requestedTier: command.requestedTier,
       mode: profile.defaultMode,
       riskLevel: risk.riskLevel,
@@ -3140,7 +3197,7 @@ private func requestCmpPeerApproval(
     agentID: command.agentID,
     targetAgentID: command.targetAgentID,
     eventKind: .peerApprovalRequested,
-    capabilityKey: capabilityKey,
+    capabilityKey: capabilityKey.rawValue,
     summary: command.summary,
     detail: routing.decision.summary,
     createdAt: requestedAt,
@@ -3152,23 +3209,23 @@ private func requestCmpPeerApproval(
   switch humanGateState {
   case .approved:
     followUpEventKind = .gateReleased
-    followUpSummary = "TAP released the gate for \(capabilityKey) without requiring additional human intervention."
+    followUpSummary = "TAP released the gate for \(capabilityKey.rawValue) without requiring additional human intervention."
   case .rejected:
     followUpEventKind = .peerApprovalRejected
-    followUpSummary = "TAP rejected \(capabilityKey) for \(command.targetAgentID) under the current risk policy."
+    followUpSummary = "TAP rejected \(capabilityKey.rawValue) for \(command.targetAgentID) under the current risk policy."
   case .waitingApproval:
     followUpEventKind = .peerApprovalWaiting
-    followUpSummary = "TAP is waiting for human approval before \(command.targetAgentID) can use \(capabilityKey)."
+    followUpSummary = "TAP is waiting for human approval before \(command.targetAgentID) can use \(capabilityKey.rawValue)."
   case .notRequired:
     followUpEventKind = .gateReleased
-    followUpSummary = "TAP determined that no additional gate is required for \(capabilityKey)."
+    followUpSummary = "TAP determined that no additional gate is required for \(capabilityKey.rawValue)."
   }
   try await appendTapRuntimeEvent(
     projectID: command.projectID,
     agentID: command.agentID,
     targetAgentID: command.targetAgentID,
     eventKind: followUpEventKind,
-    capabilityKey: capabilityKey,
+    capabilityKey: capabilityKey.rawValue,
     summary: followUpSummary,
     detail: routing.decision.summary,
     createdAt: requestedAt,
@@ -3197,10 +3254,11 @@ private func decideCmpPeerApproval(
   command: PraxisDecideCmpPeerApprovalCommand,
   dependencies: PraxisDependencyGraph
 ) async throws -> PraxisCmpPeerApproval {
-  let capabilityKey = command.capabilityKey.trimmingCharacters(in: .whitespacesAndNewlines)
-  guard !capabilityKey.isEmpty else {
-    throw PraxisError.invalidInput("CMP peer approval decision requires a non-empty capabilityKey.")
-  }
+  let capabilityKey = try normalizedCapabilityID(
+    from: command.capabilityKey.rawValue,
+    fieldName: "capabilityKey",
+    error: PraxisError.invalidInput("CMP peer approval decision requires a non-empty capabilityKey.")
+  )
 
   let existingDescriptor = try await cmpResolvedPeerApprovalDescriptor(
     projectID: command.projectID,
@@ -3212,7 +3270,7 @@ private func decideCmpPeerApproval(
   let existingFields = try cmpPeerApprovalSurfaceFields(from: existingDescriptor)
   guard existingFields.humanGateState == PraxisHumanGateState.waitingApproval else {
     throw PraxisError.invalidInput(
-      "CMP peer approval gate is already resolved for \(command.projectID), \(command.agentID), \(command.targetAgentID), \(capabilityKey)."
+      "CMP peer approval gate is already resolved for \(command.projectID), \(command.agentID), \(command.targetAgentID), \(capabilityKey.rawValue)."
     )
   }
   let decidedAt = runtimeNow()
@@ -3250,8 +3308,8 @@ private func decideCmpPeerApproval(
     agentID: command.agentID,
     targetAgentID: command.targetAgentID,
     eventKind: resolution.eventKind,
-    capabilityKey: capabilityKey,
-    summary: "Explicit TAP decision \(command.decision.rawValue) resolved \(capabilityKey) for \(command.targetAgentID).",
+    capabilityKey: capabilityKey.rawValue,
+    summary: "Explicit TAP decision \(command.decision.rawValue) resolved \(capabilityKey.rawValue) for \(command.targetAgentID).",
     detail: command.decisionSummary,
     createdAt: decidedAt,
     metadata: [
@@ -3273,7 +3331,7 @@ private func decideCmpPeerApproval(
     projectID: updatedDescriptor.projectID,
     agentID: updatedDescriptor.agentID,
     targetAgentID: updatedDescriptor.targetAgentID,
-    capabilityKey: updatedDescriptor.capabilityKey,
+    capabilityKey: try cmpPeerApprovalCapabilityID(from: updatedDescriptor),
     requestedTier: updatedFields.requestedTier,
     summary: "CMP peer approval decision persisted an explicit host-neutral TAP resolution.",
     route: updatedFields.route,
@@ -3290,17 +3348,25 @@ private func readbackCmpPeerApproval(
   command: PraxisReadbackCmpPeerApprovalCommand,
   dependencies: PraxisDependencyGraph
 ) async throws -> PraxisCmpPeerApprovalReadback {
-  let normalizedCapabilityKey = command.capabilityKey?.trimmingCharacters(in: .whitespacesAndNewlines)
-  let capabilityKey = normalizedCapabilityKey?.isEmpty == true ? nil : normalizedCapabilityKey
+  let capabilityKey = try optionalCapabilityID(
+    from: command.capabilityKey?.rawValue,
+    context: "CMP peer approval readback request"
+  )
   let descriptor = try await dependencies.hostAdapters.cmpPeerApprovalStore?.describe(
     .init(
       projectID: command.projectID,
       agentID: command.agentID,
       targetAgentID: command.targetAgentID,
-      capabilityKey: capabilityKey
+      capabilityKey: capabilityKey?.rawValue
     )
   )
-  return try cmpPeerApprovalReadback(query: command, descriptor: descriptor, dependencies: dependencies)
+  let normalizedCommand = PraxisReadbackCmpPeerApprovalCommand(
+    projectID: command.projectID,
+    agentID: command.agentID,
+    targetAgentID: command.targetAgentID,
+    capabilityKey: capabilityKey
+  )
+  return try cmpPeerApprovalReadback(query: normalizedCommand, descriptor: descriptor, dependencies: dependencies)
 }
 
 private struct PraxisCmpReadbackScope {

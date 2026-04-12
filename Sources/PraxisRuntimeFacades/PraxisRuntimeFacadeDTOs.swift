@@ -1,3 +1,4 @@
+import PraxisCapabilityContracts
 import PraxisCmpDelivery
 import PraxisCmpFiveAgent
 import PraxisCmpTypes
@@ -86,7 +87,7 @@ public struct PraxisTapStatusSnapshot: Sendable, Equatable, Codable {
   public let availableCapabilityIDs: [String]
   public let pendingApprovalCount: Int
   public let approvedApprovalCount: Int
-  public let latestCapabilityKey: String?
+  public let latestCapabilityKey: PraxisCapabilityID?
   public let latestDecisionSummary: String?
 
   public init(
@@ -101,7 +102,7 @@ public struct PraxisTapStatusSnapshot: Sendable, Equatable, Codable {
     availableCapabilityIDs: [String],
     pendingApprovalCount: Int,
     approvedApprovalCount: Int,
-    latestCapabilityKey: String? = nil,
+    latestCapabilityKey: PraxisCapabilityID? = nil,
     latestDecisionSummary: String? = nil
   ) {
     self.summary = summary
@@ -123,7 +124,7 @@ public struct PraxisTapStatusSnapshot: Sendable, Equatable, Codable {
 public struct PraxisTapHistoryEntrySnapshot: Sendable, Equatable, Codable {
   public let agentID: String
   public let targetAgentID: String
-  public let capabilityKey: String
+  public let capabilityKey: PraxisCapabilityID
   public let requestedTier: PraxisTapCapabilityTier
   public let route: PraxisReviewerRoute
   public let outcome: PraxisCmpPeerApprovalOutcome
@@ -134,7 +135,7 @@ public struct PraxisTapHistoryEntrySnapshot: Sendable, Equatable, Codable {
   public init(
     agentID: String,
     targetAgentID: String,
-    capabilityKey: String,
+    capabilityKey: PraxisCapabilityID,
     requestedTier: PraxisTapCapabilityTier,
     route: PraxisReviewerRoute,
     outcome: PraxisCmpPeerApprovalOutcome,
@@ -728,7 +729,7 @@ public struct PraxisCmpPeerApprovalSnapshot: Sendable, Equatable, Codable {
   public let projectID: String
   public let agentID: String
   public let targetAgentID: String
-  public let capabilityKey: String
+  public let capabilityKey: PraxisCapabilityID
   public let requestedTier: PraxisTapCapabilityTier
   public let route: PraxisReviewerRoute
   public let outcome: PraxisCmpPeerApprovalOutcome
@@ -743,7 +744,7 @@ public struct PraxisCmpPeerApprovalSnapshot: Sendable, Equatable, Codable {
     projectID: String,
     agentID: String,
     targetAgentID: String,
-    capabilityKey: String,
+    capabilityKey: PraxisCapabilityID,
     requestedTier: PraxisTapCapabilityTier,
     route: PraxisReviewerRoute,
     outcome: PraxisCmpPeerApprovalOutcome,
@@ -774,7 +775,7 @@ public struct PraxisCmpPeerApprovalReadbackSnapshot: Sendable, Equatable, Codabl
   public let projectID: String
   public let agentID: String?
   public let targetAgentID: String?
-  public let capabilityKey: String?
+  public let capabilityKey: PraxisCapabilityID?
   public let requestedTier: PraxisTapCapabilityTier?
   public let route: PraxisReviewerRoute?
   public let outcome: PraxisCmpPeerApprovalOutcome?
@@ -790,7 +791,7 @@ public struct PraxisCmpPeerApprovalReadbackSnapshot: Sendable, Equatable, Codabl
     projectID: String,
     agentID: String? = nil,
     targetAgentID: String? = nil,
-    capabilityKey: String? = nil,
+    capabilityKey: PraxisCapabilityID? = nil,
     requestedTier: PraxisTapCapabilityTier? = nil,
     route: PraxisReviewerRoute? = nil,
     outcome: PraxisCmpPeerApprovalOutcome? = nil,

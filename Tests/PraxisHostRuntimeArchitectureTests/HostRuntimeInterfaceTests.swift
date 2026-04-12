@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import PraxisCapabilityContracts
 import PraxisCheckpoint
 import PraxisCmpDelivery
 import PraxisCmpTypes
@@ -20,6 +21,10 @@ import PraxisTapTypes
 @testable import PraxisRuntimePresentationBridge
 import PraxisRuntimeUseCases
 import PraxisTransition
+
+private func capabilityID(_ rawValue: String) -> PraxisCapabilityID {
+  PraxisCapabilityID(rawValue: rawValue)
+}
 
 private func encodeRuntimeInterfaceTestJSON<T: Encodable>(_ value: T) throws -> String {
   let encoder = JSONEncoder()
@@ -931,7 +936,7 @@ struct HostRuntimeInterfaceTests {
           projectID: "cmp.local-runtime",
           agentID: "runtime.local",
           targetAgentID: "checker.local",
-          capabilityKey: "tool.git",
+          capabilityKey: capabilityID("tool.git"),
           requestedTier: .b1,
           summary: "Escalate git access to checker"
         )
@@ -944,7 +949,7 @@ struct HostRuntimeInterfaceTests {
           projectID: "cmp.local-runtime",
           agentID: "runtime.local",
           targetAgentID: "checker.local",
-          capabilityKey: "tool.git",
+          capabilityKey: capabilityID("tool.git"),
           decision: .approve,
           reviewerAgentID: "reviewer.local",
           decisionSummary: "Approved git access for checker"
@@ -958,7 +963,7 @@ struct HostRuntimeInterfaceTests {
           projectID: "cmp.local-runtime",
           agentID: "runtime.local",
           targetAgentID: "checker.local",
-          capabilityKey: "tool.git"
+          capabilityKey: capabilityID("tool.git")
         )
       )
     )
@@ -1529,14 +1534,14 @@ struct HostRuntimeInterfaceTests {
             targetAgentID: command.targetAgentID,
             capabilityKey: command.capabilityKey,
             requestedTier: command.requestedTier,
-            summary: "Approval snapshot summary for \(command.capabilityKey).",
+            summary: "Approval snapshot summary for \(command.capabilityKey.rawValue).",
             route: .humanReview,
             outcome: .escalatedToHuman,
             tapMode: .restricted,
             riskLevel: .normal,
             humanGateState: .waitingApproval,
             requestedAt: "2026-04-11T12:00:00Z",
-            decisionSummary: "Escalated \(command.capabilityKey) to human review."
+            decisionSummary: "Escalated \(command.capabilityKey.rawValue) to human review."
           )
         },
         decideCmpPeerApproval: { command in
@@ -1546,7 +1551,7 @@ struct HostRuntimeInterfaceTests {
             targetAgentID: command.targetAgentID,
             capabilityKey: command.capabilityKey,
             requestedTier: .b1,
-            summary: "Approval decision snapshot for \(command.capabilityKey).",
+            summary: "Approval decision snapshot for \(command.capabilityKey.rawValue).",
             route: .humanReview,
             outcome: .approvedByHuman,
             tapMode: .restricted,
@@ -1563,7 +1568,7 @@ struct HostRuntimeInterfaceTests {
             targetAgentID: command.targetAgentID,
             capabilityKey: command.capabilityKey,
             requestedTier: .b1,
-            summary: "Approval readback summary for \(command.capabilityKey ?? "unknown").",
+            summary: "Approval readback summary for \(command.capabilityKey?.rawValue ?? "unknown").",
             route: .humanReview,
             outcome: .approvedByHuman,
             tapMode: .restricted,
@@ -1585,7 +1590,7 @@ struct HostRuntimeInterfaceTests {
           projectID: "cmp.local-runtime",
           agentID: "runtime.local",
           targetAgentID: "checker.local",
-          capabilityKey: "tool.git",
+          capabilityKey: capabilityID("tool.git"),
           requestedTier: .b1,
           summary: "Escalate git access"
         )
@@ -1598,7 +1603,7 @@ struct HostRuntimeInterfaceTests {
           projectID: "cmp.local-runtime",
           agentID: "runtime.local",
           targetAgentID: "checker.local",
-          capabilityKey: "tool.git",
+          capabilityKey: capabilityID("tool.git"),
           decision: .approve,
           reviewerAgentID: "reviewer.local",
           decisionSummary: "Approved by reviewer.local."
@@ -1612,7 +1617,7 @@ struct HostRuntimeInterfaceTests {
           projectID: "cmp.local-runtime",
           agentID: "runtime.local",
           targetAgentID: "checker.local",
-          capabilityKey: "tool.git"
+          capabilityKey: capabilityID("tool.git")
         )
       )
     )
@@ -1654,6 +1659,49 @@ struct HostRuntimeInterfaceTests {
     #expect(readbackResponse.snapshot?.humanGateState == .approved)
     #expect(readbackResponse.events.map(\.name) == ["cmp.peer_approval.readback"])
     #expect(readbackResponse.events.first?.detail == readbackResponse.snapshot?.summary)
+  }
+
+  @Test
+  func runtimeInterfaceReadbackCmpPeerApprovalTreatsBlankOptionalCapabilityKeyAsOmittedFilter() async throws {
+    let runtimeInterface = makeStubbedRuntimeInterface(
+      cmpFacade: makeStubCmpFacade(
+        readbackCmpPeerApproval: { command in
+          #expect(command.capabilityKey == nil)
+          return PraxisCmpPeerApprovalReadback(
+            projectID: command.projectID,
+            agentID: command.agentID,
+            targetAgentID: command.targetAgentID,
+            capabilityKey: capabilityID("tool.git"),
+            requestedTier: .b1,
+            summary: "Approval readback summary for tool.git.",
+            route: .humanReview,
+            outcome: .approvedByHuman,
+            tapMode: .restricted,
+            riskLevel: .normal,
+            humanGateState: .approved,
+            requestedAt: "2026-04-11T12:05:00Z",
+            decisionSummary: "Approved by reviewer.local.",
+            found: true,
+            issues: []
+          )
+        }
+      )
+    )
+
+    let response = await runtimeInterface.handle(
+      .readbackCmpPeerApproval(
+        .init(
+          payloadSummary: "Read back peer approval",
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          targetAgentID: "checker.local",
+          capabilityKey: capabilityID("   ")
+        )
+      )
+    )
+
+    #expect(response.status == .success)
+    #expect(response.snapshot?.capabilityKey == capabilityID("tool.git"))
   }
 
   @Test
@@ -2135,7 +2183,7 @@ struct HostRuntimeInterfaceTests {
             projectID: "cmp.local-runtime",
             agentID: "",
             targetAgentID: "checker.local",
-            capabilityKey: "tool.git",
+            capabilityKey: capabilityID("tool.git"),
             requestedTier: .b1,
             summary: "Escalate git access"
           )
@@ -2149,7 +2197,7 @@ struct HostRuntimeInterfaceTests {
             projectID: "cmp.local-runtime",
             agentID: "runtime.local",
             targetAgentID: "   ",
-            capabilityKey: "tool.git",
+            capabilityKey: capabilityID("tool.git"),
             requestedTier: .b1,
             summary: "Escalate git access"
           )
@@ -2163,7 +2211,7 @@ struct HostRuntimeInterfaceTests {
             projectID: "cmp.local-runtime",
             agentID: "runtime.local",
             targetAgentID: "checker.local",
-            capabilityKey: "",
+            capabilityKey: capabilityID(""),
             requestedTier: .b1,
             summary: "Escalate git access"
           )
@@ -2177,7 +2225,7 @@ struct HostRuntimeInterfaceTests {
             projectID: "cmp.local-runtime",
             agentID: "   ",
             targetAgentID: "checker.local",
-            capabilityKey: "tool.git",
+            capabilityKey: capabilityID("tool.git"),
             decision: .approve,
             reviewerAgentID: "reviewer.local",
             decisionSummary: "Approved git access"
@@ -2192,7 +2240,7 @@ struct HostRuntimeInterfaceTests {
             projectID: "cmp.local-runtime",
             agentID: "runtime.local",
             targetAgentID: "",
-            capabilityKey: "tool.git",
+            capabilityKey: capabilityID("tool.git"),
             decision: .approve,
             reviewerAgentID: "reviewer.local",
             decisionSummary: "Approved git access"
@@ -2207,7 +2255,7 @@ struct HostRuntimeInterfaceTests {
             projectID: "cmp.local-runtime",
             agentID: "runtime.local",
             targetAgentID: "checker.local",
-            capabilityKey: "",
+            capabilityKey: capabilityID(""),
             decision: .approve,
             reviewerAgentID: "reviewer.local",
             decisionSummary: "Approved git access"
@@ -2441,7 +2489,7 @@ struct HostRuntimeInterfaceTests {
             projectID: "cmp.local-runtime",
             agentID: "runtime.local",
             targetAgentID: "checker.local",
-            capabilityKey: "tool.git",
+            capabilityKey: capabilityID("tool.git"),
             requestedTier: .b1,
             summary: "   "
           )
@@ -2456,7 +2504,7 @@ struct HostRuntimeInterfaceTests {
             projectID: "cmp.local-runtime",
             agentID: "runtime.local",
             targetAgentID: "checker.local",
-            capabilityKey: "tool.git",
+            capabilityKey: capabilityID("tool.git"),
             decision: .approve,
             reviewerAgentID: "reviewer.local",
             decisionSummary: "   "
@@ -2655,7 +2703,7 @@ struct HostRuntimeInterfaceTests {
           projectID: "cmp.local-runtime",
           agentID: "runtime.local",
           targetAgentID: "checker.local",
-          capabilityKey: "tool.git",
+          capabilityKey: capabilityID("tool.git"),
           decision: .approve,
           reviewerAgentID: "reviewer.local",
           decisionSummary: "Approve missing approval"
@@ -2669,7 +2717,7 @@ struct HostRuntimeInterfaceTests {
           projectID: "cmp.local-runtime",
           agentID: "runtime.local",
           targetAgentID: "checker.local",
-          capabilityKey: "tool.git",
+          capabilityKey: capabilityID("tool.git"),
           decision: .approve,
           reviewerAgentID: "reviewer.local",
           decisionSummary: "Approve resolved approval"
@@ -3151,7 +3199,7 @@ struct HostRuntimeInterfaceTests {
         summary: "Typed TAP status snapshot",
         projectID: "cmp.local-runtime",
         agentID: "checker.local",
-        capabilityKey: "tool.shell.exec",
+        capabilityKey: capabilityID("tool.shell.exec"),
         tapMode: .restricted,
         riskLevel: .risky,
         humanGateState: .waitingApproval,
@@ -3170,7 +3218,7 @@ struct HostRuntimeInterfaceTests {
           .init(
             agentID: "checker.local",
             targetAgentID: "runtime.local",
-            capabilityKey: "tool.shell.exec",
+            capabilityKey: capabilityID("tool.shell.exec"),
             requestedTier: .b2,
             route: .humanReview,
             outcome: .escalatedToHuman,
@@ -3189,7 +3237,7 @@ struct HostRuntimeInterfaceTests {
         projectID: "cmp.local-runtime",
         agentID: "runtime.local",
         targetAgentID: "checker.local",
-        capabilityKey: "tool.shell.exec",
+        capabilityKey: capabilityID("tool.shell.exec"),
         requestedTier: .b2,
         route: .humanReview,
         outcome: .approvedByHuman,
@@ -3690,7 +3738,7 @@ struct HostRuntimeInterfaceTests {
         projectID: "cmp.local-runtime",
         agentID: "runtime.local",
         targetAgentID: "checker.local",
-        capabilityKey: "tool.git",
+        capabilityKey: capabilityID("tool.git"),
         requestedTier: .b1,
         summary: "Escalate git access to checker"
       )
@@ -3701,7 +3749,7 @@ struct HostRuntimeInterfaceTests {
         projectID: "cmp.local-runtime",
         agentID: "runtime.local",
         targetAgentID: "checker.local",
-        capabilityKey: "tool.git",
+        capabilityKey: capabilityID("tool.git"),
         decision: .approve,
         reviewerAgentID: "reviewer.local",
         decisionSummary: "Approved git access"
@@ -3713,7 +3761,7 @@ struct HostRuntimeInterfaceTests {
         projectID: "cmp.local-runtime",
         agentID: "runtime.local",
         targetAgentID: "checker.local",
-        capabilityKey: "tool.git"
+        capabilityKey: capabilityID("tool.git")
       )
     )
 
@@ -3788,7 +3836,7 @@ struct HostRuntimeInterfaceTests {
             projectID: "cmp.local-runtime",
             agentID: "runtime.local",
             targetAgentID: "checker.local",
-            capabilityKey: "tool.git"
+            capabilityKey: capabilityID("tool.git")
           )
         )
       ),

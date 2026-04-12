@@ -1,3 +1,4 @@
+import PraxisCapabilityContracts
 import PraxisCmpDelivery
 import PraxisCmpDbModel
 import PraxisCmpFiveAgent
@@ -131,7 +132,7 @@ public struct PraxisTapStatusReadback: Sendable, Equatable, Codable {
   public let availableCapabilityIDs: [String]
   public let pendingApprovalCount: Int
   public let approvedApprovalCount: Int
-  public let latestCapabilityKey: String?
+  public let latestCapabilityKey: PraxisCapabilityID?
   public let latestDecisionSummary: String?
   public let issues: [String]
 
@@ -147,7 +148,7 @@ public struct PraxisTapStatusReadback: Sendable, Equatable, Codable {
     availableCapabilityIDs: [String],
     pendingApprovalCount: Int,
     approvedApprovalCount: Int,
-    latestCapabilityKey: String? = nil,
+    latestCapabilityKey: PraxisCapabilityID? = nil,
     latestDecisionSummary: String? = nil,
     issues: [String]
   ) {
@@ -194,7 +195,7 @@ public enum PraxisCmpPeerApprovalOutcome: String, Sendable, Codable {
 public struct PraxisTapHistoryEntry: Sendable, Equatable, Codable {
   public let agentID: String
   public let targetAgentID: String
-  public let capabilityKey: String
+  public let capabilityKey: PraxisCapabilityID
   public let requestedTier: PraxisTapCapabilityTier
   public let route: PraxisReviewerRoute
   public let outcome: PraxisCmpPeerApprovalOutcome
@@ -205,7 +206,7 @@ public struct PraxisTapHistoryEntry: Sendable, Equatable, Codable {
   public init(
     agentID: String,
     targetAgentID: String,
-    capabilityKey: String,
+    capabilityKey: PraxisCapabilityID,
     requestedTier: PraxisTapCapabilityTier,
     route: PraxisReviewerRoute,
     outcome: PraxisCmpPeerApprovalOutcome,
@@ -1121,7 +1122,7 @@ public struct PraxisRequestCmpPeerApprovalCommand: Sendable, Equatable, Codable 
   public let projectID: String
   public let agentID: String
   public let targetAgentID: String
-  public let capabilityKey: String
+  public let capabilityKey: PraxisCapabilityID
   public let requestedTier: PraxisTapCapabilityTier
   public let summary: String
 
@@ -1129,7 +1130,7 @@ public struct PraxisRequestCmpPeerApprovalCommand: Sendable, Equatable, Codable 
     projectID: String,
     agentID: String,
     targetAgentID: String,
-    capabilityKey: String,
+    capabilityKey: PraxisCapabilityID,
     requestedTier: PraxisTapCapabilityTier,
     summary: String
   ) {
@@ -1146,7 +1147,7 @@ public struct PraxisCmpPeerApproval: Sendable, Equatable, Codable {
   public let projectID: String
   public let agentID: String
   public let targetAgentID: String
-  public let capabilityKey: String
+  public let capabilityKey: PraxisCapabilityID
   public let requestedTier: PraxisTapCapabilityTier
   public let summary: String
   public let route: PraxisReviewerRoute
@@ -1161,7 +1162,7 @@ public struct PraxisCmpPeerApproval: Sendable, Equatable, Codable {
     projectID: String,
     agentID: String,
     targetAgentID: String,
-    capabilityKey: String,
+    capabilityKey: PraxisCapabilityID,
     requestedTier: PraxisTapCapabilityTier,
     summary: String,
     route: PraxisReviewerRoute,
@@ -1192,13 +1193,13 @@ public struct PraxisReadbackCmpPeerApprovalCommand: Sendable, Equatable, Codable
   public let projectID: String
   public let agentID: String?
   public let targetAgentID: String?
-  public let capabilityKey: String?
+  public let capabilityKey: PraxisCapabilityID?
 
   public init(
     projectID: String,
     agentID: String? = nil,
     targetAgentID: String? = nil,
-    capabilityKey: String? = nil
+    capabilityKey: PraxisCapabilityID? = nil
   ) {
     self.projectID = projectID
     self.agentID = agentID
@@ -1211,7 +1212,7 @@ public struct PraxisDecideCmpPeerApprovalCommand: Sendable, Equatable, Codable {
   public let projectID: String
   public let agentID: String
   public let targetAgentID: String
-  public let capabilityKey: String
+  public let capabilityKey: PraxisCapabilityID
   public let decision: PraxisCmpPeerApprovalDecision
   public let reviewerAgentID: String?
   public let decisionSummary: String
@@ -1220,7 +1221,7 @@ public struct PraxisDecideCmpPeerApprovalCommand: Sendable, Equatable, Codable {
     projectID: String,
     agentID: String,
     targetAgentID: String,
-    capabilityKey: String,
+    capabilityKey: PraxisCapabilityID,
     decision: PraxisCmpPeerApprovalDecision,
     reviewerAgentID: String? = nil,
     decisionSummary: String
@@ -1239,7 +1240,7 @@ public struct PraxisCmpPeerApprovalReadback: Sendable, Equatable, Codable {
   public let projectID: String
   public let agentID: String?
   public let targetAgentID: String?
-  public let capabilityKey: String?
+  public let capabilityKey: PraxisCapabilityID?
   public let requestedTier: PraxisTapCapabilityTier?
   public let summary: String
   public let route: PraxisReviewerRoute?
@@ -1256,7 +1257,7 @@ public struct PraxisCmpPeerApprovalReadback: Sendable, Equatable, Codable {
     projectID: String,
     agentID: String? = nil,
     targetAgentID: String? = nil,
-    capabilityKey: String? = nil,
+    capabilityKey: PraxisCapabilityID? = nil,
     requestedTier: PraxisTapCapabilityTier? = nil,
     summary: String,
     route: PraxisReviewerRoute? = nil,

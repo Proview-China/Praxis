@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import PraxisCapabilityContracts
 import PraxisCmpFiveAgent
 import PraxisCmpDelivery
 import PraxisCmpTypes
@@ -18,6 +19,10 @@ import PraxisSession
 import PraxisTapReview
 import PraxisTapTypes
 import PraxisToolingContracts
+
+private func capabilityID(_ rawValue: String) -> PraxisCapabilityID {
+  PraxisCapabilityID(rawValue: rawValue)
+}
 
 private struct StubSemanticMemoryStore: PraxisSemanticMemoryStoreContract {
   let bundleResult: PraxisSemanticMemoryBundle
@@ -202,7 +207,7 @@ struct PraxisRuntimeFacadesTests {
         projectID: "cmp.local-runtime",
         agentID: "runtime.local",
         targetAgentID: "checker.local",
-        capabilityKey: "tool.shell.exec",
+        capabilityKey: .init(rawValue: "tool.shell.exec"),
         requestedTier: .b2,
         summary: "Need shell execution for split facade test"
       )
@@ -212,7 +217,7 @@ struct PraxisRuntimeFacadesTests {
         projectID: "cmp.local-runtime",
         agentID: "runtime.local",
         targetAgentID: "checker.local",
-        capabilityKey: "tool.shell.exec"
+        capabilityKey: .init(rawValue: "tool.shell.exec")
       )
     )
     let statusReadback = try await facade.cmpReadbackFacade.readbackStatus(
@@ -257,13 +262,13 @@ struct PraxisRuntimeFacadesTests {
     #expect(rolesReadback.projectID == "cmp.local-runtime")
     #expect(!rolesReadback.summary.contains("CLI"))
     #expect(!rolesReadback.summary.contains("GUI"))
-    #expect(requestedApproval.capabilityKey == "tool.shell.exec")
+    #expect(requestedApproval.capabilityKey == PraxisCapabilityID(rawValue: "tool.shell.exec"))
     #expect(requestedApproval.requestedTier == .b2)
     #expect(requestedApproval.route == .toolReview)
     #expect(requestedApproval.outcome == .redirectedToProvisioning)
     #expect(requestedApproval.humanGateState == .waitingApproval)
     #expect(approvalReadback.found)
-    #expect(approvalReadback.capabilityKey == "tool.shell.exec")
+    #expect(approvalReadback.capabilityKey == PraxisCapabilityID(rawValue: "tool.shell.exec"))
     #expect(approvalReadback.requestedTier == .b2)
     #expect(approvalReadback.route == .toolReview)
     #expect(approvalReadback.outcome == .redirectedToProvisioning)
@@ -487,7 +492,7 @@ struct PraxisRuntimeFacadesTests {
       availableCapabilityIDs: ["tool.git", "tool.shell.exec"],
       pendingApprovalCount: 1,
       approvedApprovalCount: 0,
-      latestCapabilityKey: "tool.shell.exec",
+      latestCapabilityKey: .init(rawValue: "tool.shell.exec"),
       latestDecisionSummary: "Waiting on explicit approval."
     )
     let historySnapshot = PraxisTapHistorySnapshot(
@@ -499,7 +504,7 @@ struct PraxisRuntimeFacadesTests {
         .init(
           agentID: "runtime.local",
           targetAgentID: "checker.local",
-          capabilityKey: "tool.shell.exec",
+          capabilityKey: .init(rawValue: "tool.shell.exec"),
           requestedTier: .b2,
           route: .humanReview,
           outcome: .escalatedToHuman,
@@ -510,7 +515,7 @@ struct PraxisRuntimeFacadesTests {
         .init(
           agentID: "runtime.local",
           targetAgentID: "checker.local",
-          capabilityKey: "dispatch_released",
+          capabilityKey: .init(rawValue: "dispatch_released"),
           requestedTier: .b0,
           route: .autoApprove,
           outcome: .baselineApproved,
@@ -554,7 +559,7 @@ struct PraxisRuntimeFacadesTests {
       projectID: "cmp.local-runtime",
       agentID: "runtime.local",
       targetAgentID: "checker.local",
-      capabilityKey: "tool.shell.exec",
+      capabilityKey: .init(rawValue: "tool.shell.exec"),
       requestedTier: .b2,
       route: .humanReview,
       outcome: .escalatedToHuman,
@@ -569,7 +574,7 @@ struct PraxisRuntimeFacadesTests {
       projectID: "cmp.local-runtime",
       agentID: "runtime.local",
       targetAgentID: "checker.local",
-      capabilityKey: "tool.shell.exec",
+      capabilityKey: .init(rawValue: "tool.shell.exec"),
       requestedTier: .b2,
       route: .humanReview,
       outcome: .escalatedToHuman,
@@ -618,7 +623,7 @@ struct PraxisRuntimeFacadesTests {
       projectID: "cmp.local-runtime",
       agentID: "runtime.local",
       targetAgentID: "checker.local",
-      capabilityKey: "tool.git",
+      capabilityKey: .init(rawValue: "tool.git"),
       requestedTier: .b1,
       route: .humanReview,
       outcome: .baselineApproved,
@@ -633,7 +638,7 @@ struct PraxisRuntimeFacadesTests {
       projectID: "cmp.local-runtime",
       agentID: "runtime.local",
       targetAgentID: "checker.local",
-      capabilityKey: "tool.shell.exec",
+      capabilityKey: .init(rawValue: "tool.shell.exec"),
       requestedTier: .b2,
       route: .humanReview,
       outcome: .escalatedToHuman,
@@ -656,7 +661,7 @@ struct PraxisRuntimeFacadesTests {
       availableCapabilityIDs: ["tool.shell.exec"],
       pendingApprovalCount: 1,
       approvedApprovalCount: 0,
-      latestCapabilityKey: "tool.shell.exec",
+      latestCapabilityKey: .init(rawValue: "tool.shell.exec"),
       latestDecisionSummary: "Waiting for approval"
     )
 

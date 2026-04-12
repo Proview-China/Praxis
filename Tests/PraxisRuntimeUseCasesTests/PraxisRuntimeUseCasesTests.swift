@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import PraxisCapabilityContracts
 import PraxisCmpDelivery
 import PraxisCoreTypes
 import PraxisCmpTypes
@@ -19,6 +20,10 @@ import PraxisTapReview
 import PraxisTapTypes
 import PraxisToolingContracts
 import PraxisUserIOContracts
+
+private func capabilityID(_ rawValue: String) -> PraxisCapabilityID {
+  PraxisCapabilityID(rawValue: rawValue)
+}
 
 private struct StubSemanticMemoryStore: PraxisSemanticMemoryStoreContract {
   let bundleResult: PraxisSemanticMemoryBundle
@@ -1374,7 +1379,7 @@ struct PraxisRuntimeUseCasesTests {
         projectID: "cmp.local-runtime",
         agentID: "runtime.local",
         targetAgentID: "checker.local",
-        capabilityKey: "tool.git",
+        capabilityKey: .init(rawValue: "tool.git"),
         requestedTier: .b1,
         summary: "Escalate git access to checker"
       )
@@ -1384,7 +1389,7 @@ struct PraxisRuntimeUseCasesTests {
         projectID: "cmp.local-runtime",
         agentID: "runtime.local",
         targetAgentID: "checker.local",
-        capabilityKey: "tool.git",
+        capabilityKey: .init(rawValue: "tool.git"),
         decision: .approve,
         reviewerAgentID: "reviewer.local",
         decisionSummary: "Approved git access for checker"
@@ -1398,7 +1403,7 @@ struct PraxisRuntimeUseCasesTests {
         projectID: "cmp.local-runtime",
         agentID: "runtime.local",
         targetAgentID: "checker.local",
-        capabilityKey: "tool.git"
+        capabilityKey: .init(rawValue: "tool.git")
       )
     )
     let statusReadback = try await readbackStatusUseCase.execute(
@@ -1425,7 +1430,7 @@ struct PraxisRuntimeUseCasesTests {
     #expect(controlReadback.control.recoveryPreference == .resumeLatest)
     #expect(controlReadback.control.automation[.autoDispatch] == false)
     #expect(approvalReadback.found)
-    #expect(approvalReadback.capabilityKey == "tool.git")
+    #expect(approvalReadback.capabilityKey == PraxisCapabilityID(rawValue: "tool.git"))
     #expect(approvalReadback.requestedTier == .b1)
     #expect(approvalReadback.route == .humanReview)
     #expect(approvalReadback.outcome == .approvedByHuman)
@@ -1511,7 +1516,7 @@ struct PraxisRuntimeUseCasesTests {
           projectID: "cmp.local-runtime",
           agentID: "runtime.local",
           targetAgentID: "checker.local",
-          capabilityKey: "tool.git",
+          capabilityKey: .init(rawValue: "tool.git"),
           requestedTier: .b1,
           summary: "Escalate git access to checker"
         )
@@ -1521,7 +1526,7 @@ struct PraxisRuntimeUseCasesTests {
           projectID: "cmp.local-runtime",
           agentID: "runtime.local",
           targetAgentID: "checker.local",
-          capabilityKey: "tool.git",
+          capabilityKey: .init(rawValue: "tool.git"),
           decision: testCase.decision,
           reviewerAgentID: "reviewer.local",
           decisionSummary: testCase.decisionSummary
@@ -1532,7 +1537,7 @@ struct PraxisRuntimeUseCasesTests {
           projectID: "cmp.local-runtime",
           agentID: "runtime.local",
           targetAgentID: "checker.local",
-          capabilityKey: "tool.git"
+          capabilityKey: .init(rawValue: "tool.git")
         )
       )
       let tapStatus = try await readbackTapStatusUseCase.execute(
@@ -1554,7 +1559,7 @@ struct PraxisRuntimeUseCasesTests {
       #expect(tapStatus.humanGateState == testCase.humanGateState)
       #expect(
         tapHistory.entries.contains {
-          $0.capabilityKey == "tool.git"
+          $0.capabilityKey == PraxisCapabilityID(rawValue: "tool.git")
             && $0.outcome == testCase.outcome
             && $0.humanGateState == testCase.humanGateState
             && $0.decisionSummary == testCase.decisionSummary
@@ -1590,7 +1595,7 @@ struct PraxisRuntimeUseCasesTests {
         projectID: "cmp.local-runtime",
         agentID: "runtime.local",
         targetAgentID: "checker.local",
-        capabilityKey: "tool.shell.exec",
+        capabilityKey: .init(rawValue: "tool.shell.exec"),
         requestedTier: .b2,
         summary: "Escalate shell execution for checker"
       )
@@ -1606,13 +1611,71 @@ struct PraxisRuntimeUseCasesTests {
     #expect(tapStatus.tapMode == .restricted)
     #expect(tapStatus.humanGateState == .waitingApproval)
     let containsEscalatedApproval = tapHistory.entries.contains { entry in
-      entry.capabilityKey == "tool.shell.exec"
+      entry.capabilityKey == PraxisCapabilityID(rawValue: "tool.shell.exec")
         && entry.requestedTier == .b2
         && entry.route == .toolReview
         && entry.outcome == .redirectedToProvisioning
         && entry.humanGateState == .waitingApproval
     }
     #expect(containsEscalatedApproval)
+  }
+
+  @Test
+  func cmpPeerApprovalReadbackTreatsBlankOptionalCapabilityKeyAsOmittedFilter() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-runtime-usecases-peer-approval-blank-readback-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+    let dependencies = try makeDependencies(hostAdapters: registry)
+    let requestApprovalUseCase = PraxisRequestCmpPeerApprovalUseCase(dependencies: dependencies)
+    let readbackApprovalUseCase = PraxisReadbackCmpPeerApprovalUseCase(dependencies: dependencies)
+
+    _ = try await requestApprovalUseCase.execute(
+      PraxisRequestCmpPeerApprovalCommand(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityKey: capabilityID("tool.git"),
+        requestedTier: .b1,
+        summary: "Escalate git access to checker"
+      )
+    )
+
+    let readback = try await readbackApprovalUseCase.execute(
+      PraxisReadbackCmpPeerApprovalCommand(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityKey: capabilityID("   ")
+      )
+    )
+
+    #expect(readback.found)
+    #expect(readback.capabilityKey == capabilityID("tool.git"))
+  }
+
+  @Test
+  func cmpPeerApprovalReadbackNoHitTreatsBlankOptionalCapabilityKeyAsOmittedFilter() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-runtime-usecases-peer-approval-blank-readback-miss-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+    let dependencies = try makeDependencies(hostAdapters: registry)
+    let readbackApprovalUseCase = PraxisReadbackCmpPeerApprovalUseCase(dependencies: dependencies)
+
+    let readback = try await readbackApprovalUseCase.execute(
+      PraxisReadbackCmpPeerApprovalCommand(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityKey: capabilityID("   ")
+      )
+    )
+
+    #expect(readback.found == false)
+    #expect(readback.capabilityKey == nil)
   }
 
   @Test
@@ -1709,7 +1772,7 @@ struct PraxisRuntimeUseCasesTests {
             projectID: "cmp.local-runtime",
             agentID: "runtime.local",
             targetAgentID: "checker.local",
-            capabilityKey: "tool.git"
+            capabilityKey: .init(rawValue: "tool.git")
           )
         )
         Issue.record("Expected invalidInput for corrupted CMP peer approval \(invalidCase.fieldName).")
@@ -1898,7 +1961,7 @@ struct PraxisRuntimeUseCasesTests {
     )
 
     #expect(history.entries.count == 1)
-    #expect(history.entries.first?.capabilityKey == PraxisTapRuntimeEventKind.dispatchBlocked.rawValue)
+    #expect(history.entries.first?.capabilityKey == capabilityID(PraxisTapRuntimeEventKind.dispatchBlocked.rawValue))
     #expect(history.entries.first?.route == .humanReview)
     #expect(history.entries.first?.outcome == .escalatedToHuman)
   }
