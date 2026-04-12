@@ -237,6 +237,7 @@ struct PraxisRuntimeFacadesTests {
     #expect(projectReadback.persistenceSummary.isEmpty == false)
     #expect(ingest.projectID == "cmp.local-runtime")
     #expect(ingest.acceptedEventCount == 1)
+    #expect(ingest.nextAction == .commitContextDelta)
     #expect(commit.projectID == "cmp.local-runtime")
     #expect(!commit.deltaID.isEmpty)
     #expect(commit.activeLineStage == .candidateReady)
@@ -727,7 +728,7 @@ struct PraxisRuntimeFacadesTests {
           .init(
             id: "cmp.project.lineage",
             gate: .lineage,
-            status: .degraded,
+            status: .missing,
             summary: "Lineage readiness is degraded."
           ),
         ]
@@ -739,8 +740,9 @@ struct PraxisRuntimeFacadesTests {
 
     #expect(encoded.contains(#""gate":"workspace""#))
     #expect(encoded.contains(#""status":"ready""#))
+    #expect(encoded.contains(#""status":"missing""#))
     #expect(decoded.smokeResult.checks.first?.gate == .workspace)
-    #expect(decoded.smokeResult.checks.last?.status == .degraded)
+    #expect(decoded.smokeResult.checks.last?.status == .missing)
 
     let invalidGateJSON =
       #"{"projectID":"cmp.local-runtime","smokeResult":{"checks":[{"gate":"broken_gate","id":"cmp.project.workspace","status":"ready","summary":"Workspace readiness is ready."}],"summary":"CMP smoke summary"}}"#
@@ -752,6 +754,34 @@ struct PraxisRuntimeFacadesTests {
     }
     #expect(throws: DecodingError.self) {
       try decodeFacadeTestJSON(PraxisCmpProjectSmokeSnapshot.self, from: invalidStatusJSON)
+    }
+  }
+
+  @Test
+  func cmpFlowIngestSnapshotRoundTripsTypedNextActionAndRejectsUnknownValues() throws {
+    let snapshot = PraxisCmpFlowIngestSnapshot(
+      summary: "CMP ingest summary",
+      projectID: "cmp.local-runtime",
+      agentID: "runtime.local",
+      sessionID: "cmp.flow.snapshot",
+      requestID: "req.flow.snapshot",
+      acceptedEventCount: 1,
+      sectionCount: 1,
+      storedSectionCount: 1,
+      nextAction: .commitContextDelta
+    )
+
+    let encoded = try encodeFacadeTestJSON(snapshot)
+    let decoded = try decodeFacadeTestJSON(PraxisCmpFlowIngestSnapshot.self, from: encoded)
+
+    #expect(encoded.contains(#""nextAction":"commit_context_delta""#))
+    #expect(decoded.nextAction == .commitContextDelta)
+
+    let invalidJSON =
+      #"{"acceptedEventCount":1,"agentID":"runtime.local","nextAction":"broken_action","projectID":"cmp.local-runtime","requestID":"req.flow.snapshot","sectionCount":1,"sessionID":"cmp.flow.snapshot","storedSectionCount":1,"summary":"CMP ingest summary"}"#
+
+    #expect(throws: DecodingError.self) {
+      try decodeFacadeTestJSON(PraxisCmpFlowIngestSnapshot.self, from: invalidJSON)
     }
   }
 

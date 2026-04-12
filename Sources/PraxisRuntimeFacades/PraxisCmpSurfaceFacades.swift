@@ -14,17 +14,6 @@ private func mapCmpHostProfile(_ profile: PraxisCmpProjectHostProfile) -> Praxis
   )
 }
 
-private func mapCmpTruthLayerStatus(_ status: PraxisCmpProjectComponentStatus) -> PraxisTruthLayerStatus {
-  switch status {
-  case .ready:
-    return .ready
-  case .missing:
-    return .failed
-  case .degraded:
-    return .degraded
-  }
-}
-
 /// Hosts the neutral CMP session surface exposed to runtime callers.
 public final class PraxisCmpSessionFacade: Sendable {
   public let openCmpSessionUseCase: any PraxisOpenCmpSessionUseCaseProtocol
@@ -159,7 +148,7 @@ public final class PraxisCmpProjectFacade: Sendable {
           .init(
             id: check.id,
             gate: check.gate,
-            status: mapCmpTruthLayerStatus(check.status),
+            status: check.status,
             summary: check.summary
           )
         }

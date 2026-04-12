@@ -194,6 +194,25 @@ struct HostRuntimeSurfaceTests {
   }
 
   @Test
+  func cmpSmokeSurfaceModelsPreserveMissingStatus() {
+    let smoke = PraxisCmpProjectSmokeResult(
+      summary: "CMP smoke summary",
+      checks: [
+        .init(
+          id: "cmp.project.delivery",
+          gate: .delivery,
+          status: .missing,
+          summary: "Delivery coordination summary: store is missing."
+        )
+      ]
+    )
+
+    #expect(smoke.checks.count == 1)
+    #expect(smoke.checks.first?.gate == .delivery)
+    #expect(smoke.checks.first?.status == .missing)
+  }
+
+  @Test
   func runtimeFacadeAndBridgeExposeHostBackedInspectionFlow() async throws {
     let hostAdapters = PraxisHostAdapterRegistry.scaffoldDefaults()
     let compositionRoot = PraxisRuntimeBridgeFactory.makeCompositionRoot(hostAdapters: hostAdapters)
@@ -422,7 +441,7 @@ struct HostRuntimeSurfaceTests {
     #expect(ingest.projectID == "cmp.local-runtime")
     #expect(ingest.sessionID == "cmp.flow.session")
     #expect(ingest.acceptedEventCount == 1)
-    #expect(ingest.nextAction == "commit_context_delta")
+    #expect(ingest.nextAction == .commitContextDelta)
     #expect(commit.projectID == "cmp.local-runtime")
     #expect(commit.activeLineStage == .candidateReady)
     #expect(commit.snapshotCandidateID != nil)
@@ -516,14 +535,14 @@ struct HostRuntimeSurfaceTests {
     #expect(smoke.projectID == "cmp.local-runtime")
     #expect(smoke.smokeResult.checks.count == 5)
     let gitSmokeStatus = try #require(smoke.smokeResult.checks.first { $0.gate == .git }?.status)
-    let expectedGitSmokeStatus: PraxisTruthLayerStatus
+    let expectedGitSmokeStatus: PraxisCmpProjectComponentStatus
     switch readback.projectSummary.componentStatuses[.gitExecutor] {
     case .ready:
       expectedGitSmokeStatus = .ready
     case .degraded:
       expectedGitSmokeStatus = .degraded
     case .missing, nil:
-      expectedGitSmokeStatus = .failed
+      expectedGitSmokeStatus = .missing
     }
     #expect(gitSmokeStatus == expectedGitSmokeStatus)
     #expect(smoke.smokeResult.checks.map(\.gate).contains(.workspace))

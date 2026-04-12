@@ -77,13 +77,13 @@ public struct PraxisRuntimeSmokeResult: Sendable, Equatable, Codable {
 public struct PraxisCmpProjectSmokeCheck: Sendable, Equatable, Codable, Identifiable {
   public let id: String
   public let gate: PraxisCmpSmokeGate
-  public let status: PraxisTruthLayerStatus
+  public let status: PraxisCmpProjectComponentStatus
   public let summary: String
 
   public init(
     id: String,
     gate: PraxisCmpSmokeGate,
-    status: PraxisTruthLayerStatus,
+    status: PraxisCmpProjectComponentStatus,
     summary: String
   ) {
     self.id = id
