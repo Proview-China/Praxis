@@ -2,6 +2,7 @@ import Foundation
 import Testing
 import PraxisGoal
 import PraxisRun
+@testable import PraxisRuntimeUseCases
 #if canImport(PraxisAppleUI)
 @testable import PraxisAppleUI
 #endif
@@ -9,6 +10,52 @@ import PraxisRun
 @testable import PraxisRuntimePresentationBridge
 
 struct HostRuntimePresentationBridgeTests {
+  @Test
+  func presentationStateMapperKeepsRunEventWireNamesStable() {
+    let mapper = PraxisPresentationStateMapper()
+    let followUpAction = PraxisRunFollowUpAction(
+      kind: .wait,
+      reason: "Approval required",
+      intentID: "intent.follow-up"
+    )
+
+    let startedEvents = mapper.mapRunEvents(
+      from: .init(
+        runID: .init(rawValue: "run:started"),
+        sessionID: .init(rawValue: "session:started"),
+        phase: .running,
+        tickCount: 1,
+        lifecycleDisposition: .started,
+        followUpAction: followUpAction,
+        phaseSummary: "started summary"
+      )
+    )
+    let resumedEvents = mapper.mapRunEvents(
+      from: .init(
+        runID: .init(rawValue: "run:resumed"),
+        sessionID: .init(rawValue: "session:resumed"),
+        phase: .running,
+        tickCount: 2,
+        lifecycleDisposition: .resumed,
+        phaseSummary: "resumed summary"
+      )
+    )
+    let recoveredEvents = mapper.mapRunEvents(
+      from: .init(
+        runID: .init(rawValue: "run:recovered"),
+        sessionID: .init(rawValue: "session:recovered"),
+        phase: .paused,
+        tickCount: 3,
+        lifecycleDisposition: .recoveredWithoutResume,
+        phaseSummary: "recovered summary"
+      )
+    )
+
+    #expect(startedEvents.map { $0.name } == ["run.started", "run.follow_up_ready"])
+    #expect(resumedEvents.map { $0.name } == ["run.resumed"])
+    #expect(recoveredEvents.map { $0.name } == ["run.recovered"])
+  }
+
   @Test
   @MainActor
   func cliAndApplePresentationBridgesExposeCapabilityCatalogSurface() async throws {

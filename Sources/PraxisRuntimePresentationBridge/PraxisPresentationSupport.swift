@@ -1,4 +1,5 @@
 import PraxisRuntimeFacades
+import PraxisRuntimeInterface
 
 public struct PraxisPresentationStateMapper: Sendable {
   public init() {}
@@ -48,19 +49,9 @@ public struct PraxisPresentationStateMapper: Sendable {
   }
 
   public func mapRunEvents(from runSummary: PraxisRunSummary) -> [PraxisPresentationEvent] {
-    let lifecycleEventName: String
-    switch runSummary.lifecycleDisposition {
-    case .started:
-      lifecycleEventName = "run.started"
-    case .resumed:
-      lifecycleEventName = "run.resumed"
-    case .recoveredWithoutResume:
-      lifecycleEventName = "run.recovered"
-    }
-
     var events: [PraxisPresentationEvent] = [
       PraxisPresentationEvent(
-        name: lifecycleEventName,
+        name: runtimeInterfaceEventName(for: runSummary.lifecycleDisposition).rawValue,
         detail: runSummary.phaseSummary,
         runID: runSummary.runID.rawValue,
         sessionID: runSummary.sessionID.rawValue,
@@ -71,7 +62,7 @@ public struct PraxisPresentationStateMapper: Sendable {
     if let followUpAction = runSummary.followUpAction {
       events.append(
         PraxisPresentationEvent(
-          name: "run.follow_up_ready",
+          name: PraxisRuntimeInterfaceEventName.runFollowUpReady.rawValue,
           detail: "\(followUpAction.kind.rawValue): \(followUpAction.reason)",
           runID: runSummary.runID.rawValue,
           sessionID: runSummary.sessionID.rawValue,
@@ -81,6 +72,19 @@ public struct PraxisPresentationStateMapper: Sendable {
     }
 
     return events
+  }
+
+  private func runtimeInterfaceEventName(
+    for lifecycleDisposition: PraxisRunLifecycleDisposition
+  ) -> PraxisRuntimeInterfaceEventName {
+    switch lifecycleDisposition {
+    case .started:
+      .runStarted
+    case .resumed:
+      .runResumed
+    case .recoveredWithoutResume:
+      .runRecovered
+    }
   }
 }
 
