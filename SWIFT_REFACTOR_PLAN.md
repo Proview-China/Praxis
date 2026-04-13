@@ -66,8 +66,8 @@
   - `events`
 - 当前 Swift 仍然没有承接 TS 的完整 live/runtime 深度：
   - provider / browser / multimodal user-io 的 live host depth 仍未完成，当前更像 scaffold placeholder、local baseline 或已组合 surface 的分层体系，而不是统一 live lane
-  - 本地持久化已切到 SQLite-backed single-file baseline，并具备 `PRAGMA user_version` 的 schema versioning baseline，但还没有进入更丰富的 migration policy
-  - `PraxisFFI` 已正式升格为独立 target，但当前仍只有最小 encoded bridge surface，尚未冻结完整 ABI / 多语言绑定细节
+  - 本地持久化已切到 SQLite-backed single-file baseline，并已把 `PRAGMA user_version` baseline guard 收紧成显式 schema policy：fresh init、current reopen、legacy baseline adoption、future-version rejection 都已有测试覆盖
+  - `PraxisFFI` 已正式升格为独立 target，并已补齐当前 thin encoded bridge 的生命周期 / envelope / snapshot-drain 回归网，但完整 ABI / 多语言 ownership / streaming 细节仍未冻结
 
 ### 2.3 当前验证状态
 
@@ -76,16 +76,16 @@
 - `swift test` 通过
 - Swift package tests 已切换到 `Swift Testing`
 - 当前 `swift test` 最新快照为：
-  - `362` tests
+  - `383` tests
   - `53` suites
-- `npm run typecheck` 当前仍未全绿：
-  - `src/agent_core/live-agent-chat.ts:1690` 仍存在 TypeScript 参数个数错误
+- `npm run typecheck` 通过
 
 这说明：
 
 - Swift 非 UI 主线当前已经不是“target 规划 + 架构守卫”阶段，而是已具备大体可用的 HostRuntime / CMP / MP / TAP 中立表面与对应行为回归网
-- 但它还不是 TS 运行时的功能等价替代，也还没有正式冻结导出层与 live host 深度
-- TS 侧当前仍是行为参考基线；上面的 `typecheck` 问题是可选尾账，不是当前 Swift 非 UI 主线 blocker
+- 这轮非 UI 收口已经补完 Wave 6 truth / provenance residual、SQLite schema policy、Wave 7 FFI boundary hardening、CLI 最小验证入口与阻塞型 TS 尾账
+- 但它还不是 TS 运行时的功能等价替代，也还没有正式冻结导出层 ABI 与完整 live host 深度
+- TS 侧当前仍是行为参考基线，但此前阻塞验证可信度的 `typecheck` 尾账已关闭
 
 ## 3. 总目标
 
@@ -528,11 +528,11 @@ Core 禁止直接依赖：
   - runtime interface opaque references、lineage references、event names、TAP capability IDs、tool-review governance signals、CMP recovery source、role-stage telemetry 等弱类型 contract 的持续 typed migration
   - `localDefaults` provenance truth 收口：`unavailable / scaffoldPlaceholder / localBaseline / composed`
   - CMP/TAP readback wording truth 收口：只有真正来自 persisted state 或 append-only runtime events 的路径保留 `persisted` 语义，其余 fallback 路径改回 `current ... state/view`
+  - MP inspection / smoke / readback 的 provenance wording 收口：mixed provenance、mixed fallback、override path 已有稳定回归网，不再把 fallback surface 误报成 host-backed 或 persisted
+  - SQLite-backed runtime store 的 schema policy 已从散点 guard 收紧成显式决策层：fresh init、current reopen、legacy baseline adoption、tampered/future schema rejection 都有守卫测试
 - 这意味着当前 Wave 6 已经从“最小 local runtime 闭环”继续推进到“host-neutral surface 与 truth wording 收口”阶段，而不是仍停留在 neutral bridge 可调用的早期状态。
 - 当前 Wave 6 的可信残余项主要是：
-  - SQLite-backed runtime store 已有 baseline schema versioning guard，但仍缺更丰富的 migration policy
   - provider / browser / multimodal user-io 仍未形成完整 live host depth，当前主要是 scaffold placeholder、local baseline 与 composed surface 的组合
-  - provenance / mixed-fallback 行为网仍是高价值回归网，不是对所有 host-surface 传播路径的完备证明
   - `PraxisFFI` 虽已正式 target 化，但仍停留在薄 encoded export 层，未冻结完整 ABI / ownership / streaming 协议
 - 当前阶段应刻意保留的弹性包括：
   - 真实导出函数表如何组织
@@ -540,7 +540,7 @@ Core 禁止直接依赖：
   - 流式 token / partial update 协议
   - 最终的句柄释放与缓冲区所有权模型
 - 当前本地验证快照见 `2.3`：
-  - `swift test` 为 `362` tests / `53` suites 全通过
+  - `swift test` 为 `383` tests / `53` suites 全通过
 
 覆盖 target：
 
@@ -568,7 +568,7 @@ Core 禁止直接依赖：
 
 ### Wave 7：Entry / Export Adapters
 
-进度策略（`2026-04-11`）：
+进度策略（`2026-04-13`）：
 
 - 当前阶段尽量不深入 CLI / GUI 产品实现
 - `PraxisCLI` 只保留为最小调试 / smoke / 开发验证适配层
@@ -583,6 +583,10 @@ Core 禁止直接依赖：
   - 内存管理方式
   - 事件流协议
   - 多语言绑定映射策略
+- 当前这轮非 UI 收口已完成的关键项包括：
+  - `PraxisFFI` 会话句柄生命周期、encoded request/response/event envelope、snapshot/drain、closed/invalid handle 错误语义与 legacy flat payload compatibility 的稳定回归网
+  - `PraxisCLI` 的最小验证入口收口：`inspect-*`、`run-goal`、`resume-run`、`events` 都经由 `RuntimeGateway -> RuntimeInterface`，并已锁住 buffered events、invalid command、runtime failure、interactive-mode fail-fast 与参数校验语义
+  - `PraxisAppleUI` 明确保留在本轮范围之外，不参与当前验收
 
 覆盖 target：
 
@@ -761,9 +765,15 @@ Core 禁止直接依赖：
      - 已具备 typed request/response/error envelope、session handle lifecycle、FFI bridge smoke surface
      - HostRuntime 当前已能通过 neutral surface 承接 inspection / run / resume / buffered events
 10. PR 10
-   - `PraxisCLI`（若仍需要最小验证入口）
-   - `PraxisAppleUI`（若需要原生壳）
-   - 或优先替换为 `PraxisFFI` / 导出层相关 PR
+   - `PraxisCLI`
+   - `PraxisFFI`
+   - 状态：已完成（`2026-04-13`，非 UI 范围）
+   - 完成内容：
+     - `PraxisCLI` 已锁定为最小验证入口，`inspect-*`、`run-goal`、`resume-run`、`events` 统一经由 `RuntimeGateway -> RuntimeInterface`
+     - CLI 已补齐 buffered events、runtime failure、unknown command、interactive mode fail-fast、freeform `run-goal` 与 strict `resume-run` 参数校验回归网
+     - `PraxisFFI` 已补齐 thin encoded bridge 的 session lifecycle、snapshot/drain monotonicity、handle isolation、structured error envelope 与 legacy flat payload compatibility 回归网
+   - `PraxisAppleUI`
+   - 状态：延期（不属于当前非 UI 收口范围）
 
 ## 13. 验证与测试拓扑
 
@@ -844,20 +854,28 @@ Core 禁止直接依赖：
 
 ## 14. 当前剩余项与下一步建议
 
-按当前进度，Swift 非 UI 主线已经从“大块架构迁移”进入“剩余真值与导出边界收口”阶段。可信的剩余项目前压缩为：
+按当前进度，截至 `2026-04-13`，这轮 Swift 非 UI 收口已经完成：
 
-1. 继续补强 Wave 6 的 truth / provenance residual
-   - 为 mixed provenance、mixed fallback、override path 继续补行为回归网
-   - 重点不是再发明新的大 facade，而是防止现有 host-neutral surface 在 wording、summary、inspection、smoke 上重新漂强
-2. 继续做实 local runtime baseline
-   - 在已落地的 SQLite schema versioning baseline 之上继续补 richer migration policy
-   - 保持 `localDefaults` 中真实 local lane 与 scaffold/local-baseline/composed host-facing lane 的边界清晰
-3. 再推进 Wave 7 的导出层
-   - 在已正式 target 化的 `PraxisFFI` 上继续收紧稳定导出边界与 ownership 约束
-   - `PraxisCLI` 继续只承担最小验证入口
-   - `TUI / GUI` 仍不属于当前这份 Swift 非 UI 收口范围
-4. 作为可选尾账处理 TS UI 问题
-   - `src/agent_core/live-agent-chat.ts:1690` 仍可顺手修，但它不是当前 Swift 主线 blocker
+1. Wave 6 truth / provenance residual
+   - mixed provenance、mixed fallback、override path 已补稳定回归网
+   - inspection / smoke / readback wording 已与真实 provenance 对齐
+2. local runtime baseline / SQLite migration policy
+   - `PRAGMA user_version` baseline guard 已升级成显式 schema policy
+   - fresh / current / legacy-adoption / future-or-tampered schema 都已有测试覆盖
+3. Wave 7 non-UI export/entry hardening
+   - `PraxisFFI` 已锁住当前 thin encoded bridge 的稳定边界
+   - `PraxisCLI` 已锁住最小验证入口，不反向牵引 Runtime 设计
+4. 阻塞型 TS 非 UI 尾账
+   - `src/agent_core/live-agent-chat.ts:1690` 已修复，`npm run typecheck` 已恢复全绿
+
+仍保留的后续项主要是：
+
+1. provider / browser / multimodal user-io 的完整 live host depth
+   - 当前仍以 unavailable / scaffoldPlaceholder / localBaseline / composed 的分层体系为主
+2. `PraxisFFI` 的完整 ABI / ownership / streaming 协议冻结
+   - 当前仍刻意只保留 thin encoded bridge 的稳定边界，不提前定稿
+3. `PraxisAppleUI`、TUI、GUI 宿主体验
+   - 不属于当前这份 Swift 非 UI 收口范围
 
 最重要的一句话：
 
