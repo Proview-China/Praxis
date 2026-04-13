@@ -44,134 +44,168 @@ private let sqliteTransientDestructor = unsafeBitCast(-1, to: sqlite3_destructor
 private let localSQLiteSchemaLock = NSLock()
 private let localSQLiteRuntimeSchemaVersion = 1
 
+private struct LocalSQLiteSchemaColumnSignature: Sendable, Equatable {
+  let name: String
+  let declaredType: String
+  let isNotNull: Bool
+  let primaryKeyOrdinal: Int
+}
+
 private struct LocalSQLiteSchemaTableSpec: Sendable {
   let name: String
-  let expectedColumns: Set<String>
+  let expectedColumnSignatures: [LocalSQLiteSchemaColumnSignature]
+
+  var expectedColumnSignatureByName: [String: LocalSQLiteSchemaColumnSignature] {
+    Dictionary(uniqueKeysWithValues: expectedColumnSignatures.map { ($0.name, $0) })
+  }
+}
+
+private enum LocalSQLiteSchemaPolicyDecision: Sendable {
+  case initializeFresh
+  case adoptLegacyCurrentSchema
+  case reopenCurrentSchema
+  case rejectUnsupportedOlder(foundVersion: Int)
+  case rejectUnsupportedFuture(foundVersion: Int)
+  case rejectIncompatibleSchema(reason: String)
+}
+
+private func localSQLiteColumn(
+  _ name: String,
+  _ declaredType: String,
+  notNull: Bool = false,
+  primaryKeyOrdinal: Int = 0
+) -> LocalSQLiteSchemaColumnSignature {
+  LocalSQLiteSchemaColumnSignature(
+    name: name,
+    declaredType: declaredType,
+    isNotNull: notNull,
+    primaryKeyOrdinal: primaryKeyOrdinal
+  )
 }
 
 private let localSQLiteCurrentSchemaTableSpecs: [LocalSQLiteSchemaTableSpec] = [
   .init(
     name: "checkpoints",
-    expectedColumns: [
-      "pointer_key",
-      "checkpoint_id",
-      "session_id",
-      "tier",
-      "created_at",
-      "last_sequence",
-      "record_json",
-      "updated_at",
+    expectedColumnSignatures: [
+      localSQLiteColumn("pointer_key", "TEXT", primaryKeyOrdinal: 1),
+      localSQLiteColumn("checkpoint_id", "TEXT", notNull: true),
+      localSQLiteColumn("session_id", "TEXT", notNull: true),
+      localSQLiteColumn("tier", "TEXT", notNull: true),
+      localSQLiteColumn("created_at", "TEXT", notNull: true),
+      localSQLiteColumn("last_sequence", "INTEGER"),
+      localSQLiteColumn("record_json", "TEXT", notNull: true),
+      localSQLiteColumn("updated_at", "TEXT", notNull: true),
     ]
   ),
   .init(
     name: "journal_events",
-    expectedColumns: [
-      "sequence",
-      "session_id",
-      "run_reference",
-      "correlation_id",
-      "type",
-      "summary",
-      "metadata_json",
+    expectedColumnSignatures: [
+      localSQLiteColumn("sequence", "INTEGER", primaryKeyOrdinal: 1),
+      localSQLiteColumn("session_id", "TEXT", notNull: true),
+      localSQLiteColumn("run_reference", "TEXT"),
+      localSQLiteColumn("correlation_id", "TEXT"),
+      localSQLiteColumn("type", "TEXT", notNull: true),
+      localSQLiteColumn("summary", "TEXT", notNull: true),
+      localSQLiteColumn("metadata_json", "TEXT"),
     ]
   ),
   .init(
     name: "projections",
-    expectedColumns: [
-      "project_id",
-      "projection_id",
-      "lineage_id",
-      "agent_id",
-      "updated_at",
-      "descriptor_json",
+    expectedColumnSignatures: [
+      localSQLiteColumn("project_id", "TEXT", notNull: true, primaryKeyOrdinal: 1),
+      localSQLiteColumn("projection_id", "TEXT", notNull: true, primaryKeyOrdinal: 2),
+      localSQLiteColumn("lineage_id", "TEXT"),
+      localSQLiteColumn("agent_id", "TEXT"),
+      localSQLiteColumn("updated_at", "TEXT"),
+      localSQLiteColumn("descriptor_json", "TEXT", notNull: true),
     ]
   ),
   .init(
     name: "cmp_packages",
-    expectedColumns: [
-      "project_id",
-      "package_id",
-      "source_agent_id",
-      "target_agent_id",
-      "source_snapshot_id",
-      "package_kind",
-      "updated_at",
-      "descriptor_json",
+    expectedColumnSignatures: [
+      localSQLiteColumn("project_id", "TEXT", notNull: true, primaryKeyOrdinal: 1),
+      localSQLiteColumn("package_id", "TEXT", notNull: true, primaryKeyOrdinal: 2),
+      localSQLiteColumn("source_agent_id", "TEXT", notNull: true),
+      localSQLiteColumn("target_agent_id", "TEXT", notNull: true),
+      localSQLiteColumn("source_snapshot_id", "TEXT"),
+      localSQLiteColumn("package_kind", "TEXT", notNull: true),
+      localSQLiteColumn("updated_at", "TEXT", notNull: true),
+      localSQLiteColumn("descriptor_json", "TEXT", notNull: true),
     ]
   ),
   .init(
     name: "cmp_controls",
-    expectedColumns: [
-      "project_id",
-      "agent_id",
-      "updated_at",
-      "descriptor_json",
+    expectedColumnSignatures: [
+      localSQLiteColumn("project_id", "TEXT", notNull: true, primaryKeyOrdinal: 1),
+      localSQLiteColumn("agent_id", "TEXT", notNull: true, primaryKeyOrdinal: 2),
+      localSQLiteColumn("updated_at", "TEXT", notNull: true),
+      localSQLiteColumn("descriptor_json", "TEXT", notNull: true),
     ]
   ),
   .init(
     name: "cmp_peer_approvals",
-    expectedColumns: [
-      "project_id",
-      "agent_id",
-      "target_agent_id",
-      "capability_key",
-      "updated_at",
-      "descriptor_json",
+    expectedColumnSignatures: [
+      localSQLiteColumn("project_id", "TEXT", notNull: true, primaryKeyOrdinal: 1),
+      localSQLiteColumn("agent_id", "TEXT", notNull: true, primaryKeyOrdinal: 2),
+      localSQLiteColumn("target_agent_id", "TEXT", notNull: true, primaryKeyOrdinal: 3),
+      localSQLiteColumn("capability_key", "TEXT", notNull: true, primaryKeyOrdinal: 4),
+      localSQLiteColumn("updated_at", "TEXT", notNull: true),
+      localSQLiteColumn("descriptor_json", "TEXT", notNull: true),
     ]
   ),
   .init(
     name: "tap_runtime_events",
-    expectedColumns: [
-      "event_id",
-      "project_id",
-      "agent_id",
-      "target_agent_id",
-      "event_kind",
-      "capability_key",
-      "created_at",
-      "record_json",
+    expectedColumnSignatures: [
+      localSQLiteColumn("event_id", "TEXT", primaryKeyOrdinal: 1),
+      localSQLiteColumn("project_id", "TEXT", notNull: true),
+      localSQLiteColumn("agent_id", "TEXT", notNull: true),
+      localSQLiteColumn("target_agent_id", "TEXT"),
+      localSQLiteColumn("event_kind", "TEXT", notNull: true),
+      localSQLiteColumn("capability_key", "TEXT"),
+      localSQLiteColumn("created_at", "TEXT", notNull: true),
+      localSQLiteColumn("record_json", "TEXT", notNull: true),
     ]
   ),
   .init(
     name: "delivery_truth",
-    expectedColumns: [
-      "delivery_id",
-      "package_id",
-      "topic",
-      "target_agent_id",
-      "status",
-      "updated_at",
-      "record_json",
+    expectedColumnSignatures: [
+      localSQLiteColumn("delivery_id", "TEXT", primaryKeyOrdinal: 1),
+      localSQLiteColumn("package_id", "TEXT"),
+      localSQLiteColumn("topic", "TEXT", notNull: true),
+      localSQLiteColumn("target_agent_id", "TEXT"),
+      localSQLiteColumn("status", "TEXT", notNull: true),
+      localSQLiteColumn("updated_at", "TEXT", notNull: true),
+      localSQLiteColumn("record_json", "TEXT", notNull: true),
     ]
   ),
   .init(
     name: "embeddings",
-    expectedColumns: [
-      "embedding_id",
-      "storage_key",
-      "record_json",
+    expectedColumnSignatures: [
+      localSQLiteColumn("embedding_id", "TEXT", primaryKeyOrdinal: 1),
+      localSQLiteColumn("storage_key", "TEXT", notNull: true),
+      localSQLiteColumn("record_json", "TEXT", notNull: true),
     ]
   ),
   .init(
     name: "semantic_memory",
-    expectedColumns: [
-      "memory_id",
-      "project_id",
-      "agent_id",
-      "scope_level",
-      "freshness_status",
-      "summary",
-      "storage_key",
-      "record_json",
+    expectedColumnSignatures: [
+      localSQLiteColumn("memory_id", "TEXT", primaryKeyOrdinal: 1),
+      localSQLiteColumn("project_id", "TEXT", notNull: true),
+      localSQLiteColumn("agent_id", "TEXT", notNull: true),
+      localSQLiteColumn("scope_level", "TEXT", notNull: true),
+      localSQLiteColumn("freshness_status", "TEXT", notNull: true),
+      localSQLiteColumn("summary", "TEXT", notNull: true),
+      localSQLiteColumn("storage_key", "TEXT", notNull: true),
+      localSQLiteColumn("record_json", "TEXT", notNull: true),
     ]
   ),
   .init(
     name: "lineages",
-    expectedColumns: [
-      "lineage_id",
-      "branch_ref",
-      "parent_lineage_id",
-      "descriptor_json",
+    expectedColumnSignatures: [
+      localSQLiteColumn("lineage_id", "TEXT", primaryKeyOrdinal: 1),
+      localSQLiteColumn("branch_ref", "TEXT", notNull: true),
+      localSQLiteColumn("parent_lineage_id", "TEXT"),
+      localSQLiteColumn("descriptor_json", "TEXT", notNull: true),
     ]
   ),
 ]
@@ -325,17 +359,23 @@ private func localSQLiteUserTableNames(database: OpaquePointer?) throws -> Set<S
   }
 }
 
-private func localSQLiteColumnNames(
+private func localSQLiteNormalizeDeclaredType(_ declaredType: String?) -> String {
+  declaredType?
+    .trimmingCharacters(in: .whitespacesAndNewlines)
+    .uppercased() ?? ""
+}
+
+private func localSQLiteColumnSignatures(
   in tableName: String,
   database: OpaquePointer?
-) throws -> Set<String> {
+) throws -> [String: LocalSQLiteSchemaColumnSignature] {
   let statement = try localSQLitePrepareStatement(
     "PRAGMA table_info(\(tableName));",
     database: database
   )
   defer { sqlite3_finalize(statement) }
 
-  var columnNames: Set<String> = []
+  var signatures: [String: LocalSQLiteSchemaColumnSignature] = [:]
   while true {
     let code = sqlite3_step(statement)
     switch code {
@@ -343,11 +383,16 @@ private func localSQLiteColumnNames(
       guard let columnName = localSQLiteText(from: statement, at: 1) else {
         continue
       }
-      columnNames.insert(columnName)
+      signatures[columnName] = LocalSQLiteSchemaColumnSignature(
+        name: columnName,
+        declaredType: localSQLiteNormalizeDeclaredType(localSQLiteText(from: statement, at: 2)),
+        isNotNull: (localSQLiteInteger(from: statement, at: 3) ?? 0) != 0,
+        primaryKeyOrdinal: localSQLiteInteger(from: statement, at: 5) ?? 0
+      )
     case SQLITE_DONE:
-      return columnNames
+      return signatures
     default:
-      throw PraxisError.invariantViolation("Failed to inspect local runtime SQLite columns for \(tableName): \(localSQLiteErrorMessage(database)).")
+      throw PraxisError.invariantViolation("Failed to inspect local runtime SQLite column signatures for \(tableName): \(localSQLiteErrorMessage(database)).")
     }
   }
 }
@@ -384,8 +429,8 @@ private func localSQLiteMatchesCurrentRuntimeSchema(
       return false
     }
 
-    let columnNames = try localSQLiteColumnNames(in: tableName, database: database)
-    guard columnNames == table.expectedColumns else {
+    let columnSignatures = try localSQLiteColumnSignatures(in: tableName, database: database)
+    guard columnSignatures == table.expectedColumnSignatureByName else {
       return false
     }
   }
@@ -552,41 +597,60 @@ private func localSQLiteAdoptLegacyCurrentSchema(database: OpaquePointer?) throw
   }
 }
 
-private func localSQLiteEnsureSchema(database: OpaquePointer?) throws {
+private func localSQLiteResolveSchemaPolicyDecision(
+  database: OpaquePointer?
+) throws -> LocalSQLiteSchemaPolicyDecision {
   let schemaVersion = try localSQLiteReadUserVersion(database: database)
   let tableNames = try localSQLiteUserTableNames(database: database)
 
   switch schemaVersion {
   case 0 where tableNames.isEmpty:
-    try localSQLiteInitializeFreshSchema(database: database)
+    return .initializeFresh
   case 0:
     guard try localSQLiteMatchesCurrentRuntimeSchema(
       database: database,
       allowMissingManagedTables: true
     ) else {
-      throw PraxisError.invariantViolation(
-        "Local runtime SQLite schema is unversioned and does not satisfy the current baseline adoption policy."
+      return .rejectIncompatibleSchema(
+        reason: "Local runtime SQLite schema is unversioned and does not satisfy the current baseline adoption policy."
       )
     }
-    try localSQLiteAdoptLegacyCurrentSchema(database: database)
+    return .adoptLegacyCurrentSchema
   case localSQLiteRuntimeSchemaVersion:
     guard try localSQLiteMatchesCurrentRuntimeSchema(
       database: database,
       allowMissingManagedTables: false
     ) else {
-      throw PraxisError.invariantViolation(
-        "Local runtime SQLite schema version \(localSQLiteRuntimeSchemaVersion) does not satisfy the current baseline policy."
+      return .rejectIncompatibleSchema(
+        reason: "Local runtime SQLite schema version \(localSQLiteRuntimeSchemaVersion) does not satisfy the current baseline policy."
       )
     }
-    try localSQLiteApplyCurrentSchemaArtifacts(database: database)
+    return .reopenCurrentSchema
   case let version where version > localSQLiteRuntimeSchemaVersion:
-    throw PraxisError.invariantViolation(
-      "Local runtime SQLite schema version \(version) is newer than supported version \(localSQLiteRuntimeSchemaVersion). Refusing to open this runtime store."
-    )
+    return .rejectUnsupportedFuture(foundVersion: version)
   default:
+    return .rejectUnsupportedOlder(foundVersion: schemaVersion)
+  }
+}
+
+private func localSQLiteEnsureSchema(database: OpaquePointer?) throws {
+  switch try localSQLiteResolveSchemaPolicyDecision(database: database) {
+  case .initializeFresh:
+    try localSQLiteInitializeFreshSchema(database: database)
+  case .adoptLegacyCurrentSchema:
+    try localSQLiteAdoptLegacyCurrentSchema(database: database)
+  case .reopenCurrentSchema:
+    try localSQLiteApplyCurrentSchemaArtifacts(database: database)
+  case let .rejectUnsupportedOlder(foundVersion):
     throw PraxisError.invariantViolation(
-      "Local runtime SQLite schema version \(schemaVersion) is older than supported version \(localSQLiteRuntimeSchemaVersion), and no migration path is available."
+      "Local runtime SQLite schema version \(foundVersion) is older than supported version \(localSQLiteRuntimeSchemaVersion), and no migration path is available."
     )
+  case let .rejectUnsupportedFuture(foundVersion):
+    throw PraxisError.invariantViolation(
+      "Local runtime SQLite schema version \(foundVersion) is newer than supported version \(localSQLiteRuntimeSchemaVersion). Refusing to open this runtime store."
+    )
+  case let .rejectIncompatibleSchema(reason):
+    throw PraxisError.invariantViolation(reason)
   }
 }
 

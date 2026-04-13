@@ -221,6 +221,25 @@ private func seedLegacyProjectionOnlyRuntimeDatabase(
   }
 }
 
+private func seedProjectionSchemaOnlyRuntimeDatabase(
+  at fileURL: URL,
+  createTableSQL: String
+) throws {
+  try withHostTestSQLiteDatabase(at: fileURL) { database in
+    try hostTestSQLiteExecute(createTableSQL, database: database)
+  }
+}
+
+private func replaceProjectionTable(
+  at fileURL: URL,
+  createTableSQL: String
+) throws {
+  try withHostTestSQLiteDatabase(at: fileURL) { database in
+    try hostTestSQLiteExecute("DROP TABLE projections;", database: database)
+    try hostTestSQLiteExecute(createTableSQL, database: database)
+  }
+}
+
 private func seedRecoverProjectionDescriptor(
   in registry: PraxisHostAdapterRegistry,
   projectID: String = "cmp.local-runtime",
@@ -394,6 +413,36 @@ struct HostRuntimeSurfaceTests {
   }
 
   @Test
+  func localSQLiteRuntimeStoreRejectsLegacyUnversionedSchemaWhenColumnNamesMatchButSignaturesDrift() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-local-sqlite-version-legacy-signature-drift-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let databaseFileURL = rootDirectory.appendingPathComponent("runtime.sqlite3", isDirectory: false)
+    try seedProjectionSchemaOnlyRuntimeDatabase(
+      at: databaseFileURL,
+      createTableSQL:
+        """
+        CREATE TABLE projections (
+          project_id TEXT NOT NULL,
+          projection_id TEXT NOT NULL,
+          lineage_id TEXT,
+          agent_id TEXT,
+          updated_at TEXT,
+          descriptor_json BLOB NOT NULL,
+          PRIMARY KEY (project_id, projection_id)
+        );
+        """
+    )
+
+    let rejectedStore = PraxisLocalProjectionStore(fileURL: databaseFileURL)
+
+    await #expect(throws: PraxisError.invariantViolation("Local runtime SQLite schema is unversioned and does not satisfy the current baseline adoption policy.")) {
+      _ = try await rejectedStore.describe(.init(projectID: "cmp.local-runtime"))
+    }
+  }
+
+  @Test
   func localSQLiteRuntimeStoreReopensCurrentVersionDatabaseWhenSchemaStillMatchesBaseline() async throws {
     let rootDirectory = FileManager.default.temporaryDirectory
       .appendingPathComponent("praxis-local-sqlite-version-reopen-\(UUID().uuidString)", isDirectory: true)
@@ -439,6 +488,43 @@ struct HostRuntimeSurfaceTests {
       )
     }
     try setHostTestSQLiteUserVersion(1, at: databaseFileURL)
+
+    let rejectedStore = PraxisLocalProjectionStore(fileURL: databaseFileURL)
+
+    await #expect(throws: PraxisError.invariantViolation("Local runtime SQLite schema version 1 does not satisfy the current baseline policy.")) {
+      _ = try await rejectedStore.describe(.init(projectID: "cmp.local-runtime"))
+    }
+  }
+
+  @Test
+  func localSQLiteRuntimeStoreRejectsCurrentVersionSchemaWhenColumnNamesMatchButSignaturesDrift() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-local-sqlite-version-current-signature-drift-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let databaseFileURL = rootDirectory.appendingPathComponent("runtime.sqlite3", isDirectory: false)
+    let seededStore = PraxisLocalProjectionStore(fileURL: databaseFileURL)
+    _ = try await seededStore.save(
+      makeLocalProjectionDescriptor(
+        projectionID: "projection.sqlite.current-signature-drift",
+        lineageID: "lineage.sqlite.current-signature-drift"
+      )
+    )
+    try replaceProjectionTable(
+      at: databaseFileURL,
+      createTableSQL:
+        """
+        CREATE TABLE projections (
+          project_id TEXT NOT NULL,
+          projection_id TEXT NOT NULL,
+          lineage_id TEXT,
+          agent_id TEXT,
+          updated_at TEXT,
+          descriptor_json BLOB NOT NULL,
+          PRIMARY KEY (project_id, projection_id)
+        );
+        """
+    )
 
     let rejectedStore = PraxisLocalProjectionStore(fileURL: databaseFileURL)
 
