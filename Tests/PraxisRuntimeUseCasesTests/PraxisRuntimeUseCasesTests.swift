@@ -2649,6 +2649,114 @@ struct PraxisRuntimeUseCasesTests {
   }
 
   @Test
+  func mpWorkflowUseCasesPreserveBoundaryStringsWithoutPresentationKeys() async throws {
+    let memoryStore = PraxisFakeSemanticMemoryStore(
+      seedRecords: [
+        PraxisSemanticMemoryRecord(
+          id: " memory.primary ",
+          projectID: "mp.local-runtime",
+          agentID: "runtime.local",
+          scopeLevel: .project,
+          memoryKind: .semantic,
+          summary: "onboarding primary memory",
+          storageKey: " memory/primary ",
+          freshnessStatus: .fresh,
+          alignmentStatus: .aligned,
+          updatedAt: "2026-04-13T10:02:00Z"
+        ),
+        PraxisSemanticMemoryRecord(
+          id: " memory.supporting ",
+          projectID: "mp.local-runtime",
+          agentID: "runtime.local",
+          scopeLevel: .project,
+          memoryKind: .summary,
+          summary: "onboarding supporting memory",
+          storageKey: " memory/supporting ",
+          freshnessStatus: .aging,
+          alignmentStatus: .unreviewed,
+          updatedAt: "2026-04-13T10:01:00Z"
+        ),
+        PraxisSemanticMemoryRecord(
+          id: " memory.superseded ",
+          projectID: "mp.local-runtime",
+          agentID: "runtime.local",
+          scopeLevel: .project,
+          memoryKind: .summary,
+          summary: "onboarding superseded memory",
+          storageKey: " memory/superseded ",
+          freshnessStatus: .superseded,
+          alignmentStatus: .aligned,
+          updatedAt: "2026-04-13T10:00:00Z"
+        ),
+      ]
+    )
+    let dependencies = try makeDependencies(
+      hostAdapters: PraxisHostAdapterRegistry(semanticMemoryStore: memoryStore)
+    )
+
+    let ingest = try await PraxisIngestMpUseCase(dependencies: dependencies).execute(
+      .init(
+        projectID: "mp.local-runtime",
+        agentID: "runtime.local",
+        sessionID: " session.ingest ",
+        scopeLevel: .project,
+        summary: "Persist host-neutral memory state",
+        checkedSnapshotRef: .init(rawValue: " snapshot.mp.runtime "),
+        branchRef: " main ",
+        storageKey: "memory/created",
+        memoryKind: .summary,
+        observedAt: "2026-04-13T10:05:00Z"
+      )
+    )
+    let resolve = try await PraxisResolveMpUseCase(dependencies: dependencies).execute(
+      .init(
+        projectID: "mp.local-runtime",
+        query: "onboarding",
+        requesterAgentID: "runtime.local",
+        requesterSessionID: "session.resolve",
+        scopeLevels: [.project],
+        limit: 5
+      )
+    )
+    let history = try await PraxisRequestMpHistoryUseCase(dependencies: dependencies).execute(
+      .init(
+        projectID: "mp.local-runtime",
+        requesterAgentID: "runtime.local",
+        requesterSessionID: "history.session",
+        reason: "Need historical context",
+        query: "onboarding",
+        scopeLevels: [.project],
+        limit: 5
+      )
+    )
+
+    let encodedIngest = try encodeUseCaseTestJSON(ingest)
+    let encodedResolve = try encodeUseCaseTestJSON(resolve)
+    let encodedHistory = try encodeUseCaseTestJSON(history)
+
+    #expect(encodedIngest.contains(#""sessionID":" session.ingest ""#))
+    #expect(encodedIngest.contains(#""storageKey":"memory\/created""#))
+    #expect(encodedResolve.contains(#""primaryMemoryIDs":["memory.primary"]"#))
+    #expect(encodedResolve.contains(#""supportingMemoryIDs":["memory.supporting"]"#))
+    #expect(encodedResolve.contains(#""omittedSupersededMemoryIDs":["memory.superseded"]"#))
+    #expect(encodedHistory.contains(#""primaryMemoryIDs":["memory.primary"]"#))
+    #expect(encodedHistory.contains(#""supportingMemoryIDs":["memory.supporting"]"#))
+
+    for encoded in [encodedIngest, encodedResolve, encodedHistory] {
+      for forbiddenKey in ["\"title\":", "\"kind\":", "\"terminal\"", "\"screen\"", "\"viewState\"", "\"prompt\""] {
+        #expect(!encoded.contains(forbiddenKey))
+      }
+    }
+
+    #expect(ingest.sessionID == " session.ingest ")
+    #expect(resolve.primaryMemoryIDs == ["memory.primary"])
+    #expect(resolve.supportingMemoryIDs == ["memory.supporting"])
+    #expect(resolve.omittedSupersededMemoryIDs == ["memory.superseded"])
+    #expect(history.primaryMemoryIDs == ["memory.primary"])
+    #expect(history.supportingMemoryIDs == ["memory.supporting"])
+  }
+
+  @Test
   func mpTypedCountMapsDoNotExposePublicStringConstructionBackdoors() throws {
     let testFileURL = URL(fileURLWithPath: #filePath)
     let repositoryRoot = testFileURL

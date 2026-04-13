@@ -1764,6 +1764,187 @@ struct HostRuntimeInterfaceTests {
   }
 
   @Test
+  func runtimeInterfacePreservesMpSessionLikeFieldsWithoutCanonicalizingAndRejectsBlankCheckedSnapshotRef() async throws {
+    let runtimeInterface = makeStubbedRuntimeInterface(
+      mpFacade: makeStubMpFacade(
+        resolveMp: { command in
+          #expect(command.projectID == " mp.local-runtime ")
+          #expect(command.requesterSessionID == " session.resolve ")
+          return PraxisMpResolveResult(
+            projectID: command.projectID,
+            query: command.query,
+            summary: "MP resolve preserved raw session boundary values.",
+            primaryMemoryIDs: [" memory.primary "],
+            supportingMemoryIDs: [" memory.supporting "],
+            omittedSupersededMemoryIDs: [" memory.superseded "],
+            rerankComposition: .init(
+              fresh: 1,
+              aging: 0,
+              stale: 0,
+              superseded: 1,
+              aligned: 1,
+              unreviewed: 0,
+              drifted: 0
+            ),
+            roleCounts: .init(counts: [.dispatcher: 1]),
+            roleStages: .init(stages: [.dispatcher: .assembleBundle]),
+            issues: []
+          )
+        },
+        requestMpHistory: { command in
+          #expect(command.requesterSessionID == "\thistory.session\t")
+          return PraxisMpHistoryResult(
+            projectID: command.projectID,
+            requesterAgentID: command.requesterAgentID,
+            query: command.query,
+            reason: command.reason,
+            summary: "MP history preserved raw requester session identifiers.",
+            primaryMemoryIDs: [" history.primary "],
+            supportingMemoryIDs: [" history.supporting "],
+            omittedSupersededMemoryIDs: [],
+            rerankComposition: .init(
+              fresh: 1,
+              aging: 0,
+              stale: 0,
+              superseded: 0,
+              aligned: 1,
+              unreviewed: 0,
+              drifted: 0
+            ),
+            roleCounts: .init(counts: [.dispatcher: 1]),
+            roleStages: .init(stages: [.dispatcher: .assembleBundle]),
+            issues: []
+          )
+        }
+      )
+    )
+
+    let blankSnapshotResponse = await runtimeInterface.handle(
+      .ingestMp(
+        .init(
+          payloadSummary: "Reject blank checked snapshot reference",
+          projectID: "mp.local-runtime",
+          agentID: "runtime.local",
+          summary: "This request should fail before reaching MP ingest.",
+          checkedSnapshotRef: runtimeInterfaceReferenceID("   "),
+          branchRef: "main"
+        )
+      )
+    )
+    let resolveResponse = await runtimeInterface.handle(
+      .resolveMp(
+        .init(
+          payloadSummary: "Preserve padded resolve session identifier",
+          projectID: " mp.local-runtime ",
+          query: "onboarding",
+          requesterAgentID: "runtime.local",
+          sessionID: " session.resolve ",
+          scopeLevels: [.project],
+          limit: 3
+        )
+      )
+    )
+    let historyResponse = await runtimeInterface.handle(
+      .requestMpHistory(
+        .init(
+          payloadSummary: "Preserve padded history session identifier",
+          projectID: "mp.local-runtime",
+          requesterAgentID: "runtime.local",
+          sessionID: "\thistory.session\t",
+          reason: "Need historical memory trace",
+          query: "onboarding",
+          scopeLevels: [.project],
+          limit: 3
+        )
+      )
+    )
+
+    #expect(blankSnapshotResponse.status == .failure)
+    #expect(blankSnapshotResponse.error?.code == .invalidInput)
+    #expect(blankSnapshotResponse.error?.message == "Field checkedSnapshotRef must not be empty.")
+
+    #expect(resolveResponse.status == .success)
+    #expect(resolveResponse.snapshot?.kind == .mpResolve)
+    #expect(resolveResponse.snapshot?.projectID == " mp.local-runtime ")
+    #expect(resolveResponse.snapshot?.sessionID?.rawValue == " session.resolve ")
+
+    #expect(historyResponse.status == .success)
+    #expect(historyResponse.snapshot?.kind == .mpHistory)
+    #expect(historyResponse.snapshot?.sessionID?.rawValue == "\thistory.session\t")
+  }
+
+  @Test
+  func runtimeInterfacePreservesExactMpMutationIdentifiersWithoutCanonicalizing() async throws {
+    let runtimeInterface = makeStubbedRuntimeInterface(
+      mpFacade: makeStubMpFacade(
+        alignMp: { command in
+          guard command.memoryID == " memory.align " else {
+            throw PraxisError.invalidInput("alignMp memoryID was normalized unexpectedly.")
+          }
+          throw PraxisError.invalidInput("alignMp preserved padded memoryID.")
+        },
+        promoteMp: { command in
+          guard command.memoryID == " memory.promote " else {
+            throw PraxisError.invalidInput("promoteMp memoryID was normalized unexpectedly.")
+          }
+          guard command.targetSessionID == " session.promote " else {
+            throw PraxisError.invalidInput("promoteMp targetSessionID was normalized unexpectedly.")
+          }
+          throw PraxisError.invalidInput("promoteMp preserved padded memoryID and targetSessionID.")
+        },
+        archiveMp: { command in
+          guard command.memoryID == "\tmemory.archive\t" else {
+            throw PraxisError.invalidInput("archiveMp memoryID was normalized unexpectedly.")
+          }
+          throw PraxisError.invalidInput("archiveMp preserved padded memoryID.")
+        }
+      )
+    )
+
+    let alignResponse = await runtimeInterface.handle(
+      .alignMp(
+        .init(
+          payloadSummary: "Align MP with padded memory ID",
+          projectID: "mp.local-runtime",
+          memoryID: " memory.align "
+        )
+      )
+    )
+    let promoteResponse = await runtimeInterface.handle(
+      .promoteMp(
+        .init(
+          payloadSummary: "Promote MP with padded identifiers",
+          projectID: "mp.local-runtime",
+          memoryID: " memory.promote ",
+          targetPromotionState: .acceptedByParent,
+          targetSessionID: " session.promote "
+        )
+      )
+    )
+    let archiveResponse = await runtimeInterface.handle(
+      .archiveMp(
+        .init(
+          payloadSummary: "Archive MP with padded memory ID",
+          projectID: "mp.local-runtime",
+          memoryID: "\tmemory.archive\t"
+        )
+      )
+    )
+
+    #expect(alignResponse.status == .failure)
+    #expect(alignResponse.error?.code == .invalidInput)
+    #expect(alignResponse.error?.message == "alignMp preserved padded memoryID.")
+
+    #expect(promoteResponse.status == .failure)
+    #expect(promoteResponse.error?.code == .invalidInput)
+    #expect(promoteResponse.error?.message == "promoteMp preserved padded memoryID and targetSessionID.")
+
+    #expect(archiveResponse.status == .failure)
+    #expect(archiveResponse.error?.code == .invalidInput)
+    #expect(archiveResponse.error?.message == "archiveMp preserved padded memoryID.")
+  }
+
+  @Test
   func runtimeInterfaceResolveCmpFlowNotFoundKeepsSuccessEnvelopeAndNilIntentID() async throws {
     let runtimeInterface = makeStubbedRuntimeInterface(
       cmpFacade: makeStubCmpFacade(
@@ -3520,6 +3701,136 @@ struct HostRuntimeInterfaceTests {
     #expect(decodedRecover == recoverRequest)
     #expect(decodedMaterialize == materializeRequest)
     #expect(decodedIngest == ingestRequest)
+  }
+
+  @Test
+  func runtimeInterfaceCodecRoundTripsMpWorkflowRequestsAsStableStrings() throws {
+    let codec = PraxisJSONRuntimeInterfaceCodec()
+    let ingestRequest = PraxisRuntimeInterfaceRequest.ingestMp(
+      .init(
+        payloadSummary: "Ingest MP workflow memory",
+        projectID: "mp.local-runtime",
+        agentID: "runtime.local",
+        sessionID: "mp.session",
+        scopeLevel: .project,
+        summary: "Store host-neutral MP workflow memory",
+        checkedSnapshotRef: runtimeInterfaceReferenceID("snapshot.mp.runtime"),
+        branchRef: "main",
+        storageKey: "memory/primary",
+        memoryKind: .summary,
+        observedAt: "2026-04-13T10:00:00Z",
+        capturedAt: "2026-04-13T10:01:00Z",
+        semanticGroupID: "semantic.group.runtime",
+        tags: ["host-neutral", "wire-shape"],
+        sourceRefs: ["cmp://snapshot/runtime", "doc://memory/runtime"],
+        confidence: .high
+      )
+    )
+    let alignRequest = PraxisRuntimeInterfaceRequest.alignMp(
+      .init(
+        payloadSummary: "Align MP workflow memory",
+        projectID: "mp.local-runtime",
+        memoryID: "memory.primary",
+        alignedAt: "2026-04-13T10:05:00Z",
+        queryText: "verify onboarding summary"
+      )
+    )
+    let promoteRequest = PraxisRuntimeInterfaceRequest.promoteMp(
+      .init(
+        payloadSummary: "Promote MP workflow memory",
+        projectID: "mp.local-runtime",
+        memoryID: "memory.primary",
+        targetPromotionState: .acceptedByParent,
+        targetSessionID: "mp.session",
+        promotedAt: "2026-04-13T10:06:00Z",
+        reason: "Promote stable onboarding memory"
+      )
+    )
+    let archiveRequest = PraxisRuntimeInterfaceRequest.archiveMp(
+      .init(
+        payloadSummary: "Archive MP workflow memory",
+        projectID: "mp.local-runtime",
+        memoryID: "memory.primary",
+        archivedAt: "2026-04-13T10:07:00Z",
+        reason: "Superseded by project memory"
+      )
+    )
+    let resolveRequest = PraxisRuntimeInterfaceRequest.resolveMp(
+      .init(
+        payloadSummary: "Resolve MP workflow bundle",
+        projectID: "mp.local-runtime",
+        query: "onboarding",
+        requesterAgentID: "runtime.local",
+        sessionID: "mp.session",
+        scopeLevels: [.global, .project],
+        limit: 7
+      )
+    )
+    let historyRequest = PraxisRuntimeInterfaceRequest.requestMpHistory(
+      .init(
+        payloadSummary: "Request MP workflow history",
+        projectID: "mp.local-runtime",
+        requesterAgentID: "runtime.local",
+        sessionID: "mp.session",
+        reason: "Need historical MP context",
+        query: "onboarding",
+        scopeLevels: [.project, .agentIsolated],
+        limit: 4
+      )
+    )
+
+    let ingestData = try codec.encode(ingestRequest)
+    let alignData = try codec.encode(alignRequest)
+    let promoteData = try codec.encode(promoteRequest)
+    let archiveData = try codec.encode(archiveRequest)
+    let resolveData = try codec.encode(resolveRequest)
+    let historyData = try codec.encode(historyRequest)
+
+    let ingestJSON = String(decoding: ingestData, as: UTF8.self)
+    let alignJSON = String(decoding: alignData, as: UTF8.self)
+    let promoteJSON = String(decoding: promoteData, as: UTF8.self)
+    let archiveJSON = String(decoding: archiveData, as: UTF8.self)
+    let resolveJSON = String(decoding: resolveData, as: UTF8.self)
+    let historyJSON = String(decoding: historyData, as: UTF8.self)
+
+    let decodedIngest = try codec.decodeRequest(ingestData)
+    let decodedAlign = try codec.decodeRequest(alignData)
+    let decodedPromote = try codec.decodeRequest(promoteData)
+    let decodedArchive = try codec.decodeRequest(archiveData)
+    let decodedResolve = try codec.decodeRequest(resolveData)
+    let decodedHistory = try codec.decodeRequest(historyData)
+
+    #expect(
+      ingestJSON ==
+        #"{"ingestMp":{"agentID":"runtime.local","branchRef":"main","capturedAt":"2026-04-13T10:01:00Z","checkedSnapshotRef":"snapshot.mp.runtime","confidence":"high","memoryKind":"summary","observedAt":"2026-04-13T10:00:00Z","payloadSummary":"Ingest MP workflow memory","projectID":"mp.local-runtime","scopeLevel":"project","semanticGroupID":"semantic.group.runtime","sessionID":"mp.session","sourceRefs":["cmp:\/\/snapshot\/runtime","doc:\/\/memory\/runtime"],"storageKey":"memory\/primary","summary":"Store host-neutral MP workflow memory","tags":["host-neutral","wire-shape"]},"kind":"ingestMp"}"#
+    )
+    #expect(
+      alignJSON ==
+        #"{"alignMp":{"alignedAt":"2026-04-13T10:05:00Z","memoryID":"memory.primary","payloadSummary":"Align MP workflow memory","projectID":"mp.local-runtime","queryText":"verify onboarding summary"},"kind":"alignMp"}"#
+    )
+    #expect(
+      promoteJSON ==
+        #"{"kind":"promoteMp","promoteMp":{"memoryID":"memory.primary","payloadSummary":"Promote MP workflow memory","projectID":"mp.local-runtime","promotedAt":"2026-04-13T10:06:00Z","reason":"Promote stable onboarding memory","targetPromotionState":"accepted_by_parent","targetSessionID":"mp.session"}}"#
+    )
+    #expect(
+      archiveJSON ==
+        #"{"archiveMp":{"archivedAt":"2026-04-13T10:07:00Z","memoryID":"memory.primary","payloadSummary":"Archive MP workflow memory","projectID":"mp.local-runtime","reason":"Superseded by project memory"},"kind":"archiveMp"}"#
+    )
+    #expect(
+      resolveJSON ==
+        #"{"kind":"resolveMp","resolveMp":{"limit":7,"payloadSummary":"Resolve MP workflow bundle","projectID":"mp.local-runtime","query":"onboarding","requesterAgentID":"runtime.local","scopeLevels":["global","project"],"sessionID":"mp.session"}}"#
+    )
+    #expect(
+      historyJSON ==
+        #"{"kind":"requestMpHistory","requestMpHistory":{"limit":4,"payloadSummary":"Request MP workflow history","projectID":"mp.local-runtime","query":"onboarding","reason":"Need historical MP context","requesterAgentID":"runtime.local","scopeLevels":["project","agent_isolated"],"sessionID":"mp.session"}}"#
+    )
+
+    #expect(decodedIngest == ingestRequest)
+    #expect(decodedAlign == alignRequest)
+    #expect(decodedPromote == promoteRequest)
+    #expect(decodedArchive == archiveRequest)
+    #expect(decodedResolve == resolveRequest)
+    #expect(decodedHistory == historyRequest)
   }
 
   @Test
