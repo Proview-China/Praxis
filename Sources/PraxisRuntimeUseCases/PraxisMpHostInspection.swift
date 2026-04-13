@@ -53,7 +53,7 @@ public struct PraxisMpHostInspectionService: Sendable {
         readyStatus: .ready,
         missingStatus: .degraded,
         readySummary: providerInferenceReadySummary(for: providerInferenceProvenance),
-        fallbackSummary: "Provider inference is absent; MP remains local-baseline only."
+        fallbackSummary: providerInferenceUnavailableSummary()
       ),
       smokeCheck(
         id: "mp.browser.grounding",
@@ -145,7 +145,7 @@ public struct PraxisMpHostInspectionService: Sendable {
     case .composed:
       return "Provider inference surface is composed for MP enrichment."
     case .unavailable:
-      return "Provider inference is absent; MP remains local-baseline only."
+      return providerInferenceUnavailableSummary()
     }
   }
 
@@ -175,8 +175,12 @@ public struct PraxisMpHostInspectionService: Sendable {
     case .composed:
       return "ICMA / Iterator / Checker / DbAgent / Dispatcher lanes have a composed provider inference surface available."
     case .unavailable:
-      return "Five-agent lanes remain Core-side protocols until a provider inference surface is composed."
+      return "Five-agent lanes remain Core-side protocols because no provider inference surface is currently registered."
     }
+  }
+
+  private func providerInferenceUnavailableSummary() -> String {
+    "Provider inference is absent; MP does not currently expose a provider inference lane."
   }
 
   private func memoryStoreSummary(

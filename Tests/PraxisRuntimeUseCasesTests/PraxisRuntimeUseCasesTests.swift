@@ -2911,6 +2911,122 @@ struct PraxisRuntimeUseCasesTests {
   }
 
   @Test
+  func mpHostInspectionServiceKeepsMixedFallbackInspectionTruthStrict() async throws {
+    let inspectionService = PraxisMpHostInspectionService()
+    let hostAdapters = PraxisHostAdapterRegistry(
+      browserGroundingCollector: PraxisStubBrowserGroundingCollector { _ in
+        PraxisBrowserGroundingEvidenceBundle(
+          pages: [.init(role: .candidateSource, url: "https://example.com/mixed")],
+          facts: []
+        )
+      },
+      semanticSearchIndex: PraxisStubSemanticSearchIndex(
+        cannedResults: [
+          "host runtime": [
+            .init(id: "match-1", score: 0.9, contentSummary: "Mixed host runtime hit", storageKey: "memory/primary")
+          ]
+        ]
+      ),
+      semanticMemoryStore: StubSemanticMemoryStore(
+        bundleResult: .init(
+          primaryMemoryIDs: ["memory.primary"],
+          supportingMemoryIDs: [],
+          omittedSupersededMemoryIDs: []
+        )
+      ),
+      audioTranscriptionDriver: PraxisStubAudioTranscriptionDriver { _ in
+        .init(transcript: "local audio transcript")
+      },
+      speechSynthesisDriver: PraxisStubSpeechSynthesisDriver { _ in
+        .init(audioAssetRef: "audio://mixed.mp3", format: "mp3")
+      },
+      browserGroundingSurfaceProvenance: .scaffoldPlaceholder,
+      audioTranscriptionSurfaceProvenance: .localBaseline,
+      speechSynthesisSurfaceProvenance: .composed
+    )
+
+    let inspection = try await inspectionService.inspect(
+      projectID: "mp.local-runtime",
+      hostAdapters: hostAdapters
+    )
+
+    #expect(
+      inspection.workflowSummary
+        == "Five-agent lanes remain Core-side protocols because no provider inference surface is currently registered."
+    )
+    #expect(inspection.workflowSummary.contains("local-baseline only") == false)
+    #expect(inspection.workflowSummary.contains("host-backed") == false)
+    #expect(inspection.workflowSummary.contains("persisted") == false)
+    #expect(
+      inspection.multimodalSummary
+        == "Multimodal host chips: audio.transcribe (local-baseline), speech.synthesize, browser.ground (scaffold-placeholder)"
+    )
+    #expect(inspection.issues.contains { $0.contains("local baselines") })
+    #expect(inspection.issues.contains { $0.contains("scaffold placeholders") })
+  }
+
+  @Test
+  func mpHostInspectionServiceKeepsMixedFallbackSmokeWordingStrictAcrossBrowserProvenanceMix() throws {
+    let inspectionService = PraxisMpHostInspectionService()
+    let browserCases: [(provenance: PraxisHostAdapterSurfaceProvenance, expectedSummary: String)] = [
+      (
+        .localBaseline,
+        "Browser grounding surface is wired through a local baseline collector that yields candidate evidence without claiming a fetched browser session."
+      ),
+      (
+        .scaffoldPlaceholder,
+        "Browser grounding surface is wired through scaffold placeholders and does not claim fetched or verified evidence."
+      ),
+      (
+        .composed,
+        "Browser grounding collector is composed for evidence-backed memory capture."
+      ),
+    ]
+
+    for browserCase in browserCases {
+      let hostAdapters = PraxisHostAdapterRegistry(
+        browserGroundingCollector: PraxisStubBrowserGroundingCollector { _ in
+          PraxisBrowserGroundingEvidenceBundle(
+            pages: [.init(role: .candidateSource, url: "https://example.com/mixed-smoke")],
+            facts: []
+          )
+        },
+        semanticSearchIndex: PraxisStubSemanticSearchIndex(cannedResults: [:]),
+        semanticMemoryStore: StubSemanticMemoryStore(
+          bundleResult: .init(
+            primaryMemoryIDs: [],
+            supportingMemoryIDs: [],
+            omittedSupersededMemoryIDs: []
+          )
+        ),
+        browserGroundingSurfaceProvenance: browserCase.provenance
+      )
+
+      let smoke = inspectionService.smoke(
+        projectID: "mp.local-runtime",
+        hostAdapters: hostAdapters
+      )
+
+      let providerCheck = try #require(smoke.checks.first { $0.gate == .providerInference })
+      let browserCheck = try #require(smoke.checks.first { $0.gate == .browserGrounding })
+
+      #expect(smoke.summary == "MP smoke reports 3/4 runtime gates ready for project mp.local-runtime.")
+      #expect(providerCheck.status == .degraded)
+      #expect(
+        providerCheck.summary
+          == "Provider inference is absent; MP does not currently expose a provider inference lane."
+      )
+      #expect(providerCheck.summary.contains("local-baseline only") == false)
+      #expect(providerCheck.summary.contains("host-backed") == false)
+      #expect(providerCheck.summary.contains("persisted") == false)
+      #expect(browserCheck.status == .ready)
+      #expect(browserCheck.summary == browserCase.expectedSummary)
+      #expect(browserCheck.summary.contains("host-backed") == false)
+      #expect(browserCheck.summary.contains("persisted") == false)
+    }
+  }
+
+  @Test
   func mpSearchReadbackAndSmokeUseCasesUseHostRuntimeSemanticMemorySurface() async throws {
     let memoryStore = StubSemanticMemoryStore(
       bundleResult: .init(
