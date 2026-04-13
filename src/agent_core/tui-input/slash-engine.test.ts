@@ -5,6 +5,7 @@ import {
   applySlashSuggestion,
   computeSlashState,
   DEFAULT_PRAXIS_SLASH_COMMANDS,
+  formatSlashDisplayText,
 } from "./slash-engine.js";
 
 test("computeSlashState returns ranked suggestions for slash prefixes", () => {
@@ -30,4 +31,30 @@ test("applySlashSuggestion replaces current command token and keeps trailing con
   const applied = applySlashSuggestion("/sta foo", suggestion);
   assert.equal(applied.nextInput, "/status foo");
   assert.equal(applied.nextCursorOffset, applied.nextInput.length);
+});
+
+test("default slash commands expose the planned first-wave order", () => {
+  assert.deepEqual(
+    DEFAULT_PRAXIS_SLASH_COMMANDS.map((command) => command.id),
+    [
+      "model",
+      "status",
+      "exit",
+      "cmp",
+      "mp",
+      "capabilities",
+      "init",
+      "resume",
+      "agents",
+      "permissions",
+      "workspace",
+      "language",
+    ],
+  );
+});
+
+test("formatSlashDisplayText includes aliases inline for menu display", () => {
+  const exitCommand = DEFAULT_PRAXIS_SLASH_COMMANDS.find((command) => command.id === "exit");
+  assert.ok(exitCommand);
+  assert.equal(formatSlashDisplayText(exitCommand), "/exit(quit)");
 });

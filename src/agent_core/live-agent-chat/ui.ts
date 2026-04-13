@@ -20,6 +20,11 @@ import {
   LIVE_CHAT_TAP_OVERRIDE,
   truncate,
 } from "./shared.js";
+import {
+  DEFAULT_PRAXIS_SLASH_COMMANDS,
+  formatSlashDisplayText,
+} from "../tui-input/slash-engine.js";
+import { resolveWorkspaceRoot } from "../../runtime-paths.js";
 
 function printDivider(label?: string): void {
   const prefix = "\n============================================================";
@@ -91,6 +96,15 @@ function printDirectBox(title: string, lines: string[]): void {
     console.log(`│ ${padRight(line, innerWidth - 1)}│`);
   }
   console.log(`╰${"─".repeat(innerWidth)}╯`);
+}
+
+function formatSlashCommandHelpLines(): string[] {
+  const maxLabelWidth = DEFAULT_PRAXIS_SLASH_COMMANDS.reduce(
+    (max, command) => Math.max(max, formatSlashDisplayText(command).length),
+    0,
+  );
+  return DEFAULT_PRAXIS_SLASH_COMMANDS.map((command, index) =>
+    `${String(index + 1).padStart(2, "0")} ${formatSlashDisplayText(command).padEnd(maxLabelWidth, " ")}  ${command.description ?? ""}`.trimEnd());
 }
 
 export function printDirectBullet(text: string): void {
@@ -194,11 +208,7 @@ export async function promptDirectInputBox(): Promise<string | null> {
 export async function readDirectFallbackLine(
   reader: DirectFallbackReader,
 ): Promise<string | null> {
-  const next = await reader.iterator.next();
-  if (next.done) {
-    return null;
-  }
-  return next.value;
+  return reader.read();
 }
 
 export function printStartup(config: OpenAILiveConfig): void {
@@ -216,44 +226,120 @@ export function printStartup(config: OpenAILiveConfig): void {
   console.log(`  ${formatRoutePlan("checker", LIVE_CHAT_MODEL_PLAN.cmp.checker)}`);
   console.log(`  ${formatRoutePlan("dbagent", LIVE_CHAT_MODEL_PLAN.cmp.dbagent)}`);
   console.log(`  ${formatRoutePlan("dispatcher", LIVE_CHAT_MODEL_PLAN.cmp.dispatcher)}`);
-  console.log("命令: /help /status /cmp /tap /events /history /exit");
+  console.log("命令:");
+  for (const line of formatSlashCommandHelpLines()) {
+    console.log(`  ${line}`);
+  }
 }
 
 export function printStartupDirect(config: OpenAILiveConfig): void {
   printDirectBox(">_ Praxis Direct CLI", [
     `model:     ${LIVE_CHAT_MODEL_PLAN.core.model} ${LIVE_CHAT_MODEL_PLAN.core.reasoning}`,
     `tap mode:  ${LIVE_CHAT_TAP_OVERRIDE.requestedMode} / ${LIVE_CHAT_TAP_OVERRIDE.automationDepth}`,
-    `workspace: ${process.cwd().split("/").slice(-1)[0] || process.cwd()}`,
+    `workspace: ${resolveWorkspaceRoot().split("/").slice(-1)[0] || resolveWorkspaceRoot()}`,
     `route:     ${config.baseURL}`,
   ]);
-  console.log("Commands: /help /status /capabilities /history /exit");
+  console.log("Commands:");
+  for (const line of formatSlashCommandHelpLines()) {
+    console.log(`  ${line}`);
+  }
   console.log("Composer: Enter send · Ctrl+J newline");
 }
 
 export function printHelp(uiMode: "full" | "direct"): void {
+  const commandLines = formatSlashCommandHelpLines();
   if (uiMode === "direct") {
     console.log("");
-    printDirectBox("Commands", [
-      "/help         查看命令",
-      "/status       查看最近一轮 CMP / TAP / core 总览",
-      "/capabilities 查看当前 TAP 池中已注册能力",
-      "/history      查看当前 CLI 内部对话历史摘要",
-      "/cmp          查看最近一轮 CMP 摘要",
-      "/tap          查看当前 TAP 治理视图",
-      "/events       查看最近一轮 core run 事件类型",
-      "/exit         退出",
-    ]);
+    printDirectBox("Commands", commandLines);
     return;
   }
   printDivider("Commands");
-  console.log("/help    查看命令");
-  console.log("/status  查看最近一轮 CMP/TAP/core 总览");
-  console.log("/capabilities 查看当前 TAP 池中已注册能力");
-  console.log("/cmp     查看最近一轮 CMP 摘要");
-  console.log("/tap     查看当前 TAP 治理视图");
-  console.log("/events   查看最近一轮 core run 事件类型");
-  console.log("/history 查看当前 CLI 内部对话历史摘要");
-  console.log("/exit    退出");
+  for (const line of commandLines) {
+    console.log(line);
+  }
+}
+
+export function printModelView(config: OpenAILiveConfig): void {
+  console.log("");
+  printDirectBox("Model View", [
+    `core:       ${LIVE_CHAT_MODEL_PLAN.core.model} ${LIVE_CHAT_MODEL_PLAN.core.reasoning}`,
+    `reviewer:   ${LIVE_CHAT_MODEL_PLAN.tap.reviewer.model} ${LIVE_CHAT_MODEL_PLAN.tap.reviewer.reasoning}`,
+    `tool review:${LIVE_CHAT_MODEL_PLAN.tap.toolReviewer.model} ${LIVE_CHAT_MODEL_PLAN.tap.toolReviewer.reasoning}`,
+    `provisioner:${LIVE_CHAT_MODEL_PLAN.tap.provisioner.model} ${LIVE_CHAT_MODEL_PLAN.tap.provisioner.reasoning}`,
+    `cmp/icma:   ${LIVE_CHAT_MODEL_PLAN.cmp.icma.model} ${LIVE_CHAT_MODEL_PLAN.cmp.icma.reasoning}`,
+    `cmp/iter:   ${LIVE_CHAT_MODEL_PLAN.cmp.iterator.model} ${LIVE_CHAT_MODEL_PLAN.cmp.iterator.reasoning}`,
+    `cmp/checker:${LIVE_CHAT_MODEL_PLAN.cmp.checker.model} ${LIVE_CHAT_MODEL_PLAN.cmp.checker.reasoning}`,
+    `cmp/dbagent:${LIVE_CHAT_MODEL_PLAN.cmp.dbagent.model} ${LIVE_CHAT_MODEL_PLAN.cmp.dbagent.reasoning}`,
+    `cmp/dispatch:${LIVE_CHAT_MODEL_PLAN.cmp.dispatcher.model} ${LIVE_CHAT_MODEL_PLAN.cmp.dispatcher.reasoning}`,
+    `route:      ${config.baseURL}`,
+  ]);
+}
+
+export function printMpViewPlaceholder(): void {
+  console.log("");
+  printDirectBox("MP View", [
+    "goal: browse current memory state",
+    "status: MP readback pane is not wired into the direct CLI yet",
+    "next: expose memory cards and scope summaries inside the current shell",
+  ]);
+}
+
+export function printInitViewPlaceholder(): void {
+  console.log("");
+  printDirectBox("Init", [
+    "session bootstrap already happens at startup",
+    "dedicated /init flow is reserved for a richer setup surface",
+  ]);
+}
+
+export function printResumeViewPlaceholder(): void {
+  console.log("");
+  printDirectBox("Resume", [
+    "resume entry is reserved for session recovery",
+    "the current direct CLI still keeps the active transcript in-process only",
+  ]);
+}
+
+export function printAgentsViewPlaceholder(): void {
+  console.log("");
+  printDirectBox("Agents View", [
+    "current shell is still single-agent first",
+    "the /agents entry is reserved for switching into an agents-focused surface",
+  ]);
+}
+
+export function printPermissionsView(runtime: LiveCliRuntime): void {
+  const governance = runtime.createTapGovernanceObject({
+    userOverride: LIVE_CHAT_TAP_OVERRIDE,
+  });
+  const userSurface = runtime.createTapUserSurfaceSnapshot({
+    userOverride: LIVE_CHAT_TAP_OVERRIDE,
+  });
+  const snapshot = runtime.createTapGovernanceSnapshot();
+  console.log("");
+  printDirectBox("Permissions", [
+    `effectiveMode: ${governance.taskPolicy.effectiveMode}`,
+    `workspaceMode: ${governance.workspacePolicy.workspaceMode}`,
+    `pendingHumanGateCount: ${userSurface.pendingHumanGateCount}`,
+    `blockingCapabilityKeys: ${snapshot.blockingCapabilityKeys.join(", ") || "(none)"}`,
+  ]);
+}
+
+export function printLanguageViewPlaceholder(): void {
+  console.log("");
+  printDirectBox("Language", [
+    "default shell copy is currently zh-CN with English command ids",
+    "dedicated language switching is reserved for a later TUI pass",
+  ]);
+}
+
+export function printWorkspaceView(currentWorkspace = resolveWorkspaceRoot()): void {
+  console.log("");
+  printDirectBox("Workspace", [
+    `current: ${currentWorkspace}`,
+    "usage: /workspace <path>",
+    "switch the current workspace directory for the direct shell",
+  ]);
 }
 
 export function printCmpArtifacts(turn: CmpTurnArtifacts): void {
@@ -365,6 +451,9 @@ export function printDirectStatus(state: LiveCliState): void {
     && coreTaskStatus === "completed"
     && capabilityResultStatus === "partial"
       ? " (任务已完成，但浏览器证据链是 partial)"
+      : (state.lastTurn.core.capabilityKey === "search.web" || state.lastTurn.core.capabilityKey === "search.ground")
+        && capabilityResultStatus === "partial"
+        ? " (当前只是部分联网证据，不能自动视为最终完成)"
       : "";
   console.log("");
   printDirectBox("Status", [
@@ -418,8 +507,61 @@ export function createDirectFallbackReader(): DirectFallbackReader {
     crlfDelay: Infinity,
     terminal: false,
   });
+  let pending = "";
+  let ended = false;
+  const waiters: Array<() => void> = [];
+
+  const wake = () => {
+    while (waiters.length > 0) {
+      const waiter = waiters.shift();
+      waiter?.();
+    }
+  };
+
+  const onData = (chunk: Buffer | string) => {
+    pending += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    wake();
+  };
+
+  const onEnd = () => {
+    ended = true;
+    wake();
+  };
+
+  input.on("data", onData);
+  input.on("end", onEnd);
+  input.on("close", onEnd);
+
   return {
-    readline: fallbackReadline,
-    iterator: fallbackReadline[Symbol.asyncIterator](),
+    legacyReadline: fallbackReadline,
+    close() {
+      input.off("data", onData);
+      input.off("end", onEnd);
+      input.off("close", onEnd);
+      fallbackReadline.close();
+    },
+    async read() {
+      while (true) {
+        const delimiterIndex = pending.indexOf("\u0000");
+        if (delimiterIndex >= 0) {
+          const message = pending.slice(0, delimiterIndex);
+          pending = pending.slice(delimiterIndex + 1);
+          return message;
+        }
+
+        if (ended) {
+          if (pending.length === 0) {
+            return null;
+          }
+          const message = pending;
+          pending = "";
+          return message;
+        }
+
+        await new Promise<void>((resolve) => {
+          waiters.push(resolve);
+        });
+      }
+    },
   };
 }

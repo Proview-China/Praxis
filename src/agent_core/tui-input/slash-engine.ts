@@ -12,12 +12,20 @@ export interface PraxisSlashSuggestion {
   displayText: string;
   description?: string;
   score: number;
+  order: number;
 }
 
 export interface PraxisSlashState {
   active: boolean;
   query: string;
   suggestions: PraxisSlashSuggestion[];
+}
+
+export function formatSlashDisplayText(command: PraxisSlashCommand): string {
+  if (!command.aliases || command.aliases.length === 0) {
+    return `/${command.name}`;
+  }
+  return `/${command.name}(${command.aliases.join(", ")})`;
 }
 
 function normalizeSlashToken(value: string): string {
@@ -66,28 +74,30 @@ export function computeSlashState(
 
   const firstToken = input.split(/\s+/u, 1)[0] ?? "/";
   const query = normalizeSlashToken(firstToken);
-  const suggestions = commands
-    .filter((command) => !command.hidden)
-    .map((command) => {
-      const score = commandMatchesQuery(command, query);
-      if (score == null) {
-        return null;
-      }
-      return {
-        id: command.id,
-        command,
-        displayText: `/${command.name}`,
-        description: command.description,
-        score,
-      } satisfies PraxisSlashSuggestion;
-    })
-    .filter((value): value is PraxisSlashSuggestion => value !== null)
-    .sort((left, right) => {
-      if (right.score !== left.score) {
-        return right.score - left.score;
-      }
-      return left.command.name.localeCompare(right.command.name);
+  const suggestions: PraxisSlashSuggestion[] = [];
+  for (const [order, command] of commands.entries()) {
+    if (command.hidden) {
+      continue;
+    }
+    const score = commandMatchesQuery(command, query);
+    if (score == null) {
+      continue;
+    }
+    suggestions.push({
+      id: command.id,
+      command,
+      displayText: formatSlashDisplayText(command),
+      description: command.description,
+      score,
+      order,
     });
+  }
+  suggestions.sort((left, right) => {
+    if (right.score !== left.score) {
+      return right.score - left.score;
+    }
+    return left.order - right.order;
+  });
 
   return {
     active: true,
@@ -113,12 +123,16 @@ export function applySlashSuggestion(
 }
 
 export const DEFAULT_PRAXIS_SLASH_COMMANDS: PraxisSlashCommand[] = [
-  { id: "help", name: "help", description: "查看命令" },
-  { id: "status", name: "status", description: "查看最近一轮 CMP / TAP / core 总览" },
-  { id: "capabilities", name: "capabilities", description: "查看当前 TAP 池中已注册能力" },
-  { id: "cmp", name: "cmp", description: "查看最近一轮 CMP 摘要" },
-  { id: "tap", name: "tap", description: "查看当前 TAP 治理视图" },
-  { id: "events", name: "events", description: "查看最近一轮 core run 事件类型" },
-  { id: "history", name: "history", description: "查看当前 CLI 内部对话历史摘要" },
-  { id: "exit", name: "exit", aliases: ["quit"], description: "退出" },
+  { id: "model", name: "model", description: "Choose model and reasoning settings" },
+  { id: "status", name: "status", description: "View current working status" },
+  { id: "exit", name: "exit", aliases: ["quit"], description: "Exit the current session" },
+  { id: "cmp", name: "cmp", description: "View current context sections summary" },
+  { id: "mp", name: "mp", description: "Browse current memory state" },
+  { id: "capabilities", name: "capabilities", description: "View registered TAP capabilities" },
+  { id: "init", name: "init", description: "Initialize the current workspace session" },
+  { id: "resume", name: "resume", description: "Resume the latest session or current work" },
+  { id: "agents", name: "agents", description: "Switch to agents view" },
+  { id: "permissions", name: "permissions", description: "View current permissions and approvals" },
+  { id: "workspace", name: "workspace", description: "Switch current workspace directory" },
+  { id: "language", name: "language", description: "Switch current language mode" },
 ];

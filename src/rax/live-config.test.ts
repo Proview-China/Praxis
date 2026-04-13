@@ -226,3 +226,191 @@ test("loadOpenAILiveConfig walks upward to the nearest parent .env.local", async
     }
   }
 });
+
+test("loadOpenAILiveConfig prefers ~/.raxcode/.env over workspace .env.local", async () => {
+  const rootDir = await mkdtemp(path.join(os.tmpdir(), "praxis-live-config-home-"));
+  const workspaceDir = path.join(rootDir, "workspace");
+  const raxcodeHome = path.join(rootDir, ".raxcode");
+  await mkdir(workspaceDir, { recursive: true });
+  await mkdir(raxcodeHome, { recursive: true });
+  await writeFile(path.join(workspaceDir, ".env.local"), [
+    "OPENAI_API_KEY=workspace-openai",
+    "OPENAI_BASE_URL=https://workspace.example.com",
+    "OPENAI_MODEL=gpt-workspace",
+  ].join("\n"), "utf8");
+  await writeFile(path.join(raxcodeHome, ".env"), [
+    "OPENAI_API_KEY=home-openai",
+    "OPENAI_BASE_URL=https://home.example.com",
+    "OPENAI_MODEL=gpt-home",
+  ].join("\n"), "utf8");
+
+  const originalCwd = process.cwd();
+  const originalEnv = {
+    RAXCODE_HOME: process.env.RAXCODE_HOME,
+    PRAXIS_CONFIG_ROOT: process.env.PRAXIS_CONFIG_ROOT,
+    PRAXIS_LIVE_ENV_FILE: process.env.PRAXIS_LIVE_ENV_FILE,
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+    OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
+    OPENAI_MODEL: process.env.OPENAI_MODEL,
+  };
+
+  try {
+    process.chdir(workspaceDir);
+    process.env.RAXCODE_HOME = raxcodeHome;
+    delete process.env.PRAXIS_CONFIG_ROOT;
+    delete process.env.PRAXIS_LIVE_ENV_FILE;
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_BASE_URL;
+    delete process.env.OPENAI_MODEL;
+
+    const config = loadOpenAILiveConfig();
+
+    assert.equal(config.apiKey, "home-openai");
+    assert.equal(config.baseURL, "https://home.example.com/v1");
+    assert.equal(config.model, "gpt-home");
+  } finally {
+    process.chdir(originalCwd);
+    for (const [key, value] of Object.entries(originalEnv)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+});
+
+test("loadLiveProviderConfig reads ~/.raxcode/auth.json and config.json as the global primary source", async () => {
+  const rootDir = await mkdtemp(path.join(os.tmpdir(), "praxis-live-config-json-"));
+  const workspaceDir = path.join(rootDir, "workspace");
+  const raxcodeHome = path.join(rootDir, ".raxcode");
+  await mkdir(workspaceDir, { recursive: true });
+  await mkdir(raxcodeHome, { recursive: true });
+  await writeFile(path.join(raxcodeHome, "auth.json"), JSON.stringify({
+    openai: { apiKey: "json-openai-key" },
+    anthropic: { apiKey: "json-anthropic-key" },
+    deepmind: { apiKey: "json-deepmind-key" },
+  }, null, 2), "utf8");
+  await writeFile(path.join(raxcodeHome, "config.json"), JSON.stringify({
+    openai: {
+      baseURL: "https://json-openai.example.com",
+      model: "gpt-json",
+      reasoningEffort: "high",
+      contextWindowTokens: 321000,
+    },
+    anthropic: {
+      baseURL: "https://json-anthropic.example.com",
+      model: "claude-json",
+      contextWindowTokens: 222000,
+    },
+    deepmind: {
+      baseURL: "https://json-deepmind.example.com",
+      model: "gemini-json",
+      contextWindowTokens: 111000,
+    },
+  }, null, 2), "utf8");
+
+  const originalCwd = process.cwd();
+  const originalEnv = {
+    RAXCODE_HOME: process.env.RAXCODE_HOME,
+    PRAXIS_CONFIG_ROOT: process.env.PRAXIS_CONFIG_ROOT,
+    PRAXIS_LIVE_ENV_FILE: process.env.PRAXIS_LIVE_ENV_FILE,
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+    OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
+    OPENAI_MODEL: process.env.OPENAI_MODEL,
+    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+    ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL,
+    ANTHROPIC_MODEL: process.env.ANTHROPIC_MODEL,
+    DEEPMIND_API_KEY: process.env.DEEPMIND_API_KEY,
+    DEEPMIND_BASE_URL: process.env.DEEPMIND_BASE_URL,
+    DEEPMIND_MODEL: process.env.DEEPMIND_MODEL,
+  };
+
+  try {
+    process.chdir(workspaceDir);
+    process.env.RAXCODE_HOME = raxcodeHome;
+    delete process.env.PRAXIS_CONFIG_ROOT;
+    delete process.env.PRAXIS_LIVE_ENV_FILE;
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_BASE_URL;
+    delete process.env.OPENAI_MODEL;
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.ANTHROPIC_BASE_URL;
+    delete process.env.ANTHROPIC_MODEL;
+    delete process.env.DEEPMIND_API_KEY;
+    delete process.env.DEEPMIND_BASE_URL;
+    delete process.env.DEEPMIND_MODEL;
+
+    const config = loadLiveProviderConfig();
+
+    assert.equal(config.openai.apiKey, "json-openai-key");
+    assert.equal(config.openai.baseURL, "https://json-openai.example.com/v1");
+    assert.equal(config.openai.model, "gpt-json");
+    assert.equal(config.openai.reasoningEffort, "high");
+    assert.equal(config.openai.contextWindowTokens, 321000);
+    assert.equal(config.anthropic.apiKey, "json-anthropic-key");
+    assert.equal(config.anthropic.model, "claude-json");
+    assert.equal(config.deepmind.apiKey, "json-deepmind-key");
+    assert.equal(config.deepmind.model, "gemini-json");
+  } finally {
+    process.chdir(originalCwd);
+    for (const [key, value] of Object.entries(originalEnv)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+});
+
+test("explicit PRAXIS_LIVE_ENV_FILE overrides ~/.raxcode auth.json and config.json", async () => {
+  const rootDir = await mkdtemp(path.join(os.tmpdir(), "praxis-live-config-json-explicit-"));
+  const raxcodeHome = path.join(rootDir, ".raxcode");
+  await mkdir(raxcodeHome, { recursive: true });
+  await writeFile(path.join(raxcodeHome, "auth.json"), JSON.stringify({
+    openai: { apiKey: "json-openai-key" },
+  }, null, 2), "utf8");
+  await writeFile(path.join(raxcodeHome, "config.json"), JSON.stringify({
+    openai: {
+      baseURL: "https://json-openai.example.com",
+      model: "gpt-json",
+    },
+  }, null, 2), "utf8");
+
+  const explicitEnvPath = await writeEnvFile(`
+OPENAI_API_KEY=explicit-openai-key
+OPENAI_BASE_URL=https://explicit-openai.example.com
+OPENAI_MODEL=gpt-explicit
+  `.trim());
+
+  const originalEnv = {
+    RAXCODE_HOME: process.env.RAXCODE_HOME,
+    PRAXIS_LIVE_ENV_FILE: process.env.PRAXIS_LIVE_ENV_FILE,
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+    OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
+    OPENAI_MODEL: process.env.OPENAI_MODEL,
+  };
+
+  try {
+    process.env.RAXCODE_HOME = raxcodeHome;
+    process.env.PRAXIS_LIVE_ENV_FILE = explicitEnvPath;
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_BASE_URL;
+    delete process.env.OPENAI_MODEL;
+
+    const config = loadOpenAILiveConfig();
+
+    assert.equal(config.apiKey, "explicit-openai-key");
+    assert.equal(config.baseURL, "https://explicit-openai.example.com/v1");
+    assert.equal(config.model, "gpt-explicit");
+  } finally {
+    for (const [key, value] of Object.entries(originalEnv)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+});
