@@ -1196,32 +1196,32 @@ struct PraxisRuntimeUseCasesTests {
   }
 
   @Test
-  func cmpFlowCommandSourceCompatibilityInitializersHandleNilAndStringLineageWithoutTypeAnnotations() {
+  func cmpFlowCommandInitializersAcceptOptionalTypedLineageAlongsideLegacyStringAndOmittedLineage() {
+    let optionalTypedLineageID: PraxisCmpLineageID? = .init(rawValue: "lineage.cmp.local-runtime.runtime.local")
+    let missingTypedLineageID: PraxisCmpLineageID? = nil
     let legacyStringLineageID: String? = "lineage.cmp.local-runtime.runtime.local"
-    let legacyNilLineageID: String? = nil
 
-    let recoverNil = PraxisRecoverCmpProjectCommand(
+    let recoverTyped = PraxisRecoverCmpProjectCommand(
       projectID: "cmp.local-runtime",
       agentID: "runtime.local",
       targetAgentID: "checker.local",
       reason: "Recover checker context",
-      lineageID: nil
+      lineageID: optionalTypedLineageID
     )
-    let ingestString = PraxisIngestCmpFlowCommand(
+    let ingestTypedNil = PraxisIngestCmpFlowCommand(
       projectID: "cmp.local-runtime",
       agentID: "runtime.local",
       sessionID: "cmp.flow.source-compat",
-      lineageID: legacyStringLineageID,
-      taskSummary: "Ingest through legacy string lineage path",
+      lineageID: missingTypedLineageID,
+      taskSummary: "Ingest through typed optional nil lineage path",
       materials: [.init(kind: .userInput, ref: "payload:user:source-compat")]
     )
-    let commitNil = PraxisCommitCmpFlowCommand(
+    let commitOmitted = PraxisCommitCmpFlowCommand(
       projectID: "cmp.local-runtime",
       agentID: "runtime.local",
       sessionID: "cmp.flow.source-compat",
-      lineageID: legacyNilLineageID,
       eventIDs: [.init(rawValue: "evt.source-compat.1")],
-      changeSummary: "Commit through nil lineage path",
+      changeSummary: "Commit through omitted lineage path",
       syncIntent: .toParent
     )
     let resolveString = PraxisResolveCmpFlowCommand(
@@ -1230,9 +1230,9 @@ struct PraxisRuntimeUseCasesTests {
       lineageID: legacyStringLineageID
     )
 
-    #expect(recoverNil.lineageID == nil)
-    #expect(ingestString.lineageID == .init(rawValue: "lineage.cmp.local-runtime.runtime.local"))
-    #expect(commitNil.lineageID == nil)
+    #expect(recoverTyped.lineageID == .init(rawValue: "lineage.cmp.local-runtime.runtime.local"))
+    #expect(ingestTypedNil.lineageID == nil)
+    #expect(commitOmitted.lineageID == nil)
     #expect(resolveString.lineageID == .init(rawValue: "lineage.cmp.local-runtime.runtime.local"))
   }
 

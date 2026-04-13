@@ -507,31 +507,7 @@ public struct PraxisRecoverCmpProjectCommand: Sendable, Equatable, Codable {
     agentID: String,
     targetAgentID: String,
     reason: String,
-    branchRef: String? = nil,
-    snapshotID: PraxisCmpSnapshotID? = nil,
-    packageKind: PraxisCmpContextPackageKind = .historicalReply,
-    fidelityLabel: PraxisCmpContextPackageFidelityLabel? = nil
-  ) {
-    self.init(
-      projectID: projectID,
-      agentID: agentID,
-      targetAgentID: targetAgentID,
-      reason: reason,
-      lineageID: Optional<PraxisCmpLineageID>.none,
-      branchRef: branchRef,
-      snapshotID: snapshotID,
-      packageKind: packageKind,
-      fidelityLabel: fidelityLabel,
-      canonical: ()
-    )
-  }
-
-  public init(
-    projectID: String,
-    agentID: String,
-    targetAgentID: String,
-    reason: String,
-    lineageID: PraxisCmpLineageID,
+    lineageID: PraxisCmpLineageID? = nil,
     branchRef: String? = nil,
     snapshotID: PraxisCmpSnapshotID? = nil,
     packageKind: PraxisCmpContextPackageKind = .historicalReply,
@@ -551,6 +527,7 @@ public struct PraxisRecoverCmpProjectCommand: Sendable, Equatable, Codable {
     )
   }
 
+  @_disfavoredOverload
   public init(
     projectID: String,
     agentID: String,
@@ -668,31 +645,7 @@ public struct PraxisIngestCmpFlowCommand: Sendable, Equatable, Codable {
     agentID: String,
     sessionID: String,
     runID: String? = nil,
-    parentAgentID: String? = nil,
-    taskSummary: String,
-    materials: [PraxisCmpRuntimeContextMaterial],
-    requiresActiveSync: Bool = false
-  ) {
-    self.init(
-      projectID: projectID,
-      agentID: agentID,
-      sessionID: sessionID,
-      runID: runID,
-      lineageID: Optional<PraxisCmpLineageID>.none,
-      parentAgentID: parentAgentID,
-      taskSummary: taskSummary,
-      materials: materials,
-      requiresActiveSync: requiresActiveSync,
-      canonical: ()
-    )
-  }
-
-  public init(
-    projectID: String,
-    agentID: String,
-    sessionID: String,
-    runID: String? = nil,
-    lineageID: PraxisCmpLineageID,
+    lineageID: PraxisCmpLineageID? = nil,
     parentAgentID: String? = nil,
     taskSummary: String,
     materials: [PraxisCmpRuntimeContextMaterial],
@@ -712,6 +665,7 @@ public struct PraxisIngestCmpFlowCommand: Sendable, Equatable, Codable {
     )
   }
 
+  @_disfavoredOverload
   public init(
     projectID: String,
     agentID: String,
@@ -814,33 +768,7 @@ public struct PraxisCommitCmpFlowCommand: Sendable, Equatable, Codable {
     agentID: String,
     sessionID: String,
     runID: String? = nil,
-    parentAgentID: String? = nil,
-    eventIDs: [PraxisCmpEventID],
-    baseRef: String? = nil,
-    changeSummary: String,
-    syncIntent: PraxisCmpContextSyncIntent
-  ) {
-    self.init(
-      projectID: projectID,
-      agentID: agentID,
-      sessionID: sessionID,
-      runID: runID,
-      lineageID: Optional<PraxisCmpLineageID>.none,
-      parentAgentID: parentAgentID,
-      eventIDs: eventIDs,
-      baseRef: baseRef,
-      changeSummary: changeSummary,
-      syncIntent: syncIntent,
-      canonical: ()
-    )
-  }
-
-  public init(
-    projectID: String,
-    agentID: String,
-    sessionID: String,
-    runID: String? = nil,
-    lineageID: PraxisCmpLineageID,
+    lineageID: PraxisCmpLineageID? = nil,
     parentAgentID: String? = nil,
     eventIDs: [PraxisCmpEventID],
     baseRef: String? = nil,
@@ -862,6 +790,7 @@ public struct PraxisCommitCmpFlowCommand: Sendable, Equatable, Codable {
     )
   }
 
+  @_disfavoredOverload
   public init(
     projectID: String,
     agentID: String,
@@ -937,21 +866,7 @@ public struct PraxisResolveCmpFlowCommand: Sendable, Equatable, Codable {
   public init(
     projectID: String,
     agentID: String,
-    branchRef: String? = nil
-  ) {
-    self.init(
-      projectID: projectID,
-      agentID: agentID,
-      lineageID: Optional<PraxisCmpLineageID>.none,
-      branchRef: branchRef,
-      canonical: ()
-    )
-  }
-
-  public init(
-    projectID: String,
-    agentID: String,
-    lineageID: PraxisCmpLineageID,
+    lineageID: PraxisCmpLineageID? = nil,
     branchRef: String? = nil
   ) {
     self.init(
@@ -963,6 +878,7 @@ public struct PraxisResolveCmpFlowCommand: Sendable, Equatable, Codable {
     )
   }
 
+  @_disfavoredOverload
   public init(
     projectID: String,
     agentID: String,

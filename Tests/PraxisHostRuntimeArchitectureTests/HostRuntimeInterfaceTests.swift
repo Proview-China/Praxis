@@ -3878,6 +3878,171 @@ struct HostRuntimeInterfaceTests {
   }
 
   @Test
+  func runtimeInterfaceRoutesCmpLineagePayloadsThroughUnifiedOptionalTypedInitializers() async throws {
+    let expectedRecoverLineage = PraxisCmpLineageID(rawValue: "lineage.recover.runtime")
+    let expectedCommitLineage = PraxisCmpLineageID(rawValue: "lineage.commit.runtime")
+    let commitEventID = PraxisCmpEventID(rawValue: "event.runtime.1")
+    let cmpFacade = makeStubCmpFacade(
+      recoverCmpProject: { command in
+        #expect(command.lineageID == expectedRecoverLineage)
+        return PraxisCmpProjectRecovery(
+          projectID: command.projectID,
+          sourceAgentID: command.agentID,
+          targetAgentID: command.targetAgentID,
+          summary: "Recovered CMP project.",
+          status: .aligned,
+          recoverySource: .historicalContext,
+          foundHistoricalContext: true,
+          packageID: .init(rawValue: "package.runtime.recover"),
+          packageKind: command.packageKind,
+          hydratedRecoverySummary: "Hydrated one projection.",
+          resumableProjectionCount: 1,
+          missingProjectionCount: 0,
+          issues: []
+        )
+      },
+      ingestCmpFlow: { command in
+        #expect(command.lineageID == nil)
+        return PraxisCmpFlowIngest(
+          projectID: command.projectID,
+          agentID: command.agentID,
+          sessionID: command.sessionID,
+          summary: "Ingested CMP flow.",
+          requestID: .init(rawValue: "request.runtime.ingest"),
+          result: .init(
+            status: .accepted,
+            acceptedEventIDs: [commitEventID],
+            nextAction: .noop
+          ),
+          ingress: .init(
+            request: .init(
+              requestID: .init(rawValue: "request.runtime.ingest"),
+              lineageID: .init(rawValue: "lineage.runtime.ingest"),
+              taskSummary: command.taskSummary,
+              createdAt: "2026-04-13T00:00:00Z"
+            ),
+            sections: [],
+            requiresActiveSync: command.requiresActiveSync
+          ),
+          loweredSections: [],
+          roleAssignments: []
+        )
+      },
+      commitCmpFlow: { command in
+        #expect(command.lineageID == expectedCommitLineage)
+        let delta = PraxisCmpContextDelta(
+          id: .init(rawValue: "delta.runtime.commit"),
+          agentID: command.agentID,
+          eventRefs: command.eventIDs,
+          changeSummary: command.changeSummary,
+          createdAt: "2026-04-13T00:00:00Z",
+          syncIntent: command.syncIntent
+        )
+        return PraxisCmpFlowCommit(
+          projectID: command.projectID,
+          agentID: command.agentID,
+          summary: "Committed CMP flow delta.",
+          result: .init(
+            status: .accepted,
+            delta: delta,
+            snapshotCandidateID: .init(rawValue: "snapshot.runtime.candidate")
+          ),
+          snapshotCandidate: .init(
+            id: .init(rawValue: "snapshot.runtime.candidate"),
+            lineageID: expectedCommitLineage,
+            agentID: command.agentID,
+            branchRef: "cmp/runtime.local",
+            commitRef: "commit.runtime",
+            deltaRefs: [delta.id],
+            createdAt: "2026-04-13T00:00:00Z",
+            status: .pending
+          ),
+          activeLine: .init(
+            lineageID: expectedCommitLineage,
+            stage: .candidateReady,
+            latestEventID: command.eventIDs.last,
+            deltaID: delta.id,
+            updatedAt: "2026-04-13T00:00:00Z"
+          )
+        )
+      },
+      resolveCmpFlow: { command in
+        #expect(command.lineageID == nil)
+        return PraxisCmpFlowResolve(
+          projectID: command.projectID,
+          agentID: command.agentID,
+          summary: "Resolved CMP flow.",
+          result: .init(
+            status: .notFound,
+            found: false
+          ),
+          snapshot: nil
+        )
+      }
+    )
+    let runtimeInterface = makeStubbedRuntimeInterface(cmpFacade: cmpFacade)
+
+    let recoverResponse = await runtimeInterface.handle(
+      .recoverCmpProject(
+        .init(
+          payloadSummary: "Recover typed optional lineage",
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          targetAgentID: "checker.local",
+          reason: "Recover through unified initializer",
+          lineageID: runtimeInterfaceReferenceID(expectedRecoverLineage.rawValue)
+        )
+      )
+    )
+    let ingestResponse = await runtimeInterface.handle(
+      .ingestCmpFlow(
+        .init(
+          payloadSummary: "Ingest omitted lineage",
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          sessionID: "cmp.session.runtime",
+          taskSummary: "Ingest through unified initializer",
+          materials: [
+            .init(kind: .userInput, ref: "payload:user:runtime-interface")
+          ]
+        )
+      )
+    )
+    let commitResponse = await runtimeInterface.handle(
+      .commitCmpFlow(
+        .init(
+          payloadSummary: "Commit typed optional lineage",
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          sessionID: "cmp.session.runtime",
+          lineageID: runtimeInterfaceReferenceID(expectedCommitLineage.rawValue),
+          eventIDs: [runtimeInterfaceReferenceID(commitEventID.rawValue)],
+          changeSummary: "Commit through unified initializer",
+          syncIntent: .toParent
+        )
+      )
+    )
+    let resolveResponse = await runtimeInterface.handle(
+      .resolveCmpFlow(
+        .init(
+          payloadSummary: "Resolve omitted lineage",
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local"
+        )
+      )
+    )
+
+    #expect(recoverResponse.status == .success)
+    #expect(recoverResponse.error == nil)
+    #expect(ingestResponse.status == .success)
+    #expect(ingestResponse.error == nil)
+    #expect(commitResponse.status == .success)
+    #expect(commitResponse.error == nil)
+    #expect(resolveResponse.status == .success)
+    #expect(resolveResponse.error == nil)
+  }
+
+  @Test
   func runtimeInterfaceCodecRoundTripsTypedEventNamesAsStableRawValues() throws {
     let codec = PraxisJSONRuntimeInterfaceCodec()
     let response = PraxisRuntimeInterfaceResponse(
