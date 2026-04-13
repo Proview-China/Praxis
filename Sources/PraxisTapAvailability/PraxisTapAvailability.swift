@@ -13,7 +13,7 @@ public enum PraxisTapAvailabilityModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisTapAvailability",
     responsibility: "TAP family audit、gating、failure taxonomy 与 availability report。",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/tap-availability",
     ],
   )

@@ -13,12 +13,13 @@
 
 ## Working Defaults
 
-- TypeScript + Node.js 是当前新实现的主语言和主工具链。
+- 旧 TypeScript / Node.js 实现已经从仓库移除；当前活代码主语言和主工具链是 Swift + SwiftPM。
 - 根目录下与 Swift 重构相关的主计划文档，统一以 `SWIFT_REFACTOR_PLAN.md` 为唯一入口；不要重新恢复并行的 `SWIFT_ARCHITECTURE.md`、`SWIFT_OBJECT_ARCHITECTURE_PLAN.md`、`SWIFT_TARGET_EXECUTION_PLAN.md`、`REFACTOR_SWIFT_WORKORDER.md`。
 - 如果任务涉及 Swift 重构范围、target 职责、执行顺序或阶段边界，优先先回读 `SWIFT_REFACTOR_PLAN.md`，再按需补读 `memory/architecture/` 和 `memory/decisions/`。
 - `docs/` 可能会被另一个 Codex 实例持续更新；不要回滚或覆盖与你当前任务无关的文档改动。
 - `memory/` 是项目级记忆层，不要只依赖这个 `AGENTS.md`；做完重要架构决策、约束调整或阶段性结论后，要把可复用的信息写回 `memory/`。
 - 保持仓库干净、最小化，除非用户明确要求，否则不要提前铺大型目录树或旧时代兼容层。
+- 如果看到 `src/**`、`package.json`、`npm` 之类旧 TS 线索，默认把它们视为历史引用或归档语义，不要重新恢复这些实现。
 
 ## Platform Direction
 
@@ -44,8 +45,8 @@
 
 - `PraxisCore` 只放纯领域模型、状态机、规则、planner、编排协议。
 - `PraxisHostContracts` 只定义宿主协议，不承载业务规则。
-- `PraxisHostRuntime` 只负责装配、use case、facade、presentation bridge，不重新吞回 Core 规则。
-- `PraxisCLI`、`PraxisAppleUI`、未来 `PraxisFFI` 只能通过 `PraxisRuntimePresentationBridge` 进入系统。
+- `PraxisHostRuntime` 只负责装配、use case、facade 与导出边界，不重新吞回 Core 规则。
+- 新增能力默认优先落到 framework / exported host surface，不要再把 CLI、GUI、TUI 当长期主入口。
 - Core 禁止直接依赖 provider SDK、`Process`、Git CLI、数据库客户端、Redis/MQ 客户端、SwiftUI/AppKit/UIKit、终端 I/O。
 - Git / DB / MQ / provider 相关能力必须拆成 “Core model/planner + Host executor/adapter” 两层。
 

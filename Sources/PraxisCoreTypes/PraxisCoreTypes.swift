@@ -8,7 +8,7 @@ public enum PraxisCoreTypesModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisCoreTypes",
     responsibility: "共享基础类型、模块边界描述与跨子域共用标识。",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/types",
       "src/agent_core/cmp-types",
       "src/agent_core/ta-pool-types",

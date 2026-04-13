@@ -12,7 +12,7 @@ public enum PraxisCmpMqModelModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisCmpMqModel",
     responsibility: "CMP MQ topic topology、routing、neighborhood relation 与 escalation planning。",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/cmp-mq",
     ],
   )

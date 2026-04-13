@@ -11,7 +11,7 @@ public enum PraxisTapTypesModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisTapTypes",
     responsibility: "TAP review/provision/TMA/human-gate 共享类型。",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/ta-pool-types",
     ],
   )

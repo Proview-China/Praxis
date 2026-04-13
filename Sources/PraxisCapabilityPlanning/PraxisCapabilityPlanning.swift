@@ -13,7 +13,7 @@ public enum PraxisCapabilityPlanningModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisCapabilityPlanning",
     responsibility: "capability invocation plan、lease、queue、dispatch 与 execution lowering。",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/capability-invocation",
       "src/agent_core/capability-gateway",
       "src/agent_core/capability-pool",

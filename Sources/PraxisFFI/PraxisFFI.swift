@@ -6,7 +6,7 @@ public enum PraxisFFIModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisFFI",
     responsibility: "为跨语言宿主导出最小 encoded runtime bridge；只包装 runtime interface registry、codec 与 session/event envelope，不承担 UI、terminal 或 provider 语义。",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/runtime.ts",
       "src/agent_core/live-agent-chat/shared.ts",
     ],

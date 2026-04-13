@@ -17,7 +17,7 @@ public enum PraxisCmpFiveAgentModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisCmpFiveAgent",
     responsibility: "CMP five-agent role protocol 与 ICMA/iterator/checker/dbagent/dispatcher 纯职责模型。",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/cmp-five-agent",
     ],
   )

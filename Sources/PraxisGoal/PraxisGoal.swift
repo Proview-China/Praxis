@@ -23,7 +23,7 @@ public enum PraxisGoalModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisGoal",
     responsibility: "目标来源、归一化与编译协议。",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/goal",
     ],
   )

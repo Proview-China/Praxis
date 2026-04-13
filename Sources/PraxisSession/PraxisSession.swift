@@ -24,7 +24,7 @@ public enum PraxisSessionModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisSession",
     responsibility: "session header、冷热会话和 run 绑定。",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/session",
     ],
   )

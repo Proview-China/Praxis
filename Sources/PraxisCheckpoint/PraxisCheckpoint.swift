@@ -27,7 +27,7 @@ public enum PraxisCheckpointModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisCheckpoint",
     responsibility: "checkpoint snapshot、恢复入口与 runtime 快照封装。",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/checkpoint",
     ],
   )

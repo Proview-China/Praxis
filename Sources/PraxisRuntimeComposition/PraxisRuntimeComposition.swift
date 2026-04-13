@@ -40,7 +40,7 @@ public enum PraxisRuntimeCompositionModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisRuntimeComposition",
     responsibility: "composition root 与跨域装配边界。",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/runtime.ts",
       "src/rax/runtime.ts",
     ],

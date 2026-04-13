@@ -8,7 +8,7 @@ public enum PraxisMpFiveAgentModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisMpFiveAgent",
     responsibility: "MP five-agent role protocol, runtime state, and pure workflow orchestration for ingest/align/resolve/history.",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/mp-five-agent/shared.ts",
       "src/agent_core/mp-five-agent/types.ts",
       "src/agent_core/mp-five-agent/configuration.ts",

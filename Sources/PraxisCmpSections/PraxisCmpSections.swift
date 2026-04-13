@@ -11,7 +11,7 @@ public enum PraxisCmpSectionsModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisCmpSections",
     responsibility: "CMP ingest、section creation、section lowering 与 rules。",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/cmp-runtime/section-ingress.ts",
       "src/agent_core/cmp-runtime/section-rules.ts",
       "src/agent_core/cmp-runtime/ingress-contract.ts",

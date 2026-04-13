@@ -14,7 +14,7 @@ public enum PraxisTapProvisionModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisTapProvision",
     responsibility: "provision registry、asset index、planner 与 provisioning 计划模型。",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/ta-pool-provision",
     ],
   )

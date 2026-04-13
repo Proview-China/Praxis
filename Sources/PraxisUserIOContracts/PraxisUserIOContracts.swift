@@ -10,7 +10,7 @@ public enum PraxisUserIOContractsModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisUserIOContracts",
     responsibility: "user input / permission / presenter 协议族。",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/live-agent-chat.ts",
       "src/agent_core/live-agent-chat/ui.ts",
       "src/agent_core/integrations/tap-vendor-user-io-adapter.ts",

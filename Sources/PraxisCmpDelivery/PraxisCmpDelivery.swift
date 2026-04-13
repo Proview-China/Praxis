@@ -14,7 +14,7 @@ public enum PraxisCmpDeliveryModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisCmpDelivery",
     responsibility: "CMP delivery、dispatch instruction、active/passive flow 与 historical fallback planning。",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/cmp-runtime/delivery.ts",
       "src/agent_core/cmp-runtime/delivery-routing.ts",
       "src/agent_core/cmp-runtime/passive-delivery.ts",

@@ -26,7 +26,7 @@ public enum PraxisRunModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisRun",
     responsibility: "run 生命周期、tick 协调、恢复接续。",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/run",
     ],
   )

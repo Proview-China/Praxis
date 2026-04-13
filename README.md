@@ -1,67 +1,42 @@
 # Praxis
 
-Praxis 当前可继续开发的总装基线是 `integrate/dev-master-cmp`。
+Praxis 现在按纯 framework 方向继续收口。
 
-这条线已经不是单纯的 reboot 起步线，而是把 `dev-master`、`reboot/blank-slate`、`cmp/mp` 以及后续 TAP / CMP 收口补丁真正装到一起后的可验证工作线。
+仓库内被跟踪的旧 TypeScript / Node.js 实现已经移除；当前活代码主线以 SwiftPM targets、runtime contracts、FFI 导出边界和本地 runtime 组合为准。
 
 ## 当前状态
 
-- 项目主工具链是 TypeScript + Node.js。
-- `core_agent_runtime`、`TAP`、`CMP`、`MP`、`rax.cmp`、`rax.mp` 当前都已进入同一条可继续开发的主线。
+- 项目当前主工具链是 Swift + SwiftPM。
+- 仓库定位是可嵌入、可导出的 runtime/framework，而不是产品 CLI、TUI 或 GUI 仓库。
 - `memory/` 目录继续承担仓库内长期记忆层，用来沉淀当前阶段的事实、约束和工作脉络。
-- macOS 不默认走 Electron；Windows / Linux 后续仍可再评估 Electron。
+- 根目录主计划以 [SWIFT_REFACTOR_PLAN.md](/Users/shiyu/Documents/Project/Praxis/SWIFT_REFACTOR_PLAN.md) 为准。
 
 ## 当前基线
 
-- 当前总装工作线：`integrate/dev-master-cmp`
-- 当前仓库级验证已经通过：
-  - `npm run typecheck`
-  - `npm run build`
-  - `npm test`
-- 当前 `MP` 线也已经接好：
-  - 真实本地 `LanceDB` adapter
-  - `rax.mp`
-  - `mp.*` capability family
-  - 默认 `AgentCoreRuntime` workflow 注册
-- `runtime.continue-followups` 已拆成 focused 测试文件，以绕开 Node 25 + `tsx` 下的单文件 OOM。
-- 当前已在真实 OpenAI-compatible 上游 `https://gmn.chuangzuoli.com` 上完成一轮单 agent 联调：
-  - `core -> TAP -> model.infer`
-  - TAP `reviewer / tool_reviewer / TMA`
-  - `CMP role -> TAP bridge`
-  - `CMP five-agent live`
-- 当前已确认并修复一处关键 live 阻塞：
-  - `dispatcher` 不是规则层坏掉，而是 `model.infer -> OpenAI responses` 把内部 metadata 一起发到了 provider，导致当前 `gmn` 路由把请求拖成 `524 timeout`
-  - 现在这层 provider metadata 已从 OpenAI `responses` 请求里移除，同时补了更紧凑的 `dispatcher` live prompt 和输出 token 上限
+- 当前仓库级主验证是 `swift test`
+- 旧 TS 运行时与 Node 构建物已经从仓库剔除：
+  - `src/`
+  - `dist/`
+  - `package.json`
+  - `package-lock.json`
+  - `tsconfig.json`
+  - `scripts/`
+- Swift runtime 主线当前保留：
+  - domain targets
+  - host contracts
+  - runtime composition / use cases / facades / interface / gateway
+  - FFI 导出边界
+- 旧 TS 文件路径若仍出现在部分 boundary metadata 或 archive 文档中，应视为历史谱系引用，不代表仓库中仍存在可执行实现。
 
-## 这条线已经承接住什么
+## 当前方向
 
-- `reboot/blank-slate` 带回来的 `agent_core` / `TAP` / capability 基座
-- `cmp/mp` 带回来的 `CMP` runtime、`rax.cmp`、五角色 runtime 与 live wrapper
-- 当前新补的 `MP` memory plane：
-  - `mp-types`
-  - `mp-lancedb`
-  - `mp-runtime`
-  - `rax.mp`
-  - `mp.search/materialize/promote/archive/split/merge/reindex/compact`
-- 后续总装阶段对 `runtime.ts`、`runtime.test.ts`、TAP replay / human-gate / provisioning 主链做的收口修正
-- 当前联调 smoke 层还新增了模型分级策略：
-  - `core` smoke 默认按 `gpt-5.4 + high`
-  - TAP 三 agent smoke 默认按 `gpt-5.4 + medium`
-  - `CMP five-agent` smoke 默认按角色分级：
-    - `icma`: `gpt-5.4 + medium`
-    - `iterator`: `gpt-5.4 + low`
-    - `checker`: `gpt-5.4 + medium`
-    - `dbagent`: `gpt-5.4 + medium`
-    - `dispatcher`: `gpt-5.4 + high`
+- 优先继续收口纯 framework 公开面，不再恢复 TS 运行时。
+- `PraxisCLI`、`PraxisAppleUI`、TUI、GUI 都不再作为长期产品方向。
+- 调用者友好性应通过更清晰的 Swift public API 和导出边界来解决，而不是通过 CLI 壳补齐。
 
 ## 接下来怎么用
 
-1. 默认直接在这条线继续开发新功能。
-2. 新功能优先复用已经接好的 `core_agent_runtime + TAP + CMP + MP + rax.cmp + rax.mp` 总装面。
-3. 如需回溯重启期设计背景，再读 [docs/master.md](/home/proview/Desktop/Praxis_series/Praxis/docs/master.md) 和 [memory/current-context.md](/home/proview/Desktop/Praxis_series/Praxis/memory/current-context.md)。
-4. 如果后面继续联调，优先从 `single-agent-live-smoke` 和 `cmp-five-agent-live-smoke` 这两个入口做断点测试，不要直接黑盒全链乱跑。
-5. 如果后面继续做 `MP`，当前建议直接从：
-   - `rax.mp`
-   - `mp.*` capability family
-   - `src/agent_core/runtime.mp-workflow.test.ts`
-   这三个面开始，不要重新发明新的 memory workflow 入口。
+1. 新功能默认直接落在 Swift targets，不再往仓库里恢复 TS/Node runtime。
+2. 先从 runtime contracts、use cases、facades、gateway、FFI 这些 framework 面扩展。
+3. 如需追溯旧实现来源，优先看 boundary metadata 的 `legacyReferences` 和 `memory/` 下的历史记录，而不是假设仓库里仍有旧 TS 代码。
+4. 任何涉及方向调整的长期结论，都同步写回 `memory/`。

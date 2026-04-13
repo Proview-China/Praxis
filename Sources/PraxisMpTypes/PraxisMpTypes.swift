@@ -9,7 +9,7 @@ public enum PraxisMpTypesModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisMpTypes",
     responsibility: "MP shared memory/scope object model and governance vocabulary.",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/mp-types/mp-memory.ts",
       "src/agent_core/mp-types/mp-scope.ts",
       "src/agent_core/mp-types/mp-actions.ts",

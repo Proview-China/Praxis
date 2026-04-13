@@ -8,7 +8,7 @@ public enum PraxisMpSearchModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisMpSearch",
     responsibility: "MP search planning, filtering, and reranking rules.",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/mp-runtime/search-planner.ts",
       "src/agent_core/mp-runtime/scope-enforcement.ts",
       "src/agent_core/mp-runtime/session-bridge.ts",

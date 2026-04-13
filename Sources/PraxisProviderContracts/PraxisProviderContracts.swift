@@ -12,7 +12,7 @@ public enum PraxisProviderContractsModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisProviderContracts",
     responsibility: "provider 推理与 capability 执行协议族。",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/integrations/model-inference.ts",
       "src/integrations",
       "src/rax/facade.ts",

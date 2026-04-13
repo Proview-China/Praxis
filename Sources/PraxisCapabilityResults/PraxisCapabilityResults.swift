@@ -11,7 +11,7 @@ public enum PraxisCapabilityResultsModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisCapabilityResults",
     responsibility: "capability result envelope、normalized output 与 result-event bridge。",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/capability-result",
     ],
   )

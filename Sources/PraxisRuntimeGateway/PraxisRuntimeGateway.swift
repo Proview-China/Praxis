@@ -41,8 +41,8 @@ import PraxisWorkspaceContracts
 public enum PraxisRuntimeGatewayModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisRuntimeGateway",
-    responsibility: "为 CLI、导出层与未来跨语言宿主提供 portal-agnostic bootstrap 与 runtime access 装配面。",
-    tsModules: [
+    responsibility: "为 framework-first 调用面与导出层提供宿主无关的 bootstrap 与 runtime access 装配面。",
+    legacyReferences: [
       "src/rax/runtime.ts",
       "src/rax/facade.ts",
       "src/agent_core/runtime.ts",
@@ -105,10 +105,10 @@ public enum PraxisRuntimeGatewayModule {
 
 public typealias PraxisRuntimeGatewayBlueprint = PraxisRuntimeBlueprint
 
-/// Builds portal-agnostic runtime access surfaces for CLI and future exported libraries.
+/// Builds host-neutral runtime access surfaces for framework callers and exported libraries.
 ///
-/// This factory owns only the neutral bootstrap path. Native presentation bridges remain outside
-/// this target so cross-language hosts can reuse the same runtime interface and registry wiring.
+/// This factory owns only the neutral bootstrap path so framework callers and cross-language hosts
+/// can reuse the same runtime interface and registry wiring.
 public enum PraxisRuntimeGatewayFactory {
   private static let sharedLocalHostAdapters = PraxisHostAdapterRegistry.localDefaults()
 
@@ -120,6 +120,16 @@ public enum PraxisRuntimeGatewayFactory {
   /// - Returns: A composition root ready to build a dependency graph.
   public static func makeCompositionRoot() -> PraxisRuntimeCompositionRoot {
     makeCompositionRoot(hostAdapters: sharedLocalHostAdapters, blueprint: PraxisRuntimeGatewayModule.bootstrap)
+  }
+
+  /// Builds a composition root using explicit host adapters and the default gateway blueprint.
+  ///
+  /// - Parameter hostAdapters: Host adapters used to materialize the runtime dependency graph.
+  /// - Returns: A composition root ready to build a dependency graph.
+  public static func makeCompositionRoot(
+    hostAdapters: PraxisHostAdapterRegistry
+  ) -> PraxisRuntimeCompositionRoot {
+    makeCompositionRoot(hostAdapters: hostAdapters, blueprint: PraxisRuntimeGatewayModule.bootstrap)
   }
 
   public static func makeCompositionRoot(
@@ -146,6 +156,17 @@ public enum PraxisRuntimeGatewayFactory {
     try makeRuntimeFacade(hostAdapters: sharedLocalHostAdapters, blueprint: PraxisRuntimeGatewayModule.bootstrap)
   }
 
+  /// Builds a runtime facade using explicit host adapters and the default gateway blueprint.
+  ///
+  /// - Parameter hostAdapters: Host adapters used to assemble runtime dependencies.
+  /// - Returns: A runtime facade backed by the requested host adapters.
+  /// - Throws: Any dependency graph validation error raised by composition.
+  public static func makeRuntimeFacade(
+    hostAdapters: PraxisHostAdapterRegistry
+  ) throws -> PraxisRuntimeFacade {
+    try makeRuntimeFacade(hostAdapters: hostAdapters, blueprint: PraxisRuntimeGatewayModule.bootstrap)
+  }
+
   public static func makeRuntimeFacade(
     hostAdapters: PraxisHostAdapterRegistry,
     blueprint: PraxisRuntimeBlueprint
@@ -163,6 +184,17 @@ public enum PraxisRuntimeGatewayFactory {
   /// - Throws: Any dependency graph validation error raised by composition.
   public static func makeRuntimeInterface() throws -> PraxisRuntimeInterfaceSession {
     try makeRuntimeInterface(hostAdapters: sharedLocalHostAdapters, blueprint: PraxisRuntimeGatewayModule.bootstrap)
+  }
+
+  /// Builds one runtime interface session using explicit host adapters and the default gateway blueprint.
+  ///
+  /// - Parameter hostAdapters: Host adapters used to assemble runtime dependencies.
+  /// - Returns: A runtime interface session backed by the requested host adapters.
+  /// - Throws: Any dependency graph validation error raised by composition.
+  public static func makeRuntimeInterface(
+    hostAdapters: PraxisHostAdapterRegistry
+  ) throws -> PraxisRuntimeInterfaceSession {
+    try makeRuntimeInterface(hostAdapters: hostAdapters, blueprint: PraxisRuntimeGatewayModule.bootstrap)
   }
 
   public static func makeRuntimeInterface(
@@ -183,6 +215,16 @@ public enum PraxisRuntimeGatewayFactory {
   /// - Returns: A registry that lazily materializes runtime interface sessions.
   public static func makeRuntimeInterfaceRegistry() -> PraxisRuntimeInterfaceRegistry {
     makeRuntimeInterfaceRegistry(hostAdapters: sharedLocalHostAdapters, blueprint: PraxisRuntimeGatewayModule.bootstrap)
+  }
+
+  /// Builds a registry that opens independent runtime sessions using explicit host adapters and the default blueprint.
+  ///
+  /// - Parameter hostAdapters: Host adapters used to assemble each session.
+  /// - Returns: A registry that lazily materializes runtime interface sessions.
+  public static func makeRuntimeInterfaceRegistry(
+    hostAdapters: PraxisHostAdapterRegistry
+  ) -> PraxisRuntimeInterfaceRegistry {
+    makeRuntimeInterfaceRegistry(hostAdapters: hostAdapters, blueprint: PraxisRuntimeGatewayModule.bootstrap)
   }
 
   public static func makeRuntimeInterfaceRegistry(

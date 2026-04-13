@@ -156,47 +156,6 @@ struct HostRuntimeBoundaryGuardTests {
   }
 
   @Test
-  func cliSourcesDoNotBypassGatewayAndRuntimeInterface() throws {
-    let violations = try HostRuntimeBoundaryGuardSupport.unexpectedImports(
-      in: "Sources/PraxisCLI",
-      forbiddenModules: PraxisHostNeutralRuntimeBoundary.cliForbiddenDirectImports
-    )
-
-    if !violations.isEmpty {
-      Issue.record(
-        """
-        CLI sources must enter through RuntimeGateway -> RuntimeInterface only.
-        Unexpected imports:
-        \(violations.joined(separator: "\n"))
-        """
-      )
-    }
-  }
-
-  @Test
-  func appleUISourcesDependOnlyOnPresentationBridgeForRuntimeAccess() throws {
-    let forbiddenViolations = try HostRuntimeBoundaryGuardSupport.unexpectedImports(
-      in: "Sources/PraxisAppleUI",
-      forbiddenModules: PraxisHostNeutralRuntimeBoundary.appleUIForbiddenDirectImports
-    )
-    let allowlistViolations = try HostRuntimeBoundaryGuardSupport.nonAllowlistedImports(
-      in: "Sources/PraxisAppleUI",
-      allowedModules: PraxisHostNeutralRuntimeBoundary.appleUIAllowedRuntimeImports
-    )
-    let violations = forbiddenViolations + allowlistViolations
-
-    if !violations.isEmpty {
-      Issue.record(
-        """
-        AppleUI sources must stay behind RuntimePresentationBridge and avoid direct runtime/domain imports.
-        Unexpected imports:
-        \(violations.joined(separator: "\n"))
-        """
-      )
-    }
-  }
-
-  @Test
   func hostNeutralMiddleLayerAvoidsPresentationFrameworkImports() throws {
     let sourceDirectories = [
       "Sources/PraxisRuntimeInterface",

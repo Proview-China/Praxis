@@ -10,7 +10,7 @@ public enum PraxisWorkspaceContractsModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisWorkspaceContracts",
     responsibility: "workspace read/search/write 协议族。",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/integrations/workspace-read-adapter.ts",
       "src/agent_core/integrations/tap-tooling-adapter.ts",
     ],

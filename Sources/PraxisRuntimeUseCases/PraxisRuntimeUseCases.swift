@@ -30,7 +30,7 @@ public enum PraxisRuntimeUseCasesModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisRuntimeUseCases",
     responsibility: "高层应用用例定义，例如 runGoal / inspectTap / inspectCmp / inspectMp。",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/runtime.ts",
       "src/agent_core/cmp-service",
       "src/agent_core/mp-runtime",

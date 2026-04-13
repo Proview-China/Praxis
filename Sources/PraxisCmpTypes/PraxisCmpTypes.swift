@@ -10,7 +10,7 @@ public enum PraxisCmpTypesModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisCmpTypes",
     responsibility: "CMP canonical object model、lineage、section、request、package、snapshot 基础类型。",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/cmp-types",
     ],
   )

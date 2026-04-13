@@ -12,7 +12,7 @@ public enum PraxisRuntimeInterfaceModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisRuntimeInterface",
     responsibility: "宿主无关的统一 runtime request/response/event surface，供未来导出层与跨语言绑定复用。",
-    tsModules: [
+    legacyReferences: [
       "src/rax/facade.ts",
       "src/agent_core/live-agent-chat/shared.ts",
     ],

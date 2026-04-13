@@ -12,7 +12,7 @@ public enum PraxisCmpGitModelModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisCmpGitModel",
     responsibility: "CMP git branch family、refs lifecycle、lineage governance 与 sync planning model。",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/cmp-git",
     ],
   )

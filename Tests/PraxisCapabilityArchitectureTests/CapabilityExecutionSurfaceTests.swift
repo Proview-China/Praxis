@@ -6,9 +6,9 @@ import Testing
 struct CapabilityExecutionSurfaceTests {
   @Test
   func capabilityPlanningBoundaryStillCoversExecutionPlaneModules() {
-    #expect(PraxisCapabilityPlanningModule.boundary.tsModules.contains("src/agent_core/capability-gateway"))
-    #expect(PraxisCapabilityPlanningModule.boundary.tsModules.contains("src/agent_core/capability-pool"))
-    #expect(PraxisCapabilityPlanningModule.boundary.tsModules.contains("src/agent_core/port"))
+    #expect(PraxisCapabilityPlanningModule.boundary.legacyReferences.contains("src/agent_core/capability-gateway"))
+    #expect(PraxisCapabilityPlanningModule.boundary.legacyReferences.contains("src/agent_core/capability-pool"))
+    #expect(PraxisCapabilityPlanningModule.boundary.legacyReferences.contains("src/agent_core/port"))
   }
 
   @Test

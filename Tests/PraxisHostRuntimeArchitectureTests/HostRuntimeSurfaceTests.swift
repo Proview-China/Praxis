@@ -22,7 +22,6 @@ import PraxisWorkspaceContracts
 @testable import PraxisRuntimeFacades
 @testable import PraxisRuntimeGateway
 @testable import PraxisRuntimeInterface
-@testable import PraxisRuntimePresentationBridge
 import PraxisRuntimeUseCases
 
 private func capabilityID(_ rawValue: String) -> PraxisCapabilityID {
@@ -646,74 +645,13 @@ struct HostRuntimeSurfaceTests {
   }
 
   @Test
-  func runtimeFacadeAndBridgeExposeScaffoldInspectionFlowWithoutHostBackedClaims() async throws {
-    let hostAdapters = PraxisHostAdapterRegistry.scaffoldDefaults()
-    let compositionRoot = PraxisRuntimeBridgeFactory.makeCompositionRoot(hostAdapters: hostAdapters)
-    let dependencies = try compositionRoot.makeDependencyGraph()
-    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: hostAdapters)
-    let bridge = try PraxisRuntimeBridgeFactory.makeCLICommandBridge(hostAdapters: hostAdapters)
-
-    let architectureState = try await bridge.handle(.init(intent: .inspectArchitecture, payloadSummary: ""))
-    let tapState = try await bridge.handle(.init(intent: .inspectTap, payloadSummary: ""))
-    let cmpState = try await bridge.handle(.init(intent: .inspectCmp, payloadSummary: ""))
-    let mpState = try await bridge.handle(.init(intent: .inspectMp, payloadSummary: ""))
-    let catalog = try await runtimeFacade.inspectionFacade.buildCapabilityCatalogSnapshot()
-    let tapStatus = try await runtimeFacade.inspectionFacade.readbackTapStatus(
-      .init(projectID: "cmp.local-runtime", agentID: "runtime.local")
-    )
-    let tapHistory = try await runtimeFacade.inspectionFacade.readbackTapHistory(
-      .init(projectID: "cmp.local-runtime", agentID: "runtime.local", limit: 5)
-    )
-    let mpInspection = try await runtimeFacade.mpFacade.inspect()
-
-    #expect(architectureState.title == "Praxis Architecture")
-    #expect(tapState.title == "TAP Inspection")
-    #expect(cmpState.title == "CMP Inspection")
-    #expect(mpState.title == "MP Inspection")
-    #expect(tapState.summary.contains("checkpoint snapshot"))
-    #expect(cmpState.summary.contains("sqlite persistence"))
-    #expect(cmpState.summary.contains("install_prompt_expected"))
-    #expect(mpState.summary.contains("Store:"))
-    #expect(mpState.summary.contains("0 primary records"))
-    #expect(catalog.summary.contains("Capability catalog assembled from current boundaries:"))
-    #expect(catalog.summary.contains("Registered host capability surfaces:"))
-    #expect(catalog.summary.contains("PraxisCmpFiveAgent"))
-    #expect(tapStatus.projectID == "cmp.local-runtime")
-    #expect(tapStatus.agentID == "runtime.local")
-    #expect(tapStatus.availableCapabilityCount > 0)
-    #expect(tapStatus.availableCapabilityIDs.contains(capabilityID("tool.shell")))
-    #expect(tapHistory.projectID == "cmp.local-runtime")
-    #expect(tapHistory.agentID == "runtime.local")
-    #expect(tapHistory.totalCount == 0)
-    #expect(dependencies.hostAdapters.providerInferenceExecutor != nil)
-    #expect(dependencies.hostAdapters.providerInferenceSurfaceProvenance == .scaffoldPlaceholder)
-    #expect(dependencies.hostAdapters.browserGroundingSurfaceProvenance == .scaffoldPlaceholder)
-    #expect(dependencies.hostAdapters.checkpointStore != nil)
-    #expect(mpInspection.workflowSummary.contains("scaffold placeholders"))
-    #expect(mpInspection.workflowSummary.contains("provider-backed") == true)
-    #expect(mpInspection.workflowSummary.contains("host-backed") == false)
-    #expect(mpInspection.multimodalSummary.contains("audio.transcribe (scaffold-placeholder)") == true)
-    #expect(mpInspection.multimodalSummary.contains("browser.ground (scaffold-placeholder)") == true)
-
-    let runState = try await bridge.handle(.init(intent: .runGoal, payloadSummary: "Bridge next action smoke"))
-    let bridgeEvents = await bridge.snapshotEvents()
-
-    #expect(runState.title == "Run run:session.cli.goal:cli.goal")
-    #expect(runState.summary.contains("Next action model_inference"))
-    #expect(runState.pendingIntentID == "evt.created.run:session.cli.goal:cli.goal:model")
-    #expect(runState.events.map(\.name) == ["run.started", "run.follow_up_ready"])
-    #expect(bridgeEvents.map(\.name) == ["run.started", "run.follow_up_ready"])
-    #expect(bridgeEvents.last?.intentID == "evt.created.run:session.cli.goal:cli.goal:model")
-  }
-
-  @Test
   func cmpFacadeExposesNeutralSessionBootstrapReadbackAndSmokeSnapshots() async throws {
     let rootDirectory = FileManager.default.temporaryDirectory
       .appendingPathComponent("praxis-cmp-facade-surface-\(UUID().uuidString)", isDirectory: true)
     defer { try? FileManager.default.removeItem(at: rootDirectory) }
 
     let hostAdapters = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
-    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(
+    let runtimeFacade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(
       hostAdapters: hostAdapters
     )
 
@@ -1005,7 +943,7 @@ struct HostRuntimeSurfaceTests {
   @Test
   func cmpFacadeBootstrapUsesDefaultAgentIDWhenExplicitAgentsAreMissing() async throws {
     let hostAdapters = PraxisHostAdapterRegistry.localDefaults()
-    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(
+    let runtimeFacade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(
       hostAdapters: hostAdapters
     )
 
@@ -1037,7 +975,7 @@ struct HostRuntimeSurfaceTests {
     defer { try? FileManager.default.removeItem(at: rootDirectory) }
 
     let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
-    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: registry)
+    let runtimeFacade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(hostAdapters: registry)
     let packageStore = try #require(registry.cmpContextPackageStore)
 
     _ = try await packageStore.save(
@@ -1087,7 +1025,7 @@ struct HostRuntimeSurfaceTests {
     defer { try? FileManager.default.removeItem(at: rootDirectory) }
 
     let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
-    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: registry)
+    let runtimeFacade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(hostAdapters: registry)
     let descriptor = try await seedRecoverProjectionDescriptor(
       in: registry,
       projectionID: "projection.recover.snapshot",
@@ -1147,7 +1085,7 @@ struct HostRuntimeSurfaceTests {
     defer { try? FileManager.default.removeItem(at: rootDirectory) }
 
     let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
-    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: registry)
+    let runtimeFacade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(hostAdapters: registry)
     _ = try await seedRecoverProjectionDescriptor(
       in: registry,
       projectionID: "projection.recover.materialize"
@@ -1548,7 +1486,7 @@ struct HostRuntimeSurfaceTests {
       checkpointStore: checkpointStore,
       journalStore: journalStore
     )
-    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: hostAdapters)
+    let runtimeFacade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(hostAdapters: hostAdapters)
 
     let started = try await runtimeFacade.runFacade.runGoal(
       .init(
@@ -1601,37 +1539,6 @@ struct HostRuntimeSurfaceTests {
   }
 
   @Test
-  func resumeFacadeRecoversPausedCheckpointAndBridgeExposesEventStream() async throws {
-    let sessionID = PraxisSessionID(rawValue: "session.paused")
-    let runID = PraxisRunID(rawValue: "run:session.paused:goal.paused")
-    let checkpointRecord = try makeCheckpointRecord(
-      status: .paused,
-      sessionID: sessionID,
-      runID: runID,
-      tickCount: 3,
-      lastCursor: .init(sequence: 4)
-    )
-    let hostAdapters = PraxisHostAdapterRegistry(
-      checkpointStore: PraxisFakeCheckpointStore(seedRecords: [checkpointRecord]),
-      journalStore: PraxisFakeJournalStore()
-    )
-    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: hostAdapters)
-    let bridge = try PraxisRuntimeBridgeFactory.makeCLICommandBridge(hostAdapters: hostAdapters)
-
-    let resumed = try await runtimeFacade.runFacade.resumeRun(.init(runID: runID))
-    let state = try await bridge.handle(.init(intent: .resumeRun, payloadSummary: runID.rawValue))
-    let events = await bridge.drainEvents()
-
-    #expect(resumed.phase == .running)
-    #expect(resumed.tickCount == 4)
-    #expect(resumed.recoveredEventCount == 0)
-    #expect(resumed.followUpAction?.intentID == "evt.resumed.run:session.paused:goal.paused:resume")
-    #expect(state.pendingIntentID == "evt.resumed.run:session.paused:goal.paused:resume")
-    #expect(state.events.map(\.name) == ["run.resumed", "run.follow_up_ready"])
-    #expect(events.map(\.name) == ["run.resumed", "run.follow_up_ready"])
-  }
-
-  @Test
   func resumeFacadeRecoversFailedCheckpointAndPreservesReplayEvidence() async throws {
     let sessionID = PraxisSessionID(rawValue: "session.failed")
     let runID = PraxisRunID(rawValue: "run:session.failed:goal.failed")
@@ -1656,7 +1563,7 @@ struct HostRuntimeSurfaceTests {
         )
       ])
     )
-    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: hostAdapters)
+    let runtimeFacade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(hostAdapters: hostAdapters)
 
     let resumed = try await runtimeFacade.runFacade.resumeRun(.init(runID: runID))
 
@@ -1697,7 +1604,7 @@ struct HostRuntimeSurfaceTests {
         )
       ])
     )
-    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: hostAdapters)
+    let runtimeFacade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(hostAdapters: hostAdapters)
 
     let resumed = try await runtimeFacade.runFacade.resumeRun(.init(runID: runID))
 
@@ -1756,7 +1663,7 @@ struct HostRuntimeSurfaceTests {
       checkpointStore: PraxisFakeCheckpointStore(seedRecords: [checkpointRecord]),
       journalStore: PraxisFakeJournalStore(seedEvents: replayEvents)
     )
-    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: hostAdapters)
+    let runtimeFacade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(hostAdapters: hostAdapters)
 
     let resumed = try await runtimeFacade.runFacade.resumeRun(.init(runID: runID))
 
@@ -1782,7 +1689,7 @@ struct HostRuntimeSurfaceTests {
       checkpointStore: PraxisFakeCheckpointStore(seedRecords: [checkpointRecord]),
       journalStore: PraxisFakeJournalStore()
     )
-    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: hostAdapters)
+    let runtimeFacade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(hostAdapters: hostAdapters)
 
     let resumed = try await runtimeFacade.runFacade.resumeRun(.init(runID: runID))
 
@@ -1806,7 +1713,7 @@ struct HostRuntimeSurfaceTests {
       checkpointStore: PraxisFakeCheckpointStore(seedRecords: [checkpointRecord]),
       journalStore: PraxisFakeJournalStore()
     )
-    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: hostAdapters)
+    let runtimeFacade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(hostAdapters: hostAdapters)
 
     let resumed = try await runtimeFacade.runFacade.resumeRun(.init(runID: runID))
 
@@ -1864,7 +1771,7 @@ struct HostRuntimeSurfaceTests {
     defer { try? FileManager.default.removeItem(at: rootDirectory) }
 
     let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
-    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: registry)
+    let runtimeFacade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(hostAdapters: registry)
     let goal = PraxisCompiledGoal(
       normalizedGoal: .init(
         id: .init(rawValue: "goal.local-runtime-truth"),
@@ -1914,8 +1821,8 @@ struct HostRuntimeSurfaceTests {
 
     let firstRegistry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
     let secondRegistry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
-    let firstFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: firstRegistry)
-    let secondFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: secondRegistry)
+    let firstFacade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(hostAdapters: firstRegistry)
+    let secondFacade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(hostAdapters: secondRegistry)
 
     _ = try await firstFacade.cmpFacade.requestPeerApproval(
       .init(
@@ -1956,7 +1863,7 @@ struct HostRuntimeSurfaceTests {
     defer { try? FileManager.default.removeItem(at: rootDirectory) }
 
     let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
-    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: registry)
+    let runtimeFacade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(hostAdapters: registry)
     _ = try await runtimeFacade.cmpFacade.updateControl(
       .init(
         projectID: "cmp.local-runtime",
@@ -2012,7 +1919,7 @@ struct HostRuntimeSurfaceTests {
     defer { try? FileManager.default.removeItem(at: rootDirectory) }
 
     let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
-    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: registry)
+    let runtimeFacade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(hostAdapters: registry)
     _ = try await runtimeFacade.cmpFacade.updateControl(
       .init(
         projectID: "cmp.local-runtime",
@@ -2089,7 +1996,7 @@ struct HostRuntimeSurfaceTests {
     defer { try? FileManager.default.removeItem(at: rootDirectory) }
 
     let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
-    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: registry)
+    let runtimeFacade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(hostAdapters: registry)
     let contextPackage = PraxisCmpContextPackage(
       id: .init(rawValue: "projection.runtime.local:checker.local:runtimeFill"),
       sourceProjectionID: .init(rawValue: "projection.runtime.local"),
@@ -2138,7 +2045,7 @@ struct HostRuntimeSurfaceTests {
     defer { try? FileManager.default.removeItem(at: rootDirectory) }
 
     let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
-    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: registry)
+    let runtimeFacade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(hostAdapters: registry)
     _ = try await registry.cmpContextPackageStore?.save(
       .init(
         projectID: "cmp.local-runtime",
@@ -2288,7 +2195,7 @@ struct HostRuntimeSurfaceTests {
     defer { try? FileManager.default.removeItem(at: rootDirectory) }
 
     let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
-    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: registry)
+    let runtimeFacade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(hostAdapters: registry)
 
     let requested = try await runtimeFacade.cmpFacade.requestPeerApproval(
       .init(
@@ -2342,7 +2249,7 @@ struct HostRuntimeSurfaceTests {
     defer { try? FileManager.default.removeItem(at: rootDirectory) }
 
     let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
-    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: registry)
+    let runtimeFacade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(hostAdapters: registry)
 
     _ = try await runtimeFacade.cmpFacade.requestPeerApproval(
       .init(
@@ -2417,7 +2324,7 @@ struct HostRuntimeSurfaceTests {
       defer { try? FileManager.default.removeItem(at: rootDirectory) }
 
       let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
-      let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: registry)
+      let runtimeFacade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(hostAdapters: registry)
 
       _ = try await runtimeFacade.cmpFacade.requestPeerApproval(
         PraxisRequestCmpPeerApprovalCommand(
@@ -2479,7 +2386,7 @@ struct HostRuntimeSurfaceTests {
     defer { try? FileManager.default.removeItem(at: rootDirectory) }
 
     let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
-    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: registry)
+    let runtimeFacade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(hostAdapters: registry)
 
     _ = try await runtimeFacade.cmpFacade.requestPeerApproval(
       .init(
@@ -2802,7 +2709,7 @@ struct HostRuntimeSurfaceTests {
         summary: "Verify local git repository"
       )
     )
-    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: registry)
+    let runtimeFacade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(hostAdapters: registry)
     let cmpSnapshot = try await runtimeFacade.inspectionFacade.inspectCmp()
 
     #expect(gitReceipt?.status == .applied)
@@ -2852,7 +2759,7 @@ struct HostRuntimeSurfaceTests {
     try FileManager.default.createDirectory(at: rootDirectory, withIntermediateDirectories: true)
 
     let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
-    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: registry)
+    let runtimeFacade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(hostAdapters: registry)
     let cmpSnapshot = try await runtimeFacade.inspectionFacade.inspectCmp()
 
     #expect(cmpSnapshot.hostRuntimeSummary.contains("workspace (ready)"))
@@ -2868,38 +2775,11 @@ struct HostRuntimeSurfaceTests {
     try FileManager.default.createDirectory(at: rootDirectory, withIntermediateDirectories: true)
 
     let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
-    let runtimeFacade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade(hostAdapters: registry)
+    let runtimeFacade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(hostAdapters: registry)
     let cmpSnapshot = try await runtimeFacade.inspectionFacade.inspectCmp()
 
     #expect(cmpSnapshot.hostRuntimeSummary.contains("system git executor (degraded)"))
     #expect(cmpSnapshot.summary.contains("workspace, git, and lineage state"))
   }
 
-  @Test
-  func defaultBridgeFactoryReusesSharedLocalHostAdaptersAcrossBridgeInstances() async throws {
-    let facade = try PraxisRuntimeBridgeFactory.makeRuntimeFacade()
-    let goal = PraxisCompiledGoal(
-      normalizedGoal: .init(
-        id: .init(rawValue: "goal.shared-factory"),
-        title: "Shared Factory Goal",
-        summary: "Verify shared local adapters"
-      ),
-      intentSummary: "Verify shared local adapters"
-    )
-    let started = try await facade.runFacade.runGoal(
-      .init(
-        goal: goal,
-        sessionID: .init(rawValue: "session.shared-factory")
-      )
-    )
-
-    let bridge = try PraxisRuntimeBridgeFactory.makeCLICommandBridge()
-    let resumedState = try await bridge.handle(
-      .init(intent: .resumeRun, payloadSummary: started.runID.rawValue)
-    )
-
-    #expect(resumedState.title == "Run \(started.runID.rawValue)")
-    #expect(resumedState.summary.contains("Resumed running run"))
-    #expect(resumedState.pendingIntentID == "evt.resumed.\(started.runID.rawValue):resume")
-  }
 }

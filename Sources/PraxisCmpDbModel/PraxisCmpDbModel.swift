@@ -12,7 +12,7 @@ public enum PraxisCmpDbModelModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisCmpDbModel",
     responsibility: "CMP DB topology、projection/package/delivery persistence model 与 write plans。",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/cmp-db",
     ],
   )

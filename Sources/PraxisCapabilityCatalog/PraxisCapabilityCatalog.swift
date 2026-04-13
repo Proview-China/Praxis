@@ -12,7 +12,7 @@ public enum PraxisCapabilityCatalogModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisCapabilityCatalog",
     responsibility: "capability package、baseline capability sets 与 family catalog。",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/capability-package",
       "src/agent_core/capability-package/mp-family-capability-package.ts",
     ],

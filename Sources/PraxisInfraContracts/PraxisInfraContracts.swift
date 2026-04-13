@@ -15,7 +15,7 @@ public enum PraxisInfraContractsModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisInfraContracts",
     responsibility: "checkpoint / projection store / message bus / local persistence / semantic search infra 协议族。",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/checkpoint",
       "src/agent_core/cmp-db",
       "src/agent_core/cmp-mq",

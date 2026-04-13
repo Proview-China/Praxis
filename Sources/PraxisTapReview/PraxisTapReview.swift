@@ -13,7 +13,7 @@ public enum PraxisTapReviewModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisTapReview",
     responsibility: "reviewer / tool reviewer 决策、路由与审查结果模型。",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/ta-pool-review",
       "src/agent_core/ta-pool-tool-review",
     ],

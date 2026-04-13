@@ -13,7 +13,7 @@ public enum PraxisCmpProjectionModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisCmpProjection",
     responsibility: "CMP projection、materialization、visibility、runtime snapshot 与 recovery model。",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/cmp-runtime/materialization.ts",
       "src/agent_core/cmp-runtime/visibility-enforcement.ts",
       "src/agent_core/cmp-runtime/runtime-snapshot.ts",

@@ -4267,7 +4267,7 @@ public final class PraxisInspectTapUseCase: PraxisInspectTapUseCaseProtocol {
     self.dependencies = dependencies
   }
 
-  /// Builds the current Swift TAP domain inspection snapshot for facades and presentation bridges.
+  /// Builds the current Swift TAP domain inspection snapshot for facades and exported runtime surfaces.
   ///
   /// - Returns: A TAP inspection that aggregates governance, context, tool-review, and runtime layers.
   /// - Throws: This implementation does not actively throw, but it propagates underlying errors from the call chain.

@@ -8,7 +8,7 @@ public enum PraxisMpMemoryModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisMpMemory",
     responsibility: "MP memory workflow truth such as alignment, supersede, bundle assembly, and quality summaries.",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/mp-types/mp-memory.ts",
       "src/agent_core/mp-lancedb/lancedb-query.ts",
       "src/agent_core/runtime.mp-workflow.test.ts",

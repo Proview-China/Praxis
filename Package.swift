@@ -62,7 +62,6 @@ let hostRuntimeTargets = [
   "PraxisRuntimeInterface",
   "PraxisRuntimeGateway",
   "PraxisFFI",
-  "PraxisRuntimePresentationBridge",
 ]
 
 let architectureTestTargets = [
@@ -93,24 +92,7 @@ sqliteSystemLibraryTarget = .systemLibrary(
 )
 #endif
 
-let appleProducts: [Product]
-let appleTargets: [Target]
 let hostRuntimeArchitectureTestsTarget: Target
-
-#if os(macOS)
-appleProducts = [
-  .library(name: "PraxisAppleUI", targets: ["PraxisAppleUI"]),
-]
-
-appleTargets = [
-  .target(
-    name: "PraxisAppleUI",
-    dependencies: [
-      "PraxisRuntimePresentationBridge",
-    ],
-    path: "Sources/PraxisAppleUI",
-  ),
-]
 hostRuntimeArchitectureTestsTarget = .testTarget(
   name: "PraxisHostRuntimeArchitectureTests",
   dependencies: [
@@ -119,29 +101,10 @@ hostRuntimeArchitectureTestsTarget = .testTarget(
     "PraxisRuntimeFacades",
     "PraxisRuntimeInterface",
     "PraxisFFI",
-    "PraxisRuntimePresentationBridge",
-    "PraxisMpTypes",
-    "PraxisAppleUI",
-  ],
-  path: "Tests/PraxisHostRuntimeArchitectureTests",
-)
-#else
-appleProducts = []
-appleTargets = []
-hostRuntimeArchitectureTestsTarget = .testTarget(
-  name: "PraxisHostRuntimeArchitectureTests",
-  dependencies: [
-    "PraxisRuntimeComposition",
-    "PraxisRuntimeUseCases",
-    "PraxisRuntimeFacades",
-    "PraxisRuntimeInterface",
-    "PraxisFFI",
-    "PraxisRuntimePresentationBridge",
     "PraxisMpTypes",
   ],
   path: "Tests/PraxisHostRuntimeArchitectureTests",
 )
-#endif
 
 let package = Package(
   name: "Praxis",
@@ -161,8 +124,7 @@ let package = Package(
     .library(name: "PraxisHostContracts", targets: hostContractTargets),
     .library(name: "PraxisHostRuntime", targets: hostRuntimeTargets),
     .library(name: "PraxisArchitectureTests", targets: architectureTestTargets),
-    .executable(name: "praxis-cli", targets: ["PraxisCLI"]),
-  ] + appleProducts,
+  ],
   targets: [
     sqliteSystemLibraryTarget,
     .target(
@@ -607,52 +569,6 @@ let package = Package(
       path: "Sources/PraxisRuntimeGateway",
     ),
     .target(
-      name: "PraxisRuntimePresentationBridge",
-      dependencies: [
-        "PraxisCoreTypes",
-        "PraxisGoal",
-        "PraxisState",
-        "PraxisTransition",
-        "PraxisRun",
-        "PraxisSession",
-        "PraxisJournal",
-        "PraxisCheckpoint",
-        "PraxisCapabilityContracts",
-        "PraxisCapabilityPlanning",
-        "PraxisCapabilityResults",
-        "PraxisCapabilityCatalog",
-        "PraxisTapTypes",
-        "PraxisTapGovernance",
-        "PraxisTapReview",
-        "PraxisTapProvision",
-        "PraxisTapRuntime",
-        "PraxisTapAvailability",
-        "PraxisCmpTypes",
-        "PraxisCmpSections",
-        "PraxisCmpProjection",
-        "PraxisCmpDelivery",
-        "PraxisCmpGitModel",
-        "PraxisCmpDbModel",
-        "PraxisCmpMqModel",
-        "PraxisCmpFiveAgent",
-        "PraxisMpTypes",
-        "PraxisMpSearch",
-        "PraxisMpMemory",
-        "PraxisMpFiveAgent",
-        "PraxisProviderContracts",
-        "PraxisWorkspaceContracts",
-        "PraxisToolingContracts",
-        "PraxisInfraContracts",
-        "PraxisUserIOContracts",
-        "PraxisRuntimeComposition",
-        "PraxisRuntimeUseCases",
-        "PraxisRuntimeFacades",
-        "PraxisRuntimeGateway",
-        "PraxisRuntimeInterface",
-      ],
-      path: "Sources/PraxisRuntimePresentationBridge",
-    ),
-    .target(
       name: "PraxisFFI",
       dependencies: [
         "PraxisCoreTypes",
@@ -660,14 +576,6 @@ let package = Package(
         "PraxisRuntimeInterface",
       ],
       path: "Sources/PraxisFFI",
-    ),
-    .executableTarget(
-      name: "PraxisCLI",
-      dependencies: [
-        "PraxisRuntimeInterface",
-        "PraxisRuntimeGateway",
-      ],
-      path: "Sources/PraxisCLI",
     ),
     .testTarget(
       name: "PraxisFoundationArchitectureTests",
@@ -1057,12 +965,5 @@ let package = Package(
       ],
       path: "Tests/PraxisMpFiveAgentTests",
     ),
-    .testTarget(
-      name: "PraxisCLITests",
-      dependencies: [
-        "PraxisCLI",
-      ],
-      path: "Tests/PraxisCLITests",
-    ),
-  ] + appleTargets,
+  ],
 )

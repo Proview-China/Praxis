@@ -12,7 +12,7 @@ public enum PraxisTapGovernanceModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisTapGovernance",
     responsibility: "风险分类、mode policy、safety interception、governance object 与 user surface snapshot。",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/ta-pool-model",
       "src/agent_core/ta-pool-context",
       "src/agent_core/ta-pool-safety",

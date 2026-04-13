@@ -25,7 +25,7 @@ public enum PraxisJournalModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisJournal",
     responsibility: "append-only journal、cursor 与 flush 触发。",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/journal",
     ],
   )

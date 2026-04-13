@@ -11,7 +11,7 @@ public enum PraxisToolingContractsModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisToolingContracts",
     responsibility: "shell / browser / system git / process tooling 协议族。",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/integrations/tap-tooling",
       "src/agent_core/cmp-git/git-cli-backend.ts",
       "src/agent_core/live-agent-chat/browser-grounding.ts",

@@ -18,7 +18,7 @@ public enum PraxisStateModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisState",
     responsibility: "事件投影、状态快照与状态校验。",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/state",
     ],
   )

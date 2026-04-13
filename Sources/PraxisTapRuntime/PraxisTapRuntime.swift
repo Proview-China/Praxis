@@ -17,7 +17,7 @@ public enum PraxisTapRuntimeModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisTapRuntime",
     responsibility: "control plane、activation lifecycle、human gate、replay、governance snapshot 与 recovery 模型。",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/ta-pool-runtime",
     ],
   )

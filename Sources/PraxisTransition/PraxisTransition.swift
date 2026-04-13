@@ -24,7 +24,7 @@ public enum PraxisTransitionModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisTransition",
     responsibility: "状态转移表、guard 和 next-action 决策。",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/transition",
     ],
   )

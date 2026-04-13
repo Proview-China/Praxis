@@ -20,7 +20,6 @@ import PraxisTapTypes
 @testable import PraxisRuntimeFacades
 @testable import PraxisRuntimeGateway
 @testable import PraxisRuntimeInterface
-@testable import PraxisRuntimePresentationBridge
 import PraxisRuntimeUseCases
 import PraxisTransition
 
@@ -599,7 +598,7 @@ private func makeThrowingRuntimeInterface(
 
   return PraxisRuntimeInterfaceSession(
     runtimeFacade: .init(runFacade: runFacade, inspectionFacade: inspectionFacade, cmpFacade: cmpFacade),
-    blueprint: PraxisRuntimePresentationBridgeModule.bootstrap
+    blueprint: PraxisRuntimeGatewayModule.bootstrap
   )
 }
 
@@ -807,7 +806,7 @@ private func makeStubbedRuntimeInterface(cmpFacade: PraxisCmpFacade) -> PraxisRu
       inspectionFacade: makeUnexpectedInspectionFacade(),
       cmpFacade: cmpFacade
     ),
-    blueprint: PraxisRuntimePresentationBridgeModule.bootstrap
+    blueprint: PraxisRuntimeGatewayModule.bootstrap
   )
 }
 
@@ -818,7 +817,7 @@ private func makeStubbedRuntimeInterface(inspectionFacade: PraxisInspectionFacad
       inspectionFacade: inspectionFacade,
       cmpFacade: makeStubCmpFacade()
     ),
-    blueprint: PraxisRuntimePresentationBridgeModule.bootstrap
+    blueprint: PraxisRuntimeGatewayModule.bootstrap
   )
 }
 
@@ -836,7 +835,7 @@ private func makeStubbedRuntimeInterface(mpFacade: PraxisMpFacade) -> PraxisRunt
       cmpControlFacade: cmpFacade.controlFacade,
       cmpReadbackFacade: cmpFacade.readbackFacade
     ),
-    blueprint: PraxisRuntimePresentationBridgeModule.bootstrap
+    blueprint: PraxisRuntimeGatewayModule.bootstrap
   )
 }
 
@@ -912,7 +911,7 @@ struct HostRuntimeInterfaceTests {
         inspectionFacade: makeUnexpectedInspectionFacade(),
         cmpFacade: makeStubCmpFacade()
       ),
-      blueprint: PraxisRuntimePresentationBridgeModule.bootstrap
+      blueprint: PraxisRuntimeGatewayModule.bootstrap
     )
 
     let response = await runtimeInterface.handle(
@@ -1844,7 +1843,7 @@ struct HostRuntimeInterfaceTests {
         cmpControlFacade: cmpFacade.controlFacade,
         cmpReadbackFacade: cmpFacade.readbackFacade
       ),
-      blueprint: PraxisRuntimePresentationBridgeModule.bootstrap
+      blueprint: PraxisRuntimeGatewayModule.bootstrap
     )
 
     let commitResponse = await runtimeInterface.handle(
@@ -4688,7 +4687,7 @@ struct HostRuntimeInterfaceTests {
         cmpControlFacade: cmpFacade.controlFacade,
         cmpReadbackFacade: cmpFacade.readbackFacade
       ),
-      blueprint: PraxisRuntimePresentationBridgeModule.bootstrap
+      blueprint: PraxisRuntimeGatewayModule.bootstrap
     )
 
     let recoverResponse = await runtimeInterface.handle(

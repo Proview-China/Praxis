@@ -10,7 +10,7 @@ public enum PraxisCapabilityContractsModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisCapabilityContracts",
     responsibility: "capability manifest、binding、invocation contract 与共享协议。",
-    tsModules: [
+    legacyReferences: [
       "src/agent_core/capability-types",
       "src/agent_core/capability-model",
     ],
