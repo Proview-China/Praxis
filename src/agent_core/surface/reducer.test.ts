@@ -232,3 +232,59 @@ test("surface reducer turns task, panel, and error events into stable snapshots"
   assert.equal(state.panels.debug?.eventCount, 4);
   assert.equal(state.messages.at(-1)?.kind, "error");
 });
+
+test("surface reducer keeps current turn focus when an older turn completes late", () => {
+  let state = createInitialSurfaceState();
+
+  state = applySurfaceEvent(state, createSurfaceEvent({
+    eventId: "event:turn.started:turn-1",
+    type: "turn.started",
+    emittedAt: "2026-04-13T02:20:00.000Z",
+    at: "2026-04-13T02:20:00.000Z",
+    source: "core",
+    turn: createSurfaceTurn({
+      turnId: "turn-1",
+      id: "turn-1",
+      turnIndex: 0,
+      status: "running",
+      startedAt: "2026-04-13T02:20:00.000Z",
+      updatedAt: "2026-04-13T02:20:00.000Z",
+      outputMessageIds: [],
+      taskIds: [],
+    }),
+  }));
+  state = applySurfaceEvent(state, createSurfaceEvent({
+    eventId: "event:turn.started:turn-2",
+    type: "turn.started",
+    emittedAt: "2026-04-13T02:20:10.000Z",
+    at: "2026-04-13T02:20:10.000Z",
+    source: "core",
+    turn: createSurfaceTurn({
+      turnId: "turn-2",
+      id: "turn-2",
+      turnIndex: 1,
+      status: "running",
+      startedAt: "2026-04-13T02:20:10.000Z",
+      updatedAt: "2026-04-13T02:20:10.000Z",
+      outputMessageIds: [],
+      taskIds: [],
+    }),
+  }));
+  state = applySurfaceEvent(state, createSurfaceEvent({
+    eventId: "event:turn.completed:turn-1",
+    type: "turn.completed",
+    emittedAt: "2026-04-13T02:20:20.000Z",
+    at: "2026-04-13T02:20:20.000Z",
+    source: "core",
+    turn: createSurfaceTurn({
+      turnId: "turn-1",
+      id: "turn-1",
+      status: "completed",
+      updatedAt: "2026-04-13T02:20:20.000Z",
+      completedAt: "2026-04-13T02:20:20.000Z",
+    }),
+  }));
+
+  assert.equal(state.currentTurnId, "turn-2");
+  assert.equal(state.turns.find((turn) => turn.turnId === "turn-1")?.status, "completed");
+});

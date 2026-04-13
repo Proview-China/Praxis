@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir } from "node:fs/promises";
+import { mkdir, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
@@ -14,6 +14,7 @@ import {
   updateBrowserTurnSummary,
 } from "./live-agent-chat/browser-grounding.js";
 import {
+  createCmpFiveAgentConfiguration,
   createCmpFiveAgentRuntime,
   createCmpRoleLiveLlmModelExecutor,
 } from "./cmp-five-agent/index.js";
@@ -22,6 +23,13 @@ import {
   type ModelInferenceExecutionParams,
   type ModelInferenceExecutionResult,
 } from "./integrations/model-inference.js";
+import { discoverLiveSkillOverlayEntries } from "./integrations/rax-skill-index-source.js";
+import { discoverMpOverlayArtifacts } from "./integrations/rax-mp-overlay-source.js";
+import {
+  buildChatCompletionMessagesFromPromptParts,
+  buildResponsesInputFromPromptParts,
+  readPromptMessagesMetadata,
+} from "./integrations/prompt-message-parts.js";
 import {
   registerTapCapabilityFamilyAssembly,
 } from "./integrations/tap-capability-family-assembly.js";
@@ -29,6 +37,26 @@ import {
   createTapCapabilityUsageIndex,
   renderTapCapabilityUsageIndexForCore,
 } from "./tap-availability/index.js";
+import {
+  buildLiveChatPromptBlocks,
+  buildLiveChatPromptMessages,
+  createCoreCmpHandoffLines,
+  createLiveChatCoreContextualInput,
+  createCoreContextEconomyLines,
+  createCoreContinuationCompactionLines,
+  renderLiveChatPromptAssembly,
+  createCoreBoundedOutputLines,
+  createCoreBrowserDisciplineLines,
+  createCoreActionPlannerContractLines,
+  createCoreCapabilityWindowLines,
+  createCoreLoopContinuationLines,
+  createCoreObjectiveAnchoringLines,
+  createCoreSearchDisciplineLines,
+  createCoreTaskStatusDisciplineLines,
+  createCoreUserInputContractLines,
+  createCoreValidationLadderLines,
+  createCoreWorkflowProtocolLines,
+} from "./core-prompt/index.js";
 import {
   createGoalSource,
 } from "./goal/index.js";
@@ -44,16 +72,22 @@ import {
   applyCliDefaultsToCapabilityRequest,
   buildDocReadCompletionAnswer,
   buildSpreadsheetReadCompletionAnswer,
+  createCapabilityFamilyTelemetry,
+  createCoreContextSnapshot,
   createLiveChatLogPath,
   type CoreTaskStatus,
+  type CoreContextSnapshot,
+  estimateContextTokens,
   extractDocReadFactSummary,
   extractSpreadsheetReadFactSummary,
   extractResponseTextMaybe,
+  extractReplyResponseTextFromPartialEnvelope,
   extractTextFromResponseLike,
   formatElapsed,
   formatNowStamp,
   formatTranscript,
   inferStreamLabel,
+  extractResponseTextFromPartialEnvelope,
   type CmpTurnArtifacts,
   type CoreActionEnvelope,
   type CoreCapabilityRequest,
@@ -84,9 +118,16 @@ import {
   printCmpArtifacts,
   printCoreArtifacts,
   printDirectAnswer,
+  printAgentsViewPlaceholder,
   printDirectBullet,
   printDirectCapabilities,
+  printInitViewPlaceholder,
+  printLanguageViewPlaceholder,
+  printModelView,
+  printMpViewPlaceholder,
+  printPermissionsView,
   printDirectStatus,
+  printResumeViewPlaceholder,
   printDirectSub,
   printEvents,
   printHelp,
@@ -95,6 +136,7 @@ import {
   printStartupDirect,
   printStatus,
   printTapArtifacts,
+  printWorkspaceView,
   promptDirectInputBox,
   readDirectFallbackLine,
 } from "./live-agent-chat/ui.js";
@@ -104,6 +146,10 @@ import {
 } from "./cmp-types/index.js";
 import { rax } from "../rax/index.js";
 import { loadOpenAILiveConfig } from "../rax/live-config.js";
+import {
+  resolveLiveReportsDir,
+  resolveWorkspaceRoot,
+} from "../runtime-paths.js";
 
 let CURRENT_UI_MODE: "full" | "direct" = "full";
 
@@ -116,6 +162,7 @@ async function executeCliModelInference(
   const model = readString(metadata.model) ?? loadOpenAILiveConfig().model;
   const reasoningEffort = readString(metadata.reasoningEffort) as "low" | "medium" | "high" | undefined;
   const maxOutputTokens = readPositiveInteger(metadata.maxOutputTokens);
+  const promptMessages = readPromptMessagesMetadata(metadata.promptMessages);
 
   if (provider !== "openai" || (variant !== "responses" && variant !== "chat_completions_compat")) {
     return executeModelInference(params);
@@ -135,11 +182,15 @@ async function executeCliModelInference(
     ? "direct"
     : CURRENT_UI_MODE;
   const printStream = shouldPrintStreamLabel(uiMode, label);
-  const preferBuffered = label === "core/action";
+  const preferBuffered = label === "core/action" && uiMode !== "direct";
+  const isFinalAssistantStream = label === "core/model.infer";
+  const shouldEmitReplyAssistantDelta = uiMode === "direct" && label === "core/action";
   const startedAt = Date.now();
   const startStamp = formatNowStamp();
   let printedHeader = false;
   let text = "";
+  let emittedAssistantText = "";
+  let capturedUsage: { inputTokens?: number; outputTokens?: number } | undefined;
 
   if (printStream) {
     console.log(`\n[stream ${label}] start ${startStamp}`);
@@ -166,11 +217,26 @@ async function executeCliModelInference(
       console.log(`[stream ${label}] ${fallbackText}`);
       console.log(`[stream ${label}] end ${formatNowStamp()} (${formatElapsed(Date.now() - startedAt)})`);
     }
-    await logger?.log("stream_text", {
-      turnIndex,
-      label,
-      text: fallbackText,
-    });
+    if (fallbackText) {
+      const replyText = shouldEmitReplyAssistantDelta
+        ? extractReplyResponseTextFromPartialEnvelope(fallbackText)
+        : undefined;
+      if (replyText) {
+        await logger?.log("assistant_delta", {
+          turnIndex,
+          label,
+          text: replyText,
+          done: true,
+        });
+      } else {
+        await logger?.log(isFinalAssistantStream ? "assistant_delta" : "stream_text", {
+          turnIndex,
+          label,
+          text: fallbackText,
+          done: true,
+        });
+      }
+    }
     await logger?.log("stream_end", {
       turnIndex,
       label,
@@ -181,23 +247,76 @@ async function executeCliModelInference(
     return fallback;
   };
 
+  const emitAssistantDeltaFromEnvelopeBuffer = async (done: boolean): Promise<void> => {
+    if (!isFinalAssistantStream && !shouldEmitReplyAssistantDelta) {
+      return;
+    }
+    const responseText = isFinalAssistantStream
+      ? extractResponseTextFromPartialEnvelope(text)
+      : extractReplyResponseTextFromPartialEnvelope(text);
+    if (!responseText || responseText.length <= emittedAssistantText.length) {
+      return;
+    }
+    const delta = responseText.slice(emittedAssistantText.length);
+    emittedAssistantText = responseText;
+    await logger?.log("assistant_delta", {
+      turnIndex,
+      label,
+      text: delta,
+      done,
+    });
+  };
+
+  const readUsageCounts = (raw: unknown): { inputTokens?: number; outputTokens?: number } | undefined => {
+    if (!raw || typeof raw !== "object") {
+      return undefined;
+    }
+    const record = raw as Record<string, unknown>;
+    const usage = record.usage;
+    if (!usage || typeof usage !== "object") {
+      return undefined;
+    }
+    const usageRecord = usage as Record<string, unknown>;
+    const inputTokens = typeof usageRecord.input_tokens === "number"
+      ? usageRecord.input_tokens
+      : typeof usageRecord.prompt_tokens === "number"
+        ? usageRecord.prompt_tokens
+        : undefined;
+    const outputTokens = typeof usageRecord.output_tokens === "number"
+      ? usageRecord.output_tokens
+      : typeof usageRecord.completion_tokens === "number"
+        ? usageRecord.completion_tokens
+        : undefined;
+    if (inputTokens === undefined && outputTokens === undefined) {
+      return undefined;
+    }
+    return { inputTokens, outputTokens };
+  };
+
   const finishBuffered = async (status: "success" | "buffered_success" | "stream_failed_fallback_buffered" = "success"): Promise<ModelInferenceExecutionResult> => {
     let bufferedText = "";
     let bufferedRaw: Record<string, unknown> | undefined;
     if (variant === "responses") {
       const response = await client.responses.create({
         model,
-        input: params.intent.frame.instructionText,
+        input: buildResponsesInputFromPromptParts({
+          instructionText: params.intent.frame.instructionText,
+          promptMessages,
+        }),
         stream: false,
         max_output_tokens: maxOutputTokens,
         reasoning: reasoningEffort ? { effort: reasoningEffort } : undefined,
       } as never);
       bufferedRaw = response as unknown as Record<string, unknown>;
       bufferedText = extractTextFromResponseLike(bufferedRaw);
+      capturedUsage = readUsageCounts(bufferedRaw);
     } else {
       const completion = await client.chat.completions.create({
         model,
-        messages: [{ role: "user", content: params.intent.frame.instructionText }],
+        messages: buildChatCompletionMessagesFromPromptParts({
+          instructionText: params.intent.frame.instructionText,
+          promptMessages,
+        }),
         stream: false,
         max_completion_tokens: maxOutputTokens,
         reasoning_effort: reasoningEffort,
@@ -208,6 +327,7 @@ async function executeCliModelInference(
         : undefined;
       bufferedText = typeof message?.content === "string" ? message.content : "";
       bufferedRaw = completion as unknown as Record<string, unknown>;
+      capturedUsage = readUsageCounts(bufferedRaw);
     }
 
     if (!bufferedText.trim()) {
@@ -217,11 +337,17 @@ async function executeCliModelInference(
     if (printStream && bufferedText) {
       console.log(`[stream ${label}] ${bufferedText}`);
     }
-    await logger?.log("stream_text", {
-      turnIndex,
-      label,
-      text: bufferedText,
-    });
+    if (isFinalAssistantStream || shouldEmitReplyAssistantDelta) {
+      text = bufferedText;
+      await emitAssistantDeltaFromEnvelopeBuffer(true);
+    } else {
+      await logger?.log("stream_text", {
+        turnIndex,
+        label,
+        text: bufferedText,
+        done: true,
+      });
+    }
     const endedAt = Date.now();
     if (printStream) {
       console.log(`[stream ${label}] end ${formatNowStamp()} (${formatElapsed(endedAt - startedAt)})`);
@@ -263,6 +389,7 @@ async function executeCliModelInference(
           model,
           layer: "api",
           variant,
+          ...(capturedUsage ? { usage: capturedUsage } : {}),
         },
       },
     };
@@ -287,7 +414,10 @@ async function executeCliModelInference(
     if (variant === "responses") {
       const stream = await client.responses.create({
         model,
-        input: params.intent.frame.instructionText,
+        input: buildResponsesInputFromPromptParts({
+          instructionText: params.intent.frame.instructionText,
+          promptMessages,
+        }),
         stream: true,
         max_output_tokens: maxOutputTokens,
         reasoning: reasoningEffort ? { effort: reasoningEffort } : undefined,
@@ -300,24 +430,36 @@ async function executeCliModelInference(
           if (printStream) {
             output.write(event.delta);
           }
+          if (isFinalAssistantStream || shouldEmitReplyAssistantDelta) {
+            await emitAssistantDeltaFromEnvelopeBuffer(false);
+          }
         } else if (event.type === "response.output_text.done" && typeof event.text === "string" && !text.trim()) {
           ensureHeader();
           text = event.text;
           if (printStream) {
             output.write(event.text);
           }
+          if (isFinalAssistantStream || shouldEmitReplyAssistantDelta) {
+            await emitAssistantDeltaFromEnvelopeBuffer(true);
+          }
+        } else if (event.type === "response.completed" && event.response && typeof event.response === "object") {
+          capturedUsage = readUsageCounts(event.response);
         }
       }
     } else {
       const stream = await client.chat.completions.create({
         model,
-        messages: [{ role: "user", content: params.intent.frame.instructionText }],
+        messages: buildChatCompletionMessagesFromPromptParts({
+          instructionText: params.intent.frame.instructionText,
+          promptMessages,
+        }),
         stream: true,
         max_completion_tokens: maxOutputTokens,
         reasoning_effort: reasoningEffort,
       } as never);
 
       for await (const chunk of stream as unknown as AsyncIterable<Record<string, unknown>>) {
+        capturedUsage = readUsageCounts(chunk) ?? capturedUsage;
         const choices = Array.isArray(chunk.choices) ? chunk.choices : [];
         const firstChoice = choices[0];
         if (!firstChoice || typeof firstChoice !== "object") {
@@ -333,6 +475,9 @@ async function executeCliModelInference(
           text += content;
           if (printStream) {
             output.write(content);
+          }
+          if (isFinalAssistantStream || shouldEmitReplyAssistantDelta) {
+            await emitAssistantDeltaFromEnvelopeBuffer(false);
           }
         }
       }
@@ -355,11 +500,15 @@ async function executeCliModelInference(
   if (printStream) {
     console.log(`[stream ${label}] end ${formatNowStamp()} (${formatElapsed(endedAt - startedAt)})`);
   }
-  await logger?.log("stream_text", {
-    turnIndex,
-    label,
-    text,
-  });
+  if (!isFinalAssistantStream && !shouldEmitReplyAssistantDelta) {
+    await logger?.log("stream_text", {
+      turnIndex,
+      label,
+      text,
+    });
+  } else {
+    await emitAssistantDeltaFromEnvelopeBuffer(true);
+  }
   await logger?.log("stream_end", {
     turnIndex,
     label,
@@ -397,6 +546,7 @@ async function executeCliModelInference(
         model,
         layer: "api",
         variant,
+        ...(capturedUsage ? { usage: capturedUsage } : {}),
       },
     },
   };
@@ -416,6 +566,30 @@ function buildCoreUserInput(input: {
   previousTaskStatus?: CoreTaskStatus;
   previousReplyText?: string;
 }): string {
+  return createCoreUserInputAssembly(input).promptText;
+}
+
+function createCoreUserInputAssembly(input: {
+  userMessage: string;
+  transcript: DialogueTurn[];
+  cmp?: CmpTurnArtifacts;
+  runtime: LiveCliState["runtime"];
+  skillEntries?: import("./core-prompt/types.js").CoreOverlayIndexEntryV1[];
+  memoryEntries?: import("./core-prompt/types.js").CoreOverlayIndexEntryV1[];
+  mpRoutedPackage?: import("./core-prompt/types.js").CoreMpRoutedPackageV1;
+  toolResultText?: string;
+  capabilityHistoryText?: string;
+  groundingEvidenceText?: string;
+  forceFinalAnswer?: boolean;
+  capabilityLoopIndex?: number;
+  maxCapabilityLoops?: number;
+  previousTaskStatus?: CoreTaskStatus;
+  previousReplyText?: string;
+}): {
+  promptText: string;
+  promptBlocks: import("./types/kernel-goal.js").GoalPromptBlock[];
+  promptMessages: Array<{ role: "system" | "developer" | "user"; content: string }>;
+} {
   const recentTurns = input.transcript.slice(-6);
   const availableCapabilities = input.runtime.capabilityPool
     .listCapabilities()
@@ -428,151 +602,252 @@ function buildCoreUserInput(input: {
         .map((manifest) => manifest.capabilityKey),
     }),
   );
-  const cmpSummaryBlock = input.cmp
-    ? [
-      "CMP active package summary:",
-      `- intent: ${input.cmp.intent}`,
-      `- operator guide: ${input.cmp.operatorGuide}`,
-      `- child guide: ${input.cmp.childGuide}`,
-      `- checker reason: ${input.cmp.checkerReason}`,
-      `- package ref: ${input.cmp.packageRef}`,
-      `- route rationale: ${input.cmp.routeRationale}`,
-      `- scope policy: ${input.cmp.scopePolicy}`,
-      `- package strategy: ${input.cmp.packageStrategy}`,
-      `- timeline strategy: ${input.cmp.timelineStrategy}`,
-    ]
-    : [
-      "CMP active package summary:",
-      "- no fresh CMP package is available yet for this turn",
-      "- proceed with the direct user request and any already available capability window",
+  const contextualInput = createLiveChatCoreContextualInput({
+    userMessage: input.userMessage,
+    transcript: input.transcript,
+    cmp: input.cmp,
+    mpRoutedPackage: input.mpRoutedPackage,
+    availableCapabilitiesText: `Currently registered TAP capabilities: ${availableCapabilities || "(none)"}.`,
+    capabilityUsageIndexText,
+    skillEntries: input.skillEntries,
+    memoryEntries: input.memoryEntries,
+    capabilityHistoryText: input.capabilityHistoryText,
+    toolResultText: input.toolResultText,
+    groundingEvidenceText: input.groundingEvidenceText,
+  });
+  const developmentInput = {
+    tapMode: LIVE_CHAT_TAP_OVERRIDE.requestedMode,
+    automationDepth: LIVE_CHAT_TAP_OVERRIDE.automationDepth,
+    uiMode: "direct" as const,
+  };
+  const modeInstructions = [
+      "You are answering inside the Praxis live CLI harness.",
+      "Use the CMP package summary below as the current executable context.",
+      "Execution mode is active.",
+      "TAP governance is configured in bapr + prefer_auto for this CLI.",
+      ...createCoreCmpHandoffLines({
+        cmpContextPackage: contextualInput.cmpContextPackage,
+        forceFinalAnswer: input.forceFinalAnswer,
+      }),
+      ...createCoreObjectiveAnchoringLines({
+        forceFinalAnswer: input.forceFinalAnswer,
+      }),
+      ...createCoreWorkflowProtocolLines({
+        mode: "user_input",
+        forceFinalAnswer: input.forceFinalAnswer,
+      }),
+      ...createCoreCapabilityWindowLines({
+        mode: "user_input",
+        forceFinalAnswer: input.forceFinalAnswer,
+      }),
+      "Your job is to finish the user task, not merely to make one tool call.",
+      "If the task is not yet complete and another registered capability can move it forward, keep issuing capability_call steps until the task is actually done.",
+      "Only stop and ask the user for help when you have determined that both your own reasoning and the currently registered TAP capability window cannot make further safe progress.",
+      ...createCoreTaskStatusDisciplineLines({
+        forceFinalAnswer: input.forceFinalAnswer,
+        incompleteActionPhrase: "emit action=capability_call instead of stopping with action=reply",
+      }),
+      ...createCoreBrowserDisciplineLines({
+        forceFinalAnswer: input.forceFinalAnswer,
+      }),
+      ...createCoreValidationLadderLines({
+        forceFinalAnswer: input.forceFinalAnswer,
+      }),
+      ...createCoreContextEconomyLines({
+        forceFinalAnswer: input.forceFinalAnswer,
+      }),
+      ...createCoreContinuationCompactionLines({
+        forceFinalAnswer: input.forceFinalAnswer,
+      }),
+      input.groundingEvidenceText
+        ? "When browser grounding evidence is provided below, treat it as tool-derived facts rather than speculation."
+        : "",
+      input.groundingEvidenceText
+        ? "The grounding evidence block is normalized JSON with pages[] and facts[]. Prefer verified facts over weaker candidate hints."
+        : "",
+      input.groundingEvidenceText
+        ? "If the grounding evidence already contains the exact value/time/source needed to satisfy the user, answer from that evidence and mark the task completed instead of asking the user to continue manually."
+        : "",
+      input.groundingEvidenceText
+        ? "Do not say the value is unavailable if the grounding evidence below already contains a verified price, timestamp, page title, or source URL."
+        : "",
+      input.groundingEvidenceText
+        ? "If the evidence shows only blockers or candidates and a safe next tool step still exists, keep the task incomplete or blocked instead of claiming completion."
+        : "",
+      input.groundingEvidenceText
+        ? "If the user requires facts that must come from the visible target page itself, such as a page-displayed timestamp or an on-page quote, do not use search results or external summaries as a substitute for those page-native facts."
+        : "",
+      ...createCoreLoopContinuationLines({
+        forceFinalAnswer: input.forceFinalAnswer,
+        toolResultPresent: Boolean(input.toolResultText),
+        capabilityLoopIndex: input.capabilityLoopIndex,
+        maxCapabilityLoops: input.maxCapabilityLoops,
+        previousTaskStatus: input.previousTaskStatus,
+        previousReplyText: input.previousReplyText ? truncate(input.previousReplyText, 180) : undefined,
+      }),
+      input.forceFinalAnswer
+        ? "A TAP tool result is already available. Do not emit another tool request. Answer the user directly."
+        : "If the user asks to inspect or operate the local workspace/system, or asks for current online information, emit a structured action envelope immediately whenever a fitting capability exists.",
     ];
-  return [
-    "You are answering inside the Praxis live CLI harness.",
-    "Use the CMP package summary below as the current executable context.",
-    "Execution mode is active.",
-    "TAP governance is configured in bapr + prefer_auto for this CLI.",
-    "The registered TAP capability window below is already available for direct use.",
-    "Do not ask the user to manually approve, manually run commands, or paste local command output when a matching registered capability already exists.",
-    "Do not describe yourself as unable to act when the capability window already contains a fitting tool.",
-    "Your job is to finish the user task, not merely to make one tool call.",
-    "If the task is not yet complete and another registered capability can move it forward, keep issuing capability_call steps until the task is actually done.",
-    "Only stop and ask the user for help when you have determined that both your own reasoning and the currently registered TAP capability window cannot make further safe progress.",
-    !input.forceFinalAnswer
-      ? "Always set taskStatus in your JSON: completed, incomplete, blocked, or exhausted."
-      : "",
-    !input.forceFinalAnswer
-      ? "Use taskStatus=completed only when the user's actual request has been fulfilled. Use taskStatus=incomplete when more tool work is still needed. Use blocked or exhausted only when you truly cannot continue safely."
-      : "",
-    !input.forceFinalAnswer
-      ? "If taskStatus would be incomplete and another registered capability can still advance the task, emit action=capability_call instead of stopping with action=reply."
-      : "",
-    !input.forceFinalAnswer
-      ? "For browser.playwright, emit exactly one reviewed action per capability_call."
-      : "",
-    !input.forceFinalAnswer
-      ? "Do not emit browser steps arrays, actions arrays, or bundled browser master plans in one request. Let later loop iterations issue the next browser action."
-      : "",
-    input.groundingEvidenceText
-      ? "When browser grounding evidence is provided below, treat it as tool-derived facts rather than speculation."
-      : "",
-    input.groundingEvidenceText
-      ? "The grounding evidence block is normalized JSON with pages[] and facts[]. Prefer verified facts over weaker candidate hints."
-      : "",
-    input.groundingEvidenceText
-      ? "If the grounding evidence already contains the exact value/time/source needed to satisfy the user, answer from that evidence and mark the task completed instead of asking the user to continue manually."
-      : "",
-    input.groundingEvidenceText
-      ? "Do not say the value is unavailable if the grounding evidence below already contains a verified price, timestamp, page title, or source URL."
-      : "",
-    input.groundingEvidenceText
-      ? "If the evidence shows only blockers or candidates and a safe next tool step still exists, keep the task incomplete or blocked instead of claiming completion."
-      : "",
-    input.groundingEvidenceText
-      ? "If the user requires facts that must come from the visible target page itself, such as a page-displayed timestamp or an on-page quote, do not use search results or external summaries as a substitute for those page-native facts."
-      : "",
-    "If the user asks what you can do, what abilities are in the TAP pool, or asks for a capability introduction, answer directly from the registered capability inventory below instead of calling a tool.",
-    "Do not use MCP capabilities merely to inspect your own already-registered TAP inventory.",
-    input.toolResultText && !input.forceFinalAnswer
-      ? `You are inside an active agent loop after tool step ${input.capabilityLoopIndex ?? 0}/${input.maxCapabilityLoops ?? 0}. If the latest tool result does not yet fully complete the user's task and another registered capability can advance the task, emit another capability_call instead of stopping early.`
-      : "",
-    input.previousTaskStatus === "incomplete" && !input.forceFinalAnswer
-      ? `Your previous follow-up reply still marked the task as incomplete${input.previousReplyText ? `: ${truncate(input.previousReplyText, 180)}` : ""}. Do not stop there. Emit the next capability_call unless the task is now truly completed, blocked, or exhausted.`
-      : "",
-    input.forceFinalAnswer
-      ? "A TAP tool result is already available. Do not emit another tool request. Answer the user directly."
-      : "If the user asks to inspect or operate the local workspace/system, or asks for current online information, emit a structured action envelope immediately whenever a fitting capability exists.",
-    input.forceFinalAnswer
-      ? "Summarize the actual tool result and continue the task."
-      : "Exact JSON schema: {\"action\":\"reply|capability_call\",\"taskStatus\":\"completed|incomplete|blocked|exhausted\",\"responseText\":\"短中文句子\",\"capabilityRequest\":{\"capabilityKey\":\"shell.restricted|shell.session|test.run|repo.write|spreadsheet.write|doc.write|remote.exec|tracker.create|code.edit|code.patch|code.diff|git.status|git.diff|git.commit|git.push|browser.playwright|write_todos|code.read|code.ls|code.glob|code.grep|code.read_many|code.symbol_search|code.lsp|spreadsheet.read|doc.read|read_pdf|read_notebook|view_image|docs.read|search.web|search.fetch|search.ground|skill.use|skill.mount|skill.prepare|mcp.listTools|mcp.listResources|mcp.readResource|mcp.call|mcp.native.execute|request_user_input|request_permissions|audio.transcribe|speech.synthesize|image.generate\",\"reason\":\"为什么要用\",\"requestedTier\":\"B0|B1|B2|B3\",\"timeoutMs\":15000,\"input\":{}}}",
-    input.forceFinalAnswer
-      ? "Do not return JSON in the final answer."
-      : "Return strict JSON only. No markdown fences. No prose outside JSON.",
-    input.forceFinalAnswer
-      ? ""
-      : "For shell.restricted, use structured input like {\"command\":\"pwd\",\"args\":[],\"cwd\":\".\",\"timeoutMs\":15000}. For test.run, use an actual test-oriented command such as {\"command\":\"npx\",\"args\":[\"tsx\",\"--test\",\"src/example.test.ts\"],\"cwd\":\".\",\"timeoutMs\":30000}; for plain JavaScript tests, {\"command\":\"node\",\"args\":[\"--test\",\"src/example.test.js\"],\"cwd\":\".\",\"timeoutMs\":30000} is also fine. For shell.session, use {\"action\":\"start\",\"command\":\"python3\",\"args\":[\"-i\"],\"cwd\":\".\",\"yield_time_ms\":500} and later {\"action\":\"write\",\"sessionId\":\"...\",\"chars\":\"print(1)\\n\"}. For remote.exec, use {\"host\":\"example-host\",\"user\":\"deploy\",\"command\":\"hostname\",\"args\":[],\"timeoutMs\":15000}. For tracker.create, use {\"title\":\"Follow up item\",\"description\":\"...\",\"labels\":[\"rollout\"]}. For code.edit, use either {\"path\":\"src/file.ts\",\"old_string\":\"旧文本\",\"new_string\":\"新文本\",\"allow_multiple\":false} or {\"path\":\"src/file.ts\",\"edits\":[{\"find\":\"旧文本\",\"replace\":\"新文本\"}]}; after editing docs or memory files, prefer docs.read for readback, and after editing source/build files, prefer code.read. For code.patch, use {\"patch\":\"*** Begin Patch\\n*** Update File: path\\n@@\\n-旧\\n+新\\n*** End Patch\\n\"}. For git.status/git.diff use bounded cwd/path inputs. For git.commit, use explicit paths like {\"cwd\":\".\",\"paths\":[\"src/file.ts\"],\"message\":\"Clear commit reason\"} and avoid sweeping unrelated dirty files. For git.push, use normal push input like {\"cwd\":\".\",\"remote\":\"origin\",\"branch\":\"feature-name\"} and never request force semantics. For browser.playwright, use actions like {\"action\":\"navigate\",\"url\":\"https://example.com\",\"allowedDomains\":[\"example.com\"],\"headless\":true}, then {\"action\":\"snapshot\"} or {\"action\":\"screenshot\"}; file uploads stay blocked unless allowFileUploads=true. For spreadsheet.read, use {\"path\":\"data/report.xlsx\",\"maxEntries\":20} or {\"path\":\"data/table.csv\",\"maxEntries\":20}; optional sheet can narrow one workbook tab. For spreadsheet.write, use {\"path\":\"artifacts/report.xlsx\",\"headers\":[\"name\",\"value\"],\"rows\":[[\"gold\",4755.44]]}. For doc.read, use {\"path\":\"docs/file.docx\",\"maxEntries\":20,\"maxBytes\":12000}. For docs.read, use {\"path\":\"memory/current-context.md\",\"maxBytes\":12000} for markdown, docs, or memory artifacts. For doc.write, use top-level fields only, not nested document wrappers; emit shapes like {\"path\":\"artifacts/status.docx\",\"format\":\"docx\",\"title\":\"Status\",\"content\":\"...\",\"sections\":[{\"heading\":\"Observation\",\"body\":[\"...\"]}]} or replace body with paragraphs:[\"...\"]. For audio.transcribe, use {\"path\":\"artifacts/meeting.mp3\",\"language\":\"zh\",\"prompt\":\"保留关键专有名词\"}. For speech.synthesize, use {\"input\":\"要播报的文本\",\"voice\":\"alloy\",\"path\":\"memory/generated/tts.mp3\"}. For image.generate, use {\"prompt\":\"A precise technical illustration...\",\"path\":\"memory/generated/diagram.png\",\"size\":\"1024x1024\"}. For request_user_input use {\"questions\":[...]} and for request_permissions use {\"permissions\":{...},\"reason\":\"...\"}. For code.symbol_search, use {\"query\":\"SymbolName\",\"path\":\".\"}. For code.lsp, use {\"path\":\"src/file.ts\",\"operation\":\"document_symbol|definition|references|hover\",\"line\":1,\"character\":1}. For read_pdf, use {\"path\":\"docs/file.pdf\",\"pages\":\"1-3\"}. For read_notebook, use {\"path\":\"notebooks/demo.ipynb\",\"maxEntries\":20}. For view_image, use {\"path\":\"assets/mockup.png\",\"detail\":\"original\"} when the user wants you to inspect a local image. For write_todos use {\"todos\":[{\"description\":\"...\",\"status\":\"pending|in_progress|completed|blocked|cancelled\"}]}, and keep at most one item in progress. Do not use shell operators like ||, &&, pipes, redirects, or inline shell strings for local shell capabilities. For code.glob/code.grep/code.read_many, prefer bounded path/pattern inputs instead of huge raw dumps.",
-    input.forceFinalAnswer
-      ? ""
-      : "If the user asks for latest/current web information, browsing, live situation, or anything explicitly requiring the internet, prefer search.ground; use search.web for broad discovery and search.fetch for targeted page retrieval.",
-    input.forceFinalAnswer
-      ? ""
-      : "For search.web/search.ground, use input like {\"query\":\"问题本体\",\"freshness\":\"day\",\"citations\":\"preferred|required\"}. Provider/model defaults will be supplied by the CLI. For search.fetch, use input like {\"url\":\"https://...\",\"prompt\":\"要抽取什么\"}, and inspect selectedBackend, resolvedBackend, fallbackApplied, finalUrl, transport, and page status facts before claiming completion.",
-    input.forceFinalAnswer
-      ? ""
-      : "When using shell.restricted, prefer bounded output. Avoid commands that dump an entire large tree or huge raw search results in one go.",
-    input.forceFinalAnswer
-      ? ""
-      : "For skill.use / skill.mount / skill.prepare, provide route fields like provider/model and include the skill source or container in input.",
-    input.forceFinalAnswer
-      ? ""
-      : "For MCP capabilities, provide route.provider, route.model, and structured input. Examples: mcp.listTools => {\"route\":{...},\"input\":{\"connectionId\":\"...\"}}, mcp.listResources => {\"route\":{...},\"input\":{\"connectionId\":\"...\"}}, mcp.call => {\"route\":{...},\"input\":{\"connectionId\":\"...\",\"toolName\":\"...\",\"arguments\":{}}}.",
-    input.forceFinalAnswer
-      ? ""
-      : "If shell.restricted, shell.session, test.run, repo.write, spreadsheet.write, doc.write, remote.exec, tracker.create, code.edit, code.patch, code.diff, git.status, git.diff, git.commit, git.push, browser.playwright, write_todos, code.symbol_search, code.lsp, spreadsheet.read, doc.read, read_pdf, read_notebook, view_image, search.web, search.fetch, search.ground, request_user_input, request_permissions, audio.transcribe, speech.synthesize, or image.generate is already registered, treat it as ready-to-use TAP inventory rather than something that still needs user approval.",
-    `Currently registered TAP capabilities: ${availableCapabilities || "(none)"}.`,
-    capabilityUsageIndexText
-      ? [
-        "",
-        "Priority hardened capability guide:",
-        capabilityUsageIndexText,
-      ].join("\n")
-      : "",
-    "",
-    "Latest user message:",
-    input.userMessage,
-    "",
-    "Recent dialogue:",
-    formatTranscript(recentTurns),
-    "",
-    ...cmpSummaryBlock,
-    ...(input.capabilityHistoryText
-      ? [
-        "",
-        "Capability results collected so far this turn:",
-        input.capabilityHistoryText,
-      ]
-      : []),
-    ...(input.toolResultText
-      ? [
-        "",
-        "Latest TAP tool result:",
-        input.toolResultText,
-      ]
-      : []),
-    ...(input.groundingEvidenceText
-      ? [
-        "",
-        "Normalized grounding evidence extracted from browser/tool results:",
-        input.groundingEvidenceText,
-      ]
-      : []),
-    "",
-    "Return JSON only. No markdown fences. No prose outside JSON. Use Chinese in responseText unless the user asks for another language.",
-  ].join("\n");
+  const contractInstructions = [
+      ...createCoreUserInputContractLines({
+        forceFinalAnswer: input.forceFinalAnswer,
+      }),
+      ...createCoreSearchDisciplineLines({
+        mode: "user_input",
+        forceFinalAnswer: input.forceFinalAnswer,
+      }),
+      ...createCoreBoundedOutputLines({
+        mode: "user_input",
+        forceFinalAnswer: input.forceFinalAnswer,
+      }),
+    ];
+  return {
+    promptText: renderLiveChatPromptAssembly({
+      developmentInput,
+      contextualInput,
+      modeInstructions,
+      contractInstructions,
+    }),
+    promptBlocks: buildLiveChatPromptBlocks({
+      developmentInput,
+      contextualInput,
+      modeInstructions,
+      contractInstructions,
+    }),
+    promptMessages: buildLiveChatPromptMessages({
+      developmentInput,
+      contextualInput,
+      modeInstructions,
+      contractInstructions,
+    }),
+  };
+}
+
+function buildCoreActionPlannerInstructionText(
+  state: LiveCliState,
+  userMessage: string,
+  cmp?: CmpTurnArtifacts,
+): string {
+  return createCoreActionPlannerAssembly(state, userMessage, cmp).promptText;
+}
+
+function createCoreActionPlannerAssembly(
+  state: LiveCliState,
+  userMessage: string,
+  cmp?: CmpTurnArtifacts,
+): {
+  promptText: string;
+  promptBlocks: import("./types/kernel-goal.js").GoalPromptBlock[];
+  promptMessages: Array<{ role: "system" | "developer" | "user"; content: string }>;
+} {
+  const availableCapabilities = state.runtime.capabilityPool
+    .listCapabilities()
+    .map((manifest) => manifest.capabilityKey);
+  const capabilityUsageIndexText = renderTapCapabilityUsageIndexForCore(
+    createTapCapabilityUsageIndex({
+      availableCapabilityKeys: availableCapabilities,
+    }),
+  );
+  const developmentInput = {
+    tapMode: LIVE_CHAT_TAP_OVERRIDE.requestedMode,
+    automationDepth: LIVE_CHAT_TAP_OVERRIDE.automationDepth,
+    uiMode: "direct" as const,
+  };
+  const contextualInput = createLiveChatCoreContextualInput({
+    userMessage,
+    transcript: state.transcript,
+    cmp,
+    mpRoutedPackage: state.mpRoutedPackage,
+    availableCapabilitiesText: `Available capabilities: ${availableCapabilities.join(", ") || "(none)"}`,
+    capabilityUsageIndexText,
+    skillEntries: state.skillOverlayEntries,
+    memoryEntries: state.memoryOverlayEntries,
+  });
+  const modeInstructions = [
+      "Return strict JSON only.",
+      "Choose the next action for the frontstage core agent.",
+      "Execution mode is active.",
+      "TAP governance is bapr + prefer_auto for this CLI.",
+      ...createCoreCmpHandoffLines({
+        cmpContextPackage: contextualInput.cmpContextPackage,
+      }),
+      ...createCoreObjectiveAnchoringLines({}),
+      ...createCoreWorkflowProtocolLines({
+        mode: "action_planner",
+      }),
+      ...createCoreCapabilityWindowLines({
+        mode: "action_planner",
+      }),
+      "Your goal is to actually finish the user task, not just to emit a single tool call.",
+      "If the current task is still incomplete and another available capability can advance it, keep emitting capability_call actions until the task is genuinely done.",
+      "Only fall back to a direct reply that asks the user for help after you have determined that neither core reasoning nor the currently registered TAP capability window can safely make further progress.",
+      ...createCoreTaskStatusDisciplineLines({
+        incompleteActionPhrase: "choose action=capability_call instead of action=reply",
+      }),
+      ...createCoreValidationLadderLines({}),
+      ...createCoreContextEconomyLines({}),
+      ...createCoreContinuationCompactionLines({}),
+      "If a fitting capability exists, choose capability_call instead of reply.",
+      ...createCoreSearchDisciplineLines({
+        mode: "action_planner",
+      }),
+      ...createCoreBoundedOutputLines({
+        mode: "action_planner",
+      }),
+      ...createCoreBrowserDisciplineLines({}),
+      "If the recent transcript shows a capability failure and the user asks you to retry, try another suitable available capability or a revised retry, rather than asking them to restate the request.",
+    ];
+  const contractInstructions = [
+      ...createCoreActionPlannerContractLines(),
+      "User message:",
+      userMessage,
+    ];
+  return {
+    promptText: renderLiveChatPromptAssembly({
+      developmentInput,
+      contextualInput,
+      modeInstructions,
+      contractInstructions,
+    }),
+    promptBlocks: buildLiveChatPromptBlocks({
+      developmentInput,
+      contextualInput,
+      modeInstructions,
+      contractInstructions,
+    }),
+    promptMessages: buildLiveChatPromptMessages({
+      developmentInput,
+      contextualInput,
+      modeInstructions,
+      contractInstructions,
+    }),
+  };
+}
+
+function createCoreContextTelemetry(input: {
+  state: LiveCliState;
+  config: ReturnType<typeof loadOpenAILiveConfig>;
+  promptKind: CoreContextSnapshot["promptKind"];
+  promptText: string;
+}): CoreContextSnapshot {
+  return createCoreContextSnapshot({
+    provider: "openai",
+    model: LIVE_CHAT_MODEL_PLAN.core.model,
+    promptKind: input.promptKind,
+    promptText: input.promptText,
+    transcriptText: formatTranscript(input.state.transcript.slice(-6)),
+    configuredWindowTokens: input.config.contextWindowTokens,
+    routePlanWindowTokens: LIVE_CHAT_MODEL_PLAN.core.contextWindowTokens,
+    maxOutputTokens: LIVE_CHAT_MODEL_PLAN.core.maxOutputTokens,
+  });
 }
 
 async function runCoreModelPass(input: {
   state: LiveCliState;
   userInput: string;
+  promptBlocks?: import("./types/kernel-goal.js").GoalPromptBlock[];
+  promptMessages?: Array<{ role: "system" | "developer" | "user"; content: string }>;
   cmp?: CmpTurnArtifacts;
   config: ReturnType<typeof loadOpenAILiveConfig>;
   inputImageUrls?: string[];
@@ -583,6 +858,10 @@ async function runCoreModelPass(input: {
   dispatchStatus: string;
   capabilityKey?: string;
   capabilityResultStatus?: string;
+  usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+  };
   eventTypes: string[];
 }> {
   const source = createGoalSource({
@@ -593,6 +872,9 @@ async function runCoreModelPass(input: {
         provider: "openai",
         model: LIVE_CHAT_MODEL_PLAN.core.model,
         variant: "responses",
+        ...(input.promptMessages?.length
+          ? { promptMessages: input.promptMessages }
+          : {}),
         reasoningEffort: input.reasoningEffortOverride ?? resolveReasoningEffort(LIVE_CHAT_MODEL_PLAN.core),
         cliHarness: "praxis-live-cli",
         cliLogger: input.state.logger,
@@ -607,6 +889,13 @@ async function runCoreModelPass(input: {
       } : {}),
     },
   });
+
+  if (input.promptBlocks?.length) {
+    source.metadata = {
+      ...(source.metadata ?? {}),
+      promptBlocks: input.promptBlocks,
+    };
+  }
 
   const result = await input.state.runtime.runUntilTerminal({
     sessionId: input.state.sessionId,
@@ -711,11 +1000,10 @@ async function executeTapRequest(
 async function runCoreActionPlanner(
   state: LiveCliState,
   userMessage: string,
+  cmp?: CmpTurnArtifacts,
 ): Promise<CoreActionEnvelope> {
-  const availableCapabilities = state.runtime.capabilityPool
-    .listCapabilities()
-    .map((manifest) => manifest.capabilityKey);
-  const recentTranscript = state.transcript.slice(-6);
+  const assembly = createCoreActionPlannerAssembly(state, userMessage, cmp);
+  const instructionText = assembly.promptText;
   const intent = {
     intentId: randomUUID(),
     sessionId: state.sessionId,
@@ -725,40 +1013,7 @@ async function runCoreActionPlanner(
     priority: "high" as const,
     frame: {
       goalId: `core-action-envelope:${state.turnIndex}`,
-      instructionText: [
-        "Return strict JSON only.",
-        "Choose the next action for the frontstage core agent.",
-        "Execution mode is active.",
-        "TAP governance is bapr + prefer_auto for this CLI.",
-        `Available capabilities: ${availableCapabilities.join(", ") || "(none)"}`,
-        "These registered capabilities are already available for direct use in this CLI.",
-        "Your goal is to actually finish the user task, not just to emit a single tool call.",
-        "If the current task is still incomplete and another available capability can advance it, keep emitting capability_call actions until the task is genuinely done.",
-        "Only fall back to a direct reply that asks the user for help after you have determined that neither core reasoning nor the currently registered TAP capability window can safely make further progress.",
-        "Always set taskStatus in your JSON: completed, incomplete, blocked, or exhausted.",
-        "Use taskStatus=completed only when the user's actual request has been fulfilled. Use taskStatus=incomplete when more tool work is still needed. Use blocked or exhausted only when you truly cannot continue safely.",
-        "If taskStatus would be incomplete and another available capability can still advance the task, choose action=capability_call instead of action=reply.",
-        "If a fitting capability exists, choose capability_call instead of reply.",
-        "Do not ask the user to approve, to run local commands themselves, or to paste command output when a fitting capability already exists.",
-        "Do not say you cannot act if the capability window already contains a matching tool.",
-        "If the user asks what you can do, what abilities you have, or what is currently in the TAP pool, answer directly from the available capability inventory instead of calling any tool.",
-        "Do not use mcp.* just to inspect your own registered inventory.",
-        "If the user asks for current, latest, online, web, or live information and search.ground is available, choose capability_call with search.ground instead of saying you cannot browse. Use search.web for broad discovery and search.fetch for targeted page reads.",
-        "For shell.restricted and test.run, prefer bounded output and avoid commands likely to dump an entire large repository or massive raw result in one step.",
-        "For browser.playwright, emit exactly one reviewed action per capability_call.",
-        "Do not emit browser steps arrays, actions arrays, or bundled browser master plans in one request. Let later loop iterations issue the next browser action.",
-        "Schema:",
-        '{"action":"reply|capability_call","taskStatus":"completed|incomplete|blocked|exhausted","responseText":"user-facing text","capabilityRequest":{"capabilityKey":"shell.restricted|shell.session|test.run|repo.write|spreadsheet.write|doc.write|remote.exec|tracker.create|code.edit|code.patch|code.diff|git.status|git.diff|git.commit|git.push|browser.playwright|write_todos|code.read|code.ls|code.glob|code.grep|code.read_many|code.symbol_search|code.lsp|spreadsheet.read|doc.read|read_pdf|read_notebook|view_image|search.web|search.fetch|search.ground|skill.use|skill.mount|skill.prepare|mcp.listTools|mcp.listResources|mcp.readResource|mcp.call|mcp.native.execute|request_user_input|request_permissions|audio.transcribe|speech.synthesize|image.generate|...","reason":"short reason","input":{"command":"...","args":["..."],"cwd":"."},"requestedTier":"B0|B1|B2|B3","timeoutMs":20000}}',
-        "If action=reply, omit capabilityRequest.",
-        "If action=capability_call, responseText should briefly tell the user what tool you are using and then proceed.",
-        "For search.web/search.ground, emit input like {\"query\":\"...\",\"freshness\":\"day\",\"citations\":\"preferred|required\"}. The CLI will supply provider/model defaults. For search.fetch, emit input like {\"url\":\"https://...\",\"prompt\":\"extract the needed facts\"}, then judge completion from selectedBackend, resolvedBackend, fallbackApplied, finalUrl, transport, and page status facts rather than from tool success alone.",
-        "For skill.* and mcp.* capabilities, include structured route/input objects rather than vague prose.",
-        "Recent transcript window:",
-        formatTranscript(recentTranscript),
-        "If the recent transcript shows a capability failure and the user asks you to retry, try another suitable available capability or a revised retry, rather than asking them to restate the request.",
-        "User message:",
-        userMessage,
-      ].join("\n"),
+      instructionText,
       successCriteria: [],
       failureCriteria: [],
       constraints: [],
@@ -768,6 +1023,8 @@ async function runCoreActionPlanner(
         provider: "openai",
         model: LIVE_CHAT_MODEL_PLAN.core.model,
         variant: "responses",
+        promptBlocks: assembly.promptBlocks,
+        promptMessages: assembly.promptMessages,
         reasoningEffort: resolveReasoningEffort(LIVE_CHAT_MODEL_PLAN.core),
         streamLabel: "core/action",
         cliLogger: state.logger,
@@ -1021,6 +1278,9 @@ async function runCmpTurn(state: LiveCliState, userMessage: string): Promise<Cmp
     agentId,
     packageId,
     packageRef,
+    packageKind: contextPackage.packageKind,
+    packageMode: dispatcherResult.loop.packageMode,
+    fidelityLabel: contextPackage.fidelityLabel,
     projectionId,
     snapshotId,
     summary,
@@ -1514,6 +1774,8 @@ function looksLikeInterimPromise(text: string | undefined): boolean {
     || /接下来我会/u.test(normalized)
     || /随后我会/u.test(normalized)
     || /先.+然后/u.test(normalized)
+    || /^(我)?先.+再/u.test(normalized)
+    || /^(我)?先(去|查|看|调用|读取|打开|确认|列出|补上|执行)/u.test(normalized)
     || /继续.+(回读|校验|确认|读取)/u.test(normalized);
 }
 
@@ -1709,19 +1971,44 @@ function synthesizeUserFacingToolAnswer(
   const normalized = output && typeof output === "object"
     ? output as Record<string, unknown>
     : undefined;
+  const errorRecord = executionError && typeof executionError === "object"
+    ? executionError as Record<string, unknown>
+    : undefined;
+  const errorMessage = typeof errorRecord?.message === "string" ? errorRecord.message : "";
   if (capabilityKey === "spreadsheet.read") {
     return buildSpreadsheetReadCompletionAnswer(extractSpreadsheetReadFactSummary(output));
   }
   if (capabilityKey === "doc.read") {
     return buildDocReadCompletionAnswer(extractDocReadFactSummary(output));
   }
+  if (executionStatus && executionStatus !== "success" && executionStatus !== "partial" && capabilityKey !== "browser.playwright") {
+    const capabilityLabel = capabilityKey === "mcp.listTools"
+      ? "MCP tools 查询"
+      : capabilityKey === "mcp.listResources"
+        ? "MCP resources 查询"
+        : capabilityKey === "mcp.readResource"
+          ? "MCP resource 读取"
+          : capabilityKey === "mcp.call"
+            ? "MCP tool 调用"
+            : capabilityKey === "mcp.native.execute"
+              ? "MCP native transport 调用"
+              : capabilityKey === "repo.write"
+                ? "仓库写入"
+                : capabilityKey === "request_permissions"
+                  ? "权限申请"
+                  : capabilityKey === "write_todos"
+                    ? "todo 工作流写入"
+                    : capabilityKey === "skill.doc.generate"
+                      ? "skill 文档生成"
+                      : capabilityKey;
+    return [
+      `${capabilityLabel}这一步没有成功完成。`,
+      errorMessage ? `失败原因：${errorMessage}` : undefined,
+    ].filter((line): line is string => Boolean(line)).join("\n");
+  }
   if (capabilityKey !== "browser.playwright") {
     return undefined;
   }
-  const errorRecord = executionError && typeof executionError === "object"
-    ? executionError as Record<string, unknown>
-    : undefined;
-  const errorMessage = typeof errorRecord?.message === "string" ? errorRecord.message : "";
   const toolText = typeof normalized?.text === "string" ? normalized.text : "";
   const action = typeof normalized?.action === "string" ? normalized.action : "browser.playwright";
   const launchEvidence = normalized?.launchEvidence && typeof normalized.launchEvidence === "object"
@@ -1820,12 +2107,14 @@ async function runCoreTurn(
 ): Promise<CoreTurnArtifacts> {
   const maxCapabilityLoops = 4;
   const maxIncompleteReplyRecoveries = 2;
+  const initialContextPrompt = buildCoreActionPlannerInstructionText(state, "", cmp);
   let actionEnvelope: CoreActionEnvelope | undefined;
   let rawAnswer = "";
   let latestRunId = `${state.sessionId}:core-reply:${state.turnIndex}`;
   let latestEventTypes: string[] = [];
   let latestTaskStatus: CoreTaskStatus = "completed";
   let latestToolExecution: NonNullable<CoreTurnArtifacts["toolExecution"]> | undefined;
+  let latestUsage: CoreTurnArtifacts["usage"] | undefined;
   let completedCapabilityLoops = 0;
   let browserTurnSummary: BrowserTurnSummary = {};
   let capabilityLoopHistory: string[] = [];
@@ -1834,6 +2123,12 @@ async function runCoreTurn(
   let pendingInputImageUrls: string[] | undefined;
   let pendingIncompleteReplyText: string | undefined;
   let incompleteReplyRecoveries = 0;
+  let latestContext = createCoreContextTelemetry({
+    state,
+    config,
+    promptKind: "initial",
+    promptText: initialContextPrompt,
+  });
 
   const finalizeReply = (params: {
     runId: string;
@@ -1841,16 +2136,24 @@ async function runCoreTurn(
     plannerRawAnswer: string;
     eventTypes: string[];
     taskStatus?: CoreTaskStatus;
-  }): CoreTurnArtifacts => ({
-    runId: params.runId,
-    answer: params.answer,
-    dispatchStatus: "reply_only",
-    taskStatus: params.taskStatus ?? latestTaskStatus,
-    capabilityResultStatus: latestToolExecution?.status ?? "success",
-    plannerRawAnswer: params.plannerRawAnswer,
-    toolExecution: latestToolExecution,
-    eventTypes: params.eventTypes,
-  });
+  }): CoreTurnArtifacts => {
+    latestUsage = {
+      inputTokens: latestContext.promptTokens,
+      outputTokens: estimateContextTokens(params.answer),
+    };
+    return {
+      runId: params.runId,
+      answer: params.answer,
+      dispatchStatus: "reply_only",
+      taskStatus: params.taskStatus ?? latestTaskStatus,
+      capabilityResultStatus: latestToolExecution?.status ?? "success",
+      context: latestContext,
+      usage: latestUsage,
+      plannerRawAnswer: params.plannerRawAnswer,
+      toolExecution: latestToolExecution,
+      eventTypes: params.eventTypes,
+    };
+  };
 
   const deriveActionEnvelopeFromRaw = (text: string): CoreActionEnvelope | undefined => {
     try {
@@ -1885,7 +2188,13 @@ async function runCoreTurn(
     rawAnswer = JSON.stringify(actionEnvelope);
   } else {
     try {
-      actionEnvelope = await runCoreActionPlanner(state, userMessage);
+      latestContext = createCoreContextTelemetry({
+        state,
+        config,
+        promptKind: "core_action",
+        promptText: buildCoreActionPlannerInstructionText(state, userMessage),
+      });
+      actionEnvelope = await runCoreActionPlanner(state, userMessage, cmp);
       rawAnswer = JSON.stringify(actionEnvelope);
     } catch {
       actionEnvelope = deterministicFirstStep;
@@ -1895,21 +2204,34 @@ async function runCoreTurn(
 
   while (true) {
     if (!actionEnvelope) {
+      const fallbackAssembly = createCoreUserInputAssembly({
+        userMessage,
+        transcript: state.transcript,
+        cmp,
+        mpRoutedPackage: state.mpRoutedPackage,
+        runtime: state.runtime,
+        skillEntries: state.skillOverlayEntries,
+        memoryEntries: state.memoryOverlayEntries,
+        toolResultText: pendingToolResultText,
+        capabilityHistoryText: capabilityLoopHistory.join("\n\n"),
+        groundingEvidenceText: browserGroundingEvidenceText,
+        capabilityLoopIndex: completedCapabilityLoops,
+        maxCapabilityLoops,
+        previousTaskStatus: pendingIncompleteReplyText ? "incomplete" : undefined,
+        previousReplyText: pendingIncompleteReplyText,
+      });
+      const fallbackUserInput = fallbackAssembly.promptText;
+      latestContext = createCoreContextTelemetry({
+        state,
+        config,
+        promptKind: "core_model_pass",
+        promptText: fallbackUserInput,
+      });
       const fallback = await runCoreModelPass({
         state,
-        userInput: buildCoreUserInput({
-          userMessage,
-          transcript: state.transcript,
-          cmp,
-          runtime: state.runtime,
-          toolResultText: pendingToolResultText,
-          capabilityHistoryText: capabilityLoopHistory.join("\n\n"),
-          groundingEvidenceText: browserGroundingEvidenceText,
-          capabilityLoopIndex: completedCapabilityLoops,
-          maxCapabilityLoops,
-          previousTaskStatus: pendingIncompleteReplyText ? "incomplete" : undefined,
-          previousReplyText: pendingIncompleteReplyText,
-        }),
+        userInput: fallbackUserInput,
+        promptBlocks: fallbackAssembly.promptBlocks,
+        promptMessages: fallbackAssembly.promptMessages,
         cmp,
         config,
         inputImageUrls: pendingInputImageUrls,
@@ -1917,6 +2239,7 @@ async function runCoreTurn(
       });
       latestRunId = fallback.runId;
       latestEventTypes = fallback.eventTypes;
+      latestUsage = fallback.usage;
       rawAnswer = fallback.answer;
       actionEnvelope = deriveActionEnvelopeFromRaw(rawAnswer)
         ?? inferDeterministicCoreActionEnvelope(state, userMessage)
@@ -1993,12 +2316,18 @@ async function runCoreTurn(
     if (state.uiMode === "direct") {
       printDirectSub(`调用能力 ${capabilityRequest.capabilityKey}`);
     }
+    const familyTelemetry = createCapabilityFamilyTelemetry({
+      capabilityKey: capabilityRequest.capabilityKey,
+      requestInput: capabilityRequest.input,
+      inputSummary: summarizeCapabilityRequestForLog(capabilityRequest),
+    });
     await state.logger.log("stage_start", {
       turnIndex: state.turnIndex,
       stage: "core/capability_bridge",
       capabilityKey: capabilityRequest.capabilityKey,
       reason: capabilityRequest.reason,
       inputSummary: summarizeCapabilityRequestForLog(capabilityRequest),
+      ...familyTelemetry,
     });
     const toolExecution = await executeCoreCapabilityRequest(
       state,
@@ -2015,6 +2344,14 @@ async function runCoreTurn(
       capabilityKey: resolvedToolExecution.capabilityKey,
       output: trimStructuredValue(resolvedToolExecution.output, 4_000),
       error: trimStructuredValue(resolvedToolExecution.error, 1_500),
+      ...createCapabilityFamilyTelemetry({
+        capabilityKey: resolvedToolExecution.capabilityKey || capabilityRequest.capabilityKey,
+        requestInput: capabilityRequest.input,
+        inputSummary: summarizeCapabilityRequestForLog(capabilityRequest),
+        status: resolvedToolExecution.status,
+        output: resolvedToolExecution.output,
+        error: resolvedToolExecution.error,
+      }),
     });
 
     const toolResultCapabilityKey = resolvedToolExecution.capabilityKey || capabilityRequest.capabilityKey;
@@ -2105,6 +2442,8 @@ async function runCoreTurn(
           taskStatus: latestTaskStatus,
           capabilityKey: capabilityRequest.capabilityKey,
           capabilityResultStatus: resolvedToolExecution.status,
+          context: latestContext,
+          usage: latestUsage,
           plannerRawAnswer: JSON.stringify(deterministicFollowup),
           toolExecution: resolvedToolExecution,
           eventTypes: latestEventTypes.length > 0 ? latestEventTypes : ["core.action_planner.reply"],
@@ -2112,30 +2451,44 @@ async function runCoreTurn(
       }
     }
 
+    const followupAssembly = createCoreUserInputAssembly({
+      userMessage,
+      transcript: state.transcript,
+      cmp,
+      mpRoutedPackage: state.mpRoutedPackage,
+      runtime: state.runtime,
+      skillEntries: state.skillOverlayEntries,
+      memoryEntries: state.memoryOverlayEntries,
+      toolResultText,
+      capabilityHistoryText: capabilityLoopHistory.join("\n\n"),
+      groundingEvidenceText: browserGroundingEvidenceText,
+      forceFinalAnswer,
+      capabilityLoopIndex: completedCapabilityLoops,
+      maxCapabilityLoops,
+    });
+    const followupUserInput = followupAssembly.promptText;
+    latestContext = createCoreContextTelemetry({
+      state,
+      config,
+      promptKind: "core_model_pass",
+      promptText: followupUserInput,
+    });
     const followup = await runCoreModelPass({
       state,
-      userInput: buildCoreUserInput({
-        userMessage,
-        transcript: state.transcript,
-        cmp,
-        runtime: state.runtime,
-        toolResultText,
-        capabilityHistoryText: capabilityLoopHistory.join("\n\n"),
-        groundingEvidenceText: browserGroundingEvidenceText,
-        forceFinalAnswer,
-        capabilityLoopIndex: completedCapabilityLoops,
-        maxCapabilityLoops,
-      }),
+      userInput: followupUserInput,
+      promptBlocks: followupAssembly.promptBlocks,
+      promptMessages: followupAssembly.promptMessages,
       cmp,
       config,
       inputImageUrls,
       reasoningEffortOverride: "low",
     });
-    latestRunId = followup.runId;
-    latestEventTypes = [
-      ...followup.eventTypes,
-      "core.action_planner.capability_call",
-      "core.capability_bridge.executed",
+      latestRunId = followup.runId;
+      latestUsage = followup.usage;
+      latestEventTypes = [
+        ...followup.eventTypes,
+        "core.action_planner.capability_call",
+        "core.capability_bridge.executed",
     ];
     const followupRawAnswer = followup.answer?.trim() ?? "";
     const followupEnvelope = deriveActionEnvelopeFromRaw(followupRawAnswer)
@@ -2190,6 +2543,8 @@ async function runCoreTurn(
         taskStatus: latestTaskStatus,
         capabilityKey: capabilityRequest.capabilityKey,
         capabilityResultStatus: resolvedToolExecution.status,
+        context: latestContext,
+        usage: latestUsage,
         plannerRawAnswer: rawAnswer,
         toolExecution: resolvedToolExecution,
         eventTypes: latestEventTypes,
@@ -2208,6 +2563,12 @@ async function runCoreTurn(
       : synthesizedToolAnswer
         || actionEnvelope.responseText
         || rawAnswer;
+    const shouldPreferSynthesizedAnswer =
+      typeof synthesizedToolAnswer === "string"
+      && (
+        isEmptyCorePlaceholderAnswer(modelFollowupAnswer)
+        || looksLikeInterimPromise(followupAnswer)
+      );
     const shouldPreferSpreadsheetAnswer =
       toolResultCapabilityKey === "spreadsheet.read"
       && typeof synthesizedToolAnswer === "string"
@@ -2220,6 +2581,8 @@ async function runCoreTurn(
       ? buildBlockedBrowserPageNativeReply(browserTurnSummary)
       : shouldPreferSpreadsheetAnswer
         ? synthesizedToolAnswer!
+        : shouldPreferSynthesizedAnswer
+          ? synthesizedToolAnswer!
         : followupAnswer;
     if (
       !forceFinalAnswer
@@ -2264,6 +2627,8 @@ async function runCoreTurn(
       taskStatus: latestTaskStatus,
       capabilityKey: capabilityRequest.capabilityKey,
       capabilityResultStatus: resolvedToolExecution.status,
+      context: latestContext,
+      usage: latestUsage,
       plannerRawAnswer: rawAnswer,
       toolExecution: resolvedToolExecution,
       eventTypes: latestEventTypes,
@@ -2354,6 +2719,7 @@ async function handleUserTurn(
       ? {
         ...core,
         answer: core.answer,
+        elapsedMs: Date.now() - coreStartedAt,
       }
       : trimStructuredValue(core, 5_000);
   state.lastTurn = {
@@ -2361,6 +2727,9 @@ async function handleUserTurn(
       agentId: options.enableCmpSync === false ? "cmp-sidecar-skipped" : "cmp-sidecar-pending",
       packageId: options.enableCmpSync === false ? "skipped" : "pending",
       packageRef: options.enableCmpSync === false ? "skipped" : "pending",
+      packageKind: options.enableCmpSync === false ? "historical_reply" : "active_reseed",
+      packageMode: options.enableCmpSync === false ? "skipped" : "pending",
+      fidelityLabel: options.enableCmpSync === false ? "skipped" : "pending",
       projectionId: options.enableCmpSync === false ? "skipped" : "pending",
       snapshotId: options.enableCmpSync === false ? "skipped" : "pending",
       summary: state.runtime.getCmpFiveAgentRuntimeSummary("cmp-live-cli-main"),
@@ -2395,6 +2764,7 @@ async function handleUserTurn(
 }
 
 function createRuntime() {
+  const workspaceRoot = resolveWorkspaceRoot();
   const reviewerRoute = toTapAgentModelRoute(LIVE_CHAT_MODEL_PLAN.tap.reviewer);
   const toolReviewerRoute = toTapAgentModelRoute(LIVE_CHAT_MODEL_PLAN.tap.toolReviewer);
   const provisionerRoute = toTapAgentModelRoute(LIVE_CHAT_MODEL_PLAN.tap.provisioner);
@@ -2463,6 +2833,9 @@ function createRuntime() {
       provisioner: provisionerRoute,
     },
     cmpFiveAgentRuntime: createCmpFiveAgentRuntime({
+      configuration: createCmpFiveAgentConfiguration({
+        promptVariant: "workmode_v8",
+      }),
       live: {
       modes: {
         icma: "llm_assisted",
@@ -2525,13 +2898,14 @@ function createRuntime() {
   registerTapCapabilityFamilyAssembly({
     runtime,
     foundation: {
-      workspaceRoot: process.cwd(),
+      workspaceRoot,
     },
     includeFamilies: {
       foundation: true,
       websearch: true,
       skill: true,
       mcp: true,
+      mp: true,
     },
   });
 
@@ -2541,9 +2915,10 @@ function createRuntime() {
 async function main(): Promise<void> {
   const options = parseCliOptions(process.argv.slice(2));
   CURRENT_UI_MODE = options.uiMode;
+  const workspaceRoot = resolveWorkspaceRoot();
   const config = loadOpenAILiveConfig();
   const logPath = createLiveChatLogPath();
-  await mkdir(resolve(process.cwd(), "memory/live-reports"), { recursive: true });
+  await mkdir(resolveLiveReportsDir(), { recursive: true });
   const logger = new LiveChatLogger(logPath);
   const runtime = createRuntime();
   const session = runtime.createSession({
@@ -2560,6 +2935,36 @@ async function main(): Promise<void> {
     turnIndex: 0,
   };
 
+  try {
+    state.skillOverlayEntries = await discoverLiveSkillOverlayEntries({
+      cwd: workspaceRoot,
+      objective: "general live chat skill overlay bootstrap",
+    });
+  } catch (error) {
+    await logger.log("stage_end", {
+      turnIndex: state.turnIndex,
+      stage: "core/skill_overlay_bootstrap",
+      status: "failed",
+      error: String(error),
+    });
+  }
+
+  try {
+    const mpOverlay = await discoverMpOverlayArtifacts({
+      cwd: workspaceRoot,
+      userMessage: "general live chat memory overlay bootstrap",
+    });
+    state.memoryOverlayEntries = mpOverlay.entries;
+    state.mpRoutedPackage = mpOverlay.routedPackage;
+  } catch (error) {
+    await logger.log("stage_end", {
+      turnIndex: state.turnIndex,
+      stage: "core/memory_overlay_bootstrap",
+      status: "failed",
+      error: String(error),
+    });
+  }
+
   if (options.uiMode === "direct") {
     printStartupDirect(config);
   } else {
@@ -2571,6 +2976,12 @@ async function main(): Promise<void> {
     logPath,
     route: config.baseURL,
     modelPlan: LIVE_CHAT_MODEL_PLAN,
+    context: createCoreContextTelemetry({
+      state,
+      config,
+      promptKind: "initial",
+      promptText: buildCoreActionPlannerInstructionText(state, ""),
+    }),
   });
 
   try {
@@ -2624,12 +3035,68 @@ async function main(): Promise<void> {
           printHelp(state.uiMode);
           continue;
         }
+        if (line === "/model") {
+          printModelView(config);
+          continue;
+        }
         if (line === "/status") {
           printStatus(state);
           continue;
         }
+        if (line === "/mp") {
+          printMpViewPlaceholder();
+          continue;
+        }
         if (line === "/capabilities") {
           printDirectCapabilities(state.runtime);
+          continue;
+        }
+        if (line === "/init") {
+          printInitViewPlaceholder();
+          continue;
+        }
+        if (line === "/resume") {
+          printResumeViewPlaceholder();
+          continue;
+        }
+        if (line === "/agents") {
+          printAgentsViewPlaceholder();
+          continue;
+        }
+        if (line === "/permissions") {
+          printPermissionsView(state.runtime);
+          continue;
+        }
+        if (line === "/workspace") {
+          printWorkspaceView();
+          continue;
+        }
+        if (line.startsWith("/workspace ")) {
+          const targetInput = line.replace(/^\/workspace\b/u, "").trim();
+          const nextWorkspace = targetInput === "~"
+            ? (process.env.HOME ?? workspaceRoot)
+            : targetInput.startsWith("~/")
+              ? resolve(process.env.HOME ?? workspaceRoot, targetInput.slice(2))
+              : resolve(workspaceRoot, targetInput);
+          try {
+            const targetStat = await stat(nextWorkspace);
+            if (!targetStat.isDirectory()) {
+              console.log("The target path is not a directory. Please check the input.");
+              continue;
+            }
+            process.chdir(nextWorkspace);
+            printWorkspaceView(process.cwd());
+          } catch (error) {
+            if (error && typeof error === "object" && "code" in error && (error as { code?: unknown }).code === "ENOENT") {
+              console.log("The directory does not exist. Please check the input.");
+              continue;
+            }
+            console.log(`Workspace switch failed: ${error instanceof Error ? error.message : String(error)}`);
+          }
+          continue;
+        }
+        if (line === "/language") {
+          printLanguageViewPlaceholder();
           continue;
         }
         if (line === "/cmp") {
@@ -2656,7 +3123,7 @@ async function main(): Promise<void> {
         await handleUserTurn(state, line, config);
       }
     } finally {
-      directFallbackReader?.readline.close();
+      directFallbackReader?.close();
       readline?.close();
     }
   } finally {

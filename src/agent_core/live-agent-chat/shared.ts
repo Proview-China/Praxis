@@ -10,6 +10,14 @@ import {
   loadLiveProviderConfig,
   loadOpenAILiveConfig,
 } from "../../rax/live-config.js";
+import { resolveLiveReportsDir } from "../../runtime-paths.js";
+import {
+  resolveCapabilityFamilyDefinition,
+  resolveFamilyOutcomeKind,
+} from "./family-telemetry.js";
+import type {
+  FamilyOutcomeKind,
+} from "./family-telemetry.js";
 
 export type DialogueRole = "user" | "assistant";
 
@@ -32,6 +40,9 @@ export interface CmpTurnArtifacts {
   agentId: string;
   packageId: string;
   packageRef: string;
+  packageKind?: string;
+  packageMode?: string;
+  fidelityLabel?: string;
   projectionId: string;
   snapshotId: string;
   summary: CmpRuntimeSummary;
@@ -52,6 +63,11 @@ export interface CoreTurnArtifacts {
   taskStatus?: CoreTaskStatus;
   capabilityKey?: string;
   capabilityResultStatus?: string;
+  context?: CoreContextSnapshot;
+  usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+  };
   eventTypes: string[];
   plannerRawAnswer?: string;
   toolExecution?: {
@@ -117,6 +133,8 @@ export function buildDocReadCompletionAnswer(summary: DocReadFactSummary | undef
     summary.path ? `- path: ${summary.path}` : undefined,
     summary.format ? `- format: ${summary.format}` : undefined,
     summary.paragraphCount !== undefined ? `- paragraphCount: ${summary.paragraphCount}` : undefined,
+    summary.returnedParagraphCount !== undefined ? `- returnedParagraphCount: ${summary.returnedParagraphCount}` : undefined,
+    summary.omittedParagraphCount !== undefined ? `- omittedParagraphCount: ${summary.omittedParagraphCount}` : undefined,
     summary.tableCount !== undefined ? `- tableCount: ${summary.tableCount}` : undefined,
   ].filter((line): line is string => Boolean(line));
 
@@ -124,8 +142,21 @@ export function buildDocReadCompletionAnswer(summary: DocReadFactSummary | undef
     `- 第${index + 1}段: ${paragraph}`);
   if (paragraphLines.length > 0) {
     lines.push(...paragraphLines);
-  } else if (summary.contentExcerpt) {
-    lines.push(`- 内容摘要: ${summary.contentExcerpt}`);
+  }
+
+  if (summary.contentExcerpt) {
+    const normalizedExcerpt = summary.contentExcerpt.trim();
+    const visibleParagraphText = summary.paragraphs
+      .slice(0, 3)
+      .map((paragraph) => paragraph.trim())
+      .filter((paragraph) => paragraph.length > 0)
+      .join("\n")
+      .trim();
+    const excerptAlreadyVisible = visibleParagraphText.length > 0
+      && normalizedExcerpt === visibleParagraphText;
+    if (!excerptAlreadyVisible) {
+      lines.push(`- 内容摘要: ${normalizedExcerpt}`);
+    }
   }
 
   if (summary.firstTable?.rows?.length) {
@@ -134,6 +165,12 @@ export function buildDocReadCompletionAnswer(summary: DocReadFactSummary | undef
       ...summary.firstTable.rows.slice(0, 2).map((row, index) =>
         `  - 第${index + 1}行: ${row.join(", ")}`),
     );
+    if (summary.firstTable.returnedRowCount !== undefined) {
+      lines.push(`- 首表 returnedRowCount: ${summary.firstTable.returnedRowCount}`);
+    }
+    if (summary.firstTable.omittedRowCount !== undefined) {
+      lines.push(`- 首表 omittedRowCount: ${summary.firstTable.omittedRowCount}`);
+    }
   }
 
   if ((summary.omittedParagraphCount ?? 0) > 0 || summary.truncated) {
@@ -148,6 +185,13 @@ export interface TurnArtifacts {
   core: CoreTurnArtifacts;
 }
 
+export interface LiveCliSkillOverlayEntry {
+  id: string;
+  label: string;
+  summary: string;
+  bodyRef?: string;
+}
+
 export interface LiveCliState {
   runtime: LiveCliRuntime;
   sessionId: string;
@@ -155,16 +199,20 @@ export interface LiveCliState {
   turnIndex: number;
   uiMode: "full" | "direct";
   logger: LiveChatLogger;
+  skillOverlayEntries?: LiveCliSkillOverlayEntry[];
+  memoryOverlayEntries?: LiveCliSkillOverlayEntry[];
+  mpRoutedPackage?: import("./core-prompt/types.js").CoreMpRoutedPackageV1;
   latestCmp?: CmpTurnArtifacts;
   pendingCmpSync?: Promise<void>;
   lastTurn?: TurnArtifacts;
 }
 
 export interface DirectFallbackReader {
-  readline: {
+  close(): void;
+  read(): Promise<string | null>;
+  legacyReadline?: {
     close(): void;
   };
-  iterator: AsyncIterator<string>;
 }
 
 export type LiveChatLogEvent =
@@ -176,7 +224,8 @@ export type LiveChatLogEvent =
   | "stage_end"
   | "stream_start"
   | "stream_end"
-  | "stream_text";
+  | "stream_text"
+  | "assistant_delta";
 
 export type AgentReasoningEffort = "low" | "medium" | "high" | "none";
 
@@ -184,6 +233,1326 @@ export interface AgentRoutePlan {
   model: string;
   reasoning: AgentReasoningEffort;
   maxOutputTokens?: number;
+  contextWindowTokens?: number;
+}
+
+export interface CoreContextSnapshot {
+  provider: string;
+  model: string;
+  windowTokens: number;
+  windowSource: "config_override" | "route_plan" | "model_family_default" | "fallback_default";
+  promptKind: "initial" | "core_action" | "core_model_pass";
+  promptTokens: number;
+  transcriptTokens: number;
+  maxOutputTokens?: number;
+}
+
+export interface CapabilityFamilyTelemetry {
+  tapFamilyKey: string;
+  tapFamilyTitle: string;
+  familyKey: string;
+  familyTitle: string;
+  familyIntentSummary: string;
+  familyOutcomeKind?: FamilyOutcomeKind;
+  familyResultSummary?: string[];
+  resultMetadata?: {
+    selectedBackend?: string;
+    resolvedBackend?: string;
+    fallbackApplied?: boolean;
+    sourceTitles?: string[];
+    sourceCount?: number;
+    targetPaths?: string[];
+    targetRefs?: string[];
+    pathCount?: number;
+    matchCount?: number;
+    symbolCount?: number;
+    changedFileCount?: number;
+    sheetCount?: number;
+    pageCount?: number;
+    paragraphCount?: number;
+    imageCount?: number;
+    aheadCount?: number;
+    behindCount?: number;
+    commitHash?: string;
+    branchName?: string;
+    targetName?: string;
+    toolName?: string;
+    resourceUri?: string;
+    itemCount?: number;
+    resultCount?: number;
+    skillName?: string;
+    mountCount?: number;
+    outputCount?: number;
+    requestKind?: string;
+    durationMs?: number;
+    todoCount?: number;
+    trackerId?: string;
+    errorCode?: string;
+    errorDetailCode?: string;
+  };
+}
+
+export function estimateContextTokens(text: string): number {
+  return Math.max(0, Math.ceil(text.length / 4));
+}
+
+function normalizeTelemetryText(value: string): string {
+  return value.replace(/\s+/gu, " ").trim();
+}
+
+function truncateTelemetryText(value: string, maxChars = 64): string {
+  if (value.length <= maxChars) {
+    return value;
+  }
+  return `${value.slice(0, maxChars - 1).trimEnd()}…`;
+}
+
+function isLowSignalSourceTitle(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return normalized === "youtube.com"
+    || normalized === "youtu.be"
+    || normalized === "facebook.com"
+    || normalized === "instagram.com"
+    || normalized === "linkedin.com"
+    || normalized === "x.com"
+    || normalized === "twitter.com"
+    || normalized === "tiktok.com";
+}
+
+function compactWebsearchIntentSubject(raw: string, capabilityKey: string): string {
+  const normalized = normalizeTelemetryText(raw)
+    .replace(/\bsite:[^\s]+/giu, " ")
+    .replace(/\b(?:OR|AND)\b/giu, " ")
+    .replace(/[()]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (!normalized) {
+    return capabilityKey === "search.fetch"
+      ? "the requested page"
+      : "the requested topic";
+  }
+  const condensed = normalized
+    .replace(/\s*official documentation domain\s*/giu, " ")
+    .replace(/\s*latest move\s*/giu, " latest move ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  return truncateTelemetryText(condensed, 52);
+}
+
+function summarizeWebsearchIntentSubject(input: {
+  capabilityKey: string;
+  requestInput?: Record<string, unknown>;
+  inputSummary?: string;
+}): string {
+  const requestInput = input.requestInput ?? {};
+  const query = readString(requestInput.query)
+    ?? readString(requestInput.prompt)
+    ?? readString(requestInput.goal);
+  if (query) {
+    return compactWebsearchIntentSubject(query, input.capabilityKey);
+  }
+  const url = readString(requestInput.url)
+    ?? (Array.isArray(requestInput.urls)
+      ? requestInput.urls.find((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+      : undefined);
+  if (url && input.capabilityKey === "search.fetch") {
+    try {
+      return new URL(url).host;
+    } catch {
+      return truncateTelemetryText(normalizeTelemetryText(url), 52);
+    }
+  }
+  const summary = readString(input.inputSummary);
+  if (summary) {
+    return compactWebsearchIntentSubject(summary, input.capabilityKey);
+  }
+  return input.capabilityKey === "search.fetch"
+    ? "the requested page"
+    : "the requested topic";
+}
+
+function collectWebsearchSourceTitles(output: Record<string, unknown> | undefined): string[] {
+  const scoredTitles = new Map<string, number>();
+  const appendTitle = (value: unknown) => {
+    if (typeof value !== "string") {
+      return;
+    }
+    const normalized = normalizeTelemetryText(value);
+    if (!normalized) {
+      return;
+    }
+    const scoreDelta = isLowSignalSourceTitle(normalized) ? 1 : 10;
+    scoredTitles.set(normalized, (scoredTitles.get(normalized) ?? 0) + scoreDelta);
+  };
+
+  if (Array.isArray(output?.sources)) {
+    for (const item of output.sources) {
+      if (!item || typeof item !== "object") {
+        continue;
+      }
+      appendTitle((item as Record<string, unknown>).title);
+    }
+  }
+
+  if (Array.isArray(output?.results)) {
+    for (const item of output.results) {
+      if (!item || typeof item !== "object") {
+        continue;
+      }
+      appendTitle((item as Record<string, unknown>).title);
+    }
+  }
+
+  if (Array.isArray(output?.pages)) {
+    for (const item of output.pages) {
+      if (!item || typeof item !== "object") {
+        continue;
+      }
+      const record = item as Record<string, unknown>;
+      appendTitle(record.title);
+      appendTitle(record.pageTitle);
+      appendTitle(record.finalUrl);
+      appendTitle(record.url);
+    }
+  }
+
+  const ranked = [...scoredTitles.entries()]
+    .sort((left, right) => {
+      if (right[1] !== left[1]) {
+        return right[1] - left[1];
+      }
+      return left[0].length - right[0].length;
+    })
+    .map(([title]) => title);
+  const highSignal = ranked.filter((title) => !isLowSignalSourceTitle(title));
+  return (highSignal.length > 0 ? highSignal : ranked).slice(0, 3);
+}
+
+function resolveWebsearchSourceCount(output: Record<string, unknown> | undefined): number | undefined {
+  if (!output) {
+    return undefined;
+  }
+  if (Array.isArray(output.sources)) {
+    return output.sources.length;
+  }
+  if (Array.isArray(output.results)) {
+    return output.results.length;
+  }
+  if (Array.isArray(output.pages)) {
+    return output.pages.length;
+  }
+  return undefined;
+}
+
+
+function readTelemetryRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || Array.isArray(value) || typeof value !== "object") {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
+}
+
+function appendTelemetryRef(
+  refs: string[],
+  value: unknown,
+  options: { prefix?: string } = {},
+): void {
+  const raw = readString(value);
+  if (!raw) {
+    return;
+  }
+  const normalized = normalizeTelemetryText(raw);
+  if (!normalized) {
+    return;
+  }
+  const prefixed = options.prefix && !normalized.includes(":")
+    ? `${options.prefix}:${normalized}`
+    : normalized;
+  if (!refs.includes(prefixed)) {
+    refs.push(prefixed);
+  }
+}
+
+function appendMpLineageTelemetryRefs(refs: string[], value: unknown): void {
+  if (value instanceof Map) {
+    for (const entry of value.values()) {
+      appendMpLineageTelemetryRefs(refs, entry);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      appendMpLineageTelemetryRefs(refs, entry);
+    }
+    return;
+  }
+  if (typeof value === "string") {
+    appendTelemetryRef(refs, value, { prefix: "agent" });
+    return;
+  }
+  const record = readTelemetryRecord(value);
+  if (!record) {
+    return;
+  }
+  appendTelemetryRef(refs, record.agentId, { prefix: "agent" });
+  appendTelemetryRef(refs, record.memoryId);
+  appendTelemetryRef(refs, record.checkedSnapshotRef);
+  const metadata = readTelemetryRecord(record.metadata);
+  appendTelemetryRef(refs, metadata?.sourceRef);
+  appendTelemetryRef(refs, metadata?.checkedSnapshotRef);
+}
+
+function createCodeFamilyTelemetry(input: {
+  capabilityKey: string;
+  requestInput?: Record<string, unknown>;
+  status?: string;
+  output?: unknown;
+  error?: unknown;
+}): CapabilityFamilyTelemetry | undefined {
+  const normalized = input.capabilityKey;
+  let familyIntentSummary = "Reading workspace files";
+  if (normalized === "code.symbol_search" || normalized === "code.lsp") {
+    familyIntentSummary = "Searching symbols in the codebase";
+  } else if (normalized === "code.patch") {
+    familyIntentSummary = "Applying a patch to the repo";
+  } else if (normalized === "code.edit") {
+    familyIntentSummary = "Editing repo files";
+  } else if (normalized === "code.diff") {
+    familyIntentSummary = "Inspecting code changes";
+  } else if (normalized === "code.glob" || normalized === "code.grep" || normalized === "code.read_many") {
+    familyIntentSummary = "Scanning workspace files";
+  }
+
+  const normalizedOutput = input.output && typeof input.output === "object"
+    ? input.output as Record<string, unknown>
+    : undefined;
+  const normalizedError = input.error && typeof input.error === "object"
+    ? input.error as Record<string, unknown>
+    : undefined;
+  const targetPaths = [
+    readString(input.requestInput?.path),
+    ...(Array.isArray(input.requestInput?.paths)
+      ? input.requestInput?.paths.filter((entry): entry is string => typeof entry === "string")
+      : []),
+    readString(normalizedOutput?.path),
+    readString(normalizedOutput?.cwd),
+  ]
+    .filter((entry): entry is string => Boolean(entry))
+    .map((entry) => normalizeTelemetryText(entry))
+    .filter((entry, index, entries) => entries.indexOf(entry) === index)
+    .slice(0, 3);
+  const matchCount = readPositiveInteger(normalizedOutput?.resultCount)
+    ?? (Array.isArray(normalizedOutput?.matches) ? normalizedOutput.matches.length : undefined)
+    ?? (Array.isArray(normalizedOutput?.definitions) ? normalizedOutput.definitions.length : undefined)
+    ?? (Array.isArray(normalizedOutput?.references) ? normalizedOutput.references.length : undefined);
+  const symbolCount = Array.isArray(normalizedOutput?.symbols) ? normalizedOutput.symbols.length : undefined;
+  const changedFileCount = Array.isArray(normalizedOutput?.changedFiles)
+    ? normalizedOutput.changedFiles.length
+    : Array.isArray(normalizedOutput?.entries)
+      ? normalizedOutput.entries.length
+      : undefined;
+  const status = normalizeTelemetryText(input.status ?? "").toLowerCase();
+  const familyResultSummary = status
+    ? [`${familyIntentSummary} ${status === "failed" || status === "blocked" || status === "timeout" ? "failed" : "succeeded"}`]
+    : undefined;
+  const resultMetadata = Object.fromEntries(
+    Object.entries({
+      targetPaths: targetPaths.length > 0 ? targetPaths : undefined,
+      pathCount: targetPaths.length > 0 ? targetPaths.length : undefined,
+      matchCount,
+      symbolCount,
+      changedFileCount,
+      errorCode: readString(normalizedError?.code),
+    }).filter(([, value]) => Array.isArray(value) ? value.length > 0 : value !== undefined),
+  ) as Record<string, unknown>;
+  return {
+    tapFamilyKey: "foundation",
+    tapFamilyTitle: "Foundation",
+    familyKey: "code",
+    familyTitle: "Code",
+    familyIntentSummary,
+    familyResultSummary,
+    resultMetadata: Object.keys(resultMetadata).length > 0
+      ? resultMetadata as CapabilityFamilyTelemetry["resultMetadata"] & {
+          targetPaths?: string[];
+          pathCount?: number;
+          matchCount?: number;
+          symbolCount?: number;
+          changedFileCount?: number;
+          errorCode?: string;
+        }
+      : undefined,
+  };
+}
+
+function createDocsFamilyTelemetry(input: {
+  capabilityKey: string;
+  requestInput?: Record<string, unknown>;
+  status?: string;
+  output?: unknown;
+  error?: unknown;
+}): CapabilityFamilyTelemetry | undefined {
+  const normalized = input.capabilityKey;
+  let familyIntentSummary = "Reading the requested document";
+  if (normalized === "spreadsheet.read" || normalized === "spreadsheet.write") {
+    familyIntentSummary = normalized === "spreadsheet.write"
+      ? "Writing spreadsheet data"
+      : "Reading spreadsheet data";
+  } else if (normalized === "read_pdf") {
+    familyIntentSummary = "Extracting content from the PDF";
+  } else if (normalized === "read_notebook") {
+    familyIntentSummary = "Reading notebook content";
+  } else if (normalized === "view_image") {
+    familyIntentSummary = "Reading the requested image";
+  } else if (normalized === "doc.write") {
+    familyIntentSummary = "Writing the requested document";
+  } else if (normalized === "docs.read") {
+    familyIntentSummary = "Reading the requested document";
+  }
+
+  const normalizedOutput = input.output && typeof input.output === "object"
+    ? input.output as Record<string, unknown>
+    : undefined;
+  const normalizedError = input.error && typeof input.error === "object"
+    ? input.error as Record<string, unknown>
+    : undefined;
+  const targetPaths = [
+    readString(input.requestInput?.path),
+    readString(normalizedOutput?.path),
+  ]
+    .filter((entry): entry is string => Boolean(entry))
+    .map((entry) => normalizeTelemetryText(entry))
+    .filter((entry, index, entries) => entries.indexOf(entry) === index)
+    .slice(0, 3);
+  const sheetCount = readPositiveInteger(normalizedOutput?.sheetCount);
+  const pageCount = readPositiveInteger(normalizedOutput?.pageCount);
+  const paragraphCount = readNonNegativeInteger(normalizedOutput?.paragraphCount);
+  const imageCount = Array.isArray(normalizedOutput?.imageUrls)
+    ? normalizedOutput.imageUrls.length
+    : readPositiveInteger(normalizedOutput?.imageCount);
+  const status = normalizeTelemetryText(input.status ?? "").toLowerCase();
+  const familyResultSummary = (() => {
+    if (!status) {
+      return undefined;
+    }
+    const lines = [
+      `${familyIntentSummary} ${status === "failed" || status === "blocked" || status === "timeout" ? "failed" : "succeeded"}`,
+    ];
+    if (normalized === "spreadsheet.read" && sheetCount) {
+      lines.push(`Returned ${sheetCount} sheet${sheetCount === 1 ? "" : "s"}`);
+    } else if (normalized === "read_pdf" && pageCount) {
+      lines.push(`Returned ${pageCount} page${pageCount === 1 ? "" : "s"}`);
+    } else if ((normalized === "doc.read" || normalized === "docs.read") && paragraphCount !== undefined) {
+      lines.push(`Returned ${paragraphCount} paragraph${paragraphCount === 1 ? "" : "s"}`);
+    }
+    return lines.slice(0, 3);
+  })();
+  const resultMetadata = Object.fromEntries(
+    Object.entries({
+      targetPaths: targetPaths.length > 0 ? targetPaths : undefined,
+      sheetCount,
+      pageCount,
+      paragraphCount,
+      imageCount,
+      errorCode: readString(normalizedError?.code),
+    }).filter(([, value]) => Array.isArray(value) ? value.length > 0 : value !== undefined),
+  ) as Record<string, unknown>;
+  return {
+    tapFamilyKey: "foundation",
+    tapFamilyTitle: "Foundation",
+    familyKey: "docs",
+    familyTitle: "Docs",
+    familyIntentSummary,
+    familyResultSummary,
+    resultMetadata: Object.keys(resultMetadata).length > 0
+      ? resultMetadata as CapabilityFamilyTelemetry["resultMetadata"] & {
+          targetPaths?: string[];
+          sheetCount?: number;
+          pageCount?: number;
+          paragraphCount?: number;
+          imageCount?: number;
+          errorCode?: string;
+        }
+      : undefined,
+  };
+}
+
+function createGitFamilyTelemetry(input: {
+  capabilityKey: string;
+  requestInput?: Record<string, unknown>;
+  status?: string;
+  output?: unknown;
+  error?: unknown;
+}): CapabilityFamilyTelemetry | undefined {
+  const normalized = input.capabilityKey;
+  let familyIntentSummary = "Checking repository status";
+  if (normalized === "git.diff") {
+    familyIntentSummary = "Inspecting repository changes";
+  } else if (normalized === "git.commit") {
+    familyIntentSummary = "Creating a git commit";
+  } else if (normalized === "git.push") {
+    familyIntentSummary = "Pushing the git branch";
+  }
+  const normalizedOutput = input.output && typeof input.output === "object"
+    ? input.output as Record<string, unknown>
+    : undefined;
+  const normalizedError = input.error && typeof input.error === "object"
+    ? input.error as Record<string, unknown>
+    : undefined;
+  const changedFileCount = Array.isArray(normalizedOutput?.changedFiles)
+    ? normalizedOutput.changedFiles.length
+    : Array.isArray(normalizedOutput?.entries)
+      ? normalizedOutput.entries.length
+      : Array.isArray(normalizedOutput?.committedFiles)
+        ? normalizedOutput.committedFiles.length
+        : undefined;
+  const aheadCount = readNonNegativeInteger(normalizedOutput?.aheadCount);
+  const behindCount = readNonNegativeInteger(normalizedOutput?.behindCount);
+  const commitHash = readString(normalizedOutput?.commitHash);
+  const branchName = readString(normalizedOutput?.branch);
+  const status = normalizeTelemetryText(input.status ?? "").toLowerCase();
+  const familyResultSummary = (() => {
+    if (!status) {
+      return undefined;
+    }
+    const lines = [`${familyIntentSummary} ${status === "failed" || status === "blocked" || status === "timeout" ? "failed" : "succeeded"}`];
+    if (normalized === "git.commit" && commitHash) {
+      lines.push(`Created commit ${commitHash.slice(0, 7)}`);
+    } else if (normalized === "git.status" && changedFileCount !== undefined) {
+      lines.push(`${changedFileCount} file${changedFileCount === 1 ? "" : "s"} changed`);
+    }
+    return lines.slice(0, 3);
+  })();
+  const resultMetadata = Object.fromEntries(
+    Object.entries({
+      changedFileCount,
+      aheadCount,
+      behindCount,
+      commitHash,
+      branchName,
+      errorCode: readString(normalizedError?.code),
+    }).filter(([, value]) => Array.isArray(value) ? value.length > 0 : value !== undefined),
+  ) as Record<string, unknown>;
+  return {
+    tapFamilyKey: "foundation",
+    tapFamilyTitle: "Foundation",
+    familyKey: "git",
+    familyTitle: "Git",
+    familyIntentSummary,
+    familyResultSummary,
+    resultMetadata: Object.keys(resultMetadata).length > 0
+      ? resultMetadata as CapabilityFamilyTelemetry["resultMetadata"] & {
+          changedFileCount?: number;
+          aheadCount?: number;
+          behindCount?: number;
+          commitHash?: string;
+          branchName?: string;
+          errorCode?: string;
+        }
+      : undefined,
+  };
+}
+
+function createShellFamilyTelemetry(input: {
+  capabilityKey: string;
+  requestInput?: Record<string, unknown>;
+  status?: string;
+  output?: unknown;
+  error?: unknown;
+}): CapabilityFamilyTelemetry {
+  const normalized = input.capabilityKey;
+  let familyIntentSummary = "Running a restricted shell command";
+  if (normalized === "shell.session") {
+    familyIntentSummary = "Running a shell session command";
+  } else if (normalized === "test.run") {
+    familyIntentSummary = "Running test command";
+  } else if (normalized === "remote.exec") {
+    familyIntentSummary = "Executing remote command";
+  }
+
+  const reqInput = input.requestInput ?? {};
+  const normalizedOutput = input.output && typeof input.output === "object"
+    ? input.output as Record<string, unknown>
+    : undefined;
+  const normalizedError = input.error && typeof input.error === "object"
+    ? input.error as Record<string, unknown>
+    : undefined;
+  const targetPaths = [
+    readString(reqInput.cwd),
+    readString(normalizedOutput?.cwd),
+  ]
+    .filter((entry): entry is string => Boolean(entry))
+    .map((entry) => normalizeTelemetryText(entry))
+    .filter((entry, index, entries) => entries.indexOf(entry) === index)
+    .slice(0, 3);
+  const changedFileCount = Array.isArray(normalizedOutput?.changedFiles)
+    ? normalizedOutput.changedFiles.length
+    : Array.isArray(normalizedOutput?.entries)
+      ? normalizedOutput.entries.length
+      : undefined;
+  const itemCount = normalized === "shell.session"
+    ? (readString(normalizedOutput?.sessionId) ? 1 : undefined)
+    : undefined;
+  const durationMs = readPositiveInteger(normalizedOutput?.durationMs);
+  const exitCode = readNonNegativeInteger(normalizedOutput?.exitCode);
+  const host = readString(normalizedOutput?.host);
+  const status = normalizeTelemetryText(input.status ?? "").toLowerCase();
+  const familyResultSummary = (() => {
+    if (!status) {
+      return undefined;
+    }
+    const lines = [`${familyIntentSummary} ${status === "failed" || status === "blocked" || status === "timeout" ? "failed" : "succeeded"}`];
+    if (normalized === "shell.session" && readString(normalizedOutput?.sessionId)) {
+      lines.push(`Session ${String(readString(normalizedOutput?.sessionId)).slice(0, 16)} ready`);
+    } else if (normalized === "remote.exec" && host) {
+      lines.push(`Target ${host}`);
+    } else if (exitCode !== undefined) {
+      lines.push(`Exit code ${exitCode}`);
+    }
+    return lines.slice(0, 3);
+  })();
+  const resultMetadata = Object.fromEntries(
+    Object.entries({
+      targetPaths: targetPaths.length > 0 ? targetPaths : undefined,
+      changedFileCount,
+      itemCount,
+      durationMs,
+      errorCode: readString(normalizedError?.code),
+    }).filter(([, value]) => Array.isArray(value) ? value.length > 0 : value !== undefined),
+  ) as CapabilityFamilyTelemetry["resultMetadata"];
+  return {
+    tapFamilyKey: "foundation",
+    tapFamilyTitle: "Foundation",
+    familyKey: "shell",
+    familyTitle: "Shell",
+    familyIntentSummary,
+    familyResultSummary,
+    resultMetadata: resultMetadata && Object.keys(resultMetadata).length > 0 ? resultMetadata : undefined,
+  };
+}
+
+function createBrowserFamilyTelemetry(input: {
+  capabilityKey: string;
+  requestInput?: Record<string, unknown>;
+  status?: string;
+  output?: unknown;
+  error?: unknown;
+}): CapabilityFamilyTelemetry {
+  const reqInput = input.requestInput ?? {};
+  const normalizedOutput = input.output && typeof input.output === "object"
+    ? input.output as Record<string, unknown>
+    : undefined;
+  const normalizedError = input.error && typeof input.error === "object"
+    ? input.error as Record<string, unknown>
+    : undefined;
+  const action = readString(reqInput.action) ?? readString(normalizedOutput?.action);
+  const familyIntentSummary = action === "navigate"
+    ? "Driving the browser"
+    : "Running browser automation";
+  const targetPaths = [
+    readString(normalizedOutput?.screenshotPath),
+    readString(normalizedOutput?.snapshotPath),
+  ]
+    .filter((entry): entry is string => Boolean(entry))
+    .map((entry) => normalizeTelemetryText(entry))
+    .filter((entry, index, entries) => entries.indexOf(entry) === index)
+    .slice(0, 3);
+  const itemCount = readPositiveInteger(normalizedOutput?.imageCount)
+    ?? (readString(normalizedOutput?.screenshotPath) ? 1 : undefined);
+  const durationMs = readPositiveInteger(normalizedOutput?.durationMs);
+  const status = normalizeTelemetryText(input.status ?? "").toLowerCase();
+  const familyResultSummary = (() => {
+    if (!status) {
+      return undefined;
+    }
+    const lines = [`${familyIntentSummary} ${status === "failed" || status === "blocked" || status === "timeout" ? "failed" : "succeeded"}`];
+    if (itemCount !== undefined) {
+      lines.push(`Captured ${itemCount} item${itemCount === 1 ? "" : "s"}`);
+    }
+    return lines.slice(0, 3);
+  })();
+  const resultMetadata = Object.fromEntries(
+    Object.entries({
+      targetPaths: targetPaths.length > 0 ? targetPaths : undefined,
+      itemCount,
+      durationMs,
+      errorCode: readString(normalizedError?.code),
+    }).filter(([, value]) => Array.isArray(value) ? value.length > 0 : value !== undefined),
+  ) as CapabilityFamilyTelemetry["resultMetadata"];
+  return {
+    tapFamilyKey: "foundation",
+    tapFamilyTitle: "Foundation",
+    familyKey: "browser",
+    familyTitle: "Browser",
+    familyIntentSummary,
+    familyResultSummary,
+    resultMetadata: resultMetadata && Object.keys(resultMetadata).length > 0 ? resultMetadata : undefined,
+  };
+}
+
+function createRepoFamilyTelemetry(input: {
+  capabilityKey: string;
+  requestInput?: Record<string, unknown>;
+  status?: string;
+  output?: unknown;
+  error?: unknown;
+}): CapabilityFamilyTelemetry {
+  const reqInput = input.requestInput ?? {};
+  const normalizedOutput = input.output && typeof input.output === "object"
+    ? input.output as Record<string, unknown>
+    : undefined;
+  const normalizedError = input.error && typeof input.error === "object"
+    ? input.error as Record<string, unknown>
+    : undefined;
+
+  const requestEntryPaths = Array.isArray(reqInput.entries)
+    ? reqInput.entries
+      .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object")
+      .map((entry) => readString(entry.path))
+      .filter((entry): entry is string => Boolean(entry))
+    : [];
+  const writtenPaths = Array.isArray(normalizedOutput?.writes)
+    ? normalizedOutput.writes
+      .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object")
+      .map((entry) => readString(entry.path))
+      .filter((entry): entry is string => Boolean(entry))
+    : [];
+  const targetPaths = [...requestEntryPaths, ...writtenPaths]
+    .map((entry) => normalizeTelemetryText(entry))
+    .filter((entry, index, entries) => entries.indexOf(entry) === index)
+    .slice(0, 3);
+  const changedFileCount = Array.isArray(normalizedOutput?.writes)
+    ? normalizedOutput.writes.length
+    : requestEntryPaths.length > 0
+      ? requestEntryPaths.length
+      : undefined;
+  const itemCount = changedFileCount;
+  const status = normalizeTelemetryText(input.status ?? "").toLowerCase();
+  const familyIntentSummary = "Writing repository files";
+  const familyResultSummary = (() => {
+    if (!status) {
+      return undefined;
+    }
+    const lines = [`${familyIntentSummary} ${status === "failed" || status === "blocked" || status === "timeout" ? "failed" : "succeeded"}`];
+    if (changedFileCount !== undefined) {
+      lines.push(`${changedFileCount} file${changedFileCount === 1 ? "" : "s"} changed`);
+    }
+    return lines.slice(0, 3);
+  })();
+  const resultMetadata = Object.fromEntries(
+    Object.entries({
+      targetPaths: targetPaths.length > 0 ? targetPaths : undefined,
+      changedFileCount,
+      itemCount,
+      errorCode: readString(normalizedError?.code),
+    }).filter(([, value]) => Array.isArray(value) ? value.length > 0 : value !== undefined),
+  ) as CapabilityFamilyTelemetry["resultMetadata"];
+  return {
+    tapFamilyKey: "foundation",
+    tapFamilyTitle: "Foundation",
+    familyKey: "repo",
+    familyTitle: "Repo",
+    familyIntentSummary,
+    familyResultSummary,
+    resultMetadata: resultMetadata && Object.keys(resultMetadata).length > 0 ? resultMetadata : undefined,
+  };
+}
+
+function createMpFamilyTelemetry(input: {
+  capabilityKey: string;
+  requestInput?: Record<string, unknown>;
+  status?: string;
+  output?: unknown;
+  error?: unknown;
+}): CapabilityFamilyTelemetry {
+  const normalized = input.capabilityKey;
+  let familyIntentSummary = "Searching memory history";
+  if (normalized === "mp.align") {
+    familyIntentSummary = "Aligning memory artifacts";
+  } else if (normalized === "mp.materialize") {
+    familyIntentSummary = "Materializing memory context";
+  } else if (normalized === "mp.ingest") {
+    familyIntentSummary = "Ingesting memory artifacts";
+  } else if (normalized === "mp.resolve") {
+    familyIntentSummary = "Resolving memory lineage";
+  } else if (normalized === "mp.promote") {
+    familyIntentSummary = "Promoting memory records";
+  } else if (normalized === "mp.archive") {
+    familyIntentSummary = "Archiving memory records";
+  } else if (normalized === "mp.split") {
+    familyIntentSummary = "Splitting memory records";
+  } else if (normalized === "mp.merge") {
+    familyIntentSummary = "Merging memory records";
+  } else if (normalized === "mp.reindex") {
+    familyIntentSummary = "Reindexing memory records";
+  } else if (normalized === "mp.compact") {
+    familyIntentSummary = "Compacting memory records";
+  } else if (normalized === "mp.history.request") {
+    familyIntentSummary = "Requesting memory history";
+  }
+  const normalizedOutput = input.output && typeof input.output === "object" ? input.output as Record<string, unknown> : undefined;
+  const normalizedError = input.error && typeof input.error === "object" ? input.error as Record<string, unknown> : undefined;
+  const requestInput = input.requestInput as Record<string, unknown> | undefined;
+  const targetRefs: string[] = [];
+  appendTelemetryRef(targetRefs, requestInput?.memoryId);
+  appendTelemetryRef(targetRefs, requestInput?.storedSection);
+  appendTelemetryRef(targetRefs, requestInput?.checkedSnapshotRef);
+  for (const agentId of readStringArray(requestInput?.agentIds) ?? []) {
+    appendTelemetryRef(targetRefs, agentId, { prefix: "agent" });
+  }
+  appendMpLineageTelemetryRefs(targetRefs, requestInput?.sourceLineages);
+  appendTelemetryRef(targetRefs, normalizedOutput?.memoryId);
+  appendMpLineageTelemetryRefs(targetRefs, normalizedOutput?.sourceLineages);
+  for (const agentId of readStringArray(normalizedOutput?.agentIds) ?? []) {
+    appendTelemetryRef(targetRefs, agentId, { prefix: "agent" });
+  }
+  const itemCount = Array.isArray(normalizedOutput?.items)
+    ? normalizedOutput.items.length
+    : Array.isArray(normalizedOutput?.records)
+      ? normalizedOutput.records.length
+      : readPositiveInteger(normalizedOutput?.count);
+  const resultCount = Array.isArray(normalizedOutput?.hits)
+    ? normalizedOutput.hits.length
+    : readPositiveInteger(normalizedOutput?.resultCount);
+  const status = normalizeTelemetryText(input.status ?? "").toLowerCase();
+  const familyResultSummary = status
+    ? [`${familyIntentSummary} ${status === "failed" || status === "blocked" || status === "timeout" ? "failed" : "succeeded"}`]
+    : undefined;
+  const resultMetadata = Object.fromEntries(
+    Object.entries({
+      targetRefs: targetRefs.length > 0 ? targetRefs : undefined,
+      itemCount,
+      resultCount,
+      errorCode: readString(normalizedError?.code),
+    }).filter(([, value]) => Array.isArray(value) ? value.length > 0 : value !== undefined),
+  ) as CapabilityFamilyTelemetry["resultMetadata"];
+  return {
+    tapFamilyKey: "mp",
+    tapFamilyTitle: "MP",
+    familyKey: "mp",
+    familyTitle: "MemoryPool",
+    familyIntentSummary,
+    familyResultSummary,
+    resultMetadata: resultMetadata && Object.keys(resultMetadata).length > 0 ? resultMetadata : undefined,
+  };
+}
+
+function createMcpFamilyTelemetry(input: {
+  capabilityKey: string;
+  requestInput?: Record<string, unknown>;
+  status?: string;
+  output?: unknown;
+  error?: unknown;
+}): CapabilityFamilyTelemetry {
+  const normalized = input.capabilityKey;
+  let familyIntentSummary = "Listing MCP tools";
+  if (normalized === "mcp.listResources") {
+    familyIntentSummary = "Listing MCP resources";
+  } else if (normalized === "mcp.readResource") {
+    familyIntentSummary = "Reading MCP resource";
+  } else if (normalized === "mcp.call") {
+    familyIntentSummary = "Calling MCP tool";
+  } else if (normalized === "mcp.native.execute") {
+    familyIntentSummary = "Executing MCP native transport";
+  }
+  const reqInput = input.requestInput ?? {};
+  const nestedInput = readTelemetryRecord(reqInput.input);
+  const transportInput = readTelemetryRecord(nestedInput?.transport);
+  const normalizedOutput = input.output && typeof input.output === "object" ? input.output as Record<string, unknown> : undefined;
+  const normalizedError = input.error && typeof input.error === "object" ? input.error as Record<string, unknown> : undefined;
+  const targetName = readString(nestedInput?.connectionId)
+    ?? readString(nestedInput?.serverName)
+    ?? readString(transportInput?.connectionId)
+    ?? readString(transportInput?.serverName)
+    ?? readString(transportInput?.command)
+    ?? readString(normalizedOutput?.connectionId);
+  const toolName = readString(nestedInput?.toolName)
+    ?? readString(nestedInput?.name)
+    ?? readString(transportInput?.toolName)
+    ?? readString(transportInput?.name)
+    ?? readString(normalizedOutput?.toolName);
+  const resourceUri = readString(nestedInput?.uri)
+    ?? readString(nestedInput?.resourceUri)
+    ?? readString(transportInput?.uri)
+    ?? readString(transportInput?.resourceUri)
+    ?? readString(normalizedOutput?.uri);
+  const itemCount = Array.isArray(normalizedOutput?.tools)
+    ? normalizedOutput.tools.length
+    : Array.isArray(normalizedOutput?.resources)
+      ? normalizedOutput.resources.length
+      : Array.isArray(normalizedOutput?.content)
+        ? normalizedOutput.content.length
+        : undefined;
+  const status = normalizeTelemetryText(input.status ?? "").toLowerCase();
+  const familyResultSummary = status
+    ? [`${familyIntentSummary} ${status === "failed" || status === "blocked" || status === "timeout" ? "failed" : "succeeded"}`]
+    : undefined;
+  const resultMetadata = Object.fromEntries(
+    Object.entries({
+      targetName,
+      toolName,
+      resourceUri,
+      itemCount,
+      errorCode: readString(normalizedError?.code),
+    }).filter(([, value]) => value !== undefined),
+  ) as CapabilityFamilyTelemetry["resultMetadata"];
+  return {
+    tapFamilyKey: "mcp",
+    tapFamilyTitle: "MCP",
+    familyKey: "mcp",
+    familyTitle: "MCP",
+    familyIntentSummary,
+    familyResultSummary,
+    resultMetadata: resultMetadata && Object.keys(resultMetadata).length > 0 ? resultMetadata : undefined,
+  };
+}
+
+function createSkillFamilyTelemetry(input: {
+  capabilityKey: string;
+  requestInput?: Record<string, unknown>;
+  status?: string;
+  output?: unknown;
+  error?: unknown;
+}): CapabilityFamilyTelemetry {
+  const normalized = input.capabilityKey;
+  let familyIntentSummary = "Using the requested skill";
+  if (normalized === "skill.mount") {
+    familyIntentSummary = "Mounting the requested skill";
+  } else if (normalized === "skill.prepare") {
+    familyIntentSummary = "Preparing the requested skill";
+  } else if (normalized === "skill.doc.generate") {
+    familyIntentSummary = "Generating skill documentation";
+  }
+  const reqInput = input.requestInput ?? {};
+  const normalizedOutput = input.output && typeof input.output === "object" ? input.output as Record<string, unknown> : undefined;
+  const normalizedError = input.error && typeof input.error === "object" ? input.error as Record<string, unknown> : undefined;
+  const skillName = readString(reqInput.skillName)
+    ?? readString(reqInput.name)
+    ?? readString(reqInput.target)
+    ?? readString(normalizedOutput?.title)
+    ?? readString((normalizedOutput?.container as Record<string, unknown> | undefined)?.name);
+  const mountCount = Array.isArray((normalizedOutput?.activation as Record<string, unknown> | undefined)?.mounts)
+    ? ((normalizedOutput?.activation as Record<string, unknown>).mounts as unknown[]).length
+    : undefined;
+  const outputCount = Array.isArray(normalizedOutput?.documents)
+    ? normalizedOutput.documents.length
+    : Array.isArray((normalizedOutput?.preparedInvocation as Record<string, unknown> | undefined)?.resources)
+      ? ((normalizedOutput?.preparedInvocation as Record<string, unknown>).resources as unknown[]).length
+      : undefined;
+  const status = normalizeTelemetryText(input.status ?? "").toLowerCase();
+  const familyResultSummary = status
+    ? [`${familyIntentSummary} ${status === "failed" || status === "blocked" || status === "timeout" ? "failed" : "succeeded"}`]
+    : undefined;
+  const resultMetadata = Object.fromEntries(
+    Object.entries({
+      skillName,
+      mountCount,
+      outputCount,
+      errorCode: readString(normalizedError?.code),
+    }).filter(([, value]) => value !== undefined),
+  ) as CapabilityFamilyTelemetry["resultMetadata"];
+  return {
+    tapFamilyKey: normalized === "skill.doc.generate" ? "foundation" : "skill",
+    tapFamilyTitle: normalized === "skill.doc.generate" ? "Foundation" : "Skill",
+    familyKey: "skill",
+    familyTitle: "Skill",
+    familyIntentSummary,
+    familyResultSummary,
+    resultMetadata: resultMetadata && Object.keys(resultMetadata).length > 0 ? resultMetadata : undefined,
+  };
+}
+
+function createUserActFamilyTelemetry(input: {
+  capabilityKey: string;
+  requestInput?: Record<string, unknown>;
+  status?: string;
+  output?: unknown;
+  error?: unknown;
+}): CapabilityFamilyTelemetry {
+  const normalized = input.capabilityKey;
+  let familyIntentSummary = "Requesting user input";
+  let requestKind = "user_input";
+  if (normalized === "request_permissions") {
+    familyIntentSummary = "Requesting additional permissions";
+    requestKind = "permissions";
+  } else if (normalized === "audio.transcribe") {
+    familyIntentSummary = "Transcribing audio";
+    requestKind = "audio_transcribe";
+  } else if (normalized === "speech.synthesize") {
+    familyIntentSummary = "Synthesizing speech";
+    requestKind = "speech_synthesize";
+  } else if (normalized === "image.generate") {
+    familyIntentSummary = "Generating image output";
+    requestKind = "image_generate";
+  }
+  const normalizedOutput = input.output && typeof input.output === "object" ? input.output as Record<string, unknown> : undefined;
+  const normalizedError = input.error && typeof input.error === "object" ? input.error as Record<string, unknown> : undefined;
+  const itemCount = Array.isArray((normalizedError?.details as Record<string, unknown> | undefined)?.questions)
+    ? ((normalizedError?.details as Record<string, unknown>).questions as unknown[]).length
+    : Array.isArray((normalizedError?.details as Record<string, unknown> | undefined)?.permissions)
+      ? ((normalizedError?.details as Record<string, unknown>).permissions as unknown[]).length
+      : Array.isArray(normalizedOutput?.segments)
+        ? normalizedOutput.segments.length
+        : Array.isArray(normalizedOutput?.images)
+          ? normalizedOutput.images.length
+          : undefined;
+  const durationMs = readPositiveInteger(normalizedOutput?.durationMs);
+  const status = normalizeTelemetryText(input.status ?? "").toLowerCase();
+  const familyResultSummary = status
+    ? [`${familyIntentSummary} ${status === "failed" || status === "blocked" || status === "timeout" ? "failed" : "succeeded"}`]
+    : undefined;
+  const resultMetadata = Object.fromEntries(
+    Object.entries({
+      requestKind,
+      itemCount,
+      durationMs,
+      errorCode: readString(normalizedError?.code),
+    }).filter(([, value]) => value !== undefined),
+  ) as CapabilityFamilyTelemetry["resultMetadata"];
+  return {
+    tapFamilyKey: "userio",
+    tapFamilyTitle: "UserIO",
+    familyKey: "useract",
+    familyTitle: "UserAct",
+    familyIntentSummary,
+    familyResultSummary,
+    resultMetadata: resultMetadata && Object.keys(resultMetadata).length > 0 ? resultMetadata : undefined,
+  };
+}
+
+function createWorkflowFamilyTelemetry(input: {
+  capabilityKey: string;
+  requestInput?: Record<string, unknown>;
+  status?: string;
+  output?: unknown;
+  error?: unknown;
+}): CapabilityFamilyTelemetry {
+  const normalized = input.capabilityKey;
+  const familyIntentSummary = normalized === "tracker.create"
+    ? "Creating tracker item"
+    : "Updating todo workflow";
+  const requestInput = input.requestInput ?? {};
+  const normalizedOutput = input.output && typeof input.output === "object" ? input.output as Record<string, unknown> : undefined;
+  const normalizedError = input.error && typeof input.error === "object" ? input.error as Record<string, unknown> : undefined;
+  const todoCount = readNonNegativeInteger(normalizedOutput?.count)
+    ?? (Array.isArray(normalizedOutput?.todos) ? normalizedOutput.todos.length : undefined)
+    ?? (Array.isArray(normalizedOutput?.newTodos) ? normalizedOutput.newTodos.length : undefined)
+    ?? (Array.isArray(requestInput.todos) ? requestInput.todos.length : undefined);
+  const trackerId = readString(normalizedOutput?.trackerId)
+    ?? readString(requestInput.trackerId)
+    ?? readString(readTelemetryRecord(normalizedOutput?.artifact)?.trackerId);
+  const itemCount = normalized === "tracker.create"
+    ? (trackerId ? 1 : undefined)
+    : todoCount;
+  const status = normalizeTelemetryText(input.status ?? "").toLowerCase();
+  const familyResultSummary = (() => {
+    if (!status) {
+      return undefined;
+    }
+    const lines = [`${familyIntentSummary} ${status === "failed" || status === "blocked" || status === "timeout" ? "failed" : "succeeded"}`];
+    if (normalized === "tracker.create" && trackerId) {
+      lines.push(`Created tracker ${trackerId.slice(0, 8)}`);
+    } else if (normalized === "write_todos" && todoCount !== undefined) {
+      lines.push(`${todoCount} todo item${todoCount === 1 ? "" : "s"} updated`);
+    }
+    return lines.slice(0, 3);
+  })();
+  const resultMetadata = Object.fromEntries(
+    Object.entries({
+      todoCount,
+      trackerId,
+      itemCount,
+      errorCode: readString(normalizedError?.code),
+    }).filter(([, value]) => value !== undefined),
+  ) as CapabilityFamilyTelemetry["resultMetadata"];
+  return {
+    tapFamilyKey: "foundation",
+    tapFamilyTitle: "Foundation",
+    familyKey: "workflow",
+    familyTitle: "Workflow",
+    familyIntentSummary,
+    familyResultSummary,
+    resultMetadata: resultMetadata && Object.keys(resultMetadata).length > 0 ? resultMetadata : undefined,
+  };
+}
+
+export function createCapabilityFamilyTelemetry(input: {
+  capabilityKey?: string | null;
+  requestInput?: Record<string, unknown>;
+  inputSummary?: string;
+  status?: string;
+  output?: unknown;
+  error?: unknown;
+}): CapabilityFamilyTelemetry | undefined {
+  const capabilityKey = input.capabilityKey?.trim().toLowerCase();
+  const family = resolveCapabilityFamilyDefinition(capabilityKey);
+  if (!family || !capabilityKey) {
+    return undefined;
+  }
+
+  const familyOutcomeKind = resolveFamilyOutcomeKind(input.status);
+  const withResolvedFamily = (
+    telemetry: CapabilityFamilyTelemetry | undefined,
+  ): CapabilityFamilyTelemetry | undefined => telemetry
+    ? {
+      ...telemetry,
+      tapFamilyKey: family.tapFamilyKey,
+      tapFamilyTitle: family.tapFamilyTitle,
+      familyKey: family.familyKey,
+      familyTitle: family.familyTitle,
+      familyOutcomeKind,
+    }
+    : undefined;
+
+  if (family.familyKey === "code") {
+    return withResolvedFamily(createCodeFamilyTelemetry({
+      capabilityKey,
+      requestInput: input.requestInput,
+      status: input.status,
+      output: input.output,
+      error: input.error,
+    }));
+  }
+  if (family.familyKey === "docs") {
+    return withResolvedFamily(createDocsFamilyTelemetry({
+      capabilityKey,
+      requestInput: input.requestInput,
+      status: input.status,
+      output: input.output,
+      error: input.error,
+    }));
+  }
+  if (family.familyKey === "git") {
+    return withResolvedFamily(createGitFamilyTelemetry({
+      capabilityKey,
+      requestInput: input.requestInput,
+      status: input.status,
+      output: input.output,
+      error: input.error,
+    }));
+  }
+  if (family.familyKey === "shell") {
+    return withResolvedFamily(createShellFamilyTelemetry({
+      capabilityKey,
+      requestInput: input.requestInput,
+      status: input.status,
+      output: input.output,
+      error: input.error,
+    }));
+  }
+  if (family.familyKey === "browser") {
+    return withResolvedFamily(createBrowserFamilyTelemetry({
+      capabilityKey,
+      requestInput: input.requestInput,
+      status: input.status,
+      output: input.output,
+      error: input.error,
+    }));
+  }
+  if (family.familyKey === "repo") {
+    return withResolvedFamily(createRepoFamilyTelemetry({
+      capabilityKey,
+      requestInput: input.requestInput,
+      status: input.status,
+      output: input.output,
+      error: input.error,
+    }));
+  }
+  if (family.familyKey === "mp") {
+    return withResolvedFamily(createMpFamilyTelemetry({
+      capabilityKey,
+      requestInput: input.requestInput,
+      status: input.status,
+      output: input.output,
+      error: input.error,
+    }));
+  }
+  if (family.familyKey === "mcp") {
+    return withResolvedFamily(createMcpFamilyTelemetry({
+      capabilityKey,
+      requestInput: input.requestInput,
+      status: input.status,
+      output: input.output,
+      error: input.error,
+    }));
+  }
+  if (family.familyKey === "skill") {
+    return withResolvedFamily(createSkillFamilyTelemetry({
+      capabilityKey,
+      requestInput: input.requestInput,
+      status: input.status,
+      output: input.output,
+      error: input.error,
+    }));
+  }
+  if (family.familyKey === "useract") {
+    return withResolvedFamily(createUserActFamilyTelemetry({
+      capabilityKey,
+      requestInput: input.requestInput,
+      status: input.status,
+      output: input.output,
+      error: input.error,
+    }));
+  }
+  if (family.familyKey === "workflow") {
+    return withResolvedFamily(createWorkflowFamilyTelemetry({
+      capabilityKey,
+      requestInput: input.requestInput,
+      status: input.status,
+      output: input.output,
+      error: input.error,
+    }));
+  }
+
+  const subject = summarizeWebsearchIntentSubject({
+    capabilityKey,
+    requestInput: input.requestInput,
+    inputSummary: input.inputSummary,
+  });
+  const familyIntentSummary = capabilityKey === "search.fetch"
+    ? `Fetching and extracting ${subject}`
+    : `Searching and grounding ${subject}`;
+
+  const normalizedOutput = input.output && typeof input.output === "object"
+    ? input.output as Record<string, unknown>
+    : undefined;
+  const normalizedError = input.error && typeof input.error === "object"
+    ? input.error as Record<string, unknown>
+    : undefined;
+  const status = normalizeTelemetryText(input.status ?? "").toLowerCase();
+  const selectedBackend = readString(normalizedOutput?.selectedBackend);
+  const resolvedBackend = readString(normalizedOutput?.resolvedBackend);
+  const fallbackApplied = normalizedOutput?.fallbackApplied === true;
+  const sourceTitles = collectWebsearchSourceTitles(normalizedOutput);
+  const sourceCount = resolveWebsearchSourceCount(normalizedOutput);
+  const errorCode = readString(normalizedError?.code);
+  const detailCode = normalizedError?.details && typeof normalizedError.details === "object"
+    ? readString((normalizedError.details as Record<string, unknown>).code)
+    : undefined;
+
+  const familyResultSummary = (() => {
+    if (!status) {
+      return undefined;
+    }
+    const lines: string[] = [];
+    if (status === "success" || status === "completed" || status === "partial") {
+      lines.push(`${familyIntentSummary} succeeded`);
+      if (fallbackApplied && resolvedBackend && selectedBackend && resolvedBackend !== selectedBackend) {
+        lines.push(`Recovered via ${resolvedBackend}`);
+      }
+    } else if (status === "failed" || status === "blocked" || status === "timeout") {
+      lines.push(`${familyIntentSummary} failed`);
+      if (fallbackApplied && resolvedBackend) {
+        lines.push(`Recovered via ${resolvedBackend}`);
+      }
+    } else {
+      lines.push(familyIntentSummary);
+    }
+    return lines.slice(0, 3);
+  })();
+
+  const resultMetadata = Object.fromEntries(
+    Object.entries({
+      selectedBackend,
+      resolvedBackend,
+      fallbackApplied: fallbackApplied ? true : undefined,
+      sourceTitles: sourceTitles.length > 0 ? sourceTitles : undefined,
+      sourceCount,
+      errorCode,
+      errorDetailCode: detailCode,
+    }).filter(([, value]) => Array.isArray(value) ? value.length > 0 : value !== undefined),
+  ) as NonNullable<CapabilityFamilyTelemetry["resultMetadata"]>;
+  const hasResultMetadata = Object.values(resultMetadata).some((value) =>
+    Array.isArray(value)
+      ? value.length > 0
+      : value !== undefined,
+  );
+
+  return {
+    tapFamilyKey: family.tapFamilyKey,
+    tapFamilyTitle: family.tapFamilyTitle,
+    familyKey: family.familyKey,
+    familyTitle: family.familyTitle,
+    familyIntentSummary,
+    familyOutcomeKind,
+    familyResultSummary,
+    resultMetadata: hasResultMetadata ? resultMetadata : undefined,
+  };
+}
+
+export function resolveContextWindowProfile(input: {
+  provider?: string;
+  model?: string;
+  configuredWindowTokens?: number;
+  routePlanWindowTokens?: number;
+  maxOutputTokens?: number;
+}): Pick<CoreContextSnapshot, "windowTokens" | "windowSource"> {
+  if (readPositiveInteger(input.configuredWindowTokens)) {
+    return {
+      windowTokens: input.configuredWindowTokens!,
+      windowSource: "config_override",
+    };
+  }
+  if (readPositiveInteger(input.routePlanWindowTokens)) {
+    return {
+      windowTokens: input.routePlanWindowTokens!,
+      windowSource: "route_plan",
+    };
+  }
+
+  const provider = (input.provider ?? "").trim().toLowerCase();
+  const model = (input.model ?? "").trim().toLowerCase();
+  if (provider === "openai" || /^gpt-5/iu.test(model)) {
+    return {
+      windowTokens: 1_050_000,
+      windowSource: "model_family_default",
+    };
+  }
+  if (provider === "anthropic" || /claude/iu.test(model)) {
+    return {
+      windowTokens: 200_000,
+      windowSource: "model_family_default",
+    };
+  }
+  if (provider === "deepmind" || /gemini/iu.test(model)) {
+    return {
+      windowTokens: 1_000_000,
+      windowSource: "model_family_default",
+    };
+  }
+  return {
+    windowTokens: 200_000,
+    windowSource: "fallback_default",
+  };
+}
+
+export function createCoreContextSnapshot(input: {
+  provider: string;
+  model: string;
+  promptKind: CoreContextSnapshot["promptKind"];
+  promptText: string;
+  transcriptText?: string;
+  configuredWindowTokens?: number;
+  routePlanWindowTokens?: number;
+  maxOutputTokens?: number;
+}): CoreContextSnapshot {
+  const resolved = resolveContextWindowProfile({
+    provider: input.provider,
+    model: input.model,
+    configuredWindowTokens: input.configuredWindowTokens,
+    routePlanWindowTokens: input.routePlanWindowTokens,
+    maxOutputTokens: input.maxOutputTokens,
+  });
+  return {
+    provider: input.provider,
+    model: input.model,
+    promptKind: input.promptKind,
+    windowTokens: resolved.windowTokens,
+    windowSource: resolved.windowSource,
+    promptTokens: estimateContextTokens(input.promptText),
+    transcriptTokens: estimateContextTokens(input.transcriptText ?? ""),
+    maxOutputTokens: input.maxOutputTokens,
+  };
 }
 
 export const LIVE_CHAT_TAP_OVERRIDE = {
@@ -262,6 +1631,8 @@ export const LIVE_CHAT_MODEL_PLAN = {
   core: {
     model: "gpt-5.4",
     reasoning: "high",
+    contextWindowTokens: 1_050_000,
+    maxOutputTokens: undefined,
   },
   tap: {
     reviewer: {
@@ -499,6 +1870,7 @@ export function summarizeToolOutputForCore(
       sources: trimStructuredValue(sources, 3_500),
       citations: trimStructuredValue(citations, 2_500),
       evidence: trimStructuredValue(normalized?.evidence, 3_500),
+      error: trimStructuredValue(normalized?.error, 2_500),
     }, null, 2);
   }
 
@@ -794,10 +2166,10 @@ export function extractDocReadFactSummary(output: unknown): DocReadFactSummary |
   return {
     path: readString(normalized.path),
     format: readString(normalized.format),
-    paragraphCount: readPositiveInteger(normalized.paragraphCount),
-    returnedParagraphCount: readPositiveInteger(normalized.returnedParagraphCount),
-    omittedParagraphCount: readPositiveInteger(normalized.omittedParagraphCount),
-    tableCount: readPositiveInteger(normalized.tableCount),
+    paragraphCount: readNonNegativeInteger(normalized.paragraphCount),
+    returnedParagraphCount: readNonNegativeInteger(normalized.returnedParagraphCount),
+    omittedParagraphCount: readNonNegativeInteger(normalized.omittedParagraphCount),
+    tableCount: readNonNegativeInteger(normalized.tableCount),
     truncated: normalized.truncated === true,
     paragraphs: Array.isArray(normalized.paragraphs)
       ? normalized.paragraphs
@@ -810,10 +2182,10 @@ export function extractDocReadFactSummary(output: unknown): DocReadFactSummary |
       : undefined,
     firstTable: firstTableRaw
       ? {
-        rowCount: readPositiveInteger(firstTableRaw.rowCount),
-        returnedRowCount: readPositiveInteger(firstTableRaw.returnedRowCount),
-        omittedRowCount: readPositiveInteger(firstTableRaw.omittedRowCount),
-        columnCount: readPositiveInteger(firstTableRaw.columnCount),
+        rowCount: readNonNegativeInteger(firstTableRaw.rowCount),
+        returnedRowCount: readNonNegativeInteger(firstTableRaw.returnedRowCount),
+        omittedRowCount: readNonNegativeInteger(firstTableRaw.omittedRowCount),
+        columnCount: readNonNegativeInteger(firstTableRaw.columnCount),
         rows: Array.isArray(firstTableRaw.rows)
           ? firstTableRaw.rows
             .map((entry) => normalizeSpreadsheetRow(entry))
@@ -1186,6 +2558,62 @@ export function unwrapResponseTextIfJson(text: string): string {
   return text;
 }
 
+export function extractResponseTextFromPartialEnvelope(buffer: string): string | undefined {
+  const match = /"responseText"\s*:\s*"/u.exec(buffer);
+  if (!match) {
+    return undefined;
+  }
+  let index = match.index + match[0].length;
+  let output = "";
+
+  while (index < buffer.length) {
+    const char = buffer[index];
+    if (char === "\"") {
+      return output;
+    }
+    if (char === "\\") {
+      const next = buffer[index + 1];
+      if (next === undefined) {
+        return output;
+      }
+      if (next === "u") {
+        const hex = buffer.slice(index + 2, index + 6);
+        if (!/^[0-9a-fA-F]{4}$/u.test(hex)) {
+          return output;
+        }
+        output += String.fromCharCode(Number.parseInt(hex, 16));
+        index += 6;
+        continue;
+      }
+      const simpleEscapeMap: Record<string, string> = {
+        "\"": "\"",
+        "\\": "\\",
+        "/": "/",
+        b: "\b",
+        f: "\f",
+        n: "\n",
+        r: "\r",
+        t: "\t",
+      };
+      output += simpleEscapeMap[next] ?? next;
+      index += 2;
+      continue;
+    }
+    output += char;
+    index += 1;
+  }
+
+  return output;
+}
+
+export function extractReplyResponseTextFromPartialEnvelope(buffer: string): string | undefined {
+  const actionMatch = /"action"\s*:\s*"([^"]*)"/u.exec(buffer);
+  if (!actionMatch || actionMatch[1] !== "reply") {
+    return undefined;
+  }
+  return extractResponseTextFromPartialEnvelope(buffer);
+}
+
 export function stripCodeFences(value: string): string {
   return value.replace(/```[a-zA-Z0-9_-]*\n?/gu, "").replace(/```/gu, "").trim();
 }
@@ -1198,6 +2626,10 @@ export function resolveReasoningEffort(
 
 export function readPositiveInteger(value: unknown): number | undefined {
   return Number.isInteger(value) && Number(value) > 0 ? Number(value) : undefined;
+}
+
+export function readNonNegativeInteger(value: unknown): number | undefined {
+  return Number.isInteger(value) && Number(value) >= 0 ? Number(value) : undefined;
 }
 
 export function readString(value: unknown): string | undefined {
@@ -1388,7 +2820,7 @@ export function formatNowStamp(date = new Date()): string {
 
 export function createLiveChatLogPath(): string {
   const timestamp = new Date().toISOString().replace(/[:.]/gu, "-");
-  return resolve(process.cwd(), "memory/live-reports", `live-agent-chat.${timestamp}.jsonl`);
+  return resolve(resolveLiveReportsDir(), `live-agent-chat.${timestamp}.jsonl`);
 }
 
 function extractFirstHttpUrl(text: string): string | undefined {
@@ -1585,16 +3017,30 @@ export function parseTapRequest(text: string): ParsedTapRequest | undefined {
 
 export function extractResponseTextMaybe(text: string): string {
   const cleaned = text.trim();
-  if (!cleaned.startsWith("{")) {
-    return cleaned;
-  }
-  try {
-    const parsed = JSON.parse(extractFirstJsonObject(cleaned)) as Record<string, unknown>;
-    if (typeof parsed.responseText === "string" && parsed.responseText.trim()) {
-      return parsed.responseText.trim();
+  const stripped = stripCodeFences(cleaned).trim();
+  const candidates = [...new Set([cleaned, stripped].filter((value) => value.length > 0))];
+
+  for (const candidate of candidates) {
+    const looksEnvelopeLike = candidate.startsWith("{") || candidate.includes("\"responseText\"");
+    if (!looksEnvelopeLike) {
+      continue;
     }
-  } catch {
-    return cleaned;
+    try {
+      const parsed = JSON.parse(extractFirstJsonObject(candidate)) as Record<string, unknown>;
+      if (typeof parsed.responseText === "string" && parsed.responseText.trim()) {
+        return parsed.responseText.trim();
+      }
+    } catch {
+      const partial = extractResponseTextFromPartialEnvelope(candidate)?.trim();
+      if (partial) {
+        return partial;
+      }
+      continue;
+    }
+    const partial = extractResponseTextFromPartialEnvelope(candidate)?.trim();
+    if (partial) {
+      return partial;
+    }
   }
   return cleaned;
 }

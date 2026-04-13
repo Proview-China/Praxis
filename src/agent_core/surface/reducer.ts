@@ -568,7 +568,9 @@ export function applySurfaceEvent(
       });
       next = {
         ...next,
-        currentTurnId: merged.turnId,
+        currentTurnId: event.type === "turn.completed"
+          ? (next.currentTurnId && next.currentTurnId !== merged.turnId ? next.currentTurnId : merged.turnId)
+          : merged.turnId,
         turns: upsertById(next.turns, merged),
       };
       break;
@@ -597,7 +599,9 @@ export function applySurfaceEvent(
         session: next.session
           ? createSurfaceSession({
             ...next.session,
-            transcriptMessageIds: [...next.session.transcriptMessageIds, message.messageId],
+            transcriptMessageIds: next.session.transcriptMessageIds.includes(message.messageId)
+              ? next.session.transcriptMessageIds
+              : [...next.session.transcriptMessageIds, message.messageId],
             updatedAt: at,
           })
           : next.session,
