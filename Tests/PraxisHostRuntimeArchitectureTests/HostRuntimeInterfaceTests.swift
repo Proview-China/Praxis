@@ -3834,6 +3834,50 @@ struct HostRuntimeInterfaceTests {
   }
 
   @Test
+  func runtimeInterfaceMapsCmpLineageReferencePayloadsIntoDomainIDsWithoutCanonicalizing() async throws {
+    let expectedLineage = PraxisCmpLineageID(rawValue: "  lineage.runtime  ")
+    let cmpFacade = makeStubCmpFacade(
+      recoverCmpProject: { command in
+        #expect(command.lineageID == expectedLineage)
+        return PraxisCmpProjectRecovery(
+          projectID: command.projectID,
+          sourceAgentID: command.agentID,
+          targetAgentID: command.targetAgentID,
+          summary: "Recovered CMP project.",
+          status: .aligned,
+          recoverySource: .historicalContext,
+          foundHistoricalContext: true,
+          snapshotID: .init(rawValue: "snapshot.runtime.recover"),
+          packageID: .init(rawValue: "package.runtime.recover"),
+          packageKind: command.packageKind,
+          hydratedRecoverySummary: "Hydrated one projection.",
+          resumableProjectionCount: 1,
+          missingProjectionCount: 0,
+          issues: []
+        )
+      }
+    )
+    let runtimeInterface = makeStubbedRuntimeInterface(cmpFacade: cmpFacade)
+
+    let response = await runtimeInterface.handle(
+      PraxisRuntimeInterfaceRequest.recoverCmpProject(
+        PraxisRuntimeInterfaceRecoverCmpProjectRequestPayload(
+          payloadSummary: "Recover lineage reference",
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          targetAgentID: "checker.local",
+          reason: "Preserve opaque lineage reference",
+          lineageID: runtimeInterfaceReferenceID(expectedLineage.rawValue)
+        )
+      )
+    )
+
+    #expect(response.status == .success)
+    #expect(response.error == nil)
+    #expect(response.snapshot?.kind == .cmpRecover)
+  }
+
+  @Test
   func runtimeInterfaceCodecRoundTripsTypedEventNamesAsStableRawValues() throws {
     let codec = PraxisJSONRuntimeInterfaceCodec()
     let response = PraxisRuntimeInterfaceResponse(
@@ -4354,6 +4398,85 @@ struct HostRuntimeInterfaceTests {
     } else {
       Issue.record("Expected requestCmpHistory payload.")
     }
+  }
+
+  @Test
+  func runtimeInterfaceCodecRoundTripsCmpLineageReferencePayloadsAsStableStrings() throws {
+    let codec = PraxisJSONRuntimeInterfaceCodec()
+    let recoverRequest = PraxisRuntimeInterfaceRequest.recoverCmpProject(
+      .init(
+        payloadSummary: "Recover lineage payload",
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        reason: "Recover lineage state",
+        lineageID: runtimeInterfaceReferenceID("lineage.recover.runtime"),
+        branchRef: "cmp/recover",
+        snapshotID: runtimeInterfaceReferenceID("snapshot.recover.runtime"),
+        packageKind: .historicalReply,
+        fidelityLabel: .highSignal
+      )
+    )
+    let ingestRequest = PraxisRuntimeInterfaceRequest.ingestCmpFlow(
+      .init(
+        payloadSummary: "Ingest lineage payload",
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        sessionID: "cmp.session.runtime",
+        runID: "run.runtime",
+        lineageID: runtimeInterfaceReferenceID("lineage.ingest.runtime"),
+        parentAgentID: "planner.local",
+        taskSummary: "Ingest runtime context",
+        materials: [],
+        requiresActiveSync: true
+      )
+    )
+    let commitRequest = PraxisRuntimeInterfaceRequest.commitCmpFlow(
+      .init(
+        payloadSummary: "Commit lineage payload",
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        sessionID: "cmp.session.runtime",
+        runID: "run.runtime",
+        lineageID: runtimeInterfaceReferenceID("lineage.commit.runtime"),
+        parentAgentID: "planner.local",
+        eventIDs: [runtimeInterfaceReferenceID("event.runtime.1")],
+        baseRef: "main",
+        changeSummary: "Commit runtime change",
+        syncIntent: .toParent
+      )
+    )
+    let resolveRequest = PraxisRuntimeInterfaceRequest.resolveCmpFlow(
+      .init(
+        payloadSummary: "Resolve lineage payload",
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        lineageID: runtimeInterfaceReferenceID("lineage.resolve.runtime"),
+        branchRef: "cmp/resolve"
+      )
+    )
+
+    let recoverData = try codec.encode(recoverRequest)
+    let ingestData = try codec.encode(ingestRequest)
+    let commitData = try codec.encode(commitRequest)
+    let resolveData = try codec.encode(resolveRequest)
+    let recoverJSON = String(decoding: recoverData, as: UTF8.self)
+    let ingestJSON = String(decoding: ingestData, as: UTF8.self)
+    let commitJSON = String(decoding: commitData, as: UTF8.self)
+    let resolveJSON = String(decoding: resolveData, as: UTF8.self)
+    let decodedRecoverRequest = try codec.decodeRequest(recoverData)
+    let decodedIngestRequest = try codec.decodeRequest(ingestData)
+    let decodedCommitRequest = try codec.decodeRequest(commitData)
+    let decodedResolveRequest = try codec.decodeRequest(resolveData)
+
+    #expect(recoverJSON.contains(#""lineageID":"lineage.recover.runtime""#))
+    #expect(ingestJSON.contains(#""lineageID":"lineage.ingest.runtime""#))
+    #expect(commitJSON.contains(#""lineageID":"lineage.commit.runtime""#))
+    #expect(resolveJSON.contains(#""lineageID":"lineage.resolve.runtime""#))
+    #expect(decodedRecoverRequest == recoverRequest)
+    #expect(decodedIngestRequest == ingestRequest)
+    #expect(decodedCommitRequest == commitRequest)
+    #expect(decodedResolveRequest == resolveRequest)
   }
 
   @Test

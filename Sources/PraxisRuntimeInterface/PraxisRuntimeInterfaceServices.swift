@@ -4,6 +4,7 @@ import PraxisCmpTypes
 import PraxisGoal
 import PraxisCoreTypes
 import PraxisRuntimeFacades
+import PraxisRuntimeUseCases
 import PraxisRun
 import PraxisSession
 import PraxisTransition
@@ -1005,18 +1006,34 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
       let agentID = try requireRuntimeInterfaceField(payload.agentID, named: "agentID")
       let targetAgentID = try requireRuntimeInterfaceField(payload.targetAgentID, named: "targetAgentID")
       let reason = try requireRuntimeInterfaceText(payload.reason, named: "reason")
-      let recovery = try await runtimeFacade.cmpProjectFacade.recoverProject(
-        .init(
+      let lineageID = payload.lineageID.map { PraxisCmpLineageID(rawValue: $0.rawValue) }
+      let recoverCommand: PraxisRecoverCmpProjectCommand
+      if let lineageID {
+        recoverCommand = .init(
           projectID: projectID,
           agentID: agentID,
           targetAgentID: targetAgentID,
           reason: reason,
-          lineageID: payload.lineageID,
+          lineageID: lineageID,
           branchRef: payload.branchRef,
-          snapshotID: payload.snapshotID.map { .init(rawValue: $0.rawValue) },
+          snapshotID: payload.snapshotID.map { PraxisCmpSnapshotID(rawValue: $0.rawValue) },
           packageKind: payload.packageKind,
           fidelityLabel: payload.fidelityLabel
         )
+      } else {
+        recoverCommand = .init(
+          projectID: projectID,
+          agentID: agentID,
+          targetAgentID: targetAgentID,
+          reason: reason,
+          branchRef: payload.branchRef,
+          snapshotID: payload.snapshotID.map { PraxisCmpSnapshotID(rawValue: $0.rawValue) },
+          packageKind: payload.packageKind,
+          fidelityLabel: payload.fidelityLabel
+        )
+      }
+      let recovery = try await runtimeFacade.cmpProjectFacade.recoverProject(
+        recoverCommand
       )
       return response(from: recovery)
     case .ingestCmpFlow(let payload):
@@ -1025,18 +1042,34 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
       let sessionID = try requireRuntimeInterfaceField(payload.sessionID, named: "sessionID")
       let taskSummary = try requireRuntimeInterfaceText(payload.taskSummary, named: "taskSummary")
       let materials = try requireRuntimeInterfaceElements(payload.materials, named: "materials")
-      let ingest = try await runtimeFacade.cmpFlowFacade.ingestFlow(
-        .init(
+      let lineageID = payload.lineageID.map { PraxisCmpLineageID(rawValue: $0.rawValue) }
+      let ingestCommand: PraxisIngestCmpFlowCommand
+      if let lineageID {
+        ingestCommand = .init(
           projectID: projectID,
           agentID: agentID,
           sessionID: sessionID,
           runID: payload.runID,
-          lineageID: payload.lineageID,
+          lineageID: lineageID,
           parentAgentID: payload.parentAgentID,
           taskSummary: taskSummary,
           materials: materials,
           requiresActiveSync: payload.requiresActiveSync
         )
+      } else {
+        ingestCommand = .init(
+          projectID: projectID,
+          agentID: agentID,
+          sessionID: sessionID,
+          runID: payload.runID,
+          parentAgentID: payload.parentAgentID,
+          taskSummary: taskSummary,
+          materials: materials,
+          requiresActiveSync: payload.requiresActiveSync
+        )
+      }
+      let ingest = try await runtimeFacade.cmpFlowFacade.ingestFlow(
+        ingestCommand
       )
       return response(from: ingest)
     case .commitCmpFlow(let payload):
@@ -1045,31 +1078,59 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
       let sessionID = try requireRuntimeInterfaceField(payload.sessionID, named: "sessionID")
       let eventIDs = try requireRuntimeInterfaceReferenceIDElements(payload.eventIDs, named: "eventIDs")
       let changeSummary = try requireRuntimeInterfaceText(payload.changeSummary, named: "changeSummary")
-      let commit = try await runtimeFacade.cmpFlowFacade.commitFlow(
-        .init(
+      let lineageID = payload.lineageID.map { PraxisCmpLineageID(rawValue: $0.rawValue) }
+      let commitCommand: PraxisCommitCmpFlowCommand
+      if let lineageID {
+        commitCommand = .init(
           projectID: projectID,
           agentID: agentID,
           sessionID: sessionID,
           runID: payload.runID,
-          lineageID: payload.lineageID,
+          lineageID: lineageID,
           parentAgentID: payload.parentAgentID,
-          eventIDs: eventIDs.map { .init(rawValue: $0.rawValue) },
+          eventIDs: eventIDs.map { PraxisCmpEventID(rawValue: $0.rawValue) },
           baseRef: payload.baseRef,
           changeSummary: changeSummary,
           syncIntent: payload.syncIntent
         )
+      } else {
+        commitCommand = .init(
+          projectID: projectID,
+          agentID: agentID,
+          sessionID: sessionID,
+          runID: payload.runID,
+          parentAgentID: payload.parentAgentID,
+          eventIDs: eventIDs.map { PraxisCmpEventID(rawValue: $0.rawValue) },
+          baseRef: payload.baseRef,
+          changeSummary: changeSummary,
+          syncIntent: payload.syncIntent
+        )
+      }
+      let commit = try await runtimeFacade.cmpFlowFacade.commitFlow(
+        commitCommand
       )
       return response(from: commit)
     case .resolveCmpFlow(let payload):
       let projectID = try requireRuntimeInterfaceField(payload.projectID, named: "projectID")
       let agentID = try requireRuntimeInterfaceField(payload.agentID, named: "agentID")
-      let resolve = try await runtimeFacade.cmpFlowFacade.resolveFlow(
-        .init(
+      let lineageID = payload.lineageID.map { PraxisCmpLineageID(rawValue: $0.rawValue) }
+      let resolveCommand: PraxisResolveCmpFlowCommand
+      if let lineageID {
+        resolveCommand = .init(
           projectID: projectID,
           agentID: agentID,
-          lineageID: payload.lineageID,
+          lineageID: lineageID,
           branchRef: payload.branchRef
         )
+      } else {
+        resolveCommand = .init(
+          projectID: projectID,
+          agentID: agentID,
+          branchRef: payload.branchRef
+        )
+      }
+      let resolve = try await runtimeFacade.cmpFlowFacade.resolveFlow(
+        resolveCommand
       )
       return response(from: resolve)
     case .materializeCmpFlow(let payload):

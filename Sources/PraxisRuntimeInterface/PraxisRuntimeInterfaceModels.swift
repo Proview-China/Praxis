@@ -416,7 +416,7 @@ public struct PraxisRuntimeInterfaceRecoverCmpProjectRequestPayload: Sendable, E
   public let agentID: String
   public let targetAgentID: String
   public let reason: String
-  public let lineageID: String?
+  public let lineageID: PraxisRuntimeInterfaceReferenceID?
   public let branchRef: String?
   public let snapshotID: PraxisRuntimeInterfaceReferenceID?
   public let packageKind: PraxisCmpContextPackageKind
@@ -428,7 +428,7 @@ public struct PraxisRuntimeInterfaceRecoverCmpProjectRequestPayload: Sendable, E
     agentID: String,
     targetAgentID: String,
     reason: String,
-    lineageID: String? = nil,
+    lineageID: PraxisRuntimeInterfaceReferenceID? = nil,
     branchRef: String? = nil,
     snapshotID: PraxisRuntimeInterfaceReferenceID? = nil,
     packageKind: PraxisCmpContextPackageKind = .historicalReply,
@@ -453,7 +453,7 @@ public struct PraxisRuntimeInterfaceIngestCmpFlowRequestPayload: Sendable, Equat
   public let agentID: String
   public let sessionID: String
   public let runID: String?
-  public let lineageID: String?
+  public let lineageID: PraxisRuntimeInterfaceReferenceID?
   public let parentAgentID: String?
   public let taskSummary: String
   public let materials: [PraxisCmpRuntimeContextMaterial]
@@ -465,7 +465,7 @@ public struct PraxisRuntimeInterfaceIngestCmpFlowRequestPayload: Sendable, Equat
     agentID: String,
     sessionID: String,
     runID: String? = nil,
-    lineageID: String? = nil,
+    lineageID: PraxisRuntimeInterfaceReferenceID? = nil,
     parentAgentID: String? = nil,
     taskSummary: String,
     materials: [PraxisCmpRuntimeContextMaterial],
@@ -490,7 +490,7 @@ public struct PraxisRuntimeInterfaceCommitCmpFlowRequestPayload: Sendable, Equat
   public let agentID: String
   public let sessionID: String
   public let runID: String?
-  public let lineageID: String?
+  public let lineageID: PraxisRuntimeInterfaceReferenceID?
   public let parentAgentID: String?
   public let eventIDs: [PraxisRuntimeInterfaceReferenceID]
   public let baseRef: String?
@@ -503,7 +503,7 @@ public struct PraxisRuntimeInterfaceCommitCmpFlowRequestPayload: Sendable, Equat
     agentID: String,
     sessionID: String,
     runID: String? = nil,
-    lineageID: String? = nil,
+    lineageID: PraxisRuntimeInterfaceReferenceID? = nil,
     parentAgentID: String? = nil,
     eventIDs: [PraxisRuntimeInterfaceReferenceID],
     baseRef: String? = nil,
@@ -528,14 +528,14 @@ public struct PraxisRuntimeInterfaceResolveCmpFlowRequestPayload: Sendable, Equa
   public let payloadSummary: String
   public let projectID: String
   public let agentID: String
-  public let lineageID: String?
+  public let lineageID: PraxisRuntimeInterfaceReferenceID?
   public let branchRef: String?
 
   public init(
     payloadSummary: String,
     projectID: String,
     agentID: String,
-    lineageID: String? = nil,
+    lineageID: PraxisRuntimeInterfaceReferenceID? = nil,
     branchRef: String? = nil
   ) {
     self.payloadSummary = payloadSummary
