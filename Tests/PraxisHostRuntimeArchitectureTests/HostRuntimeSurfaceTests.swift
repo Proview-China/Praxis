@@ -254,7 +254,7 @@ struct HostRuntimeSurfaceTests {
   }
 
   @Test
-  func runtimeFacadeAndBridgeExposeHostBackedInspectionFlow() async throws {
+  func runtimeFacadeAndBridgeExposeScaffoldInspectionFlowWithoutHostBackedClaims() async throws {
     let hostAdapters = PraxisHostAdapterRegistry.scaffoldDefaults()
     let compositionRoot = PraxisRuntimeBridgeFactory.makeCompositionRoot(hostAdapters: hostAdapters)
     let dependencies = try compositionRoot.makeDependencyGraph()
@@ -272,6 +272,7 @@ struct HostRuntimeSurfaceTests {
     let tapHistory = try await runtimeFacade.inspectionFacade.readbackTapHistory(
       .init(projectID: "cmp.local-runtime", agentID: "runtime.local", limit: 5)
     )
+    let mpInspection = try await runtimeFacade.mpFacade.inspect()
 
     #expect(architectureState.title == "Praxis Architecture")
     #expect(tapState.title == "TAP Inspection")
@@ -293,7 +294,14 @@ struct HostRuntimeSurfaceTests {
     #expect(tapHistory.agentID == "runtime.local")
     #expect(tapHistory.totalCount == 0)
     #expect(dependencies.hostAdapters.providerInferenceExecutor != nil)
+    #expect(dependencies.hostAdapters.providerInferenceSurfaceProvenance == .scaffoldPlaceholder)
+    #expect(dependencies.hostAdapters.browserGroundingSurfaceProvenance == .scaffoldPlaceholder)
     #expect(dependencies.hostAdapters.checkpointStore != nil)
+    #expect(mpInspection.workflowSummary.contains("scaffold placeholders"))
+    #expect(mpInspection.workflowSummary.contains("provider-backed") == true)
+    #expect(mpInspection.workflowSummary.contains("host-backed") == false)
+    #expect(mpInspection.multimodalSummary.contains("audio.transcribe (scaffold-placeholder)") == true)
+    #expect(mpInspection.multimodalSummary.contains("browser.ground (scaffold-placeholder)") == true)
 
     let runState = try await bridge.handle(.init(intent: .runGoal, payloadSummary: "Bridge next action smoke"))
     let bridgeEvents = await bridge.snapshotEvents()
@@ -2110,6 +2118,11 @@ struct HostRuntimeSurfaceTests {
     #expect(inferenceResponse?.output.summary.contains("local runtime baseline") == true)
     #expect(inferenceResponse?.output.structuredFields["inferenceMode"]?.stringValue == "heuristic_baseline")
     #expect(inferenceResponse?.output.structuredFields["effectiveModel"]?.stringValue == "local-smoke-model")
+    #expect(secondRegistry.providerInferenceSurfaceProvenance == .localBaseline)
+    #expect(secondRegistry.browserGroundingSurfaceProvenance == .localBaseline)
+    #expect(secondRegistry.audioTranscriptionSurfaceProvenance == .localBaseline)
+    #expect(secondRegistry.speechSynthesisSurfaceProvenance == .localBaseline)
+    #expect(secondRegistry.imageGenerationSurfaceProvenance == .localBaseline)
     #expect(mcpReceipt?.status == .succeeded)
     #expect(mcpReceipt?.summary.contains("Local MCP baseline") == true)
     #expect(groundingBundle?.pages.count == 1)

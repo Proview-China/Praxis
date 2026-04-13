@@ -168,7 +168,9 @@ struct PraxisRuntimeUseCasesTests {
           supportingMemoryIDs: [],
           omittedSupersededMemoryIDs: []
         )
-      )
+      ),
+      providerInferenceSurfaceProvenance: .composed,
+      browserGroundingSurfaceProvenance: .composed
     )
 
     let smoke = inspectionService.smoke(
@@ -324,7 +326,12 @@ struct PraxisRuntimeUseCasesTests {
       },
       imageGenerationDriver: PraxisStubImageGenerationDriver { _ in
         .init(assetRef: "image://stub.png", mimeType: "image/png")
-      }
+      },
+      providerInferenceSurfaceProvenance: .composed,
+      browserGroundingSurfaceProvenance: .composed,
+      audioTranscriptionSurfaceProvenance: .composed,
+      speechSynthesisSurfaceProvenance: .composed,
+      imageGenerationSurfaceProvenance: .composed
     )
 
     let inspection = try await inspectionService.inspect(
@@ -332,8 +339,8 @@ struct PraxisRuntimeUseCasesTests {
       hostAdapters: hostAdapters
     )
 
-    #expect(inspection.summary == "MP workflow surface is now reading HostRuntime memory and multimodal adapter state.")
-    #expect(inspection.workflowSummary.contains("provider inference surface available"))
+    #expect(inspection.summary == "MP workflow surface is reading HostRuntime memory and current adapter provenance.")
+    #expect(inspection.workflowSummary == "ICMA / Iterator / Checker / DbAgent / Dispatcher lanes have a composed provider inference surface available.")
     #expect(inspection.memoryStoreSummary.contains("1 primary records and omits 1 superseded records"))
     #expect(inspection.memoryStoreSummary.contains("Semantic search matches for inspection query: 1."))
     #expect(inspection.multimodalSummary == "Multimodal host chips: audio.transcribe, speech.synthesize, image.generate, browser.ground")
@@ -2494,21 +2501,56 @@ struct PraxisRuntimeUseCasesTests {
       hostAdapters: PraxisHostAdapterRegistry(
         providerInferenceExecutor: inferenceExecutor,
         semanticSearchIndex: searchIndex,
-        semanticMemoryStore: memoryStore
+        semanticMemoryStore: memoryStore,
+        providerInferenceSurfaceProvenance: .composed
       )
     )
     let inspectMpUseCase = PraxisInspectMpUseCase(dependencies: dependencies)
 
     let inspection = try await inspectMpUseCase.execute()
 
-    #expect(inspection.summary == "MP workflow surface is now reading HostRuntime memory and multimodal adapter state.")
-    #expect(inspection.workflowSummary.contains("provider inference surface available"))
+    #expect(inspection.summary == "MP workflow surface is reading HostRuntime memory and current adapter provenance.")
+    #expect(inspection.workflowSummary == "ICMA / Iterator / Checker / DbAgent / Dispatcher lanes have a composed provider inference surface available.")
     #expect(inspection.memoryStoreSummary.contains("1 primary records and omits 1 superseded records"))
     #expect(inspection.memoryStoreSummary.contains("Semantic search matches for inspection query: 2."))
     #expect(inspection.multimodalSummary == "No multimodal host chips are currently registered.")
     #expect(inspection.issues.contains { $0.contains("Browser grounding and multimodal chips") })
     #expect(inspection.issues.contains { $0.contains("semantic memory store") } == false)
     #expect(inspection.issues.contains { $0.contains("semantic search index") } == false)
+    #expect(inspection.issues.contains { $0.contains("local baselines") } == false)
+  }
+
+  @Test
+  func inspectAndSmokeMpUseCasesKeepLocalDefaultsOnBaselineProvenanceWording() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-mp-local-defaults-provenance-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let dependencies = try makeDependencies(rootDirectory: rootDirectory)
+    let inspection = try await PraxisInspectMpUseCase(dependencies: dependencies).execute()
+    let smoke = try await PraxisSmokeMpUseCase(dependencies: dependencies).execute(
+      .init(projectID: "mp.local-runtime")
+    )
+
+    #expect(inspection.summary == "MP workflow surface is reading HostRuntime memory and current adapter provenance.")
+    #expect(inspection.workflowSummary.contains("local heuristic baseline"))
+    #expect(inspection.workflowSummary.contains("external provider-backed service") == true)
+    #expect(inspection.workflowSummary.contains("host-backed") == false)
+    #expect(inspection.multimodalSummary.contains("audio.transcribe (local-baseline)") == true)
+    #expect(inspection.multimodalSummary.contains("speech.synthesize (local-baseline)") == true)
+    #expect(inspection.multimodalSummary.contains("image.generate (local-baseline)") == true)
+    #expect(inspection.multimodalSummary.contains("browser.ground (local-baseline)") == true)
+    #expect(inspection.issues.contains { $0.contains("local baselines") })
+
+    let providerCheck = try #require(smoke.checks.first { $0.gate == .providerInference })
+    let browserCheck = try #require(smoke.checks.first { $0.gate == .browserGrounding })
+
+    #expect(providerCheck.status == .ready)
+    #expect(providerCheck.summary.contains("local heuristic baseline"))
+    #expect(providerCheck.summary.contains("host-backed") == false)
+    #expect(browserCheck.status == .ready)
+    #expect(browserCheck.summary.contains("local baseline collector"))
+    #expect(browserCheck.summary.contains("fetched browser session") == true)
   }
 
   @Test
@@ -2578,7 +2620,9 @@ struct PraxisRuntimeUseCasesTests {
             ]
           ]
         ),
-        semanticMemoryStore: memoryStore
+        semanticMemoryStore: memoryStore,
+        providerInferenceSurfaceProvenance: .composed,
+        browserGroundingSurfaceProvenance: .composed
       )
     )
 

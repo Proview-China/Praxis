@@ -37,6 +37,7 @@ public final class PraxisDependencyGraph: PraxisDependencyResolving, @unchecked 
     boundaries: [PraxisBoundaryDescriptor],
     hostAdapters: PraxisHostAdapterRegistry = .init(),
     providerInferenceExecutor: (any PraxisProviderInferenceExecutor)? = nil,
+    providerInferenceSurfaceProvenance: PraxisHostAdapterSurfaceProvenance? = nil,
     workspaceReader: (any PraxisWorkspaceReader)? = nil,
     shellExecutor: (any PraxisShellExecutor)? = nil,
     checkpointStore: (any PraxisCheckpointStoreContract)? = nil,
@@ -82,7 +83,14 @@ public final class PraxisDependencyGraph: PraxisDependencyResolving, @unchecked 
       conversationPresenter: hostAdapters.conversationPresenter,
       audioTranscriptionDriver: hostAdapters.audioTranscriptionDriver,
       speechSynthesisDriver: hostAdapters.speechSynthesisDriver,
-      imageGenerationDriver: hostAdapters.imageGenerationDriver
+      imageGenerationDriver: hostAdapters.imageGenerationDriver,
+      providerInferenceSurfaceProvenance: providerInferenceExecutor == nil
+        ? hostAdapters.providerInferenceSurfaceProvenance
+        : (providerInferenceSurfaceProvenance ?? .composed),
+      browserGroundingSurfaceProvenance: hostAdapters.browserGroundingSurfaceProvenance,
+      audioTranscriptionSurfaceProvenance: hostAdapters.audioTranscriptionSurfaceProvenance,
+      speechSynthesisSurfaceProvenance: hostAdapters.speechSynthesisSurfaceProvenance,
+      imageGenerationSurfaceProvenance: hostAdapters.imageGenerationSurfaceProvenance
     )
   }
 

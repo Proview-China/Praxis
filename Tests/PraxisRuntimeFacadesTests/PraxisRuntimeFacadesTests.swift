@@ -918,7 +918,8 @@ struct PraxisRuntimeFacadesTests {
             ]
           ]
         ),
-        semanticMemoryStore: memoryStore
+        semanticMemoryStore: memoryStore,
+        providerInferenceSurfaceProvenance: .composed
       ),
       blueprint: PraxisRuntimeGatewayModule.bootstrap
     )
@@ -926,8 +927,8 @@ struct PraxisRuntimeFacadesTests {
     let inspection = try await facade.mpFacade.inspect()
     let compatibilityInspection = try await facade.inspectionFacade.inspectMp()
 
-    #expect(inspection.summary == "MP workflow surface is now reading HostRuntime memory and multimodal adapter state.")
-    #expect(inspection.workflowSummary.contains("provider inference surface available"))
+    #expect(inspection.summary == "MP workflow surface is reading HostRuntime memory and current adapter provenance.")
+    #expect(inspection.workflowSummary == "ICMA / Iterator / Checker / DbAgent / Dispatcher lanes have a composed provider inference surface available.")
     #expect(inspection.memoryStoreSummary.contains("1 primary records and omits 0 superseded records"))
     #expect(inspection.memoryStoreSummary.contains("Semantic search matches for inspection query: 1."))
     #expect(inspection.multimodalSummary == "No multimodal host chips are currently registered.")
@@ -1001,7 +1002,9 @@ struct PraxisRuntimeFacadesTests {
             ]
           ]
         ),
-        semanticMemoryStore: memoryStore
+        semanticMemoryStore: memoryStore,
+        providerInferenceSurfaceProvenance: .composed,
+        browserGroundingSurfaceProvenance: .composed
       ),
       blueprint: PraxisRuntimeGatewayModule.bootstrap
     )

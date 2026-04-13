@@ -2824,7 +2824,12 @@ public extension PraxisHostAdapterRegistry {
       conversationPresenter: PraxisLocalConversationPresenter(),
       audioTranscriptionDriver: PraxisLocalAudioTranscriptionDriver(),
       speechSynthesisDriver: PraxisLocalSpeechSynthesisDriver(rootDirectory: resolvedRootDirectory),
-      imageGenerationDriver: PraxisLocalImageGenerationDriver(rootDirectory: resolvedRootDirectory)
+      imageGenerationDriver: PraxisLocalImageGenerationDriver(rootDirectory: resolvedRootDirectory),
+      providerInferenceSurfaceProvenance: .localBaseline,
+      browserGroundingSurfaceProvenance: .localBaseline,
+      audioTranscriptionSurfaceProvenance: .localBaseline,
+      speechSynthesisSurfaceProvenance: .localBaseline,
+      imageGenerationSurfaceProvenance: .localBaseline
     )
   }
 }

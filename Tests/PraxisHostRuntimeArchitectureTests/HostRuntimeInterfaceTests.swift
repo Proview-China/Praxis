@@ -2529,8 +2529,8 @@ struct HostRuntimeInterfaceTests {
       mpFacade: PraxisMpFacade(
         inspectMpUseCase: StubInspectMpUseCase {
           PraxisMpInspection(
-            summary: "MP workflow surface is now reading HostRuntime memory and multimodal adapter state.",
-            workflowSummary: "Five-agent lanes have a provider inference surface available.",
+            summary: "MP workflow surface is reading HostRuntime memory and current adapter provenance.",
+            workflowSummary: "ICMA / Iterator / Checker / DbAgent / Dispatcher lanes have a composed provider inference surface available.",
             memoryStoreSummary: "Semantic memory bundle exposes 1 primary records and omits 0 superseded records. Semantic search matches for inspection query: 1.",
             multimodalSummary: "No multimodal host chips are currently registered.",
             issues: []
@@ -2573,7 +2573,7 @@ struct HostRuntimeInterfaceTests {
     #expect(response.events.isEmpty)
     #expect(response.snapshot?.kind == .inspection)
     #expect(response.snapshot?.title == "MP Inspection")
-    #expect(response.snapshot?.summary == "MP workflow surface is now reading HostRuntime memory and multimodal adapter state. Store: Semantic memory bundle exposes 1 primary records and omits 0 superseded records. Semantic search matches for inspection query: 1.")
+    #expect(response.snapshot?.summary == "MP workflow surface is reading HostRuntime memory and current adapter provenance. Store: Semantic memory bundle exposes 1 primary records and omits 0 superseded records. Semantic search matches for inspection query: 1.")
     #expect(response.snapshot?.projectID == nil)
   }
 

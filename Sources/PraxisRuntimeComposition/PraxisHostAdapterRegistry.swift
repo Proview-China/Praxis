@@ -53,6 +53,11 @@ public struct PraxisHostAdapterRegistry: Sendable {
   public let audioTranscriptionDriver: (any PraxisAudioTranscriptionDriver)?
   public let speechSynthesisDriver: (any PraxisSpeechSynthesisDriver)?
   public let imageGenerationDriver: (any PraxisImageGenerationDriver)?
+  public let providerInferenceSurfaceProvenance: PraxisHostAdapterSurfaceProvenance
+  public let browserGroundingSurfaceProvenance: PraxisHostAdapterSurfaceProvenance
+  public let audioTranscriptionSurfaceProvenance: PraxisHostAdapterSurfaceProvenance
+  public let speechSynthesisSurfaceProvenance: PraxisHostAdapterSurfaceProvenance
+  public let imageGenerationSurfaceProvenance: PraxisHostAdapterSurfaceProvenance
 
   public init(
     runtimeRootDirectory: URL? = nil,
@@ -93,7 +98,12 @@ public struct PraxisHostAdapterRegistry: Sendable {
     conversationPresenter: (any PraxisConversationPresenter)? = nil,
     audioTranscriptionDriver: (any PraxisAudioTranscriptionDriver)? = nil,
     speechSynthesisDriver: (any PraxisSpeechSynthesisDriver)? = nil,
-    imageGenerationDriver: (any PraxisImageGenerationDriver)? = nil
+    imageGenerationDriver: (any PraxisImageGenerationDriver)? = nil,
+    providerInferenceSurfaceProvenance: PraxisHostAdapterSurfaceProvenance? = nil,
+    browserGroundingSurfaceProvenance: PraxisHostAdapterSurfaceProvenance? = nil,
+    audioTranscriptionSurfaceProvenance: PraxisHostAdapterSurfaceProvenance? = nil,
+    speechSynthesisSurfaceProvenance: PraxisHostAdapterSurfaceProvenance? = nil,
+    imageGenerationSurfaceProvenance: PraxisHostAdapterSurfaceProvenance? = nil
   ) {
     self.runtimeRootDirectory = runtimeRootDirectory
     self.workspaceRootDirectory = workspaceRootDirectory
@@ -134,6 +144,16 @@ public struct PraxisHostAdapterRegistry: Sendable {
     self.audioTranscriptionDriver = audioTranscriptionDriver
     self.speechSynthesisDriver = speechSynthesisDriver
     self.imageGenerationDriver = imageGenerationDriver
+    self.providerInferenceSurfaceProvenance =
+      providerInferenceExecutor == nil ? .unavailable : (providerInferenceSurfaceProvenance ?? .composed)
+    self.browserGroundingSurfaceProvenance =
+      browserGroundingCollector == nil ? .unavailable : (browserGroundingSurfaceProvenance ?? .composed)
+    self.audioTranscriptionSurfaceProvenance =
+      audioTranscriptionDriver == nil ? .unavailable : (audioTranscriptionSurfaceProvenance ?? .composed)
+    self.speechSynthesisSurfaceProvenance =
+      speechSynthesisDriver == nil ? .unavailable : (speechSynthesisSurfaceProvenance ?? .composed)
+    self.imageGenerationSurfaceProvenance =
+      imageGenerationDriver == nil ? .unavailable : (imageGenerationSurfaceProvenance ?? .composed)
   }
 
   public static func scaffoldDefaults() -> PraxisHostAdapterRegistry {
@@ -239,7 +259,21 @@ public struct PraxisHostAdapterRegistry: Sendable {
           mimeType: "image/png",
           revisedPrompt: request.prompt
         )
-      }
+      },
+      providerInferenceSurfaceProvenance: .scaffoldPlaceholder,
+      browserGroundingSurfaceProvenance: .scaffoldPlaceholder,
+      audioTranscriptionSurfaceProvenance: .scaffoldPlaceholder,
+      speechSynthesisSurfaceProvenance: .scaffoldPlaceholder,
+      imageGenerationSurfaceProvenance: .scaffoldPlaceholder
     )
   }
+}
+
+/// Describes whether one composed host surface is absent, provided by a scaffold placeholder,
+/// provided by the local baseline, or backed by a non-baseline composed adapter.
+public enum PraxisHostAdapterSurfaceProvenance: String, Sendable {
+  case unavailable
+  case scaffoldPlaceholder
+  case localBaseline
+  case composed
 }

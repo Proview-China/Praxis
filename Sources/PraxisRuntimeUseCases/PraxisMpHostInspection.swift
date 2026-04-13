@@ -25,6 +25,8 @@ public struct PraxisMpHostInspectionService: Sendable {
     projectID: String,
     hostAdapters: PraxisHostAdapterRegistry
   ) -> PraxisMpSmoke {
+    let providerInferenceProvenance = hostAdapters.providerInferenceSurfaceProvenance
+    let browserGroundingProvenance = hostAdapters.browserGroundingSurfaceProvenance
     let checks: [PraxisRuntimeSmokeCheckRecord] = [
       smokeCheck(
         id: "mp.memory.store",
@@ -47,19 +49,19 @@ public struct PraxisMpHostInspectionService: Sendable {
       smokeCheck(
         id: "mp.provider.inference",
         gate: .providerInference,
-        ready: hostAdapters.providerInferenceExecutor != nil,
+        ready: providerInferenceProvenance != .unavailable,
         readyStatus: .ready,
         missingStatus: .degraded,
-        readySummary: "Provider inference surface is available for future MP checker/align enrichment.",
+        readySummary: providerInferenceReadySummary(for: providerInferenceProvenance),
         fallbackSummary: "Provider inference is absent; MP remains local-baseline only."
       ),
       smokeCheck(
         id: "mp.browser.grounding",
         gate: .browserGrounding,
-        ready: hostAdapters.browserGroundingCollector != nil,
+        ready: browserGroundingProvenance != .unavailable,
         readyStatus: .ready,
         missingStatus: .degraded,
-        readySummary: "Browser grounding collector is wired for future evidence-backed memory capture.",
+        readySummary: browserGroundingReadySummary(for: browserGroundingProvenance),
         fallbackSummary: "Browser grounding collector is absent; browser-backed memory capture remains unavailable."
       ),
     ]
@@ -101,8 +103,8 @@ public struct PraxisMpHostInspectionService: Sendable {
     ) ?? []
 
     return PraxisMpInspection(
-      summary: "MP workflow surface is now reading HostRuntime memory and multimodal adapter state.",
-      workflowSummary: workflowSummary(providerInferenceReady: hostAdapters.providerInferenceExecutor != nil),
+      summary: "MP workflow surface is reading HostRuntime memory and current adapter provenance.",
+      workflowSummary: workflowSummary(providerInferenceProvenance: hostAdapters.providerInferenceSurfaceProvenance),
       memoryStoreSummary: memoryStoreSummary(
         bundle: memoryBundle,
         semanticMatchCount: semanticMatches.count
@@ -132,10 +134,49 @@ public struct PraxisMpHostInspectionService: Sendable {
     )
   }
 
-  private func workflowSummary(providerInferenceReady: Bool) -> String {
-    providerInferenceReady
-      ? "ICMA / Iterator / Checker / DbAgent / Dispatcher lanes now have a provider inference surface available for future host-backed execution."
-      : "Five-agent lanes remain Core-side protocols until a provider inference surface is composed."
+  private func providerInferenceReadySummary(
+    for provenance: PraxisHostAdapterSurfaceProvenance
+  ) -> String {
+    switch provenance {
+    case .scaffoldPlaceholder:
+      return "Provider inference surface is wired through scaffold placeholders for assembly smoke coverage and does not claim a live provider-backed lane."
+    case .localBaseline:
+      return "Provider inference surface is wired through a local heuristic baseline for MP enrichment smoke coverage."
+    case .composed:
+      return "Provider inference surface is composed for MP enrichment."
+    case .unavailable:
+      return "Provider inference is absent; MP remains local-baseline only."
+    }
+  }
+
+  private func browserGroundingReadySummary(
+    for provenance: PraxisHostAdapterSurfaceProvenance
+  ) -> String {
+    switch provenance {
+    case .scaffoldPlaceholder:
+      return "Browser grounding surface is wired through scaffold placeholders and does not claim fetched or verified evidence."
+    case .localBaseline:
+      return "Browser grounding surface is wired through a local baseline collector that yields candidate evidence without claiming a fetched browser session."
+    case .composed:
+      return "Browser grounding collector is composed for evidence-backed memory capture."
+    case .unavailable:
+      return "Browser grounding collector is absent; browser-backed memory capture remains unavailable."
+    }
+  }
+
+  private func workflowSummary(
+    providerInferenceProvenance: PraxisHostAdapterSurfaceProvenance
+  ) -> String {
+    switch providerInferenceProvenance {
+    case .scaffoldPlaceholder:
+      return "ICMA / Iterator / Checker / DbAgent / Dispatcher lanes can exercise provider inference contracts through scaffold placeholders; this profile does not claim local-baseline execution or an external provider-backed service."
+    case .localBaseline:
+      return "ICMA / Iterator / Checker / DbAgent / Dispatcher lanes can exercise a provider inference lane through a local heuristic baseline; this profile does not claim an external provider-backed service."
+    case .composed:
+      return "ICMA / Iterator / Checker / DbAgent / Dispatcher lanes have a composed provider inference surface available."
+    case .unavailable:
+      return "Five-agent lanes remain Core-side protocols until a provider inference surface is composed."
+    }
   }
 
   private func memoryStoreSummary(
@@ -166,6 +207,28 @@ public struct PraxisMpHostInspectionService: Sendable {
     if semanticMatchCount == 0 {
       issues.append("No semantic search matches are currently available for the local MP inspection query.")
     }
+    if [
+      hostAdapters.providerInferenceSurfaceProvenance,
+      hostAdapters.browserGroundingSurfaceProvenance,
+      hostAdapters.audioTranscriptionSurfaceProvenance,
+      hostAdapters.speechSynthesisSurfaceProvenance,
+      hostAdapters.imageGenerationSurfaceProvenance,
+    ].contains(.localBaseline) {
+      issues.append(
+        "Some provider and multimodal lanes are currently wired through local baselines; availability does not imply an external host-backed service."
+      )
+    }
+    if [
+      hostAdapters.providerInferenceSurfaceProvenance,
+      hostAdapters.browserGroundingSurfaceProvenance,
+      hostAdapters.audioTranscriptionSurfaceProvenance,
+      hostAdapters.speechSynthesisSurfaceProvenance,
+      hostAdapters.imageGenerationSurfaceProvenance,
+    ].contains(.scaffoldPlaceholder) {
+      issues.append(
+        "Some provider and multimodal lanes are currently scaffold placeholders; availability only confirms assembly coverage, not local-baseline or host-backed execution."
+      )
+    }
     if hostAdapters.browserGroundingCollector == nil
       || hostAdapters.audioTranscriptionDriver == nil
       || hostAdapters.speechSynthesisDriver == nil
@@ -177,15 +240,43 @@ public struct PraxisMpHostInspectionService: Sendable {
 
   private func multimodalSummary(from hostAdapters: PraxisHostAdapterRegistry) -> String {
     let chips = [
-      hostAdapters.audioTranscriptionDriver != nil ? "audio.transcribe" : nil,
-      hostAdapters.speechSynthesisDriver != nil ? "speech.synthesize" : nil,
-      hostAdapters.imageGenerationDriver != nil ? "image.generate" : nil,
-      hostAdapters.browserGroundingCollector != nil ? "browser.ground" : nil,
+      chipSummary(
+        id: "audio.transcribe",
+        provenance: hostAdapters.audioTranscriptionSurfaceProvenance
+      ),
+      chipSummary(
+        id: "speech.synthesize",
+        provenance: hostAdapters.speechSynthesisSurfaceProvenance
+      ),
+      chipSummary(
+        id: "image.generate",
+        provenance: hostAdapters.imageGenerationSurfaceProvenance
+      ),
+      chipSummary(
+        id: "browser.ground",
+        provenance: hostAdapters.browserGroundingSurfaceProvenance
+      ),
     ].compactMap { $0 }
 
     if chips.isEmpty {
       return "No multimodal host chips are currently registered."
     }
     return "Multimodal host chips: \(chips.joined(separator: ", "))"
+  }
+
+  private func chipSummary(
+    id: String,
+    provenance: PraxisHostAdapterSurfaceProvenance
+  ) -> String? {
+    switch provenance {
+    case .unavailable:
+      return nil
+    case .scaffoldPlaceholder:
+      return "\(id) (scaffold-placeholder)"
+    case .localBaseline:
+      return "\(id) (local-baseline)"
+    case .composed:
+      return id
+    }
   }
 }

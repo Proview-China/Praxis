@@ -1,7 +1,9 @@
 import Foundation
 import Testing
 @testable import PraxisRuntimeComposition
+@testable import PraxisRuntimeUseCases
 import PraxisCoreTypes
+import PraxisProviderContracts
 import PraxisToolingContracts
 import PraxisUserIOContracts
 import PraxisWorkspaceContracts
@@ -21,6 +23,20 @@ private final class CompositionGuardShellExecutor: PraxisShellExecutor, @uncheck
 private final class CompositionGuardUserInputDriver: PraxisUserInputDriver, @unchecked Sendable {
   func prompt(_ request: PraxisPromptRequest) async throws -> PraxisPromptResponse {
     throw PraxisError.unsupportedOperation("Composition guard test double should not prompt for user input.")
+  }
+}
+
+private final class CompositionGuardProviderInferenceExecutor: PraxisProviderInferenceExecutor, @unchecked Sendable {
+  func infer(_ request: PraxisProviderInferenceRequest) async throws -> PraxisProviderInferenceResponse {
+    PraxisProviderInferenceResponse(
+      output: .init(summary: "composition-guard override"),
+      receipt: .init(
+        capabilityKey: "provider.infer",
+        backend: "composition-guard",
+        status: .succeeded,
+        summary: "Composition guard override."
+      )
+    )
   }
 }
 
@@ -108,6 +124,35 @@ struct HostRuntimeCompositionGuardTests {
     #expect(Self.sameInstance(graph.hostAdapters.shellExecutor.map { $0 as AnyObject }, originalShellExecutor))
     #expect(Self.sameInstance(graph.userInputDriver.map { $0 as AnyObject }, overrideUserInputDriver))
     #expect(Self.sameInstance(graph.hostAdapters.userInputDriver.map { $0 as AnyObject }, overrideUserInputDriver))
+  }
+
+  @Test
+  func dependencyGraphProviderInferenceOverrideDefaultsProvenanceToCurrentOverrideSurface() {
+    let boundaries = [
+      PraxisBoundaryDescriptor(name: "PraxisRuntimeComposition", responsibility: "composition"),
+    ]
+    let registry = PraxisHostAdapterRegistry(
+      providerInferenceExecutor: CompositionGuardProviderInferenceExecutor(),
+      providerInferenceSurfaceProvenance: .localBaseline
+    )
+    let overrideProviderInferenceExecutor = CompositionGuardProviderInferenceExecutor()
+
+    let graph = PraxisDependencyGraph(
+      boundaries: boundaries,
+      hostAdapters: registry,
+      providerInferenceExecutor: overrideProviderInferenceExecutor
+    )
+    let smoke = PraxisMpHostInspectionService().smoke(
+      projectID: "mp.local-runtime",
+      hostAdapters: graph.hostAdapters
+    )
+
+    #expect(Self.sameInstance(graph.providerInferenceExecutor.map { $0 as AnyObject }, overrideProviderInferenceExecutor))
+    #expect(graph.hostAdapters.providerInferenceSurfaceProvenance == .composed)
+    #expect(
+      smoke.checks.first { $0.gate == .providerInference }?.summary
+        == "Provider inference surface is composed for MP enrichment."
+    )
   }
 
   @Test
