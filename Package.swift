@@ -101,6 +101,7 @@ hostRuntimeArchitectureTestsTarget = .testTarget(
     "PraxisRuntimeFacades",
     "PraxisRuntimeInterface",
     "PraxisFFI",
+    "PraxisRuntimeKit",
     "PraxisMpTypes",
   ],
   path: "Tests/PraxisHostRuntimeArchitectureTests",
@@ -123,6 +124,7 @@ let package = Package(
     .library(name: "PraxisMpDomain", targets: mpTargets),
     .library(name: "PraxisHostContracts", targets: hostContractTargets),
     .library(name: "PraxisHostRuntime", targets: hostRuntimeTargets),
+    .library(name: "PraxisRuntimeKit", targets: ["PraxisRuntimeKit"]),
     .library(name: "PraxisArchitectureTests", targets: architectureTestTargets),
   ],
   targets: [
@@ -577,6 +579,21 @@ let package = Package(
       ],
       path: "Sources/PraxisFFI",
     ),
+    .target(
+      name: "PraxisRuntimeKit",
+      dependencies: [
+        "PraxisCapabilityContracts",
+        "PraxisCmpTypes",
+        "PraxisCoreTypes",
+        "PraxisGoal",
+        "PraxisMpTypes",
+        "PraxisSession",
+        "PraxisTapTypes",
+        "PraxisRuntimeFacades",
+        "PraxisRuntimeGateway",
+      ],
+      path: "Sources/PraxisRuntimeKit",
+    ),
     .testTarget(
       name: "PraxisFoundationArchitectureTests",
       dependencies: [
@@ -914,6 +931,13 @@ let package = Package(
       path: "Tests/PraxisHostContractsArchitectureTests",
     ),
     hostRuntimeArchitectureTestsTarget,
+    .testTarget(
+      name: "PraxisRuntimeKitTests",
+      dependencies: [
+        "PraxisRuntimeKit",
+      ],
+      path: "Tests/PraxisRuntimeKitTests",
+    ),
     .testTarget(
       name: "PraxisRuntimeFacadesTests",
       dependencies: [

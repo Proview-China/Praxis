@@ -112,6 +112,12 @@ private enum HostRuntimeBoundaryGuardSupport {
     return violations
   }
 
+  static func fileContents(in relativeDirectory: String) throws -> [(URL, String)] {
+    try swiftSourceFiles(in: relativeDirectory).map { sourceFile in
+      (sourceFile, try String(contentsOf: sourceFile, encoding: .utf8))
+    }
+  }
+
   static func nonAllowlistedImports(
     in relativeDirectory: String,
     allowedModules: [String]
@@ -176,6 +182,168 @@ struct HostRuntimeBoundaryGuardTests {
         Host-neutral middle-layer modules must remain presentation-free.
         Unexpected imports:
         \(violations.joined(separator: "\n"))
+        """
+      )
+    }
+  }
+
+  @Test
+  func runtimeKitAvoidsTransportAndCompositionImports() throws {
+    let violations = try HostRuntimeBoundaryGuardSupport.unexpectedImports(
+      in: "Sources/PraxisRuntimeKit",
+      forbiddenModules: [
+        "PraxisRuntimeComposition",
+        "PraxisRuntimeInterface",
+        "PraxisFFI",
+      ]
+    )
+
+    if !violations.isEmpty {
+      Issue.record(
+        """
+        PraxisRuntimeKit must stay above composition and transport layers.
+        Unexpected imports:
+        \(violations.joined(separator: "\n"))
+        """
+      )
+    }
+  }
+
+  @Test
+  func runtimeKitPublicSurfaceAvoidsTransportAndBootstrapTypes() throws {
+    let forbiddenPublicSnippets = [
+      "public struct PraxisRuntimeClientConfiguration",
+      "public let configuration",
+      "public let runtimeFacade",
+      "public static func makeClient(",
+      "public func makeGoalSource(",
+      "public func normalizeGoal(",
+      "public func compileGoal(",
+      "public func inspectTap(",
+      "public func inspectCmp(",
+      "public func inspectMp(",
+      "public func readbackTapStatus(",
+      "public func readbackTapHistory(",
+      "public func status(\n    projectID:",
+      "public func history(\n    projectID:",
+      "public func tapStatus(",
+      "PraxisHostAdapterRegistry",
+      "PraxisRuntimeBlueprint",
+      "PraxisRuntimeInterface",
+      "PraxisFFI",
+    ]
+
+    let violations = try HostRuntimeBoundaryGuardSupport.fileContents(in: "Sources/PraxisRuntimeKit")
+      .flatMap { sourceFile, contents in
+        forbiddenPublicSnippets.compactMap { snippet in
+          contents.contains(snippet) ? "\(sourceFile.path): \(snippet)" : nil
+        }
+      }
+
+    if !violations.isEmpty {
+      Issue.record(
+        """
+        PraxisRuntimeKit public surface must not expose transport, export, or composition-specific details.
+        Violations:
+        \(violations.joined(separator: "\n"))
+        """
+      )
+    }
+
+    let runtimeClientSource = HostRuntimeBoundaryGuardSupport.repositoryRoot
+      .appendingPathComponent("Sources/PraxisRuntimeKit/PraxisRuntimeClient.swift")
+    let runtimeClientContents = try String(contentsOf: runtimeClientSource, encoding: .utf8)
+    let forbiddenRuntimeClientSnippets = [
+      "public func runGoal(",
+      "public func resumeRun(",
+    ]
+    let runtimeClientViolations = forbiddenRuntimeClientSnippets.compactMap { snippet in
+      runtimeClientContents.contains(snippet) ? "\(runtimeClientSource.path): \(snippet)" : nil
+    }
+
+    if !runtimeClientViolations.isEmpty {
+      Issue.record(
+        """
+        PraxisRuntimeClient should stay as a thin shell over narrower scoped clients.
+        Violations:
+        \(runtimeClientViolations.joined(separator: "\n"))
+        """
+      )
+    }
+
+    let scopedSurfaceChecks: [(String, [String])] = [
+      (
+        "Sources/PraxisRuntimeKit/PraxisRuntimeRunClient.swift",
+        [
+          "public func runGoal(",
+          "public func resumeRun(_ runID: String)",
+        ]
+      ),
+      (
+        "Sources/PraxisRuntimeKit/PraxisRuntimeTapClient.swift",
+        [
+          "public func project(_ projectID: String)",
+          "public func overview(\n    agentID: String? = nil,",
+        ]
+      ),
+      (
+        "Sources/PraxisRuntimeKit/PraxisRuntimeCmpClient.swift",
+        [
+          "public func project(_ projectID: String)",
+          "public func bootstrap(\n    agentIDs: [String] = [],",
+          "public func overview(agentID: String? = nil)",
+          "public func approvalOverview(\n    agentID: String? = nil,",
+          "public func request(\n    agentID: String,",
+          "public func decide(\n    agentID: String,",
+          "public func readback(\n    agentID: String? = nil,",
+          "public func openSession(sessionID: String? = nil)",
+        ]
+      ),
+      (
+        "Sources/PraxisRuntimeKit/PraxisRuntimeMpClient.swift",
+        [
+          "public func project(_ projectID: String)",
+          "public func search(\n    _ query: String,",
+          "public func overview(\n    query: String = \"\",",
+          "public func resolve(\n    _ query: String,",
+          "public func history(\n    for query: String,",
+          "public func align(\n    alignedAt: String? = nil,",
+          "public func promote(\n    to targetPromotionState:",
+          "public func archive(\n    archivedAt: String? = nil,",
+          "public func memory(_ memoryID: String)",
+        ]
+      ),
+      (
+        "Sources/PraxisRuntimeKit/PraxisRuntimeKitInputs.swift",
+        [
+          "public let sessionID: String?",
+          "public let agentID: String?",
+          "public let agentIDs: [String]",
+          "public let defaultAgentID: String?",
+          "public let targetAgentID: String",
+          "public let capabilityID: String",
+          "public let reviewerAgentID: String?",
+          "public let requesterAgentID: String",
+          "public let requesterSessionID: String?",
+          "public let targetSessionID: String?",
+        ]
+      ),
+    ]
+
+    let scopedViolations = try scopedSurfaceChecks.flatMap { relativePath, snippets in
+      let fileURL = HostRuntimeBoundaryGuardSupport.repositoryRoot.appendingPathComponent(relativePath)
+      let contents = try String(contentsOf: fileURL, encoding: .utf8)
+      return snippets.compactMap { snippet in
+        contents.contains(snippet) ? "\(fileURL.path): \(snippet)" : nil
+      }
+    }
+
+    if !scopedViolations.isEmpty {
+      Issue.record(
+        """
+        Scoped RuntimeKit clients should expose grouped overview/resource entrypoints instead of flat duplicate commands.
+        Violations:
+        \(scopedViolations.joined(separator: "\n"))
         """
       )
     }

@@ -1,3 +1,4 @@
+import Foundation
 import PraxisCapabilityCatalog
 import PraxisCapabilityContracts
 import PraxisCapabilityPlanning
@@ -156,6 +157,23 @@ public enum PraxisRuntimeGatewayFactory {
     try makeRuntimeFacade(hostAdapters: sharedLocalHostAdapters, blueprint: PraxisRuntimeGatewayModule.bootstrap)
   }
 
+  /// Builds a runtime facade using local default host adapters rooted at the supplied directory.
+  ///
+  /// - Parameters:
+  ///   - rootDirectory: Optional runtime root directory used to construct local default adapters.
+  ///   - blueprint: Runtime topology metadata used by neutral snapshots.
+  /// - Returns: A runtime facade backed by local default host adapters.
+  /// - Throws: Any dependency graph validation error raised by composition.
+  public static func makeRuntimeFacade(
+    rootDirectory: URL?,
+    blueprint: PraxisRuntimeBlueprint = PraxisRuntimeGatewayModule.bootstrap
+  ) throws -> PraxisRuntimeFacade {
+    try makeRuntimeFacade(
+      hostAdapters: PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory),
+      blueprint: blueprint
+    )
+  }
+
   /// Builds a runtime facade using explicit host adapters and the default gateway blueprint.
   ///
   /// - Parameter hostAdapters: Host adapters used to assemble runtime dependencies.
@@ -184,6 +202,23 @@ public enum PraxisRuntimeGatewayFactory {
   /// - Throws: Any dependency graph validation error raised by composition.
   public static func makeRuntimeInterface() throws -> PraxisRuntimeInterfaceSession {
     try makeRuntimeInterface(hostAdapters: sharedLocalHostAdapters, blueprint: PraxisRuntimeGatewayModule.bootstrap)
+  }
+
+  /// Builds one runtime interface session using local default host adapters rooted at the supplied directory.
+  ///
+  /// - Parameters:
+  ///   - rootDirectory: Optional runtime root directory used to construct local default adapters.
+  ///   - blueprint: Runtime topology metadata used by neutral snapshots.
+  /// - Returns: A runtime interface session backed by local default host adapters.
+  /// - Throws: Any dependency graph validation error raised by composition.
+  public static func makeRuntimeInterface(
+    rootDirectory: URL?,
+    blueprint: PraxisRuntimeBlueprint = PraxisRuntimeGatewayModule.bootstrap
+  ) throws -> PraxisRuntimeInterfaceSession {
+    try makeRuntimeInterface(
+      hostAdapters: PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory),
+      blueprint: blueprint
+    )
   }
 
   /// Builds one runtime interface session using explicit host adapters and the default gateway blueprint.
@@ -215,6 +250,22 @@ public enum PraxisRuntimeGatewayFactory {
   /// - Returns: A registry that lazily materializes runtime interface sessions.
   public static func makeRuntimeInterfaceRegistry() -> PraxisRuntimeInterfaceRegistry {
     makeRuntimeInterfaceRegistry(hostAdapters: sharedLocalHostAdapters, blueprint: PraxisRuntimeGatewayModule.bootstrap)
+  }
+
+  /// Builds a registry using local default host adapters rooted at the supplied directory.
+  ///
+  /// - Parameters:
+  ///   - rootDirectory: Optional runtime root directory used to construct local default adapters.
+  ///   - blueprint: Runtime topology metadata used by neutral snapshots.
+  /// - Returns: A registry that lazily materializes runtime interface sessions.
+  public static func makeRuntimeInterfaceRegistry(
+    rootDirectory: URL?,
+    blueprint: PraxisRuntimeBlueprint = PraxisRuntimeGatewayModule.bootstrap
+  ) -> PraxisRuntimeInterfaceRegistry {
+    makeRuntimeInterfaceRegistry(
+      hostAdapters: PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory),
+      blueprint: blueprint
+    )
   }
 
   /// Builds a registry that opens independent runtime sessions using explicit host adapters and the default blueprint.

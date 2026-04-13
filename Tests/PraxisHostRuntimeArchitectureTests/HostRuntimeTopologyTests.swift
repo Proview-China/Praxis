@@ -5,6 +5,7 @@ import Testing
 @testable import PraxisRuntimeFacades
 @testable import PraxisRuntimeGateway
 @testable import PraxisRuntimeInterface
+@testable import PraxisRuntimeKit
 @testable import PraxisRuntimeUseCases
 
 struct HostRuntimeTopologyTests {
@@ -26,6 +27,7 @@ struct HostRuntimeTopologyTests {
     #expect(PraxisRuntimeInterfaceModule.boundary.name == "PraxisRuntimeInterface")
     #expect(PraxisRuntimeGatewayModule.boundary.name == "PraxisRuntimeGateway")
     #expect(PraxisFFIModule.boundary.name == "PraxisFFI")
+    #expect(PraxisRuntimeKitModule.boundary.name == "PraxisRuntimeKit")
   }
 
   @Test
@@ -75,5 +77,32 @@ struct HostRuntimeTopologyTests {
     #expect(packageManifest.contains(#"name: "PraxisCLI""#) == false)
     #expect(packageManifest.contains(#"name: "PraxisAppleUI""#) == false)
     #expect(ffiBridgeSource.contains("public final class PraxisFFIBridge"))
+  }
+
+  @Test
+  func runtimeKitTargetDeclaresCallerFriendlySurfaceWithoutTransportOwnership() throws {
+    let projectRoot = URL(fileURLWithPath: #filePath)
+      .deletingLastPathComponent()
+      .deletingLastPathComponent()
+      .deletingLastPathComponent()
+    let packageManifest = try String(contentsOf: projectRoot.appendingPathComponent("Package.swift"))
+
+    guard let runtimeKitStart = packageManifest.range(
+      of: #"name: "PraxisRuntimeKit","#,
+      options: .backwards
+    )?.lowerBound,
+          let runtimeKitEnd = packageManifest[runtimeKitStart...].range(of: #"path: "Sources/PraxisRuntimeKit""#)?.upperBound else {
+      Issue.record("Expected Package.swift to declare a dedicated PraxisRuntimeKit target block.")
+      return
+    }
+
+    let runtimeKitTargetBlock = String(packageManifest[runtimeKitStart..<runtimeKitEnd])
+
+    #expect(packageManifest.contains(#".library(name: "PraxisRuntimeKit", targets: ["PraxisRuntimeKit"])"#))
+    #expect(runtimeKitTargetBlock.contains(#""PraxisRuntimeGateway""#))
+    #expect(runtimeKitTargetBlock.contains(#""PraxisRuntimeFacades""#))
+    #expect(runtimeKitTargetBlock.contains(#""PraxisRuntimeComposition""#) == false)
+    #expect(runtimeKitTargetBlock.contains(#""PraxisRuntimeInterface""#) == false)
+    #expect(runtimeKitTargetBlock.contains(#""PraxisFFI""#) == false)
   }
 }

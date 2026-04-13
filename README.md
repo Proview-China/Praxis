@@ -25,6 +25,7 @@ Praxis 现在按纯 framework 方向继续收口。
   - domain targets
   - host contracts
   - runtime composition / use cases / facades / interface / gateway
+  - `PraxisRuntimeKit` 高层 Swift framework API（收敛为 `runs` / `tap` / `cmp` / `mp` 四个稳定入口，参数面继续用 RuntimeKit 自己的 typed input / options model，并把 `project` / `run` / `session` / `agent` / `capability` / `memory` 这些标识符收成轻量 ref 类型）
   - FFI 导出边界
 - 旧 TS 文件路径若仍出现在部分 boundary metadata 或 archive 文档中，应视为历史谱系引用，不代表仓库中仍存在可执行实现。
 
