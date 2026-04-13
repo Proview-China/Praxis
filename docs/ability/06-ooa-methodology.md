@@ -1,2 +1,0 @@
-# OOA Methodology
-
