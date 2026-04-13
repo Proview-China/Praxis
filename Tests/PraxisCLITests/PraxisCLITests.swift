@@ -95,6 +95,23 @@ struct PraxisCLITests {
   }
 
   @Test
+  func runGoalParserAllowsFreeformSummaryContainingFlagLikeTokens() throws {
+    let parser = PraxisCLICommandParser()
+    let invocation = try parser.parse(["run-goal", "fix", "parser", "--", "preserve", "empty", "state"])
+
+    switch invocation {
+    case .runtime(let command):
+      guard case .runGoal(let payload) = command.request else {
+        Issue.record("Expected run-goal parse to produce a runGoal request.")
+        return
+      }
+      #expect(payload.payloadSummary == "fix parser -- preserve empty state")
+    default:
+      Issue.record("Expected run-goal parse to produce a runtime invocation.")
+    }
+  }
+
+  @Test
   func runGoalParserGeneratesDistinctGoalAndSessionIdentifiers() throws {
     let parser = PraxisCLICommandParser()
     let first = try parser.parse(["run-goal", "First CLI goal"])
@@ -295,6 +312,32 @@ struct PraxisCLITests {
     }
 
     #expect(runtimeInterface.handledRequests.isEmpty)
+  }
+
+  @Test
+  func cliAppAllowsRunGoalSummaryContainingFlagLikeTokens() async throws {
+    let runtimeInterface = StubRuntimeInterface(
+      response: .success(
+        snapshot: .init(
+          kind: .run,
+          title: "Run run:session.cli.test:cli.goal.test",
+          summary: "Started running"
+        )
+      )
+    )
+    let app = PraxisCLIApp(
+      configuration: .init(interactive: false),
+      runtimeInterface: runtimeInterface
+    )
+
+    _ = try await app.run(arguments: ["run-goal", "fix", "parser", "--", "preserve", "empty", "state"])
+
+    #expect(runtimeInterface.handledRequests.count == 1)
+    guard case .runGoal(let payload) = runtimeInterface.handledRequests.first else {
+      Issue.record("Expected run-goal invocation to reach runtime interface.")
+      return
+    }
+    #expect(payload.payloadSummary == "fix parser -- preserve empty state")
   }
 
   @Test

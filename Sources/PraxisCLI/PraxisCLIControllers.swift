@@ -209,7 +209,7 @@ public struct PraxisCLICommandParser: Sendable {
     case "inspect-mp":
       return .runtime(.init(request: .inspectMp))
     case "run-goal":
-      let payloadSummary = try parseRequiredPositionalArgument(
+      let payloadSummary = try parseRequiredFreeformArgument(
         command: "run-goal",
         arguments: arguments.dropFirst()
       )
@@ -227,7 +227,7 @@ public struct PraxisCLICommandParser: Sendable {
         )
       )
     case "resume-run":
-      let runID = try parseRequiredPositionalArgument(
+      let runID = try parseRequiredStrictPositionalArgument(
         command: "resume-run",
         arguments: arguments.dropFirst()
       )
@@ -253,7 +253,30 @@ public struct PraxisCLICommandParser: Sendable {
     }
   }
 
-  private func parseRequiredPositionalArgument(
+  private func parseRequiredFreeformArgument(
+    command: String,
+    arguments: ArraySlice<String>
+  ) throws -> String {
+    guard !arguments.isEmpty else {
+      throw PraxisCLIError.missingArgument(command)
+    }
+
+    let joined = arguments
+      .joined(separator: " ")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !joined.isEmpty else {
+      throw PraxisCLIError.missingArgument(command)
+    }
+
+    if arguments.allSatisfy({ $0.hasPrefix("--") }) {
+      let invalidFlag = arguments.first ?? ""
+      throw PraxisCLIError.invalidFlag(invalidFlag)
+    }
+
+    return joined
+  }
+
+  private func parseRequiredStrictPositionalArgument(
     command: String,
     arguments: ArraySlice<String>
   ) throws -> String {
