@@ -2,12 +2,20 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  applyCliDefaultsToCapabilityRequest,
   normalizeCoreTaskStatus,
   parseCliOptions,
   parseCoreActionEnvelope,
   parseTapRequest,
   shouldStopCoreCapabilityLoop,
 } from "./shared.js";
+import type { OpenAILiveConfig } from "./shared.js";
+
+const TEST_CONFIG = {
+  apiKey: "test-openai-key",
+  baseURL: "https://api.example.com/v1",
+  model: "gpt-5.4",
+} satisfies OpenAILiveConfig;
 
 test("parseCliOptions reads once, history-turns, and direct ui mode", () => {
   const options = parseCliOptions([
@@ -104,4 +112,59 @@ test("shouldStopCoreCapabilityLoop stops on hard-stop statuses or loop budget", 
     completedLoops: 4,
     maxLoops: 4,
   }), true);
+});
+
+test("applyCliDefaultsToCapabilityRequest keeps explicit browser.playwright inputs ahead of inferred and inherited defaults", async () => {
+  const request = {
+    capabilityKey: "browser.playwright",
+    reason: "Open the page",
+    input: {
+      action: "navigate",
+      url: "https://example.com",
+      headless: false,
+      browser: "webkit",
+      isolated: true,
+    },
+  };
+
+  const rewritten = await applyCliDefaultsToCapabilityRequest(
+    request,
+    TEST_CONFIG,
+    "请无头打开这个页面",
+    {
+      headless: true,
+      browser: "firefox",
+      isolated: false,
+    },
+  );
+
+  assert.equal(rewritten.input.headless, false);
+  assert.equal(rewritten.input.browser, "webkit");
+  assert.equal(rewritten.input.isolated, true);
+});
+
+test("applyCliDefaultsToCapabilityRequest lets browser.playwright inherit prior browser context after user-message inference", async () => {
+  const request = {
+    capabilityKey: "browser.playwright",
+    reason: "Open the page",
+    input: {
+      action: "navigate",
+      url: "https://example.com",
+    },
+  };
+
+  const rewritten = await applyCliDefaultsToCapabilityRequest(
+    request,
+    TEST_CONFIG,
+    "请无头打开这个页面",
+    {
+      headless: false,
+      browser: "chromium",
+      isolated: true,
+    },
+  );
+
+  assert.equal(rewritten.input.headless, true);
+  assert.equal(rewritten.input.browser, "chromium");
+  assert.equal(rewritten.input.isolated, true);
 });

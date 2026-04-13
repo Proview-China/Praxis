@@ -571,15 +571,46 @@ export function resolveCliDefaultCarrierRoute(
   };
 }
 
+type BrowserPlaywrightCliContext = {
+  headless?: boolean;
+  browser?: string;
+  isolated?: boolean;
+};
+
+function normalizeBrowserPlaywrightCliContext(
+  context?: BrowserPlaywrightCliContext,
+): BrowserPlaywrightCliContext | undefined {
+  if (!context) {
+    return undefined;
+  }
+
+  const normalized: BrowserPlaywrightCliContext = {};
+  if (typeof context.headless === "boolean") {
+    normalized.headless = context.headless;
+  }
+  if (context.browser === "chrome"
+    || context.browser === "chromium"
+    || context.browser === "firefox"
+    || context.browser === "webkit") {
+    normalized.browser = context.browser;
+  }
+  if (typeof context.isolated === "boolean") {
+    normalized.isolated = context.isolated;
+  }
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
 export async function applyCliDefaultsToCapabilityRequest(
   request: CoreCapabilityRequest,
   config: OpenAILiveConfig,
   userMessage: string,
+  browserContext?: BrowserPlaywrightCliContext,
 ): Promise<CoreCapabilityRequest> {
   if (request.capabilityKey !== "search.ground" && request.capabilityKey !== "search.web") {
     if (request.capabilityKey === "browser.playwright") {
       const rewrittenRequest = rewriteBrowserNavigateRequestForConcreteSearch(request, userMessage);
       const preferredHeadless = inferBrowserHeadlessPreference(userMessage);
+      const inheritedBrowserContext = normalizeBrowserPlaywrightCliContext(browserContext);
       return {
         ...rewrittenRequest,
         input: {
@@ -588,7 +619,19 @@ export async function applyCliDefaultsToCapabilityRequest(
             ? {}
             : preferredHeadless !== undefined
               ? { headless: preferredHeadless }
+              : inheritedBrowserContext?.headless !== undefined
+                ? { headless: inheritedBrowserContext.headless }
               : { headless: false }),
+          ...(typeof rewrittenRequest.input.browser === "string"
+            ? {}
+            : inheritedBrowserContext?.browser
+              ? { browser: inheritedBrowserContext.browser }
+              : {}),
+          ...(typeof rewrittenRequest.input.isolated === "boolean"
+            ? {}
+            : inheritedBrowserContext?.isolated !== undefined
+              ? { isolated: inheritedBrowserContext.isolated }
+              : {}),
         },
       };
     }
