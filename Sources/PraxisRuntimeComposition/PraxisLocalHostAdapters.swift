@@ -42,6 +42,139 @@ private struct PraxisLocalRuntimePaths: Sendable {
 
 private let sqliteTransientDestructor = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 private let localSQLiteSchemaLock = NSLock()
+private let localSQLiteRuntimeSchemaVersion = 1
+
+private struct LocalSQLiteSchemaTableSpec: Sendable {
+  let name: String
+  let expectedColumns: Set<String>
+}
+
+private let localSQLiteCurrentSchemaTableSpecs: [LocalSQLiteSchemaTableSpec] = [
+  .init(
+    name: "checkpoints",
+    expectedColumns: [
+      "pointer_key",
+      "checkpoint_id",
+      "session_id",
+      "tier",
+      "created_at",
+      "last_sequence",
+      "record_json",
+      "updated_at",
+    ]
+  ),
+  .init(
+    name: "journal_events",
+    expectedColumns: [
+      "sequence",
+      "session_id",
+      "run_reference",
+      "correlation_id",
+      "type",
+      "summary",
+      "metadata_json",
+    ]
+  ),
+  .init(
+    name: "projections",
+    expectedColumns: [
+      "project_id",
+      "projection_id",
+      "lineage_id",
+      "agent_id",
+      "updated_at",
+      "descriptor_json",
+    ]
+  ),
+  .init(
+    name: "cmp_packages",
+    expectedColumns: [
+      "project_id",
+      "package_id",
+      "source_agent_id",
+      "target_agent_id",
+      "source_snapshot_id",
+      "package_kind",
+      "updated_at",
+      "descriptor_json",
+    ]
+  ),
+  .init(
+    name: "cmp_controls",
+    expectedColumns: [
+      "project_id",
+      "agent_id",
+      "updated_at",
+      "descriptor_json",
+    ]
+  ),
+  .init(
+    name: "cmp_peer_approvals",
+    expectedColumns: [
+      "project_id",
+      "agent_id",
+      "target_agent_id",
+      "capability_key",
+      "updated_at",
+      "descriptor_json",
+    ]
+  ),
+  .init(
+    name: "tap_runtime_events",
+    expectedColumns: [
+      "event_id",
+      "project_id",
+      "agent_id",
+      "target_agent_id",
+      "event_kind",
+      "capability_key",
+      "created_at",
+      "record_json",
+    ]
+  ),
+  .init(
+    name: "delivery_truth",
+    expectedColumns: [
+      "delivery_id",
+      "package_id",
+      "topic",
+      "target_agent_id",
+      "status",
+      "updated_at",
+      "record_json",
+    ]
+  ),
+  .init(
+    name: "embeddings",
+    expectedColumns: [
+      "embedding_id",
+      "storage_key",
+      "record_json",
+    ]
+  ),
+  .init(
+    name: "semantic_memory",
+    expectedColumns: [
+      "memory_id",
+      "project_id",
+      "agent_id",
+      "scope_level",
+      "freshness_status",
+      "summary",
+      "storage_key",
+      "record_json",
+    ]
+  ),
+  .init(
+    name: "lineages",
+    expectedColumns: [
+      "lineage_id",
+      "branch_ref",
+      "parent_lineage_id",
+      "descriptor_json",
+    ]
+  ),
+]
 
 private func localRuntimeEncodeJSON<Value: Encodable>(_ value: Value) throws -> String {
   let encoder = JSONEncoder()
@@ -143,7 +276,124 @@ private func localSQLiteInteger(
   return Int(sqlite3_column_int64(statement, index))
 }
 
-private func localSQLiteEnsureSchema(database: OpaquePointer?) throws {
+private func localSQLiteReadUserVersion(database: OpaquePointer?) throws -> Int {
+  let statement = try localSQLitePrepareStatement("PRAGMA user_version;", database: database)
+  defer { sqlite3_finalize(statement) }
+  switch sqlite3_step(statement) {
+  case SQLITE_ROW:
+    return Int(sqlite3_column_int64(statement, 0))
+  case SQLITE_DONE:
+    return 0
+  default:
+    throw PraxisError.invariantViolation("Failed to read local runtime SQLite schema version: \(localSQLiteErrorMessage(database)).")
+  }
+}
+
+private func localSQLiteWriteUserVersion(
+  _ version: Int,
+  database: OpaquePointer?
+) throws {
+  try localSQLiteExecute("PRAGMA user_version = \(version);", database: database)
+}
+
+private func localSQLiteUserTableNames(database: OpaquePointer?) throws -> Set<String> {
+  let statement = try localSQLitePrepareStatement(
+    """
+    SELECT name
+    FROM sqlite_master
+    WHERE type = 'table'
+      AND name NOT LIKE 'sqlite_%';
+    """,
+    database: database
+  )
+  defer { sqlite3_finalize(statement) }
+
+  var tableNames: Set<String> = []
+  while true {
+    let code = sqlite3_step(statement)
+    switch code {
+    case SQLITE_ROW:
+      guard let tableName = localSQLiteText(from: statement, at: 0) else {
+        continue
+      }
+      tableNames.insert(tableName)
+    case SQLITE_DONE:
+      return tableNames
+    default:
+      throw PraxisError.invariantViolation("Failed to inspect local runtime SQLite tables: \(localSQLiteErrorMessage(database)).")
+    }
+  }
+}
+
+private func localSQLiteColumnNames(
+  in tableName: String,
+  database: OpaquePointer?
+) throws -> Set<String> {
+  let statement = try localSQLitePrepareStatement(
+    "PRAGMA table_info(\(tableName));",
+    database: database
+  )
+  defer { sqlite3_finalize(statement) }
+
+  var columnNames: Set<String> = []
+  while true {
+    let code = sqlite3_step(statement)
+    switch code {
+    case SQLITE_ROW:
+      guard let columnName = localSQLiteText(from: statement, at: 1) else {
+        continue
+      }
+      columnNames.insert(columnName)
+    case SQLITE_DONE:
+      return columnNames
+    default:
+      throw PraxisError.invariantViolation("Failed to inspect local runtime SQLite columns for \(tableName): \(localSQLiteErrorMessage(database)).")
+    }
+  }
+}
+
+private let localSQLiteManagedExactTableNames = Set(localSQLiteCurrentSchemaTableSpecs.map(\.name))
+private let localSQLiteManagedTablePrefixes = ["cmp_", "tap_"]
+
+private func localSQLiteIsManagedTableName(_ tableName: String) -> Bool {
+  if localSQLiteManagedExactTableNames.contains(tableName) {
+    return true
+  }
+
+  return localSQLiteManagedTablePrefixes.contains { tableName.hasPrefix($0) }
+}
+
+private func localSQLiteMatchesCurrentRuntimeSchema(
+  database: OpaquePointer?,
+  allowMissingManagedTables: Bool
+) throws -> Bool {
+  let tableNames = try localSQLiteUserTableNames(database: database)
+  let managedTableNames = Set(tableNames.filter(localSQLiteIsManagedTableName))
+  guard managedTableNames.isSubset(of: localSQLiteManagedExactTableNames) else {
+    return false
+  }
+
+  if !allowMissingManagedTables,
+     managedTableNames != localSQLiteManagedExactTableNames {
+    return false
+  }
+
+  let tableSpecsByName = Dictionary(uniqueKeysWithValues: localSQLiteCurrentSchemaTableSpecs.map { ($0.name, $0) })
+  for tableName in managedTableNames {
+    guard let table = tableSpecsByName[tableName] else {
+      return false
+    }
+
+    let columnNames = try localSQLiteColumnNames(in: tableName, database: database)
+    guard columnNames == table.expectedColumns else {
+      return false
+    }
+  }
+
+  return true
+}
+
+private func localSQLiteApplyCurrentSchemaArtifacts(database: OpaquePointer?) throws {
   let statements = [
     """
     CREATE TABLE IF NOT EXISTS checkpoints (
@@ -275,6 +525,68 @@ private func localSQLiteEnsureSchema(database: OpaquePointer?) throws {
 
   for statement in statements {
     try localSQLiteExecute(statement, database: database)
+  }
+}
+
+private func localSQLiteInitializeFreshSchema(database: OpaquePointer?) throws {
+  try localSQLiteExecute("BEGIN IMMEDIATE TRANSACTION;", database: database)
+  do {
+    try localSQLiteApplyCurrentSchemaArtifacts(database: database)
+    try localSQLiteWriteUserVersion(localSQLiteRuntimeSchemaVersion, database: database)
+    try localSQLiteExecute("COMMIT;", database: database)
+  } catch {
+    try? localSQLiteExecute("ROLLBACK;", database: database)
+    throw error
+  }
+}
+
+private func localSQLiteAdoptLegacyCurrentSchema(database: OpaquePointer?) throws {
+  try localSQLiteExecute("BEGIN IMMEDIATE TRANSACTION;", database: database)
+  do {
+    try localSQLiteApplyCurrentSchemaArtifacts(database: database)
+    try localSQLiteWriteUserVersion(localSQLiteRuntimeSchemaVersion, database: database)
+    try localSQLiteExecute("COMMIT;", database: database)
+  } catch {
+    try? localSQLiteExecute("ROLLBACK;", database: database)
+    throw error
+  }
+}
+
+private func localSQLiteEnsureSchema(database: OpaquePointer?) throws {
+  let schemaVersion = try localSQLiteReadUserVersion(database: database)
+  let tableNames = try localSQLiteUserTableNames(database: database)
+
+  switch schemaVersion {
+  case 0 where tableNames.isEmpty:
+    try localSQLiteInitializeFreshSchema(database: database)
+  case 0:
+    guard try localSQLiteMatchesCurrentRuntimeSchema(
+      database: database,
+      allowMissingManagedTables: true
+    ) else {
+      throw PraxisError.invariantViolation(
+        "Local runtime SQLite schema is unversioned and does not satisfy the current baseline adoption policy."
+      )
+    }
+    try localSQLiteAdoptLegacyCurrentSchema(database: database)
+  case localSQLiteRuntimeSchemaVersion:
+    guard try localSQLiteMatchesCurrentRuntimeSchema(
+      database: database,
+      allowMissingManagedTables: false
+    ) else {
+      throw PraxisError.invariantViolation(
+        "Local runtime SQLite schema version \(localSQLiteRuntimeSchemaVersion) does not satisfy the current baseline policy."
+      )
+    }
+    try localSQLiteApplyCurrentSchemaArtifacts(database: database)
+  case let version where version > localSQLiteRuntimeSchemaVersion:
+    throw PraxisError.invariantViolation(
+      "Local runtime SQLite schema version \(version) is newer than supported version \(localSQLiteRuntimeSchemaVersion). Refusing to open this runtime store."
+    )
+  default:
+    throw PraxisError.invariantViolation(
+      "Local runtime SQLite schema version \(schemaVersion) is older than supported version \(localSQLiteRuntimeSchemaVersion), and no migration path is available."
+    )
   }
 }
 

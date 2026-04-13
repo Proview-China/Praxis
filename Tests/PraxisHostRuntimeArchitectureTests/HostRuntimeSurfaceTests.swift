@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import SQLite3
 import PraxisCapabilityContracts
 import PraxisCheckpoint
 import PraxisCmpFiveAgent
@@ -61,6 +62,161 @@ private func runHostTestProcess(
     stderr: String(decoding: stderrPipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self),
     exitCode: process.terminationStatus
   )
+}
+
+private func withHostTestSQLiteDatabase<Result>(
+  at fileURL: URL,
+  _ body: (OpaquePointer?) throws -> Result
+) throws -> Result {
+  try FileManager.default.createDirectory(
+    at: fileURL.deletingLastPathComponent(),
+    withIntermediateDirectories: true
+  )
+
+  var database: OpaquePointer?
+  let openCode = sqlite3_open_v2(
+    fileURL.path,
+    &database,
+    SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX,
+    nil
+  )
+  guard openCode == SQLITE_OK else {
+    defer { sqlite3_close(database) }
+    throw PraxisError.invariantViolation("Failed to open host test SQLite database at \(fileURL.path).")
+  }
+
+  defer { sqlite3_close(database) }
+  return try body(database)
+}
+
+private func hostTestSQLiteExecute(
+  _ sql: String,
+  database: OpaquePointer?
+) throws {
+  guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
+    throw PraxisError.invariantViolation("Failed to execute host test SQLite SQL: \(sql)")
+  }
+}
+
+private func hostTestSQLitePrepareStatement(
+  _ sql: String,
+  database: OpaquePointer?
+) throws -> OpaquePointer? {
+  var statement: OpaquePointer?
+  guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else {
+    throw PraxisError.invariantViolation("Failed to prepare host test SQLite statement: \(sql)")
+  }
+  return statement
+}
+
+private let hostTestSQLiteTransientDestructor = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
+private func hostTestSQLiteBindText(
+  _ value: String?,
+  at index: Int32,
+  in statement: OpaquePointer?
+) throws {
+  let code: Int32
+  if let value {
+    code = sqlite3_bind_text(statement, index, value, -1, hostTestSQLiteTransientDestructor)
+  } else {
+    code = sqlite3_bind_null(statement, index)
+  }
+
+  guard code == SQLITE_OK else {
+    throw PraxisError.invariantViolation("Failed to bind host test SQLite text value.")
+  }
+}
+
+private func hostTestSQLiteUserVersion(at fileURL: URL) throws -> Int {
+  try withHostTestSQLiteDatabase(at: fileURL) { database in
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(database, "PRAGMA user_version;", -1, &statement, nil) == SQLITE_OK else {
+      throw PraxisError.invariantViolation("Failed to prepare host test SQLite user_version query.")
+    }
+    defer { sqlite3_finalize(statement) }
+    guard sqlite3_step(statement) == SQLITE_ROW else {
+      throw PraxisError.invariantViolation("Failed to read host test SQLite user_version.")
+    }
+    return Int(sqlite3_column_int64(statement, 0))
+  }
+}
+
+private func setHostTestSQLiteUserVersion(
+  _ version: Int,
+  at fileURL: URL
+) throws {
+  try withHostTestSQLiteDatabase(at: fileURL) { database in
+    try hostTestSQLiteExecute("PRAGMA user_version = \(version);", database: database)
+  }
+}
+
+private func makeLocalProjectionDescriptor(
+  projectID: String = "cmp.local-runtime",
+  projectionID: String = "projection.sqlite.versioning",
+  lineageID: String = "lineage.sqlite.versioning",
+  agentID: String = "runtime.local",
+  updatedAt: String = "2026-04-13T10:00:00Z"
+) -> PraxisProjectionRecordDescriptor {
+  PraxisProjectionRecordDescriptor(
+    projectID: projectID,
+    projectionID: .init(rawValue: projectionID),
+    lineageID: .init(rawValue: lineageID),
+    agentID: agentID,
+    visibilityLevel: .localOnly,
+    storageKey: "sqlite://cmp/\(projectionID)",
+    updatedAt: updatedAt,
+    summary: "SQLite versioning test projection",
+    metadata: ["kind": .string("sqlite-versioning")]
+  )
+}
+
+private func seedLegacyProjectionOnlyRuntimeDatabase(
+  at fileURL: URL,
+  descriptor: PraxisProjectionRecordDescriptor
+) throws {
+  try withHostTestSQLiteDatabase(at: fileURL) { database in
+    try hostTestSQLiteExecute(
+      """
+      CREATE TABLE projections (
+        project_id TEXT NOT NULL,
+        projection_id TEXT NOT NULL,
+        lineage_id TEXT,
+        agent_id TEXT,
+        updated_at TEXT,
+        descriptor_json TEXT NOT NULL,
+        PRIMARY KEY (project_id, projection_id)
+      );
+      """,
+      database: database
+    )
+
+    let statement = try hostTestSQLitePrepareStatement(
+      """
+      INSERT INTO projections (
+        project_id,
+        projection_id,
+        lineage_id,
+        agent_id,
+        updated_at,
+        descriptor_json
+      ) VALUES (?, ?, ?, ?, ?, ?);
+      """,
+      database: database
+    )
+    defer { sqlite3_finalize(statement) }
+
+    try hostTestSQLiteBindText(descriptor.projectID, at: 1, in: statement)
+    try hostTestSQLiteBindText(descriptor.projectionID.rawValue, at: 2, in: statement)
+    try hostTestSQLiteBindText(descriptor.lineageID?.rawValue, at: 3, in: statement)
+    try hostTestSQLiteBindText(descriptor.agentID, at: 4, in: statement)
+    try hostTestSQLiteBindText(descriptor.updatedAt, at: 5, in: statement)
+    try hostTestSQLiteBindText(try encodeTestJSON(descriptor), at: 6, in: statement)
+
+    guard sqlite3_step(statement) == SQLITE_DONE else {
+      throw PraxisError.invariantViolation("Failed to insert legacy host test projection descriptor.")
+    }
+  }
 }
 
 private func seedRecoverProjectionDescriptor(
@@ -165,6 +321,153 @@ private func makeCheckpointRecord(
 }
 
 struct HostRuntimeSurfaceTests {
+  @Test
+  func localSQLiteRuntimeStoreInitializesCurrentSchemaVersionForFreshDatabase() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-local-sqlite-version-init-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let databaseFileURL = rootDirectory.appendingPathComponent("runtime.sqlite3", isDirectory: false)
+    let projectionStore = PraxisLocalProjectionStore(fileURL: databaseFileURL)
+
+    _ = try await projectionStore.save(makeLocalProjectionDescriptor())
+
+    #expect(try hostTestSQLiteUserVersion(at: databaseFileURL) == 1)
+  }
+
+  @Test
+  func localSQLiteRuntimeStoreAdoptsLegacyUnversionedCurrentSchemaWithoutLosingData() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-local-sqlite-version-adopt-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let databaseFileURL = rootDirectory.appendingPathComponent("runtime.sqlite3", isDirectory: false)
+    let descriptor = makeLocalProjectionDescriptor(
+      projectionID: "projection.sqlite.legacy",
+      lineageID: "lineage.sqlite.legacy"
+    )
+
+    try seedLegacyProjectionOnlyRuntimeDatabase(at: databaseFileURL, descriptor: descriptor)
+
+    let adoptedStore = PraxisLocalProjectionStore(fileURL: databaseFileURL)
+    let descriptors = try await adoptedStore.describe(.init(projectID: descriptor.projectID))
+
+    #expect(try hostTestSQLiteUserVersion(at: databaseFileURL) == 1)
+    #expect(descriptors.count == 1)
+    #expect(descriptors.first?.projectionID == descriptor.projectionID)
+    #expect(descriptors.first?.lineageID == descriptor.lineageID)
+    #expect(descriptors.first?.storageKey == descriptor.storageKey)
+  }
+
+  @Test
+  func localSQLiteRuntimeStoreRejectsLegacyUnversionedSchemaThatDoesNotSatisfyBaselineAdoptionPolicy() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-local-sqlite-version-legacy-invalid-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let databaseFileURL = rootDirectory.appendingPathComponent("runtime.sqlite3", isDirectory: false)
+    try withHostTestSQLiteDatabase(at: databaseFileURL) { database in
+      try hostTestSQLiteExecute(
+        """
+        CREATE TABLE projections (
+          project_id TEXT NOT NULL,
+          projection_id TEXT NOT NULL,
+          lineage_id TEXT,
+          agent_id TEXT,
+          updated_at TEXT,
+          descriptor_json TEXT NOT NULL,
+          legacy_shadow TEXT,
+          PRIMARY KEY (project_id, projection_id)
+        );
+        """,
+        database: database
+      )
+    }
+
+    let rejectedStore = PraxisLocalProjectionStore(fileURL: databaseFileURL)
+
+    await #expect(throws: PraxisError.invariantViolation("Local runtime SQLite schema is unversioned and does not satisfy the current baseline adoption policy.")) {
+      _ = try await rejectedStore.describe(.init(projectID: "cmp.local-runtime"))
+    }
+  }
+
+  @Test
+  func localSQLiteRuntimeStoreReopensCurrentVersionDatabaseWhenSchemaStillMatchesBaseline() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-local-sqlite-version-reopen-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let databaseFileURL = rootDirectory.appendingPathComponent("runtime.sqlite3", isDirectory: false)
+    let descriptor = makeLocalProjectionDescriptor(
+      projectionID: "projection.sqlite.reopen",
+      lineageID: "lineage.sqlite.reopen"
+    )
+
+    let initialStore = PraxisLocalProjectionStore(fileURL: databaseFileURL)
+    _ = try await initialStore.save(descriptor)
+
+    let reopenedStore = PraxisLocalProjectionStore(fileURL: databaseFileURL)
+    let descriptors = try await reopenedStore.describe(.init(projectID: descriptor.projectID))
+
+    #expect(try hostTestSQLiteUserVersion(at: databaseFileURL) == 1)
+    #expect(descriptors.count == 1)
+    #expect(descriptors.first?.projectionID == descriptor.projectionID)
+  }
+
+  @Test
+  func localSQLiteRuntimeStoreRejectsTamperedCurrentVersionSchema() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-local-sqlite-version-current-invalid-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let databaseFileURL = rootDirectory.appendingPathComponent("runtime.sqlite3", isDirectory: false)
+    try withHostTestSQLiteDatabase(at: databaseFileURL) { database in
+      try hostTestSQLiteExecute(
+        """
+        CREATE TABLE projections (
+          project_id TEXT NOT NULL,
+          projection_id TEXT NOT NULL,
+          lineage_id TEXT,
+          agent_id TEXT,
+          updated_at TEXT,
+          PRIMARY KEY (project_id, projection_id)
+        );
+        """,
+        database: database
+      )
+    }
+    try setHostTestSQLiteUserVersion(1, at: databaseFileURL)
+
+    let rejectedStore = PraxisLocalProjectionStore(fileURL: databaseFileURL)
+
+    await #expect(throws: PraxisError.invariantViolation("Local runtime SQLite schema version 1 does not satisfy the current baseline policy.")) {
+      _ = try await rejectedStore.describe(.init(projectID: "cmp.local-runtime"))
+    }
+  }
+
+  @Test
+  func localSQLiteRuntimeStoreRejectsUnknownFutureSchemaVersion() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-local-sqlite-version-future-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let databaseFileURL = rootDirectory.appendingPathComponent("runtime.sqlite3", isDirectory: false)
+    let seededStore = PraxisLocalProjectionStore(fileURL: databaseFileURL)
+    let descriptor = makeLocalProjectionDescriptor(
+      projectionID: "projection.sqlite.future",
+      lineageID: "lineage.sqlite.future"
+    )
+
+    _ = try await seededStore.save(descriptor)
+    try setHostTestSQLiteUserVersion(2, at: databaseFileURL)
+
+    let rejectedStore = PraxisLocalProjectionStore(fileURL: databaseFileURL)
+
+    await #expect(throws: PraxisError.invariantViolation("Local runtime SQLite schema version 2 is newer than supported version 1. Refusing to open this runtime store.")) {
+      _ = try await rejectedStore.describe(.init(projectID: descriptor.projectID))
+    }
+  }
+
   @Test
   func runtimeSurfaceModelsCaptureLocalHostProfileAndSmokeViews() {
     let hostProfile = PraxisLocalRuntimeHostProfile(
