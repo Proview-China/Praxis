@@ -5855,4 +5855,25 @@ struct HostRuntimeInterfaceTests {
         )
     )
   }
+
+  @Test
+  func runtimeInterfaceCodecRejectsLegacyFlatPayloadsOutsideRunGoalAndResume() throws {
+    let codec = PraxisJSONRuntimeInterfaceCodec()
+    let legacyReadbackCmpProjectJSON = """
+    {"kind":"readbackCmpProject","payloadSummary":"Legacy flat CMP project readback","projectID":"cmp.legacy-flat"}
+    """
+
+    do {
+      _ = try codec.decodeRequest(Data(legacyReadbackCmpProjectJSON.utf8))
+      Issue.record("Expected invalid input decoding failure for unsupported legacy flat request.")
+    } catch let error as PraxisError {
+      guard case let .invalidInput(message) = error else {
+        Issue.record("Expected invalidInput, got \(error).")
+        return
+      }
+      #expect(message.contains("readbackCmpProject"))
+    } catch {
+      Issue.record("Expected PraxisError.invalidInput, got \(error).")
+    }
+  }
 }

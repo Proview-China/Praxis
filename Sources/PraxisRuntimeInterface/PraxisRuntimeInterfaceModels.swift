@@ -1380,6 +1380,8 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
     case .inspectArchitecture:
       self = .inspectArchitecture
     case .runGoal:
+      // Keep legacy flat decoding narrowly scoped to the original FFI bootstrap commands.
+      // New runtime interface commands must continue to use their nested payload envelope.
       if let payload = try container.decodeIfPresent(PraxisRuntimeInterfaceRunGoalRequestPayload.self, forKey: .runGoal) {
         self = .runGoal(payload)
       } else {

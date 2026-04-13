@@ -1347,6 +1347,9 @@ struct HostRuntimeSurfaceTests {
     #expect(invalidResponse.status == .failure)
     #expect(invalidResponse.error?.code == .invalidInput)
     #expect(invalidResponse.error?.message.contains("Failed to decode runtime interface request payload") == true)
+    #expect(invalidResponse.error?.retryable == false)
+    #expect(invalidResponse.error?.runID == nil)
+    #expect(invalidResponse.error?.sessionID == nil)
 
     let invalidEnumResponseData = try await ffiBridge.handleEncodedRequest(
       Data(
@@ -1386,8 +1389,14 @@ struct HostRuntimeSurfaceTests {
 
     #expect(closedResponse.status == .failure)
     #expect(closedResponse.error?.code == .sessionNotFound)
+    #expect(closedResponse.error?.message == "Runtime interface session handle \(handle.rawValue) was not found.")
+    #expect(closedResponse.error?.retryable == false)
+    #expect(closedResponse.error?.runID == nil)
+    #expect(closedResponse.error?.sessionID == nil)
     #expect(closedEventEnvelope.status == .failure)
     #expect(closedEventEnvelope.error?.code == .sessionNotFound)
+    #expect(closedEventEnvelope.error?.message == "Runtime interface session handle \(handle.rawValue) was not found.")
+    #expect(closedEventEnvelope.error?.retryable == false)
     #expect(closedEventEnvelope.handle == handle)
   }
 
@@ -1410,6 +1419,124 @@ struct HostRuntimeSurfaceTests {
     #expect(response.snapshot?.runID?.rawValue == "run:session.legacy-ffi:goal.legacy-ffi")
     #expect(response.snapshot?.sessionID?.rawValue == "session.legacy-ffi")
     #expect(response.events.map(\.name) == [.runStarted, .runFollowUpReady])
+  }
+
+  @Test
+  func ffiBridgeCloseRuntimeSessionIsIdempotentAndRejectsUnknownHandles() async throws {
+    let ffiBridge = PraxisFFIFactory.makeFFIBridge()
+    let codec = PraxisJSONRuntimeInterfaceCodec()
+    let handle = try await ffiBridge.openRuntimeSession()
+    let unknownHandle = PraxisRuntimeInterfaceSessionHandle(rawValue: "runtime-interface-session-unknown")
+
+    #expect(await ffiBridge.closeRuntimeSession(handle))
+    #expect(await ffiBridge.closeRuntimeSession(handle) == false)
+    #expect(await ffiBridge.closeRuntimeSession(unknownHandle) == false)
+
+    let unknownResponseData = try await ffiBridge.handleEncodedRequest(
+      codec.encode(.inspectArchitecture),
+      on: unknownHandle
+    )
+    let unknownResponse = try codec.decodeResponse(unknownResponseData)
+    let unknownEventsData = try await ffiBridge.snapshotEncodedEvents(for: unknownHandle)
+    let unknownEventEnvelope = try JSONDecoder().decode(PraxisFFIEventEnvelope.self, from: unknownEventsData)
+
+    #expect(unknownResponse.status == .failure)
+    #expect(unknownResponse.error?.code == .sessionNotFound)
+    #expect(unknownResponse.error?.message == "Runtime interface session handle \(unknownHandle.rawValue) was not found.")
+    #expect(unknownResponse.error?.retryable == false)
+    #expect(unknownEventEnvelope.status == .failure)
+    #expect(unknownEventEnvelope.handle == unknownHandle)
+    #expect(unknownEventEnvelope.error?.code == .sessionNotFound)
+    #expect(unknownEventEnvelope.error?.message == "Runtime interface session handle \(unknownHandle.rawValue) was not found.")
+    #expect(unknownEventEnvelope.error?.retryable == false)
+  }
+
+  @Test
+  func ffiBridgeSnapshotAndDrainEventBuffersMonotonically() async throws {
+    let ffiBridge = PraxisFFIFactory.makeFFIBridge()
+    let codec = PraxisJSONRuntimeInterfaceCodec()
+    let handle = try await ffiBridge.openRuntimeSession()
+    let request = PraxisRuntimeInterfaceRequest.runGoal(
+      .init(
+        payloadSummary: "FFI monotonic event buffer test",
+        goalID: "goal.ffi-monotonic",
+        goalTitle: "FFI Monotonic Goal",
+        sessionID: "session.ffi-monotonic"
+      )
+    )
+
+    _ = try await ffiBridge.handleEncodedRequest(codec.encode(request), on: handle)
+
+    let firstSnapshotData = try await ffiBridge.snapshotEncodedEvents(for: handle)
+    let secondSnapshotData = try await ffiBridge.snapshotEncodedEvents(for: handle)
+    let drainedData = try await ffiBridge.drainEncodedEvents(for: handle)
+    let postDrainSnapshotData = try await ffiBridge.snapshotEncodedEvents(for: handle)
+
+    let decoder = JSONDecoder()
+    let firstSnapshot = try decoder.decode(PraxisFFIEventEnvelope.self, from: firstSnapshotData)
+    let secondSnapshot = try decoder.decode(PraxisFFIEventEnvelope.self, from: secondSnapshotData)
+    let drainedEnvelope = try decoder.decode(PraxisFFIEventEnvelope.self, from: drainedData)
+    let postDrainSnapshot = try decoder.decode(PraxisFFIEventEnvelope.self, from: postDrainSnapshotData)
+
+    #expect(firstSnapshot.status == .success)
+    #expect(secondSnapshot.status == .success)
+    #expect(drainedEnvelope.status == .success)
+    #expect(postDrainSnapshot.status == .success)
+    #expect(firstSnapshot.events.map(\.name) == [.runStarted, .runFollowUpReady])
+    #expect(secondSnapshot.events == firstSnapshot.events)
+    #expect(drainedEnvelope.events == firstSnapshot.events)
+    #expect(postDrainSnapshot.events.isEmpty)
+  }
+
+  @Test
+  func ffiBridgeIsolatesBufferedEventsPerHandle() async throws {
+    let ffiBridge = PraxisFFIFactory.makeFFIBridge()
+    let codec = PraxisJSONRuntimeInterfaceCodec()
+    let firstHandle = try await ffiBridge.openRuntimeSession()
+    let secondHandle = try await ffiBridge.openRuntimeSession()
+
+    let firstRequest = PraxisRuntimeInterfaceRequest.runGoal(
+      .init(
+        payloadSummary: "FFI handle isolation first run",
+        goalID: "goal.ffi-handle-first",
+        goalTitle: "FFI Handle First Goal",
+        sessionID: "session.ffi-handle-first"
+      )
+    )
+    let secondRequest = PraxisRuntimeInterfaceRequest.runGoal(
+      .init(
+        payloadSummary: "FFI handle isolation second run",
+        goalID: "goal.ffi-handle-second",
+        goalTitle: "FFI Handle Second Goal",
+        sessionID: "session.ffi-handle-second"
+      )
+    )
+
+    _ = try await ffiBridge.handleEncodedRequest(codec.encode(firstRequest), on: firstHandle)
+
+    let decoder = JSONDecoder()
+    let firstSnapshotData = try await ffiBridge.snapshotEncodedEvents(for: firstHandle)
+    let secondSnapshotData = try await ffiBridge.snapshotEncodedEvents(for: secondHandle)
+    let firstSnapshot = try decoder.decode(PraxisFFIEventEnvelope.self, from: firstSnapshotData)
+    let secondSnapshot = try decoder.decode(PraxisFFIEventEnvelope.self, from: secondSnapshotData)
+
+    #expect(firstSnapshot.status == .success)
+    #expect(firstSnapshot.events.map(\.name) == [.runStarted, .runFollowUpReady])
+    #expect(firstSnapshot.events.allSatisfy { $0.sessionID?.rawValue == "session.ffi-handle-first" })
+    #expect(secondSnapshot.status == .success)
+    #expect(secondSnapshot.events.isEmpty)
+
+    _ = try await ffiBridge.handleEncodedRequest(codec.encode(secondRequest), on: secondHandle)
+
+    let firstDrainData = try await ffiBridge.drainEncodedEvents(for: firstHandle)
+    let secondPostRunSnapshotData = try await ffiBridge.snapshotEncodedEvents(for: secondHandle)
+    let firstDrain = try decoder.decode(PraxisFFIEventEnvelope.self, from: firstDrainData)
+    let secondPostRunSnapshot = try decoder.decode(PraxisFFIEventEnvelope.self, from: secondPostRunSnapshotData)
+
+    #expect(firstDrain.events.map(\.name) == [.runStarted, .runFollowUpReady])
+    #expect(firstDrain.events.allSatisfy { $0.sessionID?.rawValue == "session.ffi-handle-first" })
+    #expect(secondPostRunSnapshot.events.map(\.name) == [.runStarted, .runFollowUpReady])
+    #expect(secondPostRunSnapshot.events.allSatisfy { $0.sessionID?.rawValue == "session.ffi-handle-second" })
   }
 
   @Test
