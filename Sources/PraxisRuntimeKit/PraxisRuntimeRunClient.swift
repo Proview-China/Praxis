@@ -39,6 +39,20 @@ public struct PraxisRuntimeRunClient: Sendable {
     )
   }
 
+  /// Normalizes, compiles, and runs one goal from lightweight call-site parameters.
+  ///
+  /// - Parameters:
+  ///   - task: Plain-text task description for one runtime goal.
+  ///   - sessionID: Optional stable session identifier.
+  /// - Returns: A runtime run summary produced by the host-neutral runtime facade.
+  /// - Throws: Any goal preparation or runtime execution error raised by the underlying services.
+  public func run(
+    task: String,
+    sessionID: PraxisRuntimeSessionRef? = nil
+  ) async throws -> PraxisRunSummary {
+    try await run(.init(task: task, sessionID: sessionID))
+  }
+
   /// Resumes one existing run by identifier.
   ///
   /// - Parameter run: Stable run identifier to resume.
@@ -46,6 +60,15 @@ public struct PraxisRuntimeRunClient: Sendable {
   /// - Throws: Any runtime execution error raised by the underlying services.
   public func resumeRun(_ run: PraxisRuntimeRunRef) async throws -> PraxisRunSummary {
     try await runFacade.resumeRun(.init(runID: .init(rawValue: run.rawValue)))
+  }
+
+  /// Resumes one existing run through the shorter RuntimeKit convenience name.
+  ///
+  /// - Parameter run: Stable run identifier to resume.
+  /// - Returns: A runtime run summary produced by the host-neutral runtime facade.
+  /// - Throws: Any runtime execution error raised by the underlying services.
+  public func resume(_ run: PraxisRuntimeRunRef) async throws -> PraxisRunSummary {
+    try await resumeRun(run)
   }
 
   private static func makeGeneratedGoalID() -> PraxisGoalID {

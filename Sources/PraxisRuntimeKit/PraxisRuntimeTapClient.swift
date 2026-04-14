@@ -59,6 +59,20 @@ public struct PraxisRuntimeTapProjectClient: Sendable {
       history: history
     )
   }
+
+  /// Reads one TAP project overview from lightweight call-site parameters.
+  ///
+  /// - Parameters:
+  ///   - agent: Optional agent identifier used to scope TAP reads.
+  ///   - limit: Maximum number of TAP history entries to load.
+  /// - Returns: A TAP project overview composed from status and approval history snapshots.
+  /// - Throws: Any readback error raised by the underlying runtime use cases.
+  public func overview(
+    for agent: PraxisRuntimeAgentRef? = nil,
+    limit: Int = 10
+  ) async throws -> PraxisRuntimeTapProjectOverview {
+    try await overview(.init(agentID: agent, limit: limit))
+  }
 }
 
 /// Aggregated TAP read model for one scoped project.
@@ -72,5 +86,15 @@ public struct PraxisRuntimeTapProjectOverview: Sendable {
   ) {
     self.status = status
     self.history = history
+  }
+
+  /// Stable project identifier shared by the aggregated TAP snapshots.
+  public var projectID: String {
+    status.projectID
+  }
+
+  /// Stable scoped agent identifier when the TAP overview is agent-filtered.
+  public var agentID: String? {
+    status.agentID ?? history.agentID
   }
 }

@@ -61,6 +61,37 @@ public struct PraxisRuntimeMpProjectClient: Sendable {
     )
   }
 
+  /// Searches MP memory records from lightweight call-site parameters.
+  ///
+  /// - Parameters:
+  ///   - query: Search query string.
+  ///   - scopeLevels: Scope levels to include in the search.
+  ///   - limit: Maximum number of hits to return.
+  ///   - agent: Optional agent filter.
+  ///   - session: Optional session filter.
+  ///   - includeSuperseded: Whether superseded records should remain visible.
+  /// - Returns: An MP search snapshot projected by the runtime facade.
+  /// - Throws: Any search error raised by the underlying runtime use cases.
+  public func search(
+    query: String,
+    scopeLevels: [PraxisMpScopeLevel] = PraxisMpScopeLevel.allCases,
+    limit: Int = 5,
+    agent: PraxisRuntimeAgentRef? = nil,
+    session: PraxisRuntimeSessionRef? = nil,
+    includeSuperseded: Bool = false
+  ) async throws -> PraxisMpSearchSnapshot {
+    try await search(
+      .init(
+        query: query,
+        scopeLevels: scopeLevels,
+        limit: limit,
+        agentID: agent,
+        sessionID: session,
+        includeSuperseded: includeSuperseded
+      )
+    )
+  }
+
   /// Reads one MP project overview for the scoped project.
   ///
   /// - Parameter options: Structured MP overview options for one project read.
@@ -88,6 +119,37 @@ public struct PraxisRuntimeMpProjectClient: Sendable {
     )
   }
 
+  /// Reads one MP project overview from lightweight call-site parameters.
+  ///
+  /// - Parameters:
+  ///   - readbackQuery: Optional overview query string.
+  ///   - scopeLevels: Scope levels to include in the overview readback.
+  ///   - limit: Maximum number of records to summarize.
+  ///   - agent: Optional agent filter.
+  ///   - session: Optional session filter.
+  ///   - includeSuperseded: Whether superseded records should remain visible.
+  /// - Returns: An MP project overview composed from readback and smoke snapshots.
+  /// - Throws: Any readback or smoke error raised by the underlying runtime use cases.
+  public func overview(
+    readbackQuery: String = "",
+    scopeLevels: [PraxisMpScopeLevel] = PraxisMpScopeLevel.allCases,
+    limit: Int = 10,
+    agent: PraxisRuntimeAgentRef? = nil,
+    session: PraxisRuntimeSessionRef? = nil,
+    includeSuperseded: Bool = false
+  ) async throws -> PraxisRuntimeMpProjectOverview {
+    try await overview(
+      .init(
+        query: readbackQuery,
+        scopeLevels: scopeLevels,
+        limit: limit,
+        agentID: agent,
+        sessionID: session,
+        includeSuperseded: includeSuperseded
+      )
+    )
+  }
+
   /// Resolves one MP workflow bundle for the scoped project.
   ///
   /// - Parameter request: Structured MP resolve request for one project query.
@@ -104,6 +166,34 @@ public struct PraxisRuntimeMpProjectClient: Sendable {
         requesterSessionID: request.requesterSessionID?.rawValue,
         scopeLevels: request.scopeLevels,
         limit: request.limit
+      )
+    )
+  }
+
+  /// Resolves one MP workflow bundle from lightweight call-site parameters.
+  ///
+  /// - Parameters:
+  ///   - query: Resolve query string.
+  ///   - requesterAgent: Requesting agent identifier.
+  ///   - requesterSession: Optional requesting session identifier.
+  ///   - scopeLevels: Scope levels to include during resolution.
+  ///   - limit: Maximum number of records to resolve.
+  /// - Returns: An MP resolve snapshot projected by the runtime facade.
+  /// - Throws: Any resolve error raised by the underlying runtime use cases.
+  public func resolve(
+    query: String,
+    requesterAgent: PraxisRuntimeAgentRef,
+    requesterSession: PraxisRuntimeSessionRef? = nil,
+    scopeLevels: [PraxisMpScopeLevel] = PraxisMpScopeLevel.allCases,
+    limit: Int = 5
+  ) async throws -> PraxisMpResolveSnapshot {
+    try await resolve(
+      .init(
+        query: query,
+        requesterAgentID: requesterAgent,
+        requesterSessionID: requesterSession,
+        scopeLevels: scopeLevels,
+        limit: limit
       )
     )
   }
@@ -129,6 +219,45 @@ public struct PraxisRuntimeMpProjectClient: Sendable {
     )
   }
 
+  /// Requests historical MP context from lightweight call-site parameters.
+  ///
+  /// - Parameters:
+  ///   - query: History query string.
+  ///   - requesterAgent: Requesting agent identifier.
+  ///   - reason: Human-readable history reason.
+  ///   - requesterSession: Optional requesting session identifier.
+  ///   - scopeLevels: Scope levels to include in the history request.
+  ///   - limit: Maximum number of records to return.
+  /// - Returns: An MP history snapshot projected by the runtime facade.
+  /// - Throws: Any history error raised by the underlying runtime use cases.
+  public func history(
+    query: String,
+    requesterAgent: PraxisRuntimeAgentRef,
+    reason: String,
+    requesterSession: PraxisRuntimeSessionRef? = nil,
+    scopeLevels: [PraxisMpScopeLevel] = PraxisMpScopeLevel.allCases,
+    limit: Int = 5
+  ) async throws -> PraxisMpHistorySnapshot {
+    try await history(
+      .init(
+        query: query,
+        requesterAgentID: requesterAgent,
+        reason: reason,
+        requesterSessionID: requesterSession,
+        scopeLevels: scopeLevels,
+        limit: limit
+      )
+    )
+  }
+
+  /// Reads one direct MP smoke snapshot for the scoped project.
+  ///
+  /// - Returns: An MP smoke snapshot projected by the runtime facade.
+  /// - Throws: Any smoke error raised by the underlying runtime use cases.
+  public func smoke() async throws -> PraxisMpSmokeSnapshot {
+    try await mpFacade.smoke(.init(projectID: project.rawValue))
+  }
+
   /// Returns one memory-scoped MP client for lifecycle mutations.
   public func memory(_ memory: PraxisRuntimeMemoryRef) -> PraxisRuntimeMpMemoryClient {
     PraxisRuntimeMpMemoryClient(project: project, memory: memory, mpFacade: mpFacade)
@@ -146,6 +275,21 @@ public struct PraxisRuntimeMpProjectOverview: Sendable {
   ) {
     self.readback = readback
     self.smoke = smoke
+  }
+
+  /// Stable project identifier shared by the aggregated MP snapshots.
+  public var projectID: String {
+    readback.projectID
+  }
+
+  /// High-level MP overview summary suitable for direct caller logging.
+  public var summary: String {
+    readback.summary
+  }
+
+  /// MP smoke checks exposed without leaking the lower smoke result wrapper.
+  public var smokeChecks: [PraxisRuntimeSmokeCheck] {
+    smoke.smokeResult.checks
   }
 }
 

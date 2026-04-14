@@ -130,6 +130,7 @@ let package = Package(
     .library(name: "PraxisHostRuntime", targets: hostRuntimeTargets),
     .library(name: "PraxisRuntimeKit", targets: ["PraxisRuntimeKit"]),
     .library(name: "PraxisArchitectureTests", targets: architectureTestTargets),
+    .executable(name: "PraxisRuntimeKitSmoke", targets: ["PraxisRuntimeKitSmoke"]),
     .executable(name: "PraxisRuntimeKitRunExample", targets: ["PraxisRuntimeKitRunExample"]),
     .executable(name: "PraxisRuntimeKitCmpTapExample", targets: ["PraxisRuntimeKitCmpTapExample"]),
     .executable(name: "PraxisRuntimeKitMpExample", targets: ["PraxisRuntimeKitMpExample"]),
@@ -598,6 +599,13 @@ let package = Package(
         "PraxisRuntimeGateway",
       ],
       path: "Sources/PraxisRuntimeKit",
+    ),
+    .executableTarget(
+      name: "PraxisRuntimeKitSmoke",
+      dependencies: [
+        "PraxisRuntimeKit",
+      ],
+      path: "Examples/PraxisRuntimeKitSmoke",
     ),
     .executableTarget(
       name: "PraxisRuntimeKitRunExample",

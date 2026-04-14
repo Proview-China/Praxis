@@ -61,6 +61,15 @@ public struct PraxisRuntimeCmpProjectClient: Sendable {
     try await cmpFacade.openSession(.init(projectID: project.rawValue, sessionID: session?.rawValue))
   }
 
+  /// Opens one CMP session through the shorter RuntimeKit convenience name.
+  ///
+  /// - Parameter session: Optional explicit session identifier.
+  /// - Returns: A CMP session snapshot projected by the runtime facade.
+  /// - Throws: Any session opening error raised by the underlying runtime use cases.
+  public func openSession(_ session: PraxisRuntimeSessionRef? = nil) async throws -> PraxisCmpSessionSnapshot {
+    try await openSession(session: session)
+  }
+
   /// Bootstraps the scoped CMP project with caller-friendly options.
   ///
   /// - Parameter options: Structured bootstrap options for one project.
@@ -104,6 +113,25 @@ public struct PraxisRuntimeCmpProjectClient: Sendable {
     )
   }
 
+  /// Reads one CMP project overview from lightweight call-site parameters.
+  ///
+  /// - Parameter agent: Optional agent identifier used to scope status reads.
+  /// - Returns: A CMP project overview composed from readback, smoke, and status snapshots.
+  /// - Throws: Any readback or smoke error raised by the underlying runtime use cases.
+  public func overview(
+    for agent: PraxisRuntimeAgentRef? = nil
+  ) async throws -> PraxisRuntimeCmpProjectOverview {
+    try await overview(.init(agentID: agent))
+  }
+
+  /// Reads one direct CMP smoke snapshot for the scoped project.
+  ///
+  /// - Returns: A CMP smoke snapshot projected by the runtime facade.
+  /// - Throws: Any smoke error raised by the underlying runtime use cases.
+  public func smoke() async throws -> PraxisCmpProjectSmokeSnapshot {
+    try await cmpFacade.smokeProject(.init(projectID: project.rawValue))
+  }
+
   /// Peer approval workflow grouped behind a dedicated scoped client.
   public var approvals: PraxisRuntimeCmpApprovalClient {
     PraxisRuntimeCmpApprovalClient(project: project, cmpFacade: cmpFacade)
@@ -125,6 +153,28 @@ public struct PraxisRuntimeCmpProjectClient: Sendable {
       approval: approval
     )
   }
+
+  /// Reads one peer approval summary from lightweight call-site parameters.
+  ///
+  /// - Parameters:
+  ///   - agent: Optional requesting agent identifier.
+  ///   - targetAgent: Optional target agent identifier.
+  ///   - capability: Optional capability identifier.
+  /// - Returns: A CMP approval overview composed from approval readback and project overview.
+  /// - Throws: Any approval or project readback error raised by the underlying runtime use cases.
+  public func approvalOverview(
+    agent: PraxisRuntimeAgentRef? = nil,
+    targetAgent: PraxisRuntimeAgentRef? = nil,
+    capability: PraxisRuntimeCapabilityRef? = nil
+  ) async throws -> PraxisRuntimeCmpApprovalOverview {
+    try await approvalOverview(
+      .init(
+        agentID: agent,
+        targetAgentID: targetAgent,
+        capabilityID: capability
+      )
+    )
+  }
 }
 
 /// Aggregated CMP read model for one scoped project.
@@ -141,6 +191,26 @@ public struct PraxisRuntimeCmpProjectOverview: Sendable {
     self.readback = readback
     self.smoke = smoke
     self.status = status
+  }
+
+  /// Stable project identifier shared by the aggregated CMP snapshots.
+  public var projectID: String {
+    readback.projectSummary.projectID
+  }
+
+  /// Stable agent identifier when the aggregated status readback is agent-filtered.
+  public var agentID: String? {
+    status.agentID
+  }
+
+  /// High-level CMP overview summary suitable for direct caller logging.
+  public var summary: String {
+    readback.summary
+  }
+
+  /// CMP smoke checks exposed without leaking the lower smoke result wrapper.
+  public var smokeChecks: [PraxisCmpProjectSmokeCheck] {
+    smoke.smokeResult.checks
   }
 }
 
@@ -209,6 +279,11 @@ public struct PraxisRuntimeCmpApprovalOverview: Sendable {
   ) {
     self.overview = overview
     self.approval = approval
+  }
+
+  /// Stable project identifier shared by the approval and project snapshots.
+  public var projectID: String {
+    approval.projectID
   }
 
 }

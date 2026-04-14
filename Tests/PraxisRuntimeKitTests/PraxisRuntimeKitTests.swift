@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import PraxisCmpTypes
+import PraxisCoreTypes
 import PraxisMpTypes
 import PraxisRuntimeKit
 
@@ -162,5 +163,83 @@ struct PraxisRuntimeKitTests {
     #expect(history.projectID == "mp.local-runtime")
     #expect(history.reason == "Need historical context")
     #expect(String(describing: type(of: memoryLifecycle)) == "PraxisRuntimeMpMemoryClient")
+  }
+
+  @Test
+  func runtimeKitConveniencesReduceRequestWrapperCeremonyWithoutChangingTypedSemantics() async throws {
+    let rootDirectory = try makeRuntimeKitTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let client = try PraxisRuntimeClient.makeDefault(rootDirectory: rootDirectory)
+    let started = try await client.runs.run(
+      task: "Summarize repository status",
+      sessionID: "session.runtime-kit-convenience"
+    )
+    let resumed = try await client.runs.resume(.init(started.runID.rawValue))
+
+    let cmpProject = client.cmp.project("cmp.local-runtime")
+    let tapProject = client.tap.project("cmp.local-runtime")
+    let mpProject = client.mp.project("mp.local-runtime")
+
+    let session = try await cmpProject.openSession("cmp.runtime-kit-convenience")
+    _ = try await cmpProject.approvals.request(
+      .init(
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityID: "tool.git",
+        requestedTier: .b1,
+        summary: "Escalate git access to checker"
+      )
+    )
+    _ = try await cmpProject.approvals.decide(
+      .init(
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityID: "tool.git",
+        decision: .approve,
+        reviewerAgentID: "reviewer.local",
+        decisionSummary: "Approved git access for checker"
+      )
+    )
+    let cmpOverview = try await cmpProject.overview(for: "checker.local")
+    let cmpSmoke = try await cmpProject.smoke()
+    let tapOverview = try await tapProject.overview(for: "checker.local", limit: 10)
+    let mpOverview = try await mpProject.overview(limit: 5)
+    let mpSmoke = try await mpProject.smoke()
+    let mpSearch = try await mpProject.search(query: "onboarding", scopeLevels: [.project], limit: 5)
+
+    #expect(started.runID == resumed.runID)
+    #expect(session.sessionID == "cmp.runtime-kit-convenience")
+    #expect(cmpOverview.projectID == "cmp.local-runtime")
+    #expect(cmpOverview.smokeChecks.count == cmpSmoke.smokeResult.checks.count)
+    #expect(tapOverview.projectID == "cmp.local-runtime")
+    #expect(mpOverview.projectID == "mp.local-runtime")
+    #expect(mpOverview.smokeChecks.count == mpSmoke.smokeResult.checks.count)
+    #expect(mpSearch.query == "onboarding")
+  }
+
+  @Test
+  func runtimeKitErrorDiagnosticsMapCoreErrorCategoriesIntoCallerFacingRemediation() {
+    let invalidInput = PraxisRuntimeErrorDiagnostics.diagnose(
+      PraxisError.invalidInput("Field projectID must not be empty.")
+    )
+    let dependencyMissing = PraxisRuntimeErrorDiagnostics.diagnose(
+      PraxisError.dependencyMissing("MP resolve requires a semantic memory store adapter.")
+    )
+    let unsupportedOperation = PraxisRuntimeErrorDiagnostics.diagnose(
+      PraxisError.unsupportedOperation("System git execution is only wired for the macOS local runtime baseline today.")
+    )
+    let invariantViolation = PraxisRuntimeErrorDiagnostics.diagnose(
+      PraxisError.invariantViolation("Failed to open local runtime SQLite database.")
+    )
+
+    #expect(invalidInput.category == .invalidInput)
+    #expect(invalidInput.remediation.contains("required fields"))
+    #expect(dependencyMissing.category == .dependencyMissing)
+    #expect(dependencyMissing.remediation.contains("host adapter"))
+    #expect(unsupportedOperation.category == .unsupportedOperation)
+    #expect(unsupportedOperation.remediation.contains("supported runtime profile"))
+    #expect(invariantViolation.category == .invariantViolation)
+    #expect(invariantViolation.remediation.contains("runtime bug"))
   }
 }
