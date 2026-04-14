@@ -13,6 +13,10 @@ public protocol PraxisInspectTapUseCaseProtocol: Sendable {
   func execute(_ command: PraxisInspectTapCommand) async throws -> PraxisTapInspection
 }
 
+public protocol PraxisStageTapProvisionUseCaseProtocol: Sendable {
+  func execute(_ command: PraxisStageTapProvisionCommand) async throws -> PraxisTapProvisionStaging
+}
+
 public protocol PraxisReadbackTapStatusUseCaseProtocol: Sendable {
   func execute(_ command: PraxisReadbackTapStatusCommand) async throws -> PraxisTapStatusReadback
 }

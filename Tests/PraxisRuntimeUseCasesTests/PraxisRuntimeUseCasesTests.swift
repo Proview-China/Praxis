@@ -1968,6 +1968,57 @@ struct PraxisRuntimeUseCasesTests {
   }
 
   @Test
+  func tapProvisioningUseCaseStagesActivationReplayAndPersistsCheckpointEvidence() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-runtime-usecases-tap-provisioning-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let dependencies = try makeDependencies(rootDirectory: rootDirectory)
+    let stageProvisionUseCase = PraxisStageTapProvisionUseCase(dependencies: dependencies)
+    let inspectTapUseCase = PraxisInspectTapUseCase(dependencies: dependencies)
+    let readbackTapHistoryUseCase = PraxisReadbackTapHistoryUseCase(dependencies: dependencies)
+    let checkpointPointer = PraxisCheckpointPointer(
+      checkpointID: .init(rawValue: "tap.checkpoint.snapshot.cmp.local-runtime"),
+      sessionID: .init(rawValue: "tap.session.snapshot.cmp.local-runtime")
+    )
+
+    let staged = try await stageProvisionUseCase.execute(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityKey: capabilityID("tool.shell.exec"),
+        requestedTier: .b2,
+        summary: "Stage shell execution provisioning for checker",
+        expectedArtifacts: ["shell.exec binding"],
+        requiredVerification: ["shell.exec smoke"],
+        replayPolicy: .reReviewThenDispatch
+      )
+    )
+    let checkpoint = try await dependencies.hostAdapters.checkpointStore?.load(pointer: checkpointPointer)
+    let inspection = try await inspectTapUseCase.execute(.init(projectID: "cmp.local-runtime", historyLimit: 10))
+    let history = try await readbackTapHistoryUseCase.execute(
+      .init(projectID: "cmp.local-runtime", agentID: "checker.local", limit: 10)
+    )
+
+    #expect(staged.selectedAssets.count == 1)
+    #expect(staged.pendingReplay.nextAction.rawValue == "re_review_then_dispatch")
+    #expect(checkpoint?.snapshot.payload?["latestEventKind"]?.stringValue == "activation_staged")
+    #expect(checkpoint?.snapshot.payload?["bundleSummary"]?.stringValue?.contains("tool.shell.exec") == true)
+    #expect(checkpoint?.snapshot.payload?["pendingReplays"]?.arrayValue?.count == 1)
+    #expect(inspection.runtimeSnapshot.pendingReplays.count == 1)
+    #expect(inspection.reviewContext.runSummary.summary.contains("pending replay record"))
+    #expect(inspection.reviewContext.sections.contains { $0.sectionID == "activation-replay" })
+    #expect(
+      history.entries.contains {
+        $0.capabilityKey == capabilityID("tool.shell.exec")
+          && $0.outcome == .activationStaged
+          && $0.decisionSummary.contains("Activation staged attempt")
+      }
+    )
+  }
+
+  @Test
   func cmpDispatchStateChangesRefreshTapInspectionCheckpoint() async throws {
     let rootDirectory = FileManager.default.temporaryDirectory
       .appendingPathComponent("praxis-runtime-usecases-dispatch-checkpoint-\(UUID().uuidString)", isDirectory: true)

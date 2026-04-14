@@ -7,7 +7,9 @@ import PraxisMpMemory
 import PraxisMpTypes
 import PraxisRun
 import PraxisSession
+import PraxisTapProvision
 import PraxisTapReview
+import PraxisTapRuntime
 import PraxisTapTypes
 import PraxisRuntimeUseCases
 
@@ -115,6 +117,73 @@ public struct PraxisTapInspectionSnapshot: Sendable, Equatable, Codable {
     self.latestDecisionSummary = latestDecisionSummary
     self.advisorySummaries = advisorySummaries
     self.sections = sections
+  }
+}
+
+public struct PraxisTapProvisionStagingSnapshot: Sendable, Equatable, Codable {
+  public let summary: String
+  public let projectID: String
+  public let agentID: String
+  public let targetAgentID: String
+  public let capabilityKey: PraxisCapabilityID
+  public let requestedTier: PraxisTapCapabilityTier
+  public let provisionKind: PraxisTapProvisionKind
+  public let planSummary: String
+  public let bundleSummary: String
+  public let requiresApproval: Bool
+  public let selectedAssetNames: [String]
+  public let verificationPlan: [String]
+  public let rollbackPlan: [String]
+  public let activationAttemptID: String
+  public let activationStatus: PraxisActivationAttemptStatus
+  public let pendingReplayID: String
+  public let pendingReplayStatus: PraxisReplayStatus
+  public let pendingReplayNextAction: PraxisReplayNextAction
+  public let checkpointReference: String?
+  public let stagedAt: String
+
+  public init(
+    summary: String,
+    projectID: String,
+    agentID: String,
+    targetAgentID: String,
+    capabilityKey: PraxisCapabilityID,
+    requestedTier: PraxisTapCapabilityTier,
+    provisionKind: PraxisTapProvisionKind,
+    planSummary: String,
+    bundleSummary: String,
+    requiresApproval: Bool,
+    selectedAssetNames: [String],
+    verificationPlan: [String],
+    rollbackPlan: [String],
+    activationAttemptID: String,
+    activationStatus: PraxisActivationAttemptStatus,
+    pendingReplayID: String,
+    pendingReplayStatus: PraxisReplayStatus,
+    pendingReplayNextAction: PraxisReplayNextAction,
+    checkpointReference: String? = nil,
+    stagedAt: String
+  ) {
+    self.summary = summary
+    self.projectID = projectID
+    self.agentID = agentID
+    self.targetAgentID = targetAgentID
+    self.capabilityKey = capabilityKey
+    self.requestedTier = requestedTier
+    self.provisionKind = provisionKind
+    self.planSummary = planSummary
+    self.bundleSummary = bundleSummary
+    self.requiresApproval = requiresApproval
+    self.selectedAssetNames = selectedAssetNames
+    self.verificationPlan = verificationPlan
+    self.rollbackPlan = rollbackPlan
+    self.activationAttemptID = activationAttemptID
+    self.activationStatus = activationStatus
+    self.pendingReplayID = pendingReplayID
+    self.pendingReplayStatus = pendingReplayStatus
+    self.pendingReplayNextAction = pendingReplayNextAction
+    self.checkpointReference = checkpointReference
+    self.stagedAt = stagedAt
   }
 }
 

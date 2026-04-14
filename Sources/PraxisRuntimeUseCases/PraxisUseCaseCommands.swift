@@ -13,6 +13,7 @@ import PraxisRun
 import PraxisTapTypes
 import PraxisSession
 import PraxisTapGovernance
+import PraxisTapProvision
 import PraxisTapReview
 import PraxisTapRuntime
 import PraxisTransition
@@ -123,6 +124,104 @@ public struct PraxisInspectTapCommand: Sendable, Equatable, Codable {
   }
 }
 
+public struct PraxisStageTapProvisionCommand: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let agentID: String
+  public let targetAgentID: String
+  public let capabilityKey: PraxisCapabilityID
+  public let requestedTier: PraxisTapCapabilityTier
+  public let provisionKind: PraxisTapProvisionKind
+  public let mode: PraxisTapMode?
+  public let summary: String
+  public let expectedArtifacts: [String]
+  public let requiredVerification: [String]
+  public let replayPolicy: PraxisProvisionReplayPolicy
+
+  public init(
+    projectID: String,
+    agentID: String,
+    targetAgentID: String,
+    capabilityKey: PraxisCapabilityID,
+    requestedTier: PraxisTapCapabilityTier,
+    provisionKind: PraxisTapProvisionKind = .capability,
+    mode: PraxisTapMode? = nil,
+    summary: String,
+    expectedArtifacts: [String] = [],
+    requiredVerification: [String] = [],
+    replayPolicy: PraxisProvisionReplayPolicy = .reReviewThenDispatch
+  ) {
+    self.projectID = projectID
+    self.agentID = agentID
+    self.targetAgentID = targetAgentID
+    self.capabilityKey = capabilityKey
+    self.requestedTier = requestedTier
+    self.provisionKind = provisionKind
+    self.mode = mode
+    self.summary = summary
+    self.expectedArtifacts = expectedArtifacts
+    self.requiredVerification = requiredVerification
+    self.replayPolicy = replayPolicy
+  }
+}
+
+public struct PraxisTapProvisionStaging: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let agentID: String
+  public let targetAgentID: String
+  public let capabilityKey: PraxisCapabilityID
+  public let requestedTier: PraxisTapCapabilityTier
+  public let provisionKind: PraxisTapProvisionKind
+  public let summary: String
+  public let planSummary: String
+  public let bundleSummary: String
+  public let requiresApproval: Bool
+  public let selectedAssets: [PraxisProvisionAsset]
+  public let verificationPlan: [String]
+  public let rollbackPlan: [String]
+  public let activationAttempt: PraxisActivationAttemptRecord
+  public let pendingReplay: PraxisPendingReplay
+  public let checkpointReference: String?
+  public let stagedAt: String
+
+  public init(
+    projectID: String,
+    agentID: String,
+    targetAgentID: String,
+    capabilityKey: PraxisCapabilityID,
+    requestedTier: PraxisTapCapabilityTier,
+    provisionKind: PraxisTapProvisionKind,
+    summary: String,
+    planSummary: String,
+    bundleSummary: String,
+    requiresApproval: Bool,
+    selectedAssets: [PraxisProvisionAsset],
+    verificationPlan: [String],
+    rollbackPlan: [String],
+    activationAttempt: PraxisActivationAttemptRecord,
+    pendingReplay: PraxisPendingReplay,
+    checkpointReference: String? = nil,
+    stagedAt: String
+  ) {
+    self.projectID = projectID
+    self.agentID = agentID
+    self.targetAgentID = targetAgentID
+    self.capabilityKey = capabilityKey
+    self.requestedTier = requestedTier
+    self.provisionKind = provisionKind
+    self.summary = summary
+    self.planSummary = planSummary
+    self.bundleSummary = bundleSummary
+    self.requiresApproval = requiresApproval
+    self.selectedAssets = selectedAssets
+    self.verificationPlan = verificationPlan
+    self.rollbackPlan = rollbackPlan
+    self.activationAttempt = activationAttempt
+    self.pendingReplay = pendingReplay
+    self.checkpointReference = checkpointReference
+    self.stagedAt = stagedAt
+  }
+}
+
 public struct PraxisReadbackTapStatusCommand: Sendable, Equatable, Codable {
   public let projectID: String
   public let agentID: String?
@@ -198,6 +297,8 @@ public enum PraxisCmpPeerApprovalOutcome: String, Sendable, Codable {
   case baselineApproved = "baseline_approved"
   case reviewRequired = "review_required"
   case redirectedToProvisioning = "redirected_to_provisioning"
+  case provisionStaged = "provision_staged"
+  case activationStaged = "activation_staged"
   case escalatedToHuman = "escalated_to_human"
   case denied
   case approvedByHuman = "approved_by_human"

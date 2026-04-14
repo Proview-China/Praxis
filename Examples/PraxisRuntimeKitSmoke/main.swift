@@ -5,6 +5,7 @@ import PraxisRuntimeKit
 private enum PraxisRuntimeKitSmokeSuite: String, CaseIterable {
   case run
   case cmpTap = "cmp-tap"
+  case provisioning
   case recovery
   case mp
   case capabilities
@@ -69,6 +70,8 @@ private struct PraxisRuntimeKitSmokeHarness {
       return [await execute(.run, body: runSuite)]
     case .cmpTap:
       return [await execute(.cmpTap, body: cmpTapSuite)]
+    case .provisioning:
+      return [await execute(.provisioning, body: provisioningSuite)]
     case .mp:
       return [await execute(.mp, body: mpSuite)]
     case .recovery:
@@ -81,6 +84,7 @@ private struct PraxisRuntimeKitSmokeHarness {
       return [
         await execute(.run, body: runSuite),
         await execute(.cmpTap, body: cmpTapSuite),
+        await execute(.provisioning, body: provisioningSuite),
         await execute(.recovery, body: recoverySuite),
         await execute(.mp, body: mpSuite),
         await execute(.capabilities, body: capabilitiesSuite),
@@ -203,14 +207,69 @@ private struct PraxisRuntimeKitSmokeHarness {
     return "projectID=\(overview.projectID) smokeChecks=\(smoke.smokeResult.checks.count) hits=\(search.hits.count)"
   }
 
+  private func provisioningSuite() async throws -> String {
+    let cmpProject = client.cmp.project("cmp.local-runtime")
+    let tapProject = client.tap.project("cmp.local-runtime")
+
+    _ = try await cmpProject.openSession("cmp.runtime-kit-provisioning")
+    let requested = try await cmpProject.approvals.request(
+      .init(
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityID: "tool.shell.exec",
+        requestedTier: .b2,
+        summary: "Redirect shell execution to provisioning"
+      )
+    )
+    let staged = try await tapProject.provision(
+      .init(
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityID: "tool.shell.exec",
+        requestedTier: .b2,
+        summary: "Stage shell execution provisioning for checker",
+        expectedArtifacts: ["shell.exec binding"],
+        requiredVerification: ["shell.exec smoke"],
+        replayPolicy: .reReviewThenDispatch
+      )
+    )
+    let inspection = try await tapProject.inspect(historyLimit: 10)
+    let workbench = try await tapProject.reviewWorkbench(for: "checker.local", limit: 10)
+
+    try require(
+      requested.outcome == .redirectedToProvisioning,
+      "Provisioning smoke expected shell execution approval to redirect into provisioning."
+    )
+    try require(staged.capabilityID == "tool.shell.exec", "Provisioning smoke expected the staged capability ID to round-trip unchanged.")
+    try require(
+      staged.pendingReplayNextAction == .reReviewThenDispatch,
+      "Provisioning smoke expected the pending replay to require re-review before dispatch."
+    )
+    try require(
+      inspection.runSummary.contains("pending replay record"),
+      "Provisioning smoke expected TAP inspection to surface persisted pending replay evidence."
+    )
+    try require(
+      inspection.sections.contains { $0.sectionID == "activation-replay" },
+      "Provisioning smoke expected TAP inspection to expose an activation/replay section."
+    )
+    try require(
+      workbench.latestDecisionSummary?.contains("Activation staged attempt") == true,
+      "Provisioning smoke expected the reviewer workbench to surface the staged activation summary."
+    )
+
+    return "capability=\(staged.capabilityID) replay=\(staged.pendingReplayID) nextAction=\(staged.pendingReplayNextAction.rawValue)"
+  }
+
   private func recoverySuite() async throws -> String {
+    let recoveryProjectID = "cmp.recovery-runtime"
     let firstClient = client
     let startedRun = try await firstClient.runs.run(
       task: "Recover runtime checkpoint state",
       sessionID: "session.runtime-kit-recovery"
     )
 
-    let cmpProject = firstClient.cmp.project("cmp.local-runtime")
+    let cmpProject = firstClient.cmp.project(.init(recoveryProjectID))
     _ = try await cmpProject.openSession("cmp.runtime-kit-recovery")
     _ = try await cmpProject.approvals.request(
       .init(
@@ -234,8 +293,8 @@ private struct PraxisRuntimeKitSmokeHarness {
 
     let secondClient = try PraxisRuntimeClient.makeDefault(rootDirectory: rootDirectory)
     let resumedRun = try await secondClient.runs.resume(.init(startedRun.runID.rawValue))
-    let recoveredTapProject = secondClient.tap.project("cmp.local-runtime")
-    let recoveredInspection = try await secondClient.tap.inspect()
+    let recoveredTapProject = secondClient.tap.project(.init(recoveryProjectID))
+    let recoveredInspection = try await recoveredTapProject.inspect(historyLimit: 10)
     let recoveredWorkbench = try await recoveredTapProject.reviewWorkbench(for: "checker.local", limit: 10)
     let recoveredOverview = try await recoveredTapProject.overview(for: "checker.local", limit: 10)
 
@@ -397,7 +456,7 @@ private enum PraxisRuntimeKitSmokeArguments {
         rootDirectoryPath = arguments[index]
       case "--help", "-h":
         throw PraxisRuntimeKitSmokeFailure.invalidArguments(
-          "Usage: swift run PraxisRuntimeKitSmoke [--suite run|cmp-tap|recovery|mp|capabilities|search|all] [--root /tmp/praxis-runtime-kit-smoke]"
+          "Usage: swift run PraxisRuntimeKitSmoke [--suite run|cmp-tap|provisioning|recovery|mp|capabilities|search|all] [--root /tmp/praxis-runtime-kit-smoke]"
         )
       default:
         throw PraxisRuntimeKitSmokeFailure.invalidArguments("Unknown argument '\(arguments[index])'.")

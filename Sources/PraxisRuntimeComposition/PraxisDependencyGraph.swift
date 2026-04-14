@@ -21,6 +21,19 @@ public final class PraxisDependencyGraph: PraxisDependencyResolving, @unchecked 
     hostAdapters.providerWebSearchExecutor
   }
 
+  public var providerRequestSurface: PraxisProviderRequestSurface {
+    PraxisProviderRequestSurface(
+      inferenceExecutor: hostAdapters.providerInferenceExecutor,
+      webSearchExecutor: hostAdapters.providerWebSearchExecutor,
+      embeddingExecutor: hostAdapters.providerEmbeddingExecutor,
+      fileStore: hostAdapters.providerFileStore,
+      batchExecutor: hostAdapters.providerBatchExecutor,
+      skillRegistry: hostAdapters.providerSkillRegistry,
+      skillActivator: hostAdapters.providerSkillActivator,
+      mcpExecutor: hostAdapters.providerMCPExecutor
+    )
+  }
+
   public var workspaceReader: (any PraxisWorkspaceReader)? {
     hostAdapters.workspaceReader
   }

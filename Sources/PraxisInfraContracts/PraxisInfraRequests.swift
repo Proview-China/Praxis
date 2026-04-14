@@ -385,6 +385,8 @@ public enum PraxisTapRuntimeEventKind: String, CaseIterable, Sendable, Codable {
   case peerApprovalApproved = "peer_approval_approved"
   case peerApprovalRejected = "peer_approval_rejected"
   case gateReleased = "gate_released"
+  case provisionStaged = "provision_staged"
+  case activationStaged = "activation_staged"
   case dispatchBlocked = "dispatch_blocked"
   case dispatchReleased = "dispatch_released"
   case dispatchRetryRequested = "dispatch_retry_requested"

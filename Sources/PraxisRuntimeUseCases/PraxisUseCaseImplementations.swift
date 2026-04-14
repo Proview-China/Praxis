@@ -18,6 +18,7 @@ import PraxisSession
 import PraxisState
 import PraxisToolingContracts
 import PraxisTapGovernance
+import PraxisTapProvision
 import PraxisTapReview
 import PraxisTapRuntime
 import PraxisTapTypes
@@ -117,6 +118,128 @@ private func tapInspectionCheckpointPointer(for projectID: String) -> PraxisChec
   return .init(
     checkpointID: .init(rawValue: "tap.checkpoint.snapshot.\(tapInspectionStorageComponent(for: projectID))"),
     sessionID: sessionID
+  )
+}
+
+private let tapProvisioningPayloadKeys: Set<String> = [
+  "bundleSummary",
+  "planSummary",
+  "activationSummary",
+  "activationAttempt",
+  "pendingReplays",
+]
+
+private struct PraxisTapProvisioningCheckpointState {
+  let bundleSummary: String?
+  let planSummary: String?
+  let activationSummary: String?
+  let activationAttempt: PraxisActivationAttemptRecord?
+  let pendingReplays: [PraxisPendingReplay]
+
+  var hasRuntimeEvidence: Bool {
+    bundleSummary != nil || planSummary != nil || activationAttempt != nil || pendingReplays.isEmpty == false
+  }
+}
+
+private func preservedTapProvisioningPayload(
+  from payload: [String: PraxisValue]?
+) -> [String: PraxisValue] {
+  guard let payload else {
+    return [:]
+  }
+  return payload.reduce(into: [:]) { partial, element in
+    if tapProvisioningPayloadKeys.contains(element.key) {
+      partial[element.key] = element.value
+    }
+  }
+}
+
+private func tapProvisioningPayloadFields(
+  bundleSummary: String,
+  planSummary: String,
+  activationSummary: String,
+  activationAttempt: PraxisActivationAttemptRecord,
+  pendingReplays: [PraxisPendingReplay]
+) -> [String: PraxisValue] {
+  [
+    "bundleSummary": .string(bundleSummary),
+    "planSummary": .string(planSummary),
+    "activationSummary": .string(activationSummary),
+    "activationAttempt": .object([
+      "attemptID": .string(activationAttempt.attemptID),
+      "capabilityKey": .string(activationAttempt.capabilityKey),
+      "status": .string(activationAttempt.status.rawValue),
+      "createdAt": .string(activationAttempt.createdAt),
+    ]),
+    "pendingReplays": .array(
+      pendingReplays.map { replay in
+        .object([
+          "replayID": .string(replay.replayID),
+          "capabilityKey": .string(replay.capabilityKey),
+          "policy": .string(replay.policy.rawValue),
+          "status": .string(replay.status.rawValue),
+          "nextAction": .string(replay.nextAction.rawValue),
+          "summary": .string(replay.summary),
+          "recommendedAction": .string(replay.recommendedAction),
+        ])
+      }
+    ),
+  ]
+}
+
+private func tapProvisioningCheckpointState(
+  from payload: [String: PraxisValue]?
+) -> PraxisTapProvisioningCheckpointState {
+  let activationAttempt: PraxisActivationAttemptRecord?
+  if let object = payload?["activationAttempt"]?.objectValue,
+    let attemptID = object["attemptID"]?.stringValue,
+    let capabilityKey = object["capabilityKey"]?.stringValue,
+    let statusRawValue = object["status"]?.stringValue,
+    let status = PraxisActivationAttemptStatus(rawValue: statusRawValue),
+    let createdAt = object["createdAt"]?.stringValue
+  {
+    activationAttempt = PraxisActivationAttemptRecord(
+      attemptID: attemptID,
+      capabilityKey: capabilityKey,
+      status: status,
+      createdAt: createdAt
+    )
+  } else {
+    activationAttempt = nil
+  }
+
+  let pendingReplays: [PraxisPendingReplay] = payload?["pendingReplays"]?.arrayValue?.compactMap { value in
+    guard let object = value.objectValue,
+      let replayID = object["replayID"]?.stringValue,
+      let capabilityKey = object["capabilityKey"]?.stringValue,
+      let policyRawValue = object["policy"]?.stringValue,
+      let policy = PraxisProvisionReplayPolicy(rawValue: policyRawValue),
+      let statusRawValue = object["status"]?.stringValue,
+      let status = PraxisReplayStatus(rawValue: statusRawValue),
+      let nextActionRawValue = object["nextAction"]?.stringValue,
+      let nextAction = PraxisReplayNextAction(rawValue: nextActionRawValue),
+      let summary = object["summary"]?.stringValue,
+      let recommendedAction = object["recommendedAction"]?.stringValue
+    else {
+      return nil
+    }
+    return PraxisPendingReplay(
+      replayID: replayID,
+      capabilityKey: capabilityKey,
+      policy: policy,
+      status: status,
+      nextAction: nextAction,
+      summary: summary,
+      recommendedAction: recommendedAction
+    )
+  } ?? []
+
+  return PraxisTapProvisioningCheckpointState(
+    bundleSummary: payload?["bundleSummary"]?.stringValue,
+    planSummary: payload?["planSummary"]?.stringValue,
+    activationSummary: payload?["activationSummary"]?.stringValue,
+    activationAttempt: activationAttempt,
+    pendingReplays: pendingReplays
   )
 }
 
@@ -2813,6 +2936,17 @@ private func readbackTapStatus(
   )
   let approvalDescriptors = try await dependencies.hostAdapters.cmpPeerApprovalStore?.describeAll(approvalQuery) ?? []
   let latestApproval = approvalDescriptors.first
+  let latestRuntimeEvents = try await dependencies.hostAdapters.tapRuntimeEventStore?.read(
+    .init(
+      projectID: command.projectID,
+      agentID: nil,
+      targetAgentID: command.agentID,
+      limit: 10
+    )
+  ) ?? []
+  let latestRuntimeEvent = latestRuntimeEvents.max { lhs, rhs in
+    tapRuntimeEventRecencyScore(for: lhs) < tapRuntimeEventRecencyScore(for: rhs)
+  }
   let approvalStates = try approvalDescriptors.map { descriptor in
     try cmpPeerApprovalSurfaceFields(from: descriptor).humanGateState
   }
@@ -2838,10 +2972,16 @@ private func readbackTapStatus(
   if dependencies.hostAdapters.cmpPeerApprovalStore == nil {
     issues.append("CMP peer approval store adapter is still missing from HostRuntime composition.")
   }
+  if dependencies.hostAdapters.tapRuntimeEventStore == nil {
+    issues.append("TAP runtime event store adapter is still missing from HostRuntime composition.")
+  }
 
   let scopeLabel = command.agentID ?? "project scope"
   let readinessSummary = "TAP readiness for \(scopeLabel) currently sees \(capabilityIDs.count) registered capability surface(s), \(pendingApprovalCount) pending approval request(s), and \(approvedApprovalCount) approved request(s)."
-  let latestCapabilityID = try latestApproval.map { try cmpPeerApprovalCapabilityID(from: $0) }
+  let latestEventMetadata = try latestRuntimeEvent.map(PraxisTapHistoryExtractedMetadata.init)
+  let latestApprovalCapabilityID = try latestApproval.map { try cmpPeerApprovalCapabilityID(from: $0) }
+  let latestEventCapabilityID = try latestRuntimeEvent.flatMap { try tapStatusLatestCapabilityID(from: $0) }
+  let latestCapabilityID = latestEventCapabilityID ?? latestApprovalCapabilityID
   return PraxisTapStatusReadback(
     projectID: command.projectID,
     agentID: command.agentID,
@@ -2855,9 +2995,52 @@ private func readbackTapStatus(
     pendingApprovalCount: pendingApprovalCount,
     approvedApprovalCount: approvedApprovalCount,
     latestCapabilityKey: latestCapabilityID,
-    latestDecisionSummary: latestApproval?.decisionSummary,
+    latestDecisionSummary: latestEventMetadata?.decisionSummary ?? latestApproval?.decisionSummary,
     issues: issues
   )
+}
+
+private func tapRuntimeEventRecencyScore(for record: PraxisTapRuntimeEventRecord) -> (String, Int, String) {
+  (record.createdAt, tapRuntimeEventPriority(for: record.eventKind), record.eventID)
+}
+
+private func tapRuntimeEventPriority(for eventKind: PraxisTapRuntimeEventKind) -> Int {
+  switch eventKind {
+  case .activationStaged:
+    return 8
+  case .peerApprovalApproved, .peerApprovalRejected, .gateReleased, .dispatchReleased:
+    return 7
+  case .provisionStaged:
+    return 6
+  case .dispatchRetryRequested:
+    return 5
+  case .dispatchBlocked, .peerApprovalWaiting:
+    return 4
+  case .peerApprovalRequested:
+    return 3
+  case .controlUpdated:
+    return 2
+  }
+}
+
+private func tapStatusLatestCapabilityID(
+  from record: PraxisTapRuntimeEventRecord
+) throws -> PraxisCapabilityID? {
+  if let capabilityKey = record.capabilityKey {
+    return try normalizedCapabilityID(
+      from: capabilityKey,
+      fieldName: "capabilityKey",
+      error: PraxisError.invalidInput("TAP runtime event \(record.eventID) contains blank capabilityKey.")
+    )
+  }
+  if let metadataCapabilityKey = record.metadata["capabilityKey"]?.stringValue {
+    return try normalizedCapabilityID(
+      from: metadataCapabilityKey,
+      fieldName: "capabilityKey",
+      error: PraxisError.invalidInput("TAP runtime event \(record.eventID) metadata contains blank capabilityKey.")
+    )
+  }
+  return nil
 }
 
 private func tapHistoryEntries(
@@ -3150,6 +3333,11 @@ private func persistTapInspectionCheckpoint(
   latestEventKind: PraxisTapRuntimeEventKind,
   latestCapabilityID: PraxisCapabilityID?,
   latestDecisionSummary: String,
+  activationAttempt: PraxisActivationAttemptRecord? = nil,
+  pendingReplays: [PraxisPendingReplay]? = nil,
+  bundleSummary: String? = nil,
+  planSummary: String? = nil,
+  activationSummary: String? = nil,
   dependencies: PraxisDependencyGraph
 ) async throws {
   guard let checkpointStore = dependencies.hostAdapters.checkpointStore else {
@@ -3166,6 +3354,7 @@ private func persistTapInspectionCheckpoint(
   )
   let sessionID = tapInspectionSessionID(for: projectID)
   let checkpointPointer = tapInspectionCheckpointPointer(for: projectID)
+  let existingCheckpoint = try await checkpointStore.load(pointer: checkpointPointer)
   let storedAt = runtimeNow()
   let payload: [String: PraxisValue] = [
     "projectID": .string(projectID),
@@ -3179,6 +3368,26 @@ private func persistTapInspectionCheckpoint(
     "readinessSummary": .string(status.readinessSummary),
     "historySummary": .string(history.summary)
   ]
+    .merging(
+      {
+        if let activationAttempt,
+          let pendingReplays,
+          let bundleSummary,
+          let planSummary,
+          let activationSummary
+        {
+          return tapProvisioningPayloadFields(
+            bundleSummary: bundleSummary,
+            planSummary: planSummary,
+            activationSummary: activationSummary,
+            activationAttempt: activationAttempt,
+            pendingReplays: pendingReplays
+          )
+        }
+        return preservedTapProvisioningPayload(from: existingCheckpoint?.snapshot.payload)
+      }(),
+      uniquingKeysWith: { _, new in new }
+    )
 
   let snapshot = PraxisCheckpointSnapshot(
     id: checkpointPointer.checkpointID,
@@ -3189,6 +3398,42 @@ private func persistTapInspectionCheckpoint(
   )
   _ = try await checkpointStore.save(
     .init(pointer: checkpointPointer, snapshot: snapshot)
+  )
+}
+
+private func appendTapInspectionReplayEvidence(
+  projectID: String,
+  capabilityID: PraxisCapabilityID,
+  summary: String,
+  bundleSummary: String,
+  pendingReplay: PraxisPendingReplay,
+  dependencies: PraxisDependencyGraph
+) async throws {
+  guard let journalStore = dependencies.hostAdapters.journalStore else {
+    return
+  }
+
+  let sessionID = tapInspectionSessionID(for: projectID)
+  _ = try await journalStore.append(
+    .init(
+      events: [
+        .init(
+          sequence: 0,
+          sessionID: sessionID,
+          correlationID: "tap-provision.\(projectID).\(capabilityID.rawValue)",
+          type: "tap.provision.staged",
+          summary: summary,
+          metadata: [
+            "projectID": .string(projectID),
+            "capabilityKey": .string(capabilityID.rawValue),
+            "bundleSummary": .string(bundleSummary),
+            "replayID": .string(pendingReplay.replayID),
+            "replayStatus": .string(pendingReplay.status.rawValue),
+            "nextAction": .string(pendingReplay.nextAction.rawValue),
+          ]
+        )
+      ]
+    )
   )
 }
 
@@ -4355,6 +4600,183 @@ public final class PraxisResumeRunUseCase: PraxisResumeRunUseCaseProtocol {
   }
 }
 
+public final class PraxisStageTapProvisionUseCase: PraxisStageTapProvisionUseCaseProtocol {
+  public let dependencies: PraxisDependencyGraph
+
+  public init(dependencies: PraxisDependencyGraph) {
+    self.dependencies = dependencies
+  }
+
+  /// Builds one host-neutral provisioning receipt and stages replay evidence for TAP inspection.
+  ///
+  /// - Parameter command: Structured provisioning request for one TAP-scoped capability handoff.
+  /// - Returns: A staged provisioning receipt containing plan, activation, and replay summaries.
+  /// - Throws: Propagates validation, persistence, or readback failures.
+  public func execute(_ command: PraxisStageTapProvisionCommand) async throws -> PraxisTapProvisionStaging {
+    let projectID = command.projectID.trimmingCharacters(in: .whitespacesAndNewlines)
+    let agentID = command.agentID.trimmingCharacters(in: .whitespacesAndNewlines)
+    let targetAgentID = command.targetAgentID.trimmingCharacters(in: .whitespacesAndNewlines)
+    let summary = command.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !projectID.isEmpty else {
+      throw PraxisError.invalidInput("TAP provisioning requires a non-empty projectID.")
+    }
+    guard !agentID.isEmpty else {
+      throw PraxisError.invalidInput("TAP provisioning requires a non-empty agentID.")
+    }
+    guard !targetAgentID.isEmpty else {
+      throw PraxisError.invalidInput("TAP provisioning requires a non-empty targetAgentID.")
+    }
+    guard !summary.isEmpty else {
+      throw PraxisError.invalidInput("TAP provisioning requires a non-empty summary.")
+    }
+
+    let capabilityKey = try normalizedCapabilityID(
+      from: command.capabilityKey.rawValue,
+      fieldName: "capabilityKey",
+      error: PraxisError.invalidInput("TAP provisioning requires a non-empty capabilityKey.")
+    )
+    let stagedAt = runtimeNow()
+    let supportedModes = command.mode.map { [$0] } ?? []
+    let placeholderAsset = PraxisProvisionAsset(
+      name: "\(capabilityKey.rawValue) staged bundle",
+      capabilityID: capabilityKey,
+      status: .readyForReview,
+      supportedModes: supportedModes
+    )
+    let planner = PraxisProvisionPlanner(
+      registry: PraxisProvisionRegistry(
+        entries: [
+          PraxisProvisionRegistryEntry(
+            asset: placeholderAsset,
+            supportedModes: supportedModes,
+            summary: "Host-neutral placeholder asset for staged provisioning."
+          )
+        ]
+      )
+    )
+    let plan = planner.plan(
+      PraxisProvisionRequest(
+        kind: command.provisionKind,
+        capabilityID: capabilityKey,
+        requestedTier: command.requestedTier,
+        mode: command.mode,
+        summary: summary,
+        expectedArtifacts: command.expectedArtifacts,
+        requiredVerification: command.requiredVerification,
+        replayPolicy: command.replayPolicy
+      )
+    )
+    let lifecycle = PraxisActivationLifecycleService()
+    let activationAttempt = PraxisActivationAttemptRecord(
+      attemptID: "activation.\(projectID).\(capabilityKey.rawValue).\(UUID().uuidString.lowercased())",
+      capabilityKey: capabilityKey.rawValue,
+      status: .pending,
+      createdAt: stagedAt
+    )
+    let pendingReplay = lifecycle.createPendingReplay(
+      replayID: "replay.\(projectID).\(capabilityKey.rawValue).\(UUID().uuidString.lowercased())",
+      capabilityKey: capabilityKey.rawValue,
+      policy: command.replayPolicy
+    )
+    let bundleSummary = "Bundle assembly staged \(plan.selectedAssets.count) asset(s) for \(capabilityKey.rawValue) with \(plan.verificationPlan.count) verification step(s)."
+    let activationSummary = "Activation staged attempt \(activationAttempt.attemptID) for \(capabilityKey.rawValue); next replay action is \(pendingReplay.nextAction.rawValue)."
+
+    let provisionMetadata: [String: PraxisValue] = [
+      "requestedTier": .string(command.requestedTier.rawValue),
+      "route": .string(PraxisReviewerRoute.toolReview.rawValue),
+      "outcome": .string(PraxisCmpPeerApprovalOutcome.provisionStaged.rawValue),
+      "humanGateState": .string(PraxisHumanGateState.notRequired.rawValue),
+      "targetAgentID": .string(targetAgentID),
+      "decisionSummary": .string(plan.summary),
+      "provisionKind": .string(command.provisionKind.rawValue),
+      "replayPolicy": .string(command.replayPolicy.rawValue),
+      "bundleSummary": .string(bundleSummary),
+      "selectedAssetNames": .array(plan.selectedAssets.map { PraxisValue.string($0.name) }),
+      "verificationPlan": .array(plan.verificationPlan.map { PraxisValue.string($0) }),
+      "rollbackPlan": .array(plan.rollbackPlan.map { PraxisValue.string($0) }),
+      "requiresApproval": .bool(plan.requiresApproval),
+    ]
+    try await appendTapRuntimeEvent(
+      projectID: projectID,
+      agentID: agentID,
+      targetAgentID: targetAgentID,
+      eventKind: .provisionStaged,
+      capabilityKey: capabilityKey.rawValue,
+      summary: "Staged provisioning plan for \(capabilityKey.rawValue).",
+      detail: plan.summary,
+      createdAt: stagedAt,
+      metadata: provisionMetadata,
+      dependencies: dependencies
+    )
+
+    let activationMetadata: [String: PraxisValue] = [
+      "requestedTier": .string(command.requestedTier.rawValue),
+      "route": .string(PraxisReviewerRoute.autoApprove.rawValue),
+      "outcome": .string(PraxisCmpPeerApprovalOutcome.activationStaged.rawValue),
+      "humanGateState": .string(PraxisHumanGateState.notRequired.rawValue),
+      "targetAgentID": .string(targetAgentID),
+      "decisionSummary": .string(activationSummary),
+      "activationAttemptID": .string(activationAttempt.attemptID),
+      "activationStatus": .string(activationAttempt.status.rawValue),
+      "replayID": .string(pendingReplay.replayID),
+      "replayStatus": .string(pendingReplay.status.rawValue),
+      "nextAction": .string(pendingReplay.nextAction.rawValue),
+    ]
+    try await appendTapRuntimeEvent(
+      projectID: projectID,
+      agentID: agentID,
+      targetAgentID: targetAgentID,
+      eventKind: .activationStaged,
+      capabilityKey: capabilityKey.rawValue,
+      summary: "Staged activation and replay for \(capabilityKey.rawValue).",
+      detail: activationSummary,
+      createdAt: stagedAt,
+      metadata: activationMetadata,
+      dependencies: dependencies
+    )
+    try await appendTapInspectionReplayEvidence(
+      projectID: projectID,
+      capabilityID: capabilityKey,
+      summary: activationSummary,
+      bundleSummary: bundleSummary,
+      pendingReplay: pendingReplay,
+      dependencies: dependencies
+    )
+    try await persistTapInspectionCheckpoint(
+      projectID: projectID,
+      latestEventKind: .activationStaged,
+      latestCapabilityID: capabilityKey,
+      latestDecisionSummary: activationSummary,
+      activationAttempt: activationAttempt,
+      pendingReplays: [pendingReplay],
+      bundleSummary: bundleSummary,
+      planSummary: plan.summary,
+      activationSummary: activationSummary,
+      dependencies: dependencies
+    )
+
+    return PraxisTapProvisionStaging(
+      projectID: projectID,
+      agentID: agentID,
+      targetAgentID: targetAgentID,
+      capabilityKey: capabilityKey,
+      requestedTier: command.requestedTier,
+      provisionKind: command.provisionKind,
+      summary: "TAP staged provisioning, activation, and replay receipts without executing host-side installation.",
+      planSummary: plan.summary,
+      bundleSummary: bundleSummary,
+      requiresApproval: plan.requiresApproval,
+      selectedAssets: plan.selectedAssets,
+      verificationPlan: plan.verificationPlan,
+      rollbackPlan: plan.rollbackPlan,
+      activationAttempt: activationAttempt,
+      pendingReplay: pendingReplay,
+      checkpointReference: tapInspectionCheckpointPointer(for: projectID).checkpointID.rawValue,
+      stagedAt: stagedAt
+    )
+  }
+}
+
 public final class PraxisInspectTapUseCase: PraxisInspectTapUseCaseProtocol {
   public let dependencies: PraxisDependencyGraph
 
@@ -4377,13 +4799,22 @@ public final class PraxisInspectTapUseCase: PraxisInspectTapUseCaseProtocol {
     let inspectionSessionID = tapInspectionSessionID(for: projectID)
     let checkpointPointer = tapInspectionCheckpointPointer(for: projectID)
     let checkpointRecord = try await dependencies.hostAdapters.checkpointStore?.load(pointer: checkpointPointer)
+    let provisioningState = tapProvisioningCheckpointState(from: checkpointRecord?.snapshot.payload)
     let replaySlice = try await dependencies.hostAdapters.journalStore?.read(
       .init(sessionID: inspectionSessionID.rawValue, limit: 5)
     )
     let replayedEventCount = replaySlice?.events.count ?? 0
-    let replaySummary = replayedEventCount > 0
-      ? "Recent replay evidence contains \(replayedEventCount) journal events."
-      : "No TAP replay events are currently stored for the inspection session."
+    let replaySummary: String
+    switch (replayedEventCount, provisioningState.pendingReplays.count) {
+    case let (journalEvents, pendingReplays) where journalEvents > 0 && pendingReplays > 0:
+      replaySummary = "Recent replay evidence contains \(journalEvents) journal events and \(pendingReplays) pending replay record(s)."
+    case let (journalEvents, _) where journalEvents > 0:
+      replaySummary = "Recent replay evidence contains \(journalEvents) journal events."
+    case let (_, pendingReplays) where pendingReplays > 0:
+      replaySummary = "Recent replay evidence contains \(pendingReplays) pending replay record(s) recovered from the TAP checkpoint."
+    default:
+      replaySummary = "No TAP replay events are currently stored for the inspection session."
+    }
     let persistenceSummary = checkpointRecord != nil
       ? "A TAP checkpoint snapshot is available for inspection and recovery."
       : "No TAP checkpoint snapshot has been persisted for the inspection session \(inspectionSessionID.rawValue) yet."
@@ -4412,7 +4843,11 @@ public final class PraxisInspectTapUseCase: PraxisInspectTapUseCaseProtocol {
     )
     let reviewContext = PraxisReviewContextAperture(
       projectSummary: .init(
-        summary: tapInspectionProjectSummary(status: status, latestHistoryEntry: latestHistoryEntry),
+        summary: tapInspectionProjectSummary(
+          status: status,
+          latestHistoryEntry: latestHistoryEntry,
+          provisioningState: provisioningState
+        ),
         status: status.availableCapabilityCount > 0 ? .ready : .pending,
         source: "tap-status"
       ),
@@ -4421,7 +4856,8 @@ public final class PraxisInspectTapUseCase: PraxisInspectTapUseCaseProtocol {
           projectID: projectID,
           replaySummary: replaySummary,
           persistenceSummary: persistenceSummary,
-          history: history
+          history: history,
+          provisioningState: provisioningState
         ),
         status: checkpointRecord != nil || replayedEventCount > 0 || history.totalCount > 0 ? .ready : .pending,
         source: replayedEventCount > 0 ? "journal" : "tap-status"
@@ -4447,7 +4883,8 @@ public final class PraxisInspectTapUseCase: PraxisInspectTapUseCaseProtocol {
         history: history,
         pendingCapabilityIDs: pendingCapabilityIDs,
         persistenceSummary: persistenceSummary,
-        replaySummary: replaySummary
+        replaySummary: replaySummary,
+        provisioningState: provisioningState
       ),
       forbiddenObjects: [
         .init(kind: .runtimeHandle, summary: "Live runtime handles do not enter the TAP governance aperture."),
@@ -4477,7 +4914,8 @@ public final class PraxisInspectTapUseCase: PraxisInspectTapUseCaseProtocol {
         status: status,
         history: history,
         persistenceSummary: persistenceSummary,
-        replaySummary: replaySummary
+        replaySummary: replaySummary,
+        provisioningState: provisioningState
       )
     )
     let runtimeSnapshot = PraxisTapRuntimeSnapshot(
@@ -4486,7 +4924,8 @@ public final class PraxisInspectTapUseCase: PraxisInspectTapUseCaseProtocol {
         governance: governance,
         humanGateState: status.humanGateState
       ),
-      checkpointPointer: checkpointRecord?.pointer
+      checkpointPointer: checkpointRecord?.pointer,
+      pendingReplays: provisioningState.pendingReplays
     )
     return PraxisTapInspection(
       summary: "TAP inspection exposes governance, reviewer context, tool-review pressure, and runtime recovery state for \(projectID).",
@@ -4534,19 +4973,29 @@ private func tapInspectionPendingCapabilityIDs(
 
 private func tapInspectionProjectSummary(
   status: PraxisTapStatusReadback,
-  latestHistoryEntry: PraxisTapHistoryEntry?
+  latestHistoryEntry: PraxisTapHistoryEntry?,
+  provisioningState: PraxisTapProvisioningCheckpointState
 ) -> String {
   let latestDecisionFragment = latestHistoryEntry.map {
     " Latest reviewer decision: \($0.decisionSummary)"
   } ?? ""
-  return "Reviewer context is anchored to \(status.projectID) with \(status.availableCapabilityCount) registered capability surface(s) and \(status.pendingApprovalCount) pending approval request(s).\(latestDecisionFragment)"
+  let provisioningFragment: String
+  if let activationSummary = provisioningState.activationSummary {
+    provisioningFragment = " Latest activation staging: \(activationSummary)"
+  } else if let bundleSummary = provisioningState.bundleSummary {
+    provisioningFragment = " Latest provisioning bundle: \(bundleSummary)"
+  } else {
+    provisioningFragment = ""
+  }
+  return "Reviewer context is anchored to \(status.projectID) with \(status.availableCapabilityCount) registered capability surface(s) and \(status.pendingApprovalCount) pending approval request(s).\(latestDecisionFragment)\(provisioningFragment)"
 }
 
 private func tapInspectionRunSummary(
   projectID: String,
   replaySummary: String,
   persistenceSummary: String,
-  history: PraxisTapHistoryReadback
+  history: PraxisTapHistoryReadback,
+  provisioningState: PraxisTapProvisioningCheckpointState
 ) -> String {
   let historySummary: String
   if history.totalCount > 0 {
@@ -4554,7 +5003,10 @@ private func tapInspectionRunSummary(
   } else {
     historySummary = "No persisted reviewer activity is currently available for the scoped inspection project \(projectID)."
   }
-  return "\(persistenceSummary) \(replaySummary) \(historySummary)"
+  let activationAttemptSummary = provisioningState.activationAttempt.map {
+    " Activation attempt \($0.attemptID) is \($0.status.rawValue) for \($0.capabilityKey)."
+  } ?? ""
+  return "\(persistenceSummary) \(replaySummary) \(historySummary)\(activationAttemptSummary)"
 }
 
 private func tapInspectionRiskSummary(
@@ -4585,7 +5037,8 @@ private func tapInspectionSections(
   history: PraxisTapHistoryReadback,
   pendingCapabilityIDs: [PraxisCapabilityID],
   persistenceSummary: String,
-  replaySummary: String
+  replaySummary: String,
+  provisioningState: PraxisTapProvisioningCheckpointState
 ) -> [PraxisContextSectionRecord] {
   let latestDecisionSummary = status.latestDecisionSummary
     ?? history.entries.first?.decisionSummary
@@ -4594,7 +5047,7 @@ private func tapInspectionSections(
     ? "No approvals are currently waiting for reviewer or human action."
     : "Pending reviewer backlog covers \(pendingCapabilityIDs.map(\.rawValue).joined(separator: ", "))."
 
-  return [
+  var sections: [PraxisContextSectionRecord] = [
     .init(
       sectionID: "capability-inventory",
       title: "Capability inventory",
@@ -4620,6 +5073,23 @@ private func tapInspectionSections(
       trustLevel: .verified
     )
   ]
+
+  if provisioningState.hasRuntimeEvidence {
+    let bundleSummary = provisioningState.bundleSummary ?? "Provision bundle assembly has not been staged yet."
+    let activationSummary = provisioningState.activationSummary ?? "Activation staging has not been summarized yet."
+    sections.append(
+      .init(
+        sectionID: "activation-replay",
+        title: "Activation and replay",
+        summary: "\(bundleSummary) \(activationSummary) Pending replay count: \(provisioningState.pendingReplays.count).",
+        status: provisioningState.pendingReplays.isEmpty ? .ready : .pending,
+        freshness: .fresh,
+        trustLevel: .verified
+      )
+    )
+  }
+
+  return sections
 }
 
 private func checkpointStatus(
@@ -4687,6 +5157,10 @@ private func tapInspectionGovernanceKind(
   switch entry.outcome {
   case .redirectedToProvisioning:
     .provisionRequest
+  case .provisionStaged:
+    .provisionRequest
+  case .activationStaged:
+    .activation
   case .escalatedToHuman:
     .humanGate
   case .gateReleased:
@@ -4706,6 +5180,10 @@ private func tapInspectionActionStatus(
     .waitingHuman
   case .redirectedToProvisioning:
     .readyForHandoff
+  case .provisionStaged:
+    .readyForHandoff
+  case .activationStaged:
+    .recorded
   case .approvedByHuman, .baselineApproved, .gateReleased:
     .completed
   case .rejectedByHuman, .denied:
@@ -4751,7 +5229,8 @@ private func tapInspectionAdvisories(
   status: PraxisTapStatusReadback,
   history: PraxisTapHistoryReadback,
   persistenceSummary: String,
-  replaySummary: String
+  replaySummary: String,
+  provisioningState: PraxisTapProvisioningCheckpointState
 ) -> [PraxisToolReviewAdvisory] {
   var advisories: [PraxisToolReviewAdvisory] = history.issues.map {
     .init(code: "history_issue", severity: .risky, summary: $0)
@@ -4777,6 +5256,15 @@ private func tapInspectionAdvisories(
       summary: "\(persistenceSummary) \(replaySummary)"
     )
   )
+  if let pendingReplay = provisioningState.pendingReplays.first {
+    advisories.append(
+      PraxisToolReviewAdvisory(
+        code: "pending_replay_staged",
+        severity: status.riskLevel,
+        summary: "Pending replay \(pendingReplay.replayID) is staged for \(pendingReplay.capabilityKey) with next action \(pendingReplay.nextAction.rawValue)."
+      )
+    )
+  }
   return advisories
 }
 

@@ -180,6 +180,48 @@ struct PraxisRuntimeKitTests {
   }
 
   @Test
+  func projectScopedTapClientStagesProvisioningAndSurfacesReplayEvidence() async throws {
+    let rootDirectory = try makeRuntimeKitTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let client = try PraxisRuntimeClient.makeDefault(rootDirectory: rootDirectory)
+    let cmpProject = client.cmp.project("cmp.local-runtime")
+    let tapProject = client.tap.project("cmp.local-runtime")
+
+    _ = try await cmpProject.openSession("cmp.runtime-kit-provisioning")
+    let requested = try await cmpProject.approvals.request(
+      .init(
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityID: "tool.shell.exec",
+        requestedTier: .b2,
+        summary: "Redirect shell execution to provisioning"
+      )
+    )
+    let staged = try await tapProject.provision(
+      .init(
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityID: "tool.shell.exec",
+        requestedTier: .b2,
+        summary: "Stage shell execution provisioning for checker",
+        expectedArtifacts: ["shell.exec binding"],
+        requiredVerification: ["shell.exec smoke"]
+      )
+    )
+    let inspection = try await tapProject.inspect(historyLimit: 10)
+    let reviewWorkbench = try await tapProject.reviewWorkbench(for: "checker.local", limit: 10)
+
+    #expect(requested.outcome == .redirectedToProvisioning)
+    #expect(staged.capabilityID == "tool.shell.exec")
+    #expect(staged.selectedAssetNames.isEmpty == false)
+    #expect(staged.pendingReplayNextAction.rawValue == "re_review_then_dispatch")
+    #expect(inspection.runSummary.contains("pending replay record"))
+    #expect(inspection.sections.contains { $0.sectionID == "activation-replay" })
+    #expect(reviewWorkbench.latestDecisionSummary?.contains("Activation staged attempt") == true)
+  }
+
+  @Test
   func projectScopedTapWorkbenchDoesNotReuseDefaultInspectionProject() async throws {
     let rootDirectory = try makeRuntimeKitTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: rootDirectory) }

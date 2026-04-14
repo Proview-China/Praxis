@@ -23,6 +23,12 @@ private struct PraxisUnsupportedSmokeMpUseCase: PraxisSmokeMpUseCaseProtocol {
   }
 }
 
+private struct PraxisUnsupportedStageTapProvisionUseCase: PraxisStageTapProvisionUseCaseProtocol {
+  func execute(_ command: PraxisStageTapProvisionCommand) async throws -> PraxisTapProvisionStaging {
+    throw PraxisError.unsupportedOperation("TAP provisioning is not available in this facade profile.")
+  }
+}
+
 private struct PraxisUnsupportedIngestMpUseCase: PraxisIngestMpUseCaseProtocol {
   func execute(_ command: PraxisIngestMpCommand) async throws -> PraxisMpIngestResult {
     throw PraxisError.unsupportedOperation("MP ingest is not available in this facade profile.")
@@ -181,6 +187,7 @@ public final class PraxisRuntimeFacade: Sendable {
       runFacade: .init(dependencies: dependencies),
       inspectionFacade: .init(
         inspectTapUseCase: PraxisInspectTapUseCase(dependencies: dependencies),
+        stageTapProvisionUseCase: PraxisStageTapProvisionUseCase(dependencies: dependencies),
         readbackTapStatusUseCase: PraxisReadbackTapStatusUseCase(dependencies: dependencies),
         readbackTapHistoryUseCase: PraxisReadbackTapHistoryUseCase(dependencies: dependencies),
         inspectCmpUseCase: PraxisInspectCmpUseCase(dependencies: dependencies),
@@ -548,13 +555,14 @@ public final class PraxisRunFacade: Sendable {
 
 public final class PraxisInspectionFacade: Sendable {
   public let inspectTapUseCase: any PraxisInspectTapUseCaseProtocol
+  public let stageTapProvisionUseCase: any PraxisStageTapProvisionUseCaseProtocol
   public let readbackTapStatusUseCase: any PraxisReadbackTapStatusUseCaseProtocol
   public let readbackTapHistoryUseCase: any PraxisReadbackTapHistoryUseCaseProtocol
   public let inspectCmpUseCase: any PraxisInspectCmpUseCaseProtocol
   public let inspectMpUseCase: any PraxisInspectMpUseCaseProtocol
   public let buildCapabilityCatalogUseCase: any PraxisBuildCapabilityCatalogUseCaseProtocol
 
-  public init(
+  public convenience init(
     inspectTapUseCase: any PraxisInspectTapUseCaseProtocol,
     readbackTapStatusUseCase: any PraxisReadbackTapStatusUseCaseProtocol,
     readbackTapHistoryUseCase: any PraxisReadbackTapHistoryUseCaseProtocol,
@@ -562,7 +570,28 @@ public final class PraxisInspectionFacade: Sendable {
     inspectMpUseCase: any PraxisInspectMpUseCaseProtocol,
     buildCapabilityCatalogUseCase: any PraxisBuildCapabilityCatalogUseCaseProtocol
   ) {
+    self.init(
+      inspectTapUseCase: inspectTapUseCase,
+      stageTapProvisionUseCase: PraxisUnsupportedStageTapProvisionUseCase(),
+      readbackTapStatusUseCase: readbackTapStatusUseCase,
+      readbackTapHistoryUseCase: readbackTapHistoryUseCase,
+      inspectCmpUseCase: inspectCmpUseCase,
+      inspectMpUseCase: inspectMpUseCase,
+      buildCapabilityCatalogUseCase: buildCapabilityCatalogUseCase
+    )
+  }
+
+  public init(
+    inspectTapUseCase: any PraxisInspectTapUseCaseProtocol,
+    stageTapProvisionUseCase: any PraxisStageTapProvisionUseCaseProtocol,
+    readbackTapStatusUseCase: any PraxisReadbackTapStatusUseCaseProtocol,
+    readbackTapHistoryUseCase: any PraxisReadbackTapHistoryUseCaseProtocol,
+    inspectCmpUseCase: any PraxisInspectCmpUseCaseProtocol,
+    inspectMpUseCase: any PraxisInspectMpUseCaseProtocol,
+    buildCapabilityCatalogUseCase: any PraxisBuildCapabilityCatalogUseCaseProtocol
+  ) {
     self.inspectTapUseCase = inspectTapUseCase
+    self.stageTapProvisionUseCase = stageTapProvisionUseCase
     self.readbackTapStatusUseCase = readbackTapStatusUseCase
     self.readbackTapHistoryUseCase = readbackTapHistoryUseCase
     self.inspectCmpUseCase = inspectCmpUseCase
@@ -573,6 +602,7 @@ public final class PraxisInspectionFacade: Sendable {
   public convenience init(dependencies: PraxisDependencyGraph) {
     self.init(
       inspectTapUseCase: PraxisInspectTapUseCase(dependencies: dependencies),
+      stageTapProvisionUseCase: PraxisStageTapProvisionUseCase(dependencies: dependencies),
       readbackTapStatusUseCase: PraxisReadbackTapStatusUseCase(dependencies: dependencies),
       readbackTapHistoryUseCase: PraxisReadbackTapHistoryUseCase(dependencies: dependencies),
       inspectCmpUseCase: PraxisInspectCmpUseCase(dependencies: dependencies),
@@ -611,6 +641,34 @@ public final class PraxisInspectionFacade: Sendable {
           summary: section.summary
         )
       }
+    )
+  }
+
+  public func stageTapProvision(
+    _ command: PraxisStageTapProvisionCommand
+  ) async throws -> PraxisTapProvisionStagingSnapshot {
+    let staging = try await stageTapProvisionUseCase.execute(command)
+    return PraxisTapProvisionStagingSnapshot(
+      summary: staging.summary,
+      projectID: staging.projectID,
+      agentID: staging.agentID,
+      targetAgentID: staging.targetAgentID,
+      capabilityKey: staging.capabilityKey,
+      requestedTier: staging.requestedTier,
+      provisionKind: staging.provisionKind,
+      planSummary: staging.planSummary,
+      bundleSummary: staging.bundleSummary,
+      requiresApproval: staging.requiresApproval,
+      selectedAssetNames: staging.selectedAssets.map(\.name),
+      verificationPlan: staging.verificationPlan,
+      rollbackPlan: staging.rollbackPlan,
+      activationAttemptID: staging.activationAttempt.attemptID,
+      activationStatus: staging.activationAttempt.status,
+      pendingReplayID: staging.pendingReplay.replayID,
+      pendingReplayStatus: staging.pendingReplay.status,
+      pendingReplayNextAction: staging.pendingReplay.nextAction,
+      checkpointReference: staging.checkpointReference,
+      stagedAt: staging.stagedAt
     )
   }
 

@@ -1,3 +1,6 @@
+import PraxisTapProvision
+import PraxisTapRuntime
+import PraxisTapTypes
 import PraxisRuntimeFacades
 
 /// Caller-friendly TAP entrypoint that hides lower-level command wrappers.
@@ -98,6 +101,32 @@ public struct PraxisRuntimeTapProjectClient: Sendable {
     try await inspectionFacade.inspectTap(
       .init(projectID: project.rawValue, historyLimit: historyLimit)
     )
+  }
+
+  /// Stages one host-neutral TAP provisioning receipt for the scoped project.
+  ///
+  /// - Parameter request: Structured provisioning request for one capability handoff.
+  /// - Returns: A staged provisioning result that includes bundle, activation, and replay state.
+  /// - Throws: Any provisioning, persistence, or validation error raised by the underlying runtime use cases.
+  public func provision(
+    _ request: PraxisRuntimeTapProvisionRequest
+  ) async throws -> PraxisRuntimeTapProvisionResult {
+    let snapshot = try await inspectionFacade.stageTapProvision(
+      .init(
+        projectID: project.rawValue,
+        agentID: request.agentID.rawValue,
+        targetAgentID: request.targetAgentID.rawValue,
+        capabilityKey: .init(rawValue: request.capabilityID.rawValue),
+        requestedTier: request.requestedTier,
+        provisionKind: request.provisionKind,
+        mode: request.mode,
+        summary: request.summary,
+        expectedArtifacts: request.expectedArtifacts,
+        requiredVerification: request.requiredVerification,
+        replayPolicy: request.replayPolicy
+      )
+    )
+    return PraxisRuntimeTapProvisionResult(snapshot: snapshot)
   }
 
   /// Reads one reviewer-facing workbench for the scoped project.
@@ -307,5 +336,52 @@ private extension PraxisRuntimeTapReviewQueueItem {
       return 1
     }
     return 0
+  }
+}
+
+/// Caller-facing TAP provisioning result projected from one staged runtime receipt.
+public struct PraxisRuntimeTapProvisionResult: Sendable, Equatable {
+  public let summary: String
+  public let projectID: String
+  public let agentID: String
+  public let targetAgentID: String
+  public let capabilityID: String
+  public let requestedTier: PraxisTapCapabilityTier
+  public let provisionKind: PraxisTapProvisionKind
+  public let planSummary: String
+  public let bundleSummary: String
+  public let requiresApproval: Bool
+  public let selectedAssetNames: [String]
+  public let verificationPlan: [String]
+  public let rollbackPlan: [String]
+  public let activationAttemptID: String
+  public let activationStatus: PraxisActivationAttemptStatus
+  public let pendingReplayID: String
+  public let pendingReplayStatus: PraxisReplayStatus
+  public let pendingReplayNextAction: PraxisReplayNextAction
+  public let checkpointReference: String?
+  public let stagedAt: String
+
+  init(snapshot: PraxisTapProvisionStagingSnapshot) {
+    self.summary = snapshot.summary
+    self.projectID = snapshot.projectID
+    self.agentID = snapshot.agentID
+    self.targetAgentID = snapshot.targetAgentID
+    self.capabilityID = snapshot.capabilityKey.rawValue
+    self.requestedTier = snapshot.requestedTier
+    self.provisionKind = snapshot.provisionKind
+    self.planSummary = snapshot.planSummary
+    self.bundleSummary = snapshot.bundleSummary
+    self.requiresApproval = snapshot.requiresApproval
+    self.selectedAssetNames = snapshot.selectedAssetNames
+    self.verificationPlan = snapshot.verificationPlan
+    self.rollbackPlan = snapshot.rollbackPlan
+    self.activationAttemptID = snapshot.activationAttemptID
+    self.activationStatus = snapshot.activationStatus
+    self.pendingReplayID = snapshot.pendingReplayID
+    self.pendingReplayStatus = snapshot.pendingReplayStatus
+    self.pendingReplayNextAction = snapshot.pendingReplayNextAction
+    self.checkpointReference = snapshot.checkpointReference
+    self.stagedAt = snapshot.stagedAt
   }
 }

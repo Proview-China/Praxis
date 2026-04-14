@@ -1,5 +1,6 @@
 import PraxisCmpTypes
 import PraxisMpTypes
+import PraxisTapProvision
 import PraxisTapTypes
 import PraxisToolingContracts
 
@@ -22,6 +23,44 @@ public struct PraxisRuntimeTapOverviewOptions: Sendable, Equatable {
   public init(agentID: PraxisRuntimeAgentRef? = nil, limit: Int = 10) {
     self.agentID = agentID
     self.limit = limit
+  }
+}
+
+/// Provisioning request payload for one scoped TAP staging workflow.
+public struct PraxisRuntimeTapProvisionRequest: Sendable, Equatable {
+  public let agentID: PraxisRuntimeAgentRef
+  public let targetAgentID: PraxisRuntimeAgentRef
+  public let capabilityID: PraxisRuntimeCapabilityRef
+  public let requestedTier: PraxisTapCapabilityTier
+  public let provisionKind: PraxisTapProvisionKind
+  public let mode: PraxisTapMode?
+  public let summary: String
+  public let expectedArtifacts: [String]
+  public let requiredVerification: [String]
+  public let replayPolicy: PraxisProvisionReplayPolicy
+
+  public init(
+    agentID: PraxisRuntimeAgentRef,
+    targetAgentID: PraxisRuntimeAgentRef,
+    capabilityID: PraxisRuntimeCapabilityRef,
+    requestedTier: PraxisTapCapabilityTier,
+    provisionKind: PraxisTapProvisionKind = .capability,
+    mode: PraxisTapMode? = nil,
+    summary: String,
+    expectedArtifacts: [String] = [],
+    requiredVerification: [String] = [],
+    replayPolicy: PraxisProvisionReplayPolicy = .reReviewThenDispatch
+  ) {
+    self.agentID = agentID
+    self.targetAgentID = targetAgentID
+    self.capabilityID = capabilityID
+    self.requestedTier = requestedTier
+    self.provisionKind = provisionKind
+    self.mode = mode
+    self.summary = summary
+    self.expectedArtifacts = expectedArtifacts
+    self.requiredVerification = requiredVerification
+    self.replayPolicy = replayPolicy
   }
 }
 
