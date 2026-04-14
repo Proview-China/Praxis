@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import PraxisCapabilityContracts
+import PraxisCheckpoint
 import PraxisCmpDelivery
 import PraxisCoreTypes
 import PraxisCmpTypes
@@ -1869,6 +1870,59 @@ struct PraxisRuntimeUseCasesTests {
     #expect(statusReadback.control.recoveryPreference == .resumeLatest)
     #expect(statusReadback.control.automation[.autoDispatch] == false)
     #expect(statusReadback.roles.isEmpty == false)
+  }
+
+  @Test
+  func cmpPeerApprovalStateChangesPersistTapInspectionCheckpointForRecovery() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-runtime-usecases-tap-checkpoint-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let dependencies = try makeDependencies(rootDirectory: rootDirectory)
+    let requestApprovalUseCase = PraxisRequestCmpPeerApprovalUseCase(dependencies: dependencies)
+    let decideApprovalUseCase = PraxisDecideCmpPeerApprovalUseCase(dependencies: dependencies)
+    let checkpointPointer = PraxisCheckpointPointer(
+      checkpointID: .init(rawValue: "tap.checkpoint.snapshot"),
+      sessionID: .init(rawValue: "tap.session.snapshot")
+    )
+
+    _ = try await requestApprovalUseCase.execute(
+      PraxisRequestCmpPeerApprovalCommand(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityKey: .init(rawValue: "tool.git"),
+        requestedTier: .b1,
+        summary: "Escalate git access to checker"
+      )
+    )
+
+    let pendingCheckpoint = try await dependencies.hostAdapters.checkpointStore?.load(pointer: checkpointPointer)
+    #expect(pendingCheckpoint?.snapshot.tier == .durable)
+    #expect(pendingCheckpoint?.snapshot.payload?["projectID"]?.stringValue == "cmp.local-runtime")
+    #expect(pendingCheckpoint?.snapshot.payload?["latestEventKind"]?.stringValue == "peer_approval_waiting")
+    #expect(pendingCheckpoint?.snapshot.payload?["latestCapabilityKey"]?.stringValue == "tool.git")
+    #expect(pendingCheckpoint?.snapshot.payload?["humanGateState"]?.stringValue == "waitingApproval")
+    #expect(pendingCheckpoint?.snapshot.payload?["pendingApprovalCount"]?.numberValue == 1)
+
+    _ = try await decideApprovalUseCase.execute(
+      PraxisDecideCmpPeerApprovalCommand(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityKey: .init(rawValue: "tool.git"),
+        decision: .approve,
+        reviewerAgentID: "reviewer.local",
+        decisionSummary: "Approved git access for checker"
+      )
+    )
+
+    let resolvedCheckpoint = try await dependencies.hostAdapters.checkpointStore?.load(pointer: checkpointPointer)
+    #expect(resolvedCheckpoint?.snapshot.payload?["latestEventKind"]?.stringValue == "peer_approval_approved")
+    #expect(resolvedCheckpoint?.snapshot.payload?["latestDecisionSummary"]?.stringValue == "Approved git access for checker")
+    #expect(resolvedCheckpoint?.snapshot.payload?["humanGateState"]?.stringValue == "approved")
+    #expect(resolvedCheckpoint?.snapshot.payload?["pendingApprovalCount"]?.numberValue == 0)
+    #expect(resolvedCheckpoint?.snapshot.payload?["approvedApprovalCount"]?.numberValue == 1)
   }
 
   @Test

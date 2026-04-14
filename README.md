@@ -267,7 +267,7 @@ print(generated.outputText)
 | `capabilities.callTool(...)` / `uploadFile(...)` / `submitBatch(...)` | ready | ready | 当前复用本地 MCP / file store / batch baseline |
 | `capabilities.openSession(...)` | ready | ready | 当前先提供 caller-scoped runtime session header，durable 恢复链后续再继续接深 |
 | `capabilities.searchWeb(...)` / `fetchSearchResult(...)` / `groundSearchResult(...)` | ready | placeholder-backed SDK seam | 当前 search 链先接 deterministic local baseline；Linux 仍未接真实 browser / search substrate |
-| `tap.inspect()` | ready | ready with degraded host summaries | 当前 inspection 会暴露 reviewer backlog、latest decision、section summaries 和 recovery hints；Linux 仍会诚实反映 placeholder host truth |
+| `tap.inspect()` | ready | ready with degraded host summaries | 当前 inspection 会暴露 reviewer backlog、latest decision、section summaries 和 recovery hints；TAP approval request / decision 也会自动刷新 inspection checkpoint；Linux 仍会诚实反映 placeholder host truth |
 | `tap.project(...).overview(...)` | ready | ready | TAP 读取面可用，但其 capability 可见性仍受宿主 wiring 影响 |
 | `tap.project(...).reviewWorkbench(...)` | ready | ready with degraded host summaries | 当前 workbench 聚合 inspection / TAP history / CMP overview / reviewer queue，Linux 下仍会诚实暴露 placeholder host truth |
 | `cmp.project(...).overview(...)` / `approvalOverview(...)` | ready | ready with degraded host summaries | Linux 下 git / shell / process 仍会退化为占位语义 |

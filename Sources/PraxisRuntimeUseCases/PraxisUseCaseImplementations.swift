@@ -3111,6 +3111,51 @@ private func appendTapRuntimeEvent(
   )
 }
 
+private func persistTapInspectionCheckpoint(
+  projectID: String,
+  latestEventKind: PraxisTapRuntimeEventKind,
+  latestCapabilityID: PraxisCapabilityID?,
+  latestDecisionSummary: String,
+  dependencies: PraxisDependencyGraph
+) async throws {
+  guard let checkpointStore = dependencies.hostAdapters.checkpointStore else {
+    return
+  }
+
+  let status = try await readbackTapStatus(
+    command: .init(projectID: projectID),
+    dependencies: dependencies
+  )
+  let history = try await readbackTapHistory(
+    command: .init(projectID: projectID, limit: 1),
+    dependencies: dependencies
+  )
+  let storedAt = runtimeNow()
+  let payload: [String: PraxisValue] = [
+    "projectID": .string(projectID),
+    "latestEventKind": .string(latestEventKind.rawValue),
+    "latestCapabilityKey": latestCapabilityID.map { .string($0.rawValue) } ?? .null,
+    "latestDecisionSummary": .string(latestDecisionSummary),
+    "humanGateState": .string(status.humanGateState.rawValue),
+    "pendingApprovalCount": .number(Double(status.pendingApprovalCount)),
+    "approvedApprovalCount": .number(Double(status.approvedApprovalCount)),
+    "availableCapabilityCount": .number(Double(status.availableCapabilityCount)),
+    "readinessSummary": .string(status.readinessSummary),
+    "historySummary": .string(history.summary)
+  ]
+
+  let snapshot = PraxisCheckpointSnapshot(
+    id: tapInspectionCheckpointPointer.checkpointID,
+    sessionID: tapInspectionSessionID,
+    tier: .durable,
+    createdAt: storedAt,
+    payload: payload
+  )
+  _ = try await checkpointStore.save(
+    .init(pointer: tapInspectionCheckpointPointer, snapshot: snapshot)
+  )
+}
+
 private func cmpPendingPeerApprovalDescriptors(
   projectID: String,
   agentID: String,
@@ -3293,6 +3338,13 @@ private func requestCmpPeerApproval(
     metadata: eventMetadata,
     dependencies: dependencies
   )
+  try await persistTapInspectionCheckpoint(
+    projectID: command.projectID,
+    latestEventKind: followUpEventKind,
+    latestCapabilityID: capabilityKey,
+    latestDecisionSummary: routing.decision.summary,
+    dependencies: dependencies
+  )
 
   return PraxisCmpPeerApproval(
     projectID: command.projectID,
@@ -3384,6 +3436,13 @@ private func decideCmpPeerApproval(
       "targetAgentID": .string(command.targetAgentID),
       "reviewerAgentID": command.reviewerAgentID.map(PraxisValue.string) ?? .null,
     ],
+    dependencies: dependencies
+  )
+  try await persistTapInspectionCheckpoint(
+    projectID: command.projectID,
+    latestEventKind: resolution.eventKind,
+    latestCapabilityID: capabilityKey,
+    latestDecisionSummary: command.decisionSummary,
     dependencies: dependencies
   )
   let updatedFields = try cmpPeerApprovalSurfaceFields(from: updatedDescriptor)
