@@ -49,6 +49,7 @@ struct PraxisRuntimeKitCmpTapExample {
     let tapInspection = try await client.tap.inspect()
     let cmpOverview = try await cmpProject.overview(.init(agentID: "checker.local"))
     let tapOverview = try await tapProject.overview(.init(agentID: "checker.local", limit: 10))
+    let reviewWorkbench = try await tapProject.reviewWorkbench(.init(agentID: "checker.local", limit: 10))
 
     print("Praxis RuntimeKit CMP + TAP Example")
     print("rootDirectory: \(rootDirectory.path)")
@@ -61,6 +62,8 @@ struct PraxisRuntimeKitCmpTapExample {
     print("tap.historyCount: \(tapOverview.history.totalCount)")
     print("tap.inspect.requestedAction: \(tapInspection.requestedAction)")
     print("tap.inspect.sections: \(tapInspection.sections.map(\.sectionID).joined(separator: ", "))")
+    print("tap.workbench.summary: \(reviewWorkbench.summary)")
+    print("tap.workbench.pendingCount: \(reviewWorkbench.pendingItems.count)")
     if let latestDecision = tapOverview.status.latestDecisionSummary {
       print("tap.latestDecision: \(latestDecision)")
     }

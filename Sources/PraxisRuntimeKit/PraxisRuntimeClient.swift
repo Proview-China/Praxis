@@ -48,7 +48,10 @@ public final class PraxisRuntimeClient: Sendable {
 
   /// High-level TAP access grouped behind a dedicated scoped client.
   public var tap: PraxisRuntimeTapClient {
-    PraxisRuntimeTapClient(inspectionFacade: inspectionFacade)
+    PraxisRuntimeTapClient(
+      inspectionFacade: inspectionFacade,
+      cmpFacade: cmpFacade
+    )
   }
 
   /// High-level CMP access grouped behind a dedicated scoped client.

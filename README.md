@@ -23,7 +23,7 @@ swift run PraxisRuntimeKitSmoke --suite all
 - `PraxisRuntimeKitRunExample`
   展示 `runs.run(...)` 与 `runs.resumeRun(...)`。
 - `PraxisRuntimeKitCmpTapExample`
-  展示 project-scoped CMP approval、TAP overview，以及 `tap.inspect()` reviewer context。
+  展示 project-scoped CMP approval、TAP overview、`tap.inspect()` reviewer context，以及 `reviewWorkbench()` 聚合读面。
 - `PraxisRuntimeKitMpExample`
   展示 MP overview、search、resolve、history。
 - `PraxisRuntimeKitCapabilitiesExample`
@@ -190,6 +190,7 @@ Phase 3 当前已经落地三部分：thin capability baseline、第一条 searc
 - `client.capabilities.fetchSearchResult(...)`
 - `client.capabilities.groundSearchResult(...)`
 - `client.tap.inspect()`
+- `tap.project(...).reviewWorkbench(...)`
 
 这组能力的目标不是把 RuntimeKit 做厚，而是把现有本地 substrate 提升成 SDK 可调用面：
 
@@ -199,6 +200,7 @@ Phase 3 当前已经落地三部分：thin capability baseline、第一条 searc
 - session.open 先给出 caller-scoped runtime session header，durable runtime 再接更深恢复链
 - search.web / fetch / ground 先接本地 deterministic baseline，验证 SDK surface、evidence handoff 和 smoke 链路
 - tap.inspect 现在用真实 TAP status/history、capability inventory、checkpoint/journal readback 组装 reviewer context，而不是硬编码 placeholder 摘要
+- reviewWorkbench 把 TAP inspection、TAP overview、CMP overview 和 reviewer queue 收成一个项目级 reviewer surface，减少调用方手动拼装
 
 最小示例：
 
@@ -267,6 +269,7 @@ print(generated.outputText)
 | `capabilities.searchWeb(...)` / `fetchSearchResult(...)` / `groundSearchResult(...)` | ready | placeholder-backed SDK seam | 当前 search 链先接 deterministic local baseline；Linux 仍未接真实 browser / search substrate |
 | `tap.inspect()` | ready | ready with degraded host summaries | 当前 inspection 会暴露 reviewer backlog、latest decision、section summaries 和 recovery hints；Linux 仍会诚实反映 placeholder host truth |
 | `tap.project(...).overview(...)` | ready | ready | TAP 读取面可用，但其 capability 可见性仍受宿主 wiring 影响 |
+| `tap.project(...).reviewWorkbench(...)` | ready | ready with degraded host summaries | 当前 workbench 聚合 inspection / TAP history / CMP overview / reviewer queue，Linux 下仍会诚实暴露 placeholder host truth |
 | `cmp.project(...).overview(...)` / `approvalOverview(...)` | ready | ready with degraded host summaries | Linux 下 git / shell / process 仍会退化为占位语义 |
 | `cmp.project(...).smoke()` | ready | degraded | smoke 会诚实反映 git executor / host runtime 退化状态 |
 | `mp.project(...).overview(...)` / `search(...)` / `resolve(...)` / `history(...)` | ready | ready | 当前默认走本地 semantic memory / local heuristic baseline |

@@ -147,6 +147,7 @@ private struct PraxisRuntimeKitSmokeHarness {
     let smoke = try await cmpProject.smoke()
     let tapInspection = try await client.tap.inspect()
     let tapOverview = try await tapProject.overview(for: "checker.local", limit: 10)
+    let reviewWorkbench = try await tapProject.reviewWorkbench(for: "checker.local", limit: 10)
 
     try require(decision.outcome == .approvedByHuman, "CMP + TAP smoke expected approved git access.")
     try require(
@@ -157,8 +158,16 @@ private struct PraxisRuntimeKitSmokeHarness {
       tapInspection.latestDecisionSummary?.contains("Approved git access") == true,
       "CMP + TAP smoke expected inspectTap to surface the latest reviewer decision."
     )
+    try require(
+      reviewWorkbench.latestDecisionSummary?.contains("Approved git access") == true,
+      "CMP + TAP smoke expected the reviewer workbench to surface the latest reviewer decision."
+    )
+    try require(
+      reviewWorkbench.queueItems.isEmpty == false,
+      "CMP + TAP smoke expected the reviewer workbench to expose at least one queue item."
+    )
 
-    return "projectID=\(smoke.projectID) smokeChecks=\(smoke.smokeResult.checks.count) tapHistory=\(tapOverview.history.totalCount) tapSections=\(tapInspection.sections.count)"
+    return "projectID=\(smoke.projectID) smokeChecks=\(smoke.smokeResult.checks.count) tapHistory=\(tapOverview.history.totalCount) tapSections=\(tapInspection.sections.count) workbenchQueue=\(reviewWorkbench.queueItems.count)"
   }
 
   private func mpSuite() async throws -> String {

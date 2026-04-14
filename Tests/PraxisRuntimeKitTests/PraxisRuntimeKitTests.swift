@@ -107,6 +107,7 @@ struct PraxisRuntimeKitTests {
     )
     let approvalReadback = try await cmpProject.approvals.readback(approvalQuery)
     let tapOverview = try await tapProject.overview(.init(agentID: "checker.local", limit: 10))
+    let reviewWorkbench = try await tapProject.reviewWorkbench(.init(agentID: "checker.local", limit: 10))
     let cmpOverview = try await cmpProject.overview(.init(agentID: "checker.local"))
     let approvalOverview = try await cmpProject.approvalOverview(approvalQuery)
 
@@ -121,6 +122,11 @@ struct PraxisRuntimeKitTests {
     #expect(approvalOverview.approval.found)
     #expect(tapOverview.latestDecisionSummary?.contains("Approved git access") == true)
     #expect(tapOverview.hasWaitingHumanReview == false)
+    #expect(reviewWorkbench.projectID == "cmp.local-runtime")
+    #expect(reviewWorkbench.latestDecisionSummary?.contains("Approved git access") == true)
+    #expect(reviewWorkbench.queueItems.isEmpty == false)
+    #expect(reviewWorkbench.pendingItems.isEmpty)
+    #expect(reviewWorkbench.summary.contains("registered capability surface"))
   }
 
   @Test
