@@ -583,10 +583,30 @@ public final class PraxisInspectionFacade: Sendable {
 
   public func inspectTap() async throws -> PraxisTapInspectionSnapshot {
     let inspection = try await inspectTapUseCase.execute()
+    let latestDecisionSummary = inspection.toolReviewReport.latestDecision?.summary
+      ?? inspection.toolReviewReport.session.actions.first?.summary
+    let reviewSummary = latestDecisionSummary
+      ?? inspection.toolReviewReport.advisories.first?.summary
+      ?? inspection.reviewContext.riskSummary.plainLanguageSummary
     return PraxisTapInspectionSnapshot(
       summary: inspection.summary,
       governanceSummary: inspection.governanceSnapshot.summary,
-      reviewSummary: inspection.toolReviewReport.session.actions.first?.summary ?? inspection.reviewContext.riskSummary.plainLanguageSummary
+      reviewSummary: reviewSummary,
+      projectSummary: inspection.reviewContext.projectSummary.summary,
+      runSummary: inspection.reviewContext.runSummary.summary,
+      requestedAction: inspection.reviewContext.riskSummary.requestedAction,
+      riskLevel: inspection.reviewContext.riskSummary.riskLevel,
+      availableCapabilityCount: inspection.reviewContext.inventorySnapshot.totalCapabilities,
+      pendingCapabilityCount: inspection.reviewContext.inventorySnapshot.pendingCapabilityIDs.count,
+      latestDecisionSummary: latestDecisionSummary,
+      advisorySummaries: inspection.toolReviewReport.advisories.map(\.summary),
+      sections: inspection.reviewContext.sections.map { section in
+        .init(
+          sectionID: section.sectionID,
+          title: section.title,
+          summary: section.summary
+        )
+      }
     )
   }
 

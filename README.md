@@ -23,7 +23,7 @@ swift run PraxisRuntimeKitSmoke --suite all
 - `PraxisRuntimeKitRunExample`
   展示 `runs.run(...)` 与 `runs.resumeRun(...)`。
 - `PraxisRuntimeKitCmpTapExample`
-  展示 project-scoped CMP approval 与 TAP overview。
+  展示 project-scoped CMP approval、TAP overview，以及 `tap.inspect()` reviewer context。
 - `PraxisRuntimeKitMpExample`
   展示 MP overview、search、resolve、history。
 - `PraxisRuntimeKitCapabilitiesExample`
@@ -163,6 +163,7 @@ print(run.phaseSummary)
 - `PraxisRuntimeClient.makeDefault(...)`
 - `runs.run(...)`
 - `runs.resumeRun(...)`
+- `tap.inspect()`
 - `cmp.project(...).approvals.*`
 - `tap.project(...).overview(...)`
 - `mp.project(...).search(...)`
@@ -175,7 +176,7 @@ print(run.phaseSummary)
 
 ## Phase 3 Thin Capability Baseline
 
-Phase 3 当前已经落地两部分：thin capability baseline 和第一条 search chain；高副作用执行面仍然继续后置：
+Phase 3 当前已经落地三部分：thin capability baseline、第一条 search chain，以及 reviewer context inspection；高副作用执行面仍然继续后置：
 
 - `client.capabilities.catalog()`
 - `client.capabilities.generate(...)`
@@ -188,6 +189,7 @@ Phase 3 当前已经落地两部分：thin capability baseline 和第一条 sear
 - `client.capabilities.searchWeb(...)`
 - `client.capabilities.fetchSearchResult(...)`
 - `client.capabilities.groundSearchResult(...)`
+- `client.tap.inspect()`
 
 这组能力的目标不是把 RuntimeKit 做厚，而是把现有本地 substrate 提升成 SDK 可调用面：
 
@@ -196,6 +198,7 @@ Phase 3 当前已经落地两部分：thin capability baseline 和第一条 sear
 - embed / tool / file / batch 分别复用现有本地 baseline adapter
 - session.open 先给出 caller-scoped runtime session header，durable runtime 再接更深恢复链
 - search.web / fetch / ground 先接本地 deterministic baseline，验证 SDK surface、evidence handoff 和 smoke 链路
+- tap.inspect 现在用真实 TAP status/history、capability inventory、checkpoint/journal readback 组装 reviewer context，而不是硬编码 placeholder 摘要
 
 最小示例：
 
@@ -262,6 +265,7 @@ print(generated.outputText)
 | `capabilities.callTool(...)` / `uploadFile(...)` / `submitBatch(...)` | ready | ready | 当前复用本地 MCP / file store / batch baseline |
 | `capabilities.openSession(...)` | ready | ready | 当前先提供 caller-scoped runtime session header，durable 恢复链后续再继续接深 |
 | `capabilities.searchWeb(...)` / `fetchSearchResult(...)` / `groundSearchResult(...)` | ready | placeholder-backed SDK seam | 当前 search 链先接 deterministic local baseline；Linux 仍未接真实 browser / search substrate |
+| `tap.inspect()` | ready | ready with degraded host summaries | 当前 inspection 会暴露 reviewer backlog、latest decision、section summaries 和 recovery hints；Linux 仍会诚实反映 placeholder host truth |
 | `tap.project(...).overview(...)` | ready | ready | TAP 读取面可用，但其 capability 可见性仍受宿主 wiring 影响 |
 | `cmp.project(...).overview(...)` / `approvalOverview(...)` | ready | ready with degraded host summaries | Linux 下 git / shell / process 仍会退化为占位语义 |
 | `cmp.project(...).smoke()` | ready | degraded | smoke 会诚实反映 git executor / host runtime 退化状态 |

@@ -2215,7 +2215,11 @@ struct PraxisRuntimeUseCasesTests {
 
     let inspection = try await useCase.execute()
 
+    #expect(inspection.summary.contains("cmp.local-runtime"))
     #expect(inspection.toolReviewReport.signals.first?.kind == .governanceSnapshot)
+    #expect(inspection.reviewContext.projectSummary.summary.contains("cmp.local-runtime"))
+    #expect(inspection.reviewContext.sections.contains { $0.sectionID == "approval-backlog" })
+    #expect(inspection.toolReviewReport.advisories.isEmpty == false)
   }
 
   @Test

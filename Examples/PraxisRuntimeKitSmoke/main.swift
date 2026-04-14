@@ -145,6 +145,7 @@ private struct PraxisRuntimeKitSmokeHarness {
       )
     )
     let smoke = try await cmpProject.smoke()
+    let tapInspection = try await client.tap.inspect()
     let tapOverview = try await tapProject.overview(for: "checker.local", limit: 10)
 
     try require(decision.outcome == .approvedByHuman, "CMP + TAP smoke expected approved git access.")
@@ -152,8 +153,12 @@ private struct PraxisRuntimeKitSmokeHarness {
       tapOverview.status.availableCapabilityIDs.map(\.rawValue).contains("tool.git"),
       "CMP + TAP smoke expected tool.git to appear in TAP availability."
     )
+    try require(
+      tapInspection.latestDecisionSummary?.contains("Approved git access") == true,
+      "CMP + TAP smoke expected inspectTap to surface the latest reviewer decision."
+    )
 
-    return "projectID=\(smoke.projectID) smokeChecks=\(smoke.smokeResult.checks.count) tapHistory=\(tapOverview.history.totalCount)"
+    return "projectID=\(smoke.projectID) smokeChecks=\(smoke.smokeResult.checks.count) tapHistory=\(tapOverview.history.totalCount) tapSections=\(tapInspection.sections.count)"
   }
 
   private func mpSuite() async throws -> String {

@@ -63,15 +63,58 @@ public struct PraxisInspectionSnapshot: Sendable, Equatable, Codable {
   }
 }
 
+public struct PraxisTapInspectionSectionSnapshot: Sendable, Equatable, Codable {
+  public let sectionID: String
+  public let title: String
+  public let summary: String
+
+  public init(sectionID: String, title: String, summary: String) {
+    self.sectionID = sectionID
+    self.title = title
+    self.summary = summary
+  }
+}
+
 public struct PraxisTapInspectionSnapshot: Sendable, Equatable, Codable {
   public let summary: String
   public let governanceSummary: String
   public let reviewSummary: String
+  public let projectSummary: String
+  public let runSummary: String
+  public let requestedAction: String
+  public let riskLevel: PraxisTapRiskLevel
+  public let availableCapabilityCount: Int
+  public let pendingCapabilityCount: Int
+  public let latestDecisionSummary: String?
+  public let advisorySummaries: [String]
+  public let sections: [PraxisTapInspectionSectionSnapshot]
 
-  public init(summary: String, governanceSummary: String, reviewSummary: String) {
+  public init(
+    summary: String,
+    governanceSummary: String,
+    reviewSummary: String,
+    projectSummary: String,
+    runSummary: String,
+    requestedAction: String,
+    riskLevel: PraxisTapRiskLevel,
+    availableCapabilityCount: Int,
+    pendingCapabilityCount: Int,
+    latestDecisionSummary: String?,
+    advisorySummaries: [String],
+    sections: [PraxisTapInspectionSectionSnapshot]
+  ) {
     self.summary = summary
     self.governanceSummary = governanceSummary
     self.reviewSummary = reviewSummary
+    self.projectSummary = projectSummary
+    self.runSummary = runSummary
+    self.requestedAction = requestedAction
+    self.riskLevel = riskLevel
+    self.availableCapabilityCount = availableCapabilityCount
+    self.pendingCapabilityCount = pendingCapabilityCount
+    self.latestDecisionSummary = latestDecisionSummary
+    self.advisorySummaries = advisorySummaries
+    self.sections = sections
   }
 }
 

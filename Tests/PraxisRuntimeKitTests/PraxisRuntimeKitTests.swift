@@ -20,6 +20,10 @@ struct PraxisRuntimeKitTests {
 
     #expect(inspection.summary.isEmpty == false)
     #expect(inspection.governanceSummary.isEmpty == false)
+    #expect(inspection.projectSummary.contains("cmp.local-runtime"))
+    #expect(inspection.requestedAction.contains("reviewer context"))
+    #expect(inspection.sections.isEmpty == false)
+    #expect(inspection.advisorySummaries.isEmpty == false)
   }
 
   @Test
@@ -115,6 +119,8 @@ struct PraxisRuntimeKitTests {
     #expect(cmpOverview.status.projectID == "cmp.local-runtime")
     #expect(cmpOverview.readback.projectSummary.projectID == "cmp.local-runtime")
     #expect(approvalOverview.approval.found)
+    #expect(tapOverview.latestDecisionSummary?.contains("Approved git access") == true)
+    #expect(tapOverview.hasWaitingHumanReview == false)
   }
 
   @Test

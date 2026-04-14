@@ -46,6 +46,7 @@ struct PraxisRuntimeKitCmpTapExample {
         capabilityID: "tool.git"
       )
     )
+    let tapInspection = try await client.tap.inspect()
     let cmpOverview = try await cmpProject.overview(.init(agentID: "checker.local"))
     let tapOverview = try await tapProject.overview(.init(agentID: "checker.local", limit: 10))
 
@@ -58,8 +59,13 @@ struct PraxisRuntimeKitCmpTapExample {
     print("cmp.summary: \(cmpOverview.readback.summary)")
     print("tap.availableCapabilities: \(tapOverview.status.availableCapabilityIDs.map(\.rawValue).joined(separator: ", "))")
     print("tap.historyCount: \(tapOverview.history.totalCount)")
+    print("tap.inspect.requestedAction: \(tapInspection.requestedAction)")
+    print("tap.inspect.sections: \(tapInspection.sections.map(\.sectionID).joined(separator: ", "))")
     if let latestDecision = tapOverview.status.latestDecisionSummary {
       print("tap.latestDecision: \(latestDecision)")
+    }
+    if let latestInspectionDecision = tapInspection.latestDecisionSummary {
+      print("tap.inspect.latestDecision: \(latestInspectionDecision)")
     }
   }
 }

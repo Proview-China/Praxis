@@ -4284,93 +4284,391 @@ public final class PraxisInspectTapUseCase: PraxisInspectTapUseCaseProtocol {
     let persistenceSummary = checkpointRecord != nil
       ? "A TAP checkpoint snapshot is available for inspection and recovery."
       : "No TAP checkpoint snapshot has been persisted for the inspection session yet."
+    let status = try await readbackTapStatus(
+      command: .init(projectID: cmpLocalRuntimeProjectID),
+      dependencies: dependencies
+    )
+    let history = try await readbackTapHistory(
+      command: .init(projectID: cmpLocalRuntimeProjectID, limit: 5),
+      dependencies: dependencies
+    )
+    let latestHistoryEntry = history.entries.first
+    let pendingCapabilityIDs = tapInspectionPendingCapabilityIDs(from: history.entries)
 
     let governance = PraxisTapGovernanceObject(
       mode: .standard,
-      riskLevel: capabilityIDs.contains(.init(rawValue: "workspace.write")) || capabilityIDs.contains(.init(rawValue: "tool.shell"))
-        ? .risky
-        : .normal,
+      riskLevel: tapInspectionEffectiveRiskLevel(
+        statusRisk: status.riskLevel,
+        capabilityIDs: capabilityIDs
+      ),
       capabilityIDs: capabilityIDs
     )
     let governanceSnapshot = PraxisGovernanceSnapshot(
       governance: governance,
-      summary: "当前 TAP inspection 汇总了 governance、context、tool-review 和 runtime 四层状态。\(summarizeRegisteredHostSurfaces(from: dependencies))"
+      summary: "TAP inspection summarizes governance, reviewer context, tool-review pressure, and runtime recovery state. \(summarizeRegisteredHostSurfaces(from: dependencies))"
     )
     let reviewContext = PraxisReviewContextAperture(
-      projectSummary: .init(summary: "Swift TAP domain rules are available for inspection.", status: .ready, source: "usecase"),
-      runSummary: .init(summary: replaySummary, status: replayedEventCount > 0 ? .ready : .pending, source: "usecase"),
-      userIntentSummary: .init(summary: "Inspect current TAP domain state", status: .ready, source: "usecase"),
+      projectSummary: .init(
+        summary: tapInspectionProjectSummary(status: status, latestHistoryEntry: latestHistoryEntry),
+        status: status.availableCapabilityCount > 0 ? .ready : .pending,
+        source: "tap-status"
+      ),
+      runSummary: .init(
+        summary: tapInspectionRunSummary(
+          replaySummary: replaySummary,
+          persistenceSummary: persistenceSummary,
+          history: history
+        ),
+        status: checkpointRecord != nil || replayedEventCount > 0 || history.totalCount > 0 ? .ready : .pending,
+        source: replayedEventCount > 0 ? "journal" : "tap-status"
+      ),
+      userIntentSummary: .init(
+        summary: "Review current TAP reviewer backlog, capability inventory, and replay readiness before enabling side-effect execution.",
+        status: .ready,
+        source: "inspection"
+      ),
       inventorySnapshot: .init(
         totalCapabilities: governance.capabilityIDs.count,
-        availableCapabilityIDs: governance.capabilityIDs
+        availableCapabilityIDs: governance.capabilityIDs,
+        pendingCapabilityIDs: pendingCapabilityIDs
       ),
-      riskSummary: .init(
-        requestedAction: "Inspect current TAP domain state",
-        riskLevel: .risky,
-        plainLanguageSummary: "这次 inspection 会读取已注册的宿主能力面与 replay/readback 状态，但不会触发真实工具执行。",
-        whyItIsRisky: "如果把 inspection 暴露出来的已注册能力误当成“已经完全联通的 live 执行链”，后续集成会偏。",
-        possibleConsequence: "调用方可能高估当前 HostRuntime 已接通的程度。",
-        whatHappensIfNotRun: "TAP 当前仍缺少一条把宿主装配状态翻译成 plain-language inspection 的稳定入口。",
-        availableUserActions: [
-          .init(actionID: "review-domain", label: "查看规则", summary: "先确认 TAP 领域规则和 inspection 输出")
-        ]
+      riskSummary: tapInspectionRiskSummary(
+        status: status,
+        pendingCapabilityIDs: pendingCapabilityIDs,
+        replaySummary: replaySummary,
+        persistenceSummary: persistenceSummary
       ),
-      sections: [
-        .init(
-          sectionID: "tap-bridge",
-          title: "TAP bridge",
-          summary: persistenceSummary,
-          status: .ready,
-          freshness: checkpointRecord != nil ? .fresh : .stale,
-          trustLevel: .verified
-        )
-      ],
+      sections: tapInspectionSections(
+        status: status,
+        history: history,
+        pendingCapabilityIDs: pendingCapabilityIDs,
+        persistenceSummary: persistenceSummary,
+        replaySummary: replaySummary
+      ),
       forbiddenObjects: [
-        .init(kind: .runtimeHandle, summary: "Live runtime handle 不会直接进入 governance aperture。")
+        .init(kind: .runtimeHandle, summary: "Live runtime handles do not enter the TAP governance aperture."),
+        .init(kind: .rawShellHandle, summary: "Raw shell handles remain outside reviewer context until a bounded execution surface exists.")
       ],
       mode: governance.mode
     )
     let toolReviewReport = PraxisToolReviewReport(
       session: .init(
-        sessionID: "tap-tool-review.snapshot",
-        status: .open,
-        actions: [
-          .init(
-            reviewID: "review.snapshot",
-            sessionID: "tap-tool-review.snapshot",
-            governanceKind: .activation,
-            capabilityID: governance.capabilityIDs.last,
-            status: .recorded,
-            summary: "Current inspection includes a recorded governance action with host surface visibility but without live handoff execution.",
-            recordedAt: "2026-04-10T12:00:00Z"
-          )
-        ]
+        sessionID: "tap-tool-review.\(cmpLocalRuntimeProjectID)",
+        status: tapInspectionToolReviewSessionStatus(status: status),
+        actions: tapInspectionToolReviewActions(
+          history: history,
+          fallbackCapabilityID: governance.capabilityIDs.last
+        )
       ),
-      latestDecision: .init(route: .toolReview, summary: "High-side-effect capabilities still route through the tool-review surface."),
+      latestDecision: tapInspectionLatestDecision(status: status, latestHistoryEntry: latestHistoryEntry),
       latestResult: nil,
       signals: [
-        .init(kind: .governanceSnapshot, active: true, summary: "Inspection currently reports governance evidence without executing runtime handoff.")
+        .init(
+          kind: .governanceSnapshot,
+          active: true,
+          summary: "Inspection reports governance and reviewer evidence without executing live runtime handoff."
+        )
       ],
-      advisories: [
-        .init(code: "runtime_integration_pending", severity: .risky, summary: "\(persistenceSummary) \(replaySummary)")
-      ]
+      advisories: tapInspectionAdvisories(
+        status: status,
+        history: history,
+        persistenceSummary: persistenceSummary,
+        replaySummary: replaySummary
+      )
     )
     let runtimeSnapshot = PraxisTapRuntimeSnapshot(
       controlPlaneState: .init(
         sessionID: tapInspectionSessionID,
         governance: governance,
-        humanGateState: .notRequired
+        humanGateState: status.humanGateState
       ),
       checkpointPointer: checkpointRecord?.pointer
     )
     return PraxisTapInspection(
-      summary: "TAP inspection reports the current Swift TAP domain snapshot through HostRuntime. \(persistenceSummary) \(replaySummary)",
+      summary: "TAP inspection exposes governance, reviewer context, tool-review pressure, and runtime recovery state for \(cmpLocalRuntimeProjectID).",
       governanceSnapshot: governanceSnapshot,
       reviewContext: reviewContext,
       toolReviewReport: toolReviewReport,
       runtimeSnapshot: runtimeSnapshot
     )
   }
+}
+
+private func tapInspectionEffectiveRiskLevel(
+  statusRisk: PraxisTapRiskLevel,
+  capabilityIDs: [PraxisCapabilityID]
+) -> PraxisTapRiskLevel {
+  let hasRiskyCapability =
+    capabilityIDs.contains(.init(rawValue: "workspace.write"))
+    || capabilityIDs.contains(.init(rawValue: "tool.shell"))
+
+  switch (statusRisk, hasRiskyCapability) {
+  case (.dangerous, _):
+    return .dangerous
+  case (.risky, _), (.normal, true):
+    return .risky
+  case (.normal, false):
+    return .normal
+  }
+}
+
+private func tapInspectionPendingCapabilityIDs(
+  from entries: [PraxisTapHistoryEntry]
+) -> [PraxisCapabilityID] {
+  var pendingCapabilityIDs: [PraxisCapabilityID] = []
+  for entry in entries where entry.humanGateState == .waitingApproval {
+    if !pendingCapabilityIDs.contains(entry.capabilityKey) {
+      pendingCapabilityIDs.append(entry.capabilityKey)
+    }
+  }
+  return pendingCapabilityIDs
+}
+
+private func tapInspectionProjectSummary(
+  status: PraxisTapStatusReadback,
+  latestHistoryEntry: PraxisTapHistoryEntry?
+) -> String {
+  let latestDecisionFragment = latestHistoryEntry.map {
+    " Latest reviewer decision: \($0.decisionSummary)"
+  } ?? ""
+  return "Reviewer context is anchored to \(status.projectID) with \(status.availableCapabilityCount) registered capability surface(s) and \(status.pendingApprovalCount) pending approval request(s).\(latestDecisionFragment)"
+}
+
+private func tapInspectionRunSummary(
+  replaySummary: String,
+  persistenceSummary: String,
+  history: PraxisTapHistoryReadback
+) -> String {
+  let historySummary: String
+  if history.totalCount > 0 {
+    historySummary = "Recent reviewer activity contains \(history.totalCount) persisted TAP event(s) or approval descriptor(s)."
+  } else {
+    historySummary = "No persisted reviewer activity is currently available for the default inspection project."
+  }
+  return "\(persistenceSummary) \(replaySummary) \(historySummary)"
+}
+
+private func tapInspectionRiskSummary(
+  status: PraxisTapStatusReadback,
+  pendingCapabilityIDs: [PraxisCapabilityID],
+  replaySummary: String,
+  persistenceSummary: String
+) -> PraxisPlainLanguageRiskPayload {
+  let pendingCapabilitySummary = pendingCapabilityIDs.isEmpty
+    ? "There is no waiting approval backlog right now."
+    : "Waiting approvals currently involve \(pendingCapabilityIDs.map(\.rawValue).joined(separator: ", "))."
+  return .init(
+    requestedAction: "Inspect current TAP reviewer context before enabling side-effect execution.",
+    riskLevel: status.riskLevel,
+    plainLanguageSummary: "This inspection reads registered capability inventory, persisted reviewer activity, and recovery hints without executing live tools. \(pendingCapabilitySummary)",
+    whyItIsRisky: "If inventory and reviewer context are mistaken for fully-backed execution lanes, later integrations may overestimate what the runtime can safely do.",
+    possibleConsequence: "A caller may enable side-effect tooling before approval pressure, missing adapters, or replay readiness are understood.",
+    whatHappensIfNotRun: "\(persistenceSummary) \(replaySummary)",
+    availableUserActions: [
+      .init(actionID: "review-backlog", label: "Review backlog", summary: "Inspect pending approvals and latest reviewer decisions."),
+      .init(actionID: "compare-capabilities", label: "Compare capability inventory", summary: "Check which capability surfaces are registered versus still missing.")
+    ]
+  )
+}
+
+private func tapInspectionSections(
+  status: PraxisTapStatusReadback,
+  history: PraxisTapHistoryReadback,
+  pendingCapabilityIDs: [PraxisCapabilityID],
+  persistenceSummary: String,
+  replaySummary: String
+) -> [PraxisContextSectionRecord] {
+  let latestDecisionSummary = status.latestDecisionSummary
+    ?? history.entries.first?.decisionSummary
+    ?? "No reviewer decision has been recorded yet."
+  let backlogSummary = pendingCapabilityIDs.isEmpty
+    ? "No approvals are currently waiting for reviewer or human action."
+    : "Pending reviewer backlog covers \(pendingCapabilityIDs.map(\.rawValue).joined(separator: ", "))."
+
+  return [
+    .init(
+      sectionID: "capability-inventory",
+      title: "Capability inventory",
+      summary: "TAP currently sees \(status.availableCapabilityCount) registered capability surface(s). Latest capability: \(status.latestCapabilityKey?.rawValue ?? "none").",
+      status: status.availableCapabilityCount > 0 ? .ready : .pending,
+      freshness: .fresh,
+      trustLevel: .verified
+    ),
+    .init(
+      sectionID: "approval-backlog",
+      title: "Approval backlog",
+      summary: "\(backlogSummary) Latest decision: \(latestDecisionSummary)",
+      status: status.pendingApprovalCount > 0 ? .pending : .ready,
+      freshness: history.totalCount > 0 ? .fresh : .stale,
+      trustLevel: history.totalCount > 0 ? .verified : .derived
+    ),
+    .init(
+      sectionID: "tap-bridge",
+      title: "TAP bridge",
+      summary: "\(persistenceSummary) \(replaySummary)",
+      status: checkpointStatus(for: persistenceSummary, replaySummary: replaySummary),
+      freshness: persistenceSummary.contains("available") ? .fresh : .stale,
+      trustLevel: .verified
+    )
+  ]
+}
+
+private func checkpointStatus(
+  for persistenceSummary: String,
+  replaySummary: String
+) -> PraxisContextSummaryStatus {
+  if persistenceSummary.contains("available") || replaySummary.contains("contains") {
+    return .ready
+  }
+  return .pending
+}
+
+private func tapInspectionToolReviewSessionStatus(
+  status: PraxisTapStatusReadback
+) -> PraxisToolReviewSessionStatus {
+  if status.pendingApprovalCount > 0 || status.humanGateState == .waitingApproval {
+    return .waitingHuman
+  }
+  if status.availableCapabilityCount == 0 {
+    return .blocked
+  }
+  return .open
+}
+
+private func tapInspectionToolReviewActions(
+  history: PraxisTapHistoryReadback,
+  fallbackCapabilityID: PraxisCapabilityID?
+) -> [PraxisToolReviewActionLedgerEntry] {
+  let actions = history.entries.prefix(3).enumerated().map { offset, entry in
+    PraxisToolReviewActionLedgerEntry(
+      reviewID: "review.\(entry.capabilityKey.rawValue).\(offset)",
+      sessionID: "tap-tool-review.\(history.projectID)",
+      governanceKind: tapInspectionGovernanceKind(for: entry),
+      capabilityID: entry.capabilityKey,
+      status: tapInspectionActionStatus(for: entry),
+      summary: entry.decisionSummary,
+      recordedAt: entry.updatedAt
+    )
+  }
+
+  if !actions.isEmpty {
+    return actions
+  }
+
+  guard let fallbackCapabilityID else {
+    return []
+  }
+
+  return [
+    .init(
+      reviewID: "review.inventory.\(fallbackCapabilityID.rawValue)",
+      sessionID: "tap-tool-review.\(history.projectID)",
+      governanceKind: .lifecycle,
+      capabilityID: fallbackCapabilityID,
+      status: .recorded,
+      summary: "Inspection is currently using capability inventory and TAP status because no persisted reviewer actions are available yet.",
+      recordedAt: runtimeNow()
+    )
+  ]
+}
+
+private func tapInspectionGovernanceKind(
+  for entry: PraxisTapHistoryEntry
+) -> PraxisToolReviewGovernanceKind {
+  switch entry.outcome {
+  case .redirectedToProvisioning:
+    .provisionRequest
+  case .escalatedToHuman:
+    .humanGate
+  case .gateReleased:
+    .delivery
+  case .approvedByHuman, .baselineApproved:
+    .activation
+  case .reviewRequired, .rejectedByHuman, .denied:
+    .lifecycle
+  }
+}
+
+private func tapInspectionActionStatus(
+  for entry: PraxisTapHistoryEntry
+) -> PraxisToolReviewActionStatus {
+  switch entry.outcome {
+  case .escalatedToHuman:
+    .waitingHuman
+  case .redirectedToProvisioning:
+    .readyForHandoff
+  case .approvedByHuman, .baselineApproved, .gateReleased:
+    .completed
+  case .rejectedByHuman, .denied:
+    .blocked
+  case .reviewRequired:
+    .recorded
+  }
+}
+
+private func tapInspectionLatestDecision(
+  status: PraxisTapStatusReadback,
+  latestHistoryEntry: PraxisTapHistoryEntry?
+) -> PraxisReviewDecision? {
+  if let latestDecisionSummary = status.latestDecisionSummary {
+    return PraxisReviewDecision(
+      route: status.pendingApprovalCount > 0
+        ? .humanReview
+        : status.approvedApprovalCount > 0 ? .autoApprove : latestHistoryEntry?.route ?? .toolReview,
+      capabilityID: status.latestCapabilityKey,
+      mode: status.tapMode,
+      riskLevel: status.riskLevel,
+      summary: latestDecisionSummary
+    )
+  }
+
+  guard let latestHistoryEntry else {
+    return nil
+  }
+
+  return PraxisReviewDecision(
+    route: latestHistoryEntry.route,
+    capabilityID: latestHistoryEntry.capabilityKey,
+    mode: status.tapMode,
+    riskLevel: status.riskLevel,
+    summary: latestHistoryEntry.decisionSummary,
+    deferredReason: latestHistoryEntry.humanGateState == .waitingApproval
+      ? "Latest TAP history entry is still waiting for reviewer or human action."
+      : nil
+  )
+}
+
+private func tapInspectionAdvisories(
+  status: PraxisTapStatusReadback,
+  history: PraxisTapHistoryReadback,
+  persistenceSummary: String,
+  replaySummary: String
+) -> [PraxisToolReviewAdvisory] {
+  var advisories: [PraxisToolReviewAdvisory] = history.issues.map {
+    .init(code: "history_issue", severity: .risky, summary: $0)
+  }
+  advisories.append(contentsOf: status.issues.map {
+    .init(code: "status_issue", severity: .risky, summary: $0)
+  })
+
+  if status.pendingApprovalCount > 0 {
+    advisories.append(
+      .init(
+        code: "review_backlog_present",
+        severity: .risky,
+        summary: "TAP currently has \(status.pendingApprovalCount) approval request(s) waiting for reviewer or human action."
+      )
+    )
+  }
+
+  advisories.append(
+    .init(
+      code: "runtime_recovery_snapshot",
+      severity: status.riskLevel,
+      summary: "\(persistenceSummary) \(replaySummary)"
+    )
+  )
+  return advisories
 }
 
 public final class PraxisReadbackTapStatusUseCase: PraxisReadbackTapStatusUseCaseProtocol {

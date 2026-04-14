@@ -97,4 +97,24 @@ public struct PraxisRuntimeTapProjectOverview: Sendable {
   public var agentID: String? {
     status.agentID ?? history.agentID
   }
+
+  /// Number of approvals that are still waiting for reviewer or human action.
+  public var pendingApprovalCount: Int {
+    status.pendingApprovalCount
+  }
+
+  /// Number of approvals that already reached an approved state.
+  public var approvedApprovalCount: Int {
+    status.approvedApprovalCount
+  }
+
+  /// Latest reviewer-facing decision summary for the scoped TAP overview.
+  public var latestDecisionSummary: String? {
+    status.latestDecisionSummary ?? history.entries.first?.decisionSummary
+  }
+
+  /// Whether the scoped TAP overview currently has at least one waiting approval.
+  public var hasWaitingHumanReview: Bool {
+    status.humanGateState == .waitingApproval || pendingApprovalCount > 0
+  }
 }
