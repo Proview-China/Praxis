@@ -1968,6 +1968,135 @@ struct PraxisRuntimeUseCasesTests {
   }
 
   @Test
+  func cmpDispatchStateChangesRefreshTapInspectionCheckpoint() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-runtime-usecases-dispatch-checkpoint-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let dependencies = try makeDependencies(rootDirectory: rootDirectory)
+    let bootstrapProjectUseCase = PraxisBootstrapCmpProjectUseCase(dependencies: dependencies)
+    let ingestFlowUseCase = PraxisIngestCmpFlowUseCase(dependencies: dependencies)
+    let commitFlowUseCase = PraxisCommitCmpFlowUseCase(dependencies: dependencies)
+    let runGoalUseCase = PraxisRunGoalUseCase(dependencies: dependencies)
+    let resolveFlowUseCase = PraxisResolveCmpFlowUseCase(dependencies: dependencies)
+    let materializeFlowUseCase = PraxisMaterializeCmpFlowUseCase(dependencies: dependencies)
+    let updateControlUseCase = PraxisUpdateCmpControlUseCase(dependencies: dependencies)
+    let dispatchFlowUseCase = PraxisDispatchCmpFlowUseCase(dependencies: dependencies)
+    let retryDispatchUseCase = PraxisRetryCmpDispatchUseCase(dependencies: dependencies)
+    let checkpointPointer = PraxisCheckpointPointer(
+      checkpointID: .init(rawValue: "tap.checkpoint.snapshot.cmp.local-runtime"),
+      sessionID: .init(rawValue: "tap.session.snapshot.cmp.local-runtime")
+    )
+
+    _ = try await bootstrapProjectUseCase.execute(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentIDs: ["runtime.local", "checker.local"],
+        defaultAgentID: "runtime.local"
+      )
+    )
+    let ingest = try await ingestFlowUseCase.execute(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        sessionID: "cmp.dispatch.checkpoint",
+        taskSummary: "Capture runtime context for dispatch checkpoint coverage",
+        materials: [.init(kind: .userInput, ref: "payload:user:dispatch-checkpoint")],
+        requiresActiveSync: true
+      )
+    )
+    _ = try await commitFlowUseCase.execute(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        sessionID: "cmp.dispatch.checkpoint",
+        eventIDs: ingest.result.acceptedEventIDs,
+        changeSummary: "Commit dispatch checkpoint context",
+        syncIntent: .toParent
+      )
+    )
+    _ = try await runGoalUseCase.execute(
+      .init(
+        goal: .init(
+          normalizedGoal: .init(
+            id: .init(rawValue: "goal.cmp-dispatch-checkpoint"),
+            title: "CMP Dispatch Checkpoint Seed",
+            summary: "Seed projection for dispatch checkpoint coverage"
+          ),
+          intentSummary: "Seed projection for dispatch checkpoint coverage"
+        ),
+        sessionID: .init(rawValue: "session.cmp-dispatch-checkpoint")
+      )
+    )
+    _ = try await resolveFlowUseCase.execute(
+      .init(projectID: "cmp.local-runtime", agentID: "runtime.local")
+    )
+    let materialize = try await materializeFlowUseCase.execute(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        packageKind: .runtimeFill,
+        fidelityLabel: .highSignal
+      )
+    )
+    _ = try await updateControlUseCase.execute(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "checker.local",
+        executionStyle: .manual,
+        mode: .peerReview,
+        automation: .init(values: [.autoDispatch: false])
+      )
+    )
+
+    let blockedDispatch = try await dispatchFlowUseCase.execute(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        contextPackage: materialize.result.contextPackage,
+        targetKind: .peer,
+        reason: "Dispatch checkpoint should record blocked state"
+      )
+    )
+    let blockedCheckpoint = try await dependencies.hostAdapters.checkpointStore?.load(pointer: checkpointPointer)
+
+    #expect(blockedDispatch.result.receipt.status == .rejected)
+    #expect(blockedCheckpoint?.snapshot.payload?["latestEventKind"]?.stringValue == "dispatch_blocked")
+    #expect(
+      blockedCheckpoint?.snapshot.payload?["latestDecisionSummary"]?.stringValue?.contains("autoDispatch is disabled")
+        == true
+    )
+
+    _ = try await updateControlUseCase.execute(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "checker.local",
+        executionStyle: .automatic,
+        mode: .activePreferred,
+        automation: .init(values: [.autoDispatch: true])
+      )
+    )
+
+    let releasedDispatch = try await retryDispatchUseCase.execute(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        packageID: materialize.result.contextPackage.id,
+        reason: "Retry blocked dispatch after gate clears"
+      )
+    )
+    let releasedCheckpoint = try await dependencies.hostAdapters.checkpointStore?.load(pointer: checkpointPointer)
+
+    #expect(releasedDispatch.result.receipt.status == .delivered)
+    #expect(releasedCheckpoint?.snapshot.payload?["latestEventKind"]?.stringValue == "dispatch_released")
+    #expect(
+      releasedCheckpoint?.snapshot.payload?["latestDecisionSummary"]?.stringValue?.contains("Dispatch released package")
+        == true
+    )
+  }
+
+  @Test
   func cmpControlCommandsRoundTripTypedAutomationMapsAndRejectUnknownAutomationKeys() throws {
     let command = PraxisUpdateCmpControlCommand(
       projectID: "cmp.local-runtime",

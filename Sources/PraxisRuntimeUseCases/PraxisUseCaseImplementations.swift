@@ -1872,6 +1872,13 @@ private func dispatchCmpFlow(
       ],
       dependencies: dependencies
     )
+    try await persistTapInspectionCheckpoint(
+      projectID: command.projectID,
+      latestEventKind: .dispatchBlocked,
+      latestCapabilityID: pendingApprovals.first.map { .init(rawValue: $0.capabilityKey) },
+      latestDecisionSummary: gateReason,
+      dependencies: dependencies
+    )
 
     return PraxisCmpFlowDispatch(
       projectID: command.projectID,
@@ -1971,6 +1978,13 @@ private func dispatchCmpFlow(
       "packageID": .string(command.contextPackage.id.rawValue),
       "decisionSummary": .string("Dispatch released package \(command.contextPackage.id.rawValue) on \(topicName)."),
     ],
+    dependencies: dependencies
+  )
+  try await persistTapInspectionCheckpoint(
+    projectID: command.projectID,
+    latestEventKind: .dispatchReleased,
+    latestCapabilityID: nil,
+    latestDecisionSummary: "Dispatch released package \(command.contextPackage.id.rawValue) on \(topicName).",
     dependencies: dependencies
   )
   return PraxisCmpFlowDispatch(
