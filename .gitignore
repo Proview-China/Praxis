@@ -1,25 +1,57 @@
-# macOS
+# System
 .DS_Store
+Thumbs.db
 
-# CMake
+# Editors
+.idea/
+.vscode/
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+
+# Agent-local
+.codex/
+.github/skills/
+
+# Node / Web
+node_modules/
+dist/
+.next/
+coverage/
+.npm/
+.pnpm-store/
+*.tsbuildinfo
+
+# Python
+__pycache__/
+.pytest_cache/
+.venv/
+venv/
+
+# Build outputs
 build/
+out/
+tmp/
+.build/
+.swiftpm/
+Package.resolved
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
 Makefile
-
-# Compiled outputs
 *.dylib
 *.node
 *.o
 *.a
 
-# IDE
-.vscode/
-.idea/
-*.xcodeproj/
-*.xcworkspace/
-xcuserdata/
+# Logs
+*.log
 
-# node
-node_modules/
+# Local secrets / live smoke config
+.env.local
+.env.*.local
+
+# Legacy reboot leftovers kept out of the blank-slate history
+better-agent/
+codex-experiments/
+docs/docs-status-baseline.md
