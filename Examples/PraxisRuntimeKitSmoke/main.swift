@@ -5,6 +5,7 @@ import PraxisRuntimeKit
 private enum PraxisRuntimeKitSmokeSuite: String, CaseIterable {
   case run
   case cmpTap = "cmp-tap"
+  case recovery
   case mp
   case capabilities
   case search
@@ -70,6 +71,8 @@ private struct PraxisRuntimeKitSmokeHarness {
       return [await execute(.cmpTap, body: cmpTapSuite)]
     case .mp:
       return [await execute(.mp, body: mpSuite)]
+    case .recovery:
+      return [await execute(.recovery, body: recoverySuite)]
     case .capabilities:
       return [await execute(.capabilities, body: capabilitiesSuite)]
     case .search:
@@ -78,6 +81,7 @@ private struct PraxisRuntimeKitSmokeHarness {
       return [
         await execute(.run, body: runSuite),
         await execute(.cmpTap, body: cmpTapSuite),
+        await execute(.recovery, body: recoverySuite),
         await execute(.mp, body: mpSuite),
         await execute(.capabilities, body: capabilitiesSuite),
         await execute(.search, body: searchSuite),
@@ -197,6 +201,67 @@ private struct PraxisRuntimeKitSmokeHarness {
     try require(history.query == "onboarding", "MP smoke expected the history query to round-trip unchanged.")
 
     return "projectID=\(overview.projectID) smokeChecks=\(smoke.smokeResult.checks.count) hits=\(search.hits.count)"
+  }
+
+  private func recoverySuite() async throws -> String {
+    let firstClient = client
+    let startedRun = try await firstClient.runs.run(
+      task: "Recover runtime checkpoint state",
+      sessionID: "session.runtime-kit-recovery"
+    )
+
+    let cmpProject = firstClient.cmp.project("cmp.local-runtime")
+    _ = try await cmpProject.openSession("cmp.runtime-kit-recovery")
+    _ = try await cmpProject.approvals.request(
+      .init(
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityID: "tool.git",
+        requestedTier: .b1,
+        summary: "Escalate git access to checker for recovery smoke"
+      )
+    )
+    _ = try await cmpProject.approvals.decide(
+      .init(
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityID: "tool.git",
+        decision: .approve,
+        reviewerAgentID: "reviewer.local",
+        decisionSummary: "Approved git access for recovery smoke"
+      )
+    )
+
+    let secondClient = try PraxisRuntimeClient.makeDefault(rootDirectory: rootDirectory)
+    let resumedRun = try await secondClient.runs.resume(.init(startedRun.runID.rawValue))
+    let recoveredTapProject = secondClient.tap.project("cmp.local-runtime")
+    let recoveredInspection = try await secondClient.tap.inspect()
+    let recoveredWorkbench = try await recoveredTapProject.reviewWorkbench(for: "checker.local", limit: 10)
+    let recoveredOverview = try await recoveredTapProject.overview(for: "checker.local", limit: 10)
+
+    try require(resumedRun.runID == startedRun.runID, "Recovery smoke expected the resumed run ID to match the started run.")
+    try require(
+      resumedRun.checkpointReference == startedRun.checkpointReference,
+      "Recovery smoke expected the resumed run to keep the same checkpoint reference."
+    )
+    try require(
+      recoveredInspection.latestDecisionSummary?.contains("Approved git access for recovery smoke") == true,
+      "Recovery smoke expected a fresh client to recover the latest TAP approval decision from durable state."
+    )
+    try require(
+      recoveredWorkbench.latestDecisionSummary?.contains("Approved git access for recovery smoke") == true,
+      "Recovery smoke expected the recovered reviewer workbench to surface the latest TAP approval decision."
+    )
+    try require(
+      recoveredWorkbench.pendingItems.isEmpty,
+      "Recovery smoke expected no pending reviewer items after the approval was resolved."
+    )
+    try require(
+      recoveredOverview.latestDecisionSummary?.contains("Approved git access for recovery smoke") == true,
+      "Recovery smoke expected TAP overview to recover the latest approval decision after client restart."
+    )
+
+    return "runID=\(resumedRun.runID.rawValue) recoveredEvents=\(resumedRun.recoveredEventCount) checkpoint=\(resumedRun.checkpointReference ?? "none") reviewDecision=\(recoveredWorkbench.latestDecisionSummary ?? "none")"
   }
 
   private func capabilitiesSuite() async throws -> String {
@@ -331,7 +396,7 @@ private enum PraxisRuntimeKitSmokeArguments {
         rootDirectoryPath = arguments[index]
       case "--help", "-h":
         throw PraxisRuntimeKitSmokeFailure.invalidArguments(
-          "Usage: swift run PraxisRuntimeKitSmoke [--suite run|cmp-tap|mp|capabilities|search|all] [--root /tmp/praxis-runtime-kit-smoke]"
+          "Usage: swift run PraxisRuntimeKitSmoke [--suite run|cmp-tap|recovery|mp|capabilities|search|all] [--root /tmp/praxis-runtime-kit-smoke]"
         )
       default:
         throw PraxisRuntimeKitSmokeFailure.invalidArguments("Unknown argument '\(arguments[index])'.")

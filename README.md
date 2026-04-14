@@ -34,6 +34,7 @@ swift run PraxisRuntimeKitSmoke --suite all
 当前这些 examples 依赖本地 baseline host adapters，默认按 macOS 本地运行验证。
 Linux 路径当前只保留 compile-safe placeholder 和条件编译接缝，待 macOS 实现完备后再推进兼容实现。
 `PraxisRuntimeKitSmoke` 是独立于测试 target 的 smoke harness 骨架，适合在 examples 之外做快速回归验收。
+当前 `--suite recovery` 会验证重建 RuntimeKit client 后，run checkpoint 和 TAP approval checkpoint 仍然能恢复出最新状态。
 
 ## Technical Overview
 
@@ -369,6 +370,7 @@ swift test --filter PraxisHostRuntimeArchitectureTests
 swift test --filter PraxisTapArchitectureTests
 swift run PraxisRuntimeKitCapabilitiesExample
 swift run PraxisRuntimeKitSearchExample
+swift run PraxisRuntimeKitSmoke --suite recovery
 swift run PraxisRuntimeKitSmoke --suite all
 ```
 

@@ -60,6 +60,56 @@ struct PraxisRuntimeKitTests {
   }
 
   @Test
+  func runtimeKitRecoversRunAndTapReviewerStateAcrossFreshClients() async throws {
+    let rootDirectory = try makeRuntimeKitTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let firstClient = try PraxisRuntimeClient.makeDefault(rootDirectory: rootDirectory)
+    let startedRun = try await firstClient.runs.run(
+      .init(
+        task: "Recover runtime checkpoint state",
+        sessionID: "session.runtime-kit-recovery"
+      )
+    )
+
+    let cmpProject = firstClient.cmp.project("cmp.local-runtime")
+    _ = try await cmpProject.openSession("cmp.runtime-kit-recovery")
+    _ = try await cmpProject.approvals.request(
+      .init(
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityID: "tool.git",
+        requestedTier: .b1,
+        summary: "Escalate git access to checker for recovery coverage"
+      )
+    )
+    _ = try await cmpProject.approvals.decide(
+      .init(
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityID: "tool.git",
+        decision: .approve,
+        reviewerAgentID: "reviewer.local",
+        decisionSummary: "Approved git access for recovery coverage"
+      )
+    )
+
+    let secondClient = try PraxisRuntimeClient.makeDefault(rootDirectory: rootDirectory)
+    let resumedRun = try await secondClient.runs.resume(.init(startedRun.runID.rawValue))
+    let recoveredInspection = try await secondClient.tap.inspect()
+    let recoveredWorkbench = try await secondClient.tap.project("cmp.local-runtime").reviewWorkbench(
+      for: "checker.local",
+      limit: 10
+    )
+
+    #expect(resumedRun.runID == startedRun.runID)
+    #expect(resumedRun.checkpointReference == startedRun.checkpointReference)
+    #expect(recoveredInspection.latestDecisionSummary?.contains("Approved git access for recovery coverage") == true)
+    #expect(recoveredWorkbench.latestDecisionSummary?.contains("Approved git access for recovery coverage") == true)
+    #expect(recoveredWorkbench.pendingItems.isEmpty)
+  }
+
+  @Test
   func cmpInspectionLivesBehindScopedClient() async throws {
     let rootDirectory = try makeRuntimeKitTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: rootDirectory) }
