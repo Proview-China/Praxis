@@ -129,6 +129,26 @@ public struct PraxisRuntimeTapProjectClient: Sendable {
     return PraxisRuntimeTapProvisionResult(snapshot: snapshot)
   }
 
+  /// Advances one durable replay record for the scoped project.
+  ///
+  /// - Parameter request: Structured replay lifecycle request for one durable TAP recovery transition.
+  /// - Returns: The updated project-scoped provisioning readback after the replay transition is persisted.
+  /// - Throws: Any checkpoint, validation, or lifecycle transition error raised by the underlying runtime use cases.
+  public func advanceReplay(
+    _ request: PraxisRuntimeTapReplayRequest
+  ) async throws -> PraxisRuntimeTapProvisioningReadback {
+    let snapshot = try await inspectionFacade.advanceTapReplay(
+      .init(
+        projectID: project.rawValue,
+        agentID: request.agentID.rawValue,
+        replayID: request.replayID.rawValue,
+        action: request.action,
+        summary: request.summary
+      )
+    )
+    return PraxisRuntimeTapProvisioningReadback(snapshot: snapshot)
+  }
+
   /// Reads the durable TAP provisioning and replay snapshot for the scoped project.
   ///
   /// - Returns: A project-scoped provisioning readback recovered from checkpoint state.
@@ -143,13 +163,14 @@ public struct PraxisRuntimeTapProjectClient: Sendable {
   /// Reads one reviewer-facing workbench for the scoped project.
   ///
   /// - Parameter options: Structured workbench options for one project read.
-  /// - Returns: A project-scoped workbench that combines TAP inspection, TAP overview, CMP overview, and a reviewer queue.
+  /// - Returns: A project-scoped workbench that combines TAP inspection, durable provisioning readback, TAP overview, CMP overview, and a reviewer queue.
   /// - Throws: Any inspection, readback, or smoke error raised by the underlying runtime use cases.
   public func reviewWorkbench(
     _ options: PraxisRuntimeTapReviewWorkbenchOptions = .init()
   ) async throws -> PraxisRuntimeTapReviewWorkbench {
     async let inspection = inspect(historyLimit: options.limit)
     async let tapOverview = overview(.init(agentID: options.agentID, limit: options.limit))
+    async let provisioning = provisioning()
     async let cmpReadback = cmpFacade.readbackProject(.init(projectID: project.rawValue))
     async let cmpSmoke = cmpFacade.smokeProject(.init(projectID: project.rawValue))
     async let cmpStatus = cmpFacade.readbackStatus(
@@ -158,6 +179,7 @@ public struct PraxisRuntimeTapProjectClient: Sendable {
 
     return try await PraxisRuntimeTapReviewWorkbench(
       inspection: inspection,
+      provisioning: provisioning,
       tapOverview: tapOverview,
       cmpOverview: .init(
         readback: cmpReadback,
@@ -172,7 +194,7 @@ public struct PraxisRuntimeTapProjectClient: Sendable {
   /// - Parameters:
   ///   - agent: Optional agent identifier used to scope TAP and CMP reads.
   ///   - limit: Maximum number of TAP history entries to load into the workbench queue.
-  /// - Returns: A project-scoped workbench that combines TAP inspection, TAP overview, CMP overview, and a reviewer queue.
+  /// - Returns: A project-scoped workbench that combines TAP inspection, durable provisioning readback, TAP overview, CMP overview, and a reviewer queue.
   /// - Throws: Any inspection, readback, or smoke error raised by the underlying runtime use cases.
   public func reviewWorkbench(
     for agent: PraxisRuntimeAgentRef? = nil,
@@ -273,16 +295,19 @@ public struct PraxisRuntimeTapReviewQueueItem: Sendable, Equatable {
 /// Aggregated reviewer-facing workbench for one project-scoped TAP surface.
 public struct PraxisRuntimeTapReviewWorkbench: Sendable {
   public let inspection: PraxisTapInspectionSnapshot
+  public let provisioning: PraxisRuntimeTapProvisioningReadback
   public let tapOverview: PraxisRuntimeTapProjectOverview
   public let cmpOverview: PraxisRuntimeCmpProjectOverview
   public let queueItems: [PraxisRuntimeTapReviewQueueItem]
 
   public init(
     inspection: PraxisTapInspectionSnapshot,
+    provisioning: PraxisRuntimeTapProvisioningReadback,
     tapOverview: PraxisRuntimeTapProjectOverview,
     cmpOverview: PraxisRuntimeCmpProjectOverview
   ) {
     self.inspection = inspection
+    self.provisioning = provisioning
     self.tapOverview = tapOverview
     self.cmpOverview = cmpOverview
     self.queueItems = tapOverview.history.entries.map(PraxisRuntimeTapReviewQueueItem.init)
@@ -322,12 +347,31 @@ public struct PraxisRuntimeTapReviewWorkbench: Sendable {
 
   /// Latest decision summary surfaced by TAP status or inspection.
   public var latestDecisionSummary: String? {
-    tapOverview.latestDecisionSummary ?? inspection.latestDecisionSummary
+    tapOverview.latestDecisionSummary ?? inspection.latestDecisionSummary ?? provisioning.activationSummary
+  }
+
+  /// Whether durable TAP provisioning evidence is currently available for the scoped project.
+  public var hasProvisioningEvidence: Bool {
+    provisioning.found
+  }
+
+  /// Whether the scoped project currently has at least one replay record that still needs follow-up work.
+  public var hasActiveReplay: Bool {
+    provisioning.activeReplayCount > 0
   }
 
   /// High-level reviewer workbench summary suitable for logs or diagnostics.
   public var summary: String {
-    "Reviewer workbench for \(projectID) sees \(pendingItems.count) pending queue item(s), \(tapOverview.approvedApprovalCount) approved item(s), and \(inspection.availableCapabilityCount) registered capability surface(s)."
+    let provisioningSummary: String
+    if provisioning.found {
+      let activationStatus = provisioning.activationStatus?.rawValue ?? "unknown"
+      provisioningSummary =
+        "Durable provisioning is available with activation status \(activationStatus) and \(provisioning.activeReplayCount) active replay(s)."
+    } else {
+      provisioningSummary = "Durable provisioning is not currently staged."
+    }
+    return
+      "Reviewer workbench for \(projectID) sees \(pendingItems.count) pending queue item(s), \(tapOverview.approvedApprovalCount) approved item(s), and \(inspection.availableCapabilityCount) registered capability surface(s). \(provisioningSummary)"
   }
 }
 
@@ -431,5 +475,22 @@ public struct PraxisRuntimeTapProvisioningReadback: Sendable, Equatable {
     self.checkpointReference = snapshot.checkpointReference
     self.found = snapshot.found
     self.issues = snapshot.issues
+  }
+
+  /// The most relevant replay record for reviewer follow-up, preferring active records first.
+  public var primaryReplay: PraxisPendingReplay? {
+    replayRecords.first {
+      switch $0.status {
+      case .pending, .ready:
+        return true
+      case .consumed, .skipped:
+        return false
+      }
+    } ?? replayRecords.first
+  }
+
+  /// Whether the current provisioning snapshot still has replay work waiting to be resumed.
+  public var hasActiveReplay: Bool {
+    activeReplayCount > 0
   }
 }

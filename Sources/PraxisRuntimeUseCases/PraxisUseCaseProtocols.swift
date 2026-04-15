@@ -21,6 +21,10 @@ public protocol PraxisReadbackTapProvisioningUseCaseProtocol: Sendable {
   func execute(_ command: PraxisReadbackTapProvisioningCommand) async throws -> PraxisTapProvisioningReadback
 }
 
+public protocol PraxisAdvanceTapReplayUseCaseProtocol: Sendable {
+  func execute(_ command: PraxisAdvanceTapReplayCommand) async throws -> PraxisTapProvisioningReadback
+}
+
 public protocol PraxisReadbackTapStatusUseCaseProtocol: Sendable {
   func execute(_ command: PraxisReadbackTapStatusCommand) async throws -> PraxisTapStatusReadback
 }
@@ -67,6 +71,10 @@ public protocol PraxisMaterializeCmpFlowUseCaseProtocol: Sendable {
 
 public protocol PraxisDispatchCmpFlowUseCaseProtocol: Sendable {
   func execute(_ command: PraxisDispatchCmpFlowCommand) async throws -> PraxisCmpFlowDispatch
+}
+
+public protocol PraxisDispatchStoredCmpPackageUseCaseProtocol: Sendable {
+  func execute(_ command: PraxisDispatchStoredCmpPackageCommand) async throws -> PraxisCmpFlowDispatch
 }
 
 public protocol PraxisRetryCmpDispatchUseCaseProtocol: Sendable {

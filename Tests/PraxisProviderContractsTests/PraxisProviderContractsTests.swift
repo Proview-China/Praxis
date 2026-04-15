@@ -1,3 +1,4 @@
+import PraxisCoreTypes
 import Testing
 @testable import PraxisCapabilityResults
 @testable import PraxisProviderContracts
@@ -90,5 +91,113 @@ struct PraxisProviderContractsTests {
     let mcpReceipt = try await mcp.callTool(.init(toolName: "web.search", summary: "Find Swift docs", serverName: "openai"))
     #expect(mcpReceipt.toolName == "web.search")
     #expect(mcpReceipt.status == .succeeded)
+  }
+
+  @Test
+  func providerRequestSurfaceExposesAvailabilityAndForwardsProviderRequests() async throws {
+    let inferenceExecutor = PraxisStubProviderInferenceExecutor { request in
+      PraxisProviderInferenceResponse(
+        output: .init(summary: "Generated \(request.prompt)"),
+        receipt: .init(
+          capabilityKey: "provider.infer",
+          backend: "openai",
+          status: .succeeded,
+          providerOperationID: "op-surface",
+          completedAt: "2026-04-15T00:00:00Z",
+          summary: request.prompt
+        )
+      )
+    }
+    let webSearchExecutor = PraxisStubProviderWebSearchExecutor { request in
+      PraxisProviderWebSearchResponse(
+        query: request.query,
+        results: [
+          .init(
+            title: "Swift docs",
+            snippet: "Official documentation",
+            url: "https://swift.org/documentation/",
+            source: "swift.org"
+          )
+        ],
+        provider: "openai",
+        summary: "Found one result."
+      )
+    }
+    let embeddingExecutor = PraxisStubProviderEmbeddingExecutor { request in
+      PraxisProviderEmbeddingResponse(vectorLength: request.content.count, model: request.preferredModel)
+    }
+    let fileStore = PraxisFakeProviderFileStore(backend: "openai")
+    let batchExecutor = PraxisFakeProviderBatchExecutor(backend: "openai")
+    let skillRegistry = PraxisStubProviderSkillRegistry(skills: ["swift.test", "workspace.search"])
+    let skillActivator = PraxisFakeProviderSkillActivator()
+    let mcpExecutor = PraxisStubProviderMCPExecutor { request in
+      PraxisProviderMCPToolCallReceipt(
+        toolName: request.toolName,
+        status: .succeeded,
+        summary: request.summary
+      )
+    }
+    let surface = PraxisProviderRequestSurface(
+      inferenceExecutor: inferenceExecutor,
+      webSearchExecutor: webSearchExecutor,
+      embeddingExecutor: embeddingExecutor,
+      fileStore: fileStore,
+      batchExecutor: batchExecutor,
+      skillRegistry: skillRegistry,
+      skillActivator: skillActivator,
+      mcpExecutor: mcpExecutor
+    )
+
+    #expect(surface.supportsInference == true)
+    #expect(surface.supportsWebSearch == true)
+    #expect(surface.supportsEmbedding == true)
+    #expect(surface.supportsFileUpload == true)
+    #expect(surface.supportsBatchSubmission == true)
+    #expect(surface.supportsSkillRegistry == true)
+    #expect(surface.supportsSkillActivation == true)
+    #expect(surface.supportsToolCalls == true)
+
+    let inference = try await surface.infer(.init(prompt: "Summarize Phase 4"))
+    let webSearch = try await surface.search(.init(query: "Swift structured concurrency", limit: 1))
+    let embedding = try await surface.embed(.init(content: "CMP delivery baseline", preferredModel: "text-embedding-3-large"))
+    let fileReceipt = try await surface.upload(.init(summary: "Upload transcript", purpose: "assistants"))
+    let batchReceipt = try await surface.enqueue(.init(summary: "Nightly embedding batch", itemCount: 8))
+    let skillKeys = try await surface.listSkillKeys()
+    let activationReceipt = try await surface.activate(.init(skillKey: "swift.test", reason: "Run verification"))
+    let mcpReceipt = try await surface.callTool(.init(toolName: "web.search", summary: "Find Swift docs", serverName: "openai"))
+
+    #expect(inference.receipt.providerOperationID == "op-surface")
+    #expect(webSearch.results.first?.url == "https://swift.org/documentation/")
+    #expect(embedding.vectorLength == "CMP delivery baseline".count)
+    #expect(fileReceipt.backend == "openai")
+    #expect((await fileStore.allRequests()).first?.purpose == "assistants")
+    #expect(batchReceipt.backend == "openai")
+    #expect((await batchExecutor.allRequests()).first?.itemCount == 8)
+    #expect(skillKeys == ["swift.test", "workspace.search"])
+    #expect(activationReceipt.activated == true)
+    #expect((await skillActivator.allRequests()).first?.reason == "Run verification")
+    #expect(mcpReceipt.toolName == "web.search")
+    #expect(mcpReceipt.status == .succeeded)
+  }
+
+  @Test
+  func providerRequestSurfaceReportsDependencyMissingForUnavailableCapability() async throws {
+    let surface = PraxisProviderRequestSurface()
+
+    #expect(surface.supportsInference == false)
+    #expect(surface.supportsWebSearch == false)
+    #expect(surface.supportsEmbedding == false)
+    #expect(surface.supportsFileUpload == false)
+    #expect(surface.supportsBatchSubmission == false)
+    #expect(surface.supportsSkillRegistry == false)
+    #expect(surface.supportsSkillActivation == false)
+    #expect(surface.supportsToolCalls == false)
+
+    do {
+      _ = try await surface.infer(.init(prompt: "Summarize Phase 4"))
+      Issue.record("Expected dependencyMissing when inference executor is unavailable.")
+    } catch let error as PraxisError {
+      #expect(error == .dependencyMissing("Provider request surface requires an inference executor."))
+    }
   }
 }

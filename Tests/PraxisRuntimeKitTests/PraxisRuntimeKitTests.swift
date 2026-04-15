@@ -3,7 +3,12 @@ import Testing
 import PraxisCmpTypes
 import PraxisCoreTypes
 import PraxisMpTypes
+import PraxisRuntimeComposition
+import PraxisRuntimeGateway
 import PraxisRuntimeKit
+import PraxisRuntimeUseCases
+import PraxisTapRuntime
+import PraxisTapTypes
 
 private func makeRuntimeKitTemporaryDirectory() throws -> URL {
   let directory = FileManager.default.temporaryDirectory
@@ -223,7 +228,267 @@ struct PraxisRuntimeKitTests {
     #expect(provisioning.activationBindingKey == nil)
     #expect(inspection.runSummary.contains("replay record"))
     #expect(inspection.sections.contains { $0.sectionID == "activation-replay" })
-    #expect(reviewWorkbench.latestDecisionSummary?.contains("Activation staged attempt") == true)
+    #expect(reviewWorkbench.provisioning == provisioning)
+    #expect(reviewWorkbench.hasProvisioningEvidence)
+    #expect(reviewWorkbench.hasActiveReplay)
+    #expect(reviewWorkbench.provisioning.primaryReplay?.replayID == staged.pendingReplayID)
+    #expect(reviewWorkbench.summary.contains("activation status pending"))
+    #expect(reviewWorkbench.provisioning.activationSummary?.contains("Activation staged attempt") == true)
+    #expect(reviewWorkbench.latestDecisionSummary == reviewWorkbench.tapOverview.latestDecisionSummary)
+  }
+
+  @Test
+  func runtimeKitRecoversProvisioningWorkbenchStateAcrossFreshClients() async throws {
+    let rootDirectory = try makeRuntimeKitTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let firstClient = try PraxisRuntimeClient.makeDefault(rootDirectory: rootDirectory)
+    let firstCmpProject = firstClient.cmp.project("cmp.local-runtime")
+    let firstTapProject = firstClient.tap.project("cmp.local-runtime")
+
+    _ = try await firstCmpProject.openSession("cmp.runtime-kit-provisioning-recovery")
+    _ = try await firstCmpProject.approvals.request(
+      .init(
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityID: "tool.shell.exec",
+        requestedTier: .b2,
+        summary: "Redirect shell execution to provisioning for recovery coverage"
+      )
+    )
+    let staged = try await firstTapProject.provision(
+      .init(
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityID: "tool.shell.exec",
+        requestedTier: .b2,
+        summary: "Stage shell execution provisioning before fresh-client recovery",
+        expectedArtifacts: ["shell.exec binding"],
+        requiredVerification: ["shell.exec smoke"]
+      )
+    )
+
+    let secondClient = try PraxisRuntimeClient.makeDefault(rootDirectory: rootDirectory)
+    let recoveredTapProject = secondClient.tap.project("cmp.local-runtime")
+    let recoveredProvisioning = try await recoveredTapProject.provisioning()
+    let recoveredWorkbench = try await recoveredTapProject.reviewWorkbench(for: "checker.local", limit: 10)
+
+    #expect(recoveredProvisioning.found)
+    #expect(recoveredProvisioning.activeReplayCount == 1)
+    #expect(recoveredProvisioning.primaryReplay?.replayID == staged.pendingReplayID)
+    #expect(recoveredWorkbench.provisioning == recoveredProvisioning)
+    #expect(recoveredWorkbench.hasProvisioningEvidence)
+    #expect(recoveredWorkbench.hasActiveReplay)
+    #expect(recoveredWorkbench.provisioning.activationSummary?.contains("Activation staged attempt") == true)
+    #expect(recoveredWorkbench.latestDecisionSummary == recoveredWorkbench.tapOverview.latestDecisionSummary)
+  }
+
+  @Test
+  func projectScopedTapClientAdvancesReplayLifecycleThroughExplicitActivation() async throws {
+    let rootDirectory = try makeRuntimeKitTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let client = try PraxisRuntimeClient.makeDefault(rootDirectory: rootDirectory)
+    let cmpProject = client.cmp.project("cmp.local-runtime")
+    let tapProject = client.tap.project("cmp.local-runtime")
+
+    _ = try await cmpProject.openSession("cmp.runtime-kit-replay-advance")
+    _ = try await cmpProject.approvals.request(
+      .init(
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityID: "tool.shell.exec",
+        requestedTier: .b2,
+        summary: "Redirect shell execution to provisioning before explicit activation"
+      )
+    )
+    let staged = try await tapProject.provision(
+      .init(
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityID: "tool.shell.exec",
+        requestedTier: .b2,
+        summary: "Stage shell execution provisioning before explicit activation",
+        expectedArtifacts: ["shell.exec binding"],
+        requiredVerification: ["shell.exec smoke"]
+      )
+    )
+
+    let activated = try await tapProject.advanceReplay(
+      .init(
+        agentID: "runtime.local",
+        replayID: .init(staged.pendingReplayID),
+        action: .activate
+      )
+    )
+    let workbench = try await tapProject.reviewWorkbench(for: "checker.local", limit: 10)
+
+    #expect(activated.activationStatus == .completed)
+    #expect(activated.activationBindingKey?.contains("binding.cmp.local-runtime.tool.shell.exec") == true)
+    #expect(activated.primaryReplay?.replayID == staged.pendingReplayID)
+    #expect(activated.primaryReplay?.status == .ready)
+    #expect(activated.activeReplayCount == 1)
+    #expect(workbench.provisioning == activated)
+    #expect(workbench.hasActiveReplay)
+    #expect(workbench.provisioning.activationSummary?.contains("is ready") == true)
+    #expect(workbench.latestDecisionSummary == workbench.tapOverview.latestDecisionSummary)
+  }
+
+  @Test
+  func reviewWorkbenchPrefersNewestDecisionSummaryOverPreservedProvisioningActivationText() async throws {
+    let rootDirectory = try makeRuntimeKitTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let client = try PraxisRuntimeClient.makeDefault(rootDirectory: rootDirectory)
+    let cmpProject = client.cmp.project("cmp.local-runtime")
+    let tapProject = client.tap.project("cmp.local-runtime")
+
+    _ = try await cmpProject.openSession("cmp.runtime-kit-workbench-summary")
+    _ = try await tapProject.provision(
+      .init(
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityID: "tool.shell.exec",
+        requestedTier: .b2,
+        summary: "Stage shell execution provisioning before reviewer rejection coverage",
+        expectedArtifacts: ["shell.exec binding"],
+        requiredVerification: ["shell.exec smoke"]
+      )
+    )
+    let stagedWorkbench = try await tapProject.reviewWorkbench(for: "checker.local", limit: 10)
+    let preservedActivationSummary = try #require(stagedWorkbench.provisioning.activationSummary)
+    _ = try await cmpProject.approvals.request(
+      .init(
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityID: "tool.git",
+        requestedTier: .b1,
+        summary: "Request git approval after provisioning evidence exists"
+      )
+    )
+    _ = try await cmpProject.approvals.decide(
+      .init(
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityID: "tool.git",
+        decision: .reject,
+        reviewerAgentID: "reviewer.local",
+        decisionSummary: "Reviewer rejected git access after provisioning was staged"
+      )
+    )
+    let updatedWorkbench = try await tapProject.reviewWorkbench(for: "checker.local", limit: 10)
+
+    #expect(preservedActivationSummary.contains("Activation staged attempt") == true)
+    #expect(
+      updatedWorkbench.latestDecisionSummary?.contains("Reviewer rejected git access after provisioning was staged")
+        == true
+    )
+    #expect(updatedWorkbench.latestDecisionSummary != preservedActivationSummary)
+  }
+
+  @Test
+  func projectScopedCmpFlowClientMaterializesAndDispatchesPersistedPackage() async throws {
+    let rootDirectory = try makeRuntimeKitTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let hostAdapters = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+    let dependencies = try PraxisRuntimeGatewayFactory.makeCompositionRoot(hostAdapters: hostAdapters).makeDependencyGraph()
+    let bootstrapProjectUseCase = PraxisBootstrapCmpProjectUseCase(dependencies: dependencies)
+    let ingestFlowUseCase = PraxisIngestCmpFlowUseCase(dependencies: dependencies)
+    let commitFlowUseCase = PraxisCommitCmpFlowUseCase(dependencies: dependencies)
+    let runGoalUseCase = PraxisRunGoalUseCase(dependencies: dependencies)
+    let resolveFlowUseCase = PraxisResolveCmpFlowUseCase(dependencies: dependencies)
+    let client = try PraxisRuntimeClient.makeDefault(rootDirectory: rootDirectory)
+    let cmpProject = client.cmp.project("cmp.local-runtime")
+    let tapProject = client.tap.project("cmp.local-runtime")
+
+    _ = try await bootstrapProjectUseCase.execute(
+      PraxisBootstrapCmpProjectCommand(
+        projectID: "cmp.local-runtime",
+        agentIDs: ["runtime.local", "checker.local"],
+        defaultAgentID: "runtime.local"
+      )
+    )
+    let ingest = try await ingestFlowUseCase.execute(
+      PraxisIngestCmpFlowCommand(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        sessionID: "cmp.runtime-kit-flow",
+        taskSummary: "Capture runtime context for RuntimeKit package dispatch coverage",
+        materials: [.init(kind: .userInput, ref: "payload:user:runtime-kit-dispatch")],
+        requiresActiveSync: true
+      )
+    )
+    _ = try await commitFlowUseCase.execute(
+      PraxisCommitCmpFlowCommand(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        sessionID: "cmp.runtime-kit-flow",
+        eventIDs: ingest.result.acceptedEventIDs,
+        changeSummary: "Commit RuntimeKit dispatch context",
+        syncIntent: .toParent
+      )
+    )
+    _ = try await runGoalUseCase.execute(
+      PraxisRunGoalCommand(
+        goal: .init(
+          normalizedGoal: .init(
+            id: .init(rawValue: "goal.runtime-kit-dispatch"),
+            title: "RuntimeKit Dispatch Seed",
+            summary: "Seed projection for RuntimeKit persisted package dispatch coverage"
+          ),
+          intentSummary: "Seed projection for RuntimeKit persisted package dispatch coverage"
+        ),
+        sessionID: .init(rawValue: "session.runtime-kit-flow")
+      )
+    )
+    _ = try await resolveFlowUseCase.execute(
+      PraxisResolveCmpFlowCommand(projectID: "cmp.local-runtime", agentID: "runtime.local")
+    )
+    let staged = try await tapProject.provision(
+      PraxisRuntimeTapProvisionRequest(
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityID: "tool.shell.exec",
+        requestedTier: PraxisTapCapabilityTier.b2,
+        summary: "Stage shell execution provisioning before RuntimeKit package dispatch",
+        expectedArtifacts: ["shell.exec binding"],
+        requiredVerification: ["shell.exec smoke"]
+      )
+    )
+    _ = try await tapProject.advanceReplay(
+      .init(
+        agentID: "runtime.local",
+        replayID: .init(staged.pendingReplayID),
+        action: .activate
+      )
+    )
+
+    let materialized = try await cmpProject.flows.materialize(
+      PraxisRuntimeCmpMaterializeRequest(
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        packageKind: PraxisCmpContextPackageKind.runtimeFill,
+        fidelityLabel: PraxisCmpContextPackageFidelityLabel.highSignal
+      )
+    )
+    let dispatched = try await cmpProject.flows.dispatch(
+      PraxisRuntimeCmpDispatchRequest(
+        agentID: "runtime.local",
+        packageID: PraxisRuntimeCmpPackageRef(materialized.packageID.rawValue),
+        targetKind: PraxisCmpDispatchTargetKind.peer,
+        reason: "Dispatch persisted package through RuntimeKit flow wrapper"
+      )
+    )
+    let provisioning = try await tapProject.provisioning()
+
+    #expect(materialized.packageID.rawValue.isEmpty == false)
+    #expect(materialized.targetAgentID == "checker.local")
+    #expect(dispatched.status == PraxisCmpDispatchStatus.delivered)
+    #expect(dispatched.targetAgentID == "checker.local")
+    #expect(provisioning.activationStatus == PraxisActivationAttemptStatus.completed)
+    #expect(provisioning.activeReplayCount == 0)
+    #expect(provisioning.replayRecords.first?.status == PraxisReplayStatus.consumed)
   }
 
   @Test
@@ -269,6 +534,8 @@ struct PraxisRuntimeKitTests {
     #expect(otherWorkbench.projectID == "other-project")
     #expect(otherWorkbench.inspection.projectSummary.contains("other-project"))
     #expect(otherWorkbench.inspection.runSummary.contains("tap.session.snapshot.other-project"))
+    #expect(otherWorkbench.hasProvisioningEvidence == false)
+    #expect(otherWorkbench.hasActiveReplay == false)
     #expect(otherWorkbench.latestDecisionSummary?.contains("Approved only for default project") == false)
     #expect(otherWorkbench.pendingItems.isEmpty)
   }

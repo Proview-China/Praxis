@@ -123,3 +123,87 @@ public struct PraxisRuntimeCapabilityRef: RawRepresentable, Sendable, Hashable, 
     rawValue
   }
 }
+
+/// Stable RuntimeKit wrapper for one replay identifier.
+public struct PraxisRuntimeReplayRef: RawRepresentable, Sendable, Hashable, Codable, ExpressibleByStringLiteral, CustomStringConvertible {
+  public let rawValue: String
+
+  public init(rawValue: String) {
+    self.rawValue = rawValue
+  }
+
+  public init(_ rawValue: String) {
+    self.rawValue = rawValue
+  }
+
+  public init(stringLiteral value: String) {
+    self.rawValue = value
+  }
+
+  public var description: String {
+    rawValue
+  }
+}
+
+/// Stable RuntimeKit wrapper for one CMP package identifier.
+public struct PraxisRuntimeCmpPackageRef: RawRepresentable, Sendable, Hashable, Codable, ExpressibleByStringLiteral, CustomStringConvertible {
+  public let rawValue: String
+
+  public init(rawValue: String) {
+    self.rawValue = rawValue
+  }
+
+  public init(_ rawValue: String) {
+    self.rawValue = rawValue
+  }
+
+  public init(stringLiteral value: String) {
+    self.rawValue = value
+  }
+
+  public var description: String {
+    rawValue
+  }
+}
+
+/// Stable RuntimeKit wrapper for one CMP snapshot identifier.
+public struct PraxisRuntimeCmpSnapshotRef: RawRepresentable, Sendable, Hashable, Codable, ExpressibleByStringLiteral, CustomStringConvertible {
+  public let rawValue: String
+
+  public init(rawValue: String) {
+    self.rawValue = rawValue
+  }
+
+  public init(_ rawValue: String) {
+    self.rawValue = rawValue
+  }
+
+  public init(stringLiteral value: String) {
+    self.rawValue = value
+  }
+
+  public var description: String {
+    rawValue
+  }
+}
+
+/// Stable RuntimeKit wrapper for one CMP projection identifier.
+public struct PraxisRuntimeCmpProjectionRef: RawRepresentable, Sendable, Hashable, Codable, ExpressibleByStringLiteral, CustomStringConvertible {
+  public let rawValue: String
+
+  public init(rawValue: String) {
+    self.rawValue = rawValue
+  }
+
+  public init(_ rawValue: String) {
+    self.rawValue = rawValue
+  }
+
+  public init(stringLiteral value: String) {
+    self.rawValue = value
+  }
+
+  public var description: String {
+    rawValue
+  }
+}

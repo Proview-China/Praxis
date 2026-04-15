@@ -530,34 +530,38 @@ private func chunkedCapabilityText(_ text: String, chunkCharacterCount: Int) -> 
 }
 
 private func thinCapabilityManifestIDs(
-  providerSurface: any PraxisProviderRequestSurfaceProtocol,
-  adapters: PraxisHostAdapterRegistry
+  providerSurface: (any PraxisProviderRequestSurfaceProtocol)?,
+  browserExecutor: (any PraxisBrowserExecutor)?,
+  browserGroundingCollector: (any PraxisBrowserGroundingCollector)?,
+  supportsSessionOpen: Bool
 ) -> Set<PraxisCapabilityID> {
-  var capabilityIDs: Set<PraxisCapabilityID> = [PraxisThinCapabilityKey.sessionOpen.capabilityID]
+  var capabilityIDs: Set<PraxisCapabilityID> = supportsSessionOpen
+    ? [PraxisThinCapabilityKey.sessionOpen.capabilityID]
+    : []
 
-  if providerSurface.inferenceExecutor != nil {
+  if providerSurface?.supportsInference == true {
     capabilityIDs.insert(PraxisThinCapabilityKey.generateCreate.capabilityID)
     capabilityIDs.insert(PraxisThinCapabilityKey.generateStream.capabilityID)
   }
-  if providerSurface.embeddingExecutor != nil {
+  if providerSurface?.supportsEmbedding == true {
     capabilityIDs.insert(PraxisThinCapabilityKey.embedCreate.capabilityID)
   }
-  if providerSurface.mcpExecutor != nil {
+  if providerSurface?.supportsToolCalls == true {
     capabilityIDs.insert(PraxisThinCapabilityKey.toolCall.capabilityID)
   }
-  if providerSurface.fileStore != nil {
+  if providerSurface?.supportsFileUpload == true {
     capabilityIDs.insert(PraxisThinCapabilityKey.fileUpload.capabilityID)
   }
-  if providerSurface.batchExecutor != nil {
+  if providerSurface?.supportsBatchSubmission == true {
     capabilityIDs.insert(PraxisThinCapabilityKey.batchSubmit.capabilityID)
   }
-  if providerSurface.webSearchExecutor != nil {
+  if providerSurface?.supportsWebSearch == true {
     capabilityIDs.insert(PraxisThinCapabilityKey.searchWeb.capabilityID)
   }
-  if adapters.browserExecutor != nil {
+  if browserExecutor != nil {
     capabilityIDs.insert(PraxisThinCapabilityKey.searchFetch.capabilityID)
   }
-  if adapters.browserGroundingCollector != nil {
+  if browserGroundingCollector != nil {
     capabilityIDs.insert(PraxisThinCapabilityKey.searchGround.capabilityID)
   }
 
@@ -569,7 +573,10 @@ private func thinCapabilityManifestIDs(
 /// This surface exposes provider-backed generation, embedding, tool, file, batch, and session
 /// calls without leaking composition or transport-specific details to RuntimeKit callers.
 public final class PraxisCapabilityFacade: Sendable {
-  private let dependencies: PraxisDependencyGraph?
+  private let providerSurface: (any PraxisProviderRequestSurfaceProtocol)?
+  private let browserExecutor: (any PraxisBrowserExecutor)?
+  private let browserGroundingCollector: (any PraxisBrowserGroundingCollector)?
+  private let supportsSessionOpen: Bool
   private let sessionRegistry: PraxisSessionRegistry
   private let catalogBuilder: PraxisCapabilityCatalogBuilder
 
@@ -578,21 +585,35 @@ public final class PraxisCapabilityFacade: Sendable {
     sessionRegistry: PraxisSessionRegistry = .init(),
     catalogBuilder: PraxisCapabilityCatalogBuilder = .init()
   ) {
-    self.dependencies = dependencies
+    self.providerSurface = dependencies.providerRequestSurface
+    self.browserExecutor = dependencies.hostAdapters.browserExecutor
+    self.browserGroundingCollector = dependencies.hostAdapters.browserGroundingCollector
+    self.supportsSessionOpen = true
     self.sessionRegistry = sessionRegistry
     self.catalogBuilder = catalogBuilder
   }
 
   public static func unsupported() -> PraxisCapabilityFacade {
-    PraxisCapabilityFacade(dependencies: nil)
+    PraxisCapabilityFacade(
+      providerSurface: nil,
+      browserExecutor: nil,
+      browserGroundingCollector: nil,
+      supportsSessionOpen: false
+    )
   }
 
   private init(
-    dependencies: PraxisDependencyGraph?,
+    providerSurface: (any PraxisProviderRequestSurfaceProtocol)?,
+    browserExecutor: (any PraxisBrowserExecutor)? = nil,
+    browserGroundingCollector: (any PraxisBrowserGroundingCollector)? = nil,
+    supportsSessionOpen: Bool,
     sessionRegistry: PraxisSessionRegistry = .init(),
     catalogBuilder: PraxisCapabilityCatalogBuilder = .init()
   ) {
-    self.dependencies = dependencies
+    self.providerSurface = providerSurface
+    self.browserExecutor = browserExecutor
+    self.browserGroundingCollector = browserGroundingCollector
+    self.supportsSessionOpen = supportsSessionOpen
     self.sessionRegistry = sessionRegistry
     self.catalogBuilder = catalogBuilder
   }
@@ -601,14 +622,16 @@ public final class PraxisCapabilityFacade: Sendable {
   ///
   /// - Returns: Catalog entries currently wired for the active host profile.
   public func catalog() -> PraxisCapabilityCatalogSnapshot {
-    guard let dependencies else {
+    guard providerSurface != nil || browserExecutor != nil || browserGroundingCollector != nil || supportsSessionOpen else {
       return catalogBuilder.buildSnapshot(manifests: [])
     }
 
     let baseline = catalogBuilder.buildThinCapabilityBaseline()
     let availableIDs = thinCapabilityManifestIDs(
-      providerSurface: dependencies.providerRequestSurface,
-      adapters: dependencies.hostAdapters
+      providerSurface: providerSurface,
+      browserExecutor: browserExecutor,
+      browserGroundingCollector: browserGroundingCollector,
+      supportsSessionOpen: supportsSessionOpen
     )
     let manifests = baseline.manifests.filter { availableIDs.contains($0.id) }
     return catalogBuilder.buildSnapshot(manifests: manifests)
@@ -621,8 +644,11 @@ public final class PraxisCapabilityFacade: Sendable {
   /// - Throws: Propagates provider or validation failures.
   public func generate(_ command: PraxisCapabilityGenerateCommand) async throws -> PraxisCapabilityGenerationSnapshot {
     let prompt = try normalizedCapabilityText(command.prompt, fieldName: "prompt")
-    let executor = try requireInferenceExecutor(capability: PraxisThinCapabilityKey.generateCreate.rawValue)
-    let response = try await executor.infer(
+    let providerSurface = try requireProviderSurface(
+      isSupported: { $0.supportsInference },
+      errorMessage: "Thin capability \(PraxisThinCapabilityKey.generateCreate.rawValue) requires a provider inference executor."
+    )
+    let response = try await providerSurface.infer(
       .init(
         systemPrompt: command.systemPrompt,
         prompt: prompt,
@@ -681,8 +707,11 @@ public final class PraxisCapabilityFacade: Sendable {
   /// - Throws: Propagates provider or validation failures.
   public func embed(_ command: PraxisCapabilityEmbedCommand) async throws -> PraxisCapabilityEmbeddingSnapshot {
     let content = try normalizedCapabilityText(command.content, fieldName: "content")
-    let executor = try requireEmbeddingExecutor()
-    let response = try await executor.embed(
+    let providerSurface = try requireProviderSurface(
+      isSupported: { $0.supportsEmbedding },
+      errorMessage: "Thin capability embed.create requires a provider embedding executor."
+    )
+    let response = try await providerSurface.embed(
       .init(
         content: content,
         preferredModel: command.preferredModel
@@ -704,8 +733,11 @@ public final class PraxisCapabilityFacade: Sendable {
   public func callTool(_ command: PraxisCapabilityToolCallCommand) async throws -> PraxisCapabilityToolCallSnapshot {
     let toolName = try normalizedCapabilityText(command.toolName, fieldName: "toolName")
     let summary = try normalizedCapabilityText(command.summary, fieldName: "summary")
-    let executor = try requireMCPExecutor()
-    let receipt = try await executor.callTool(
+    let providerSurface = try requireProviderSurface(
+      isSupported: { $0.supportsToolCalls },
+      errorMessage: "Thin capability tool.call requires a provider MCP executor."
+    )
+    let receipt = try await providerSurface.callTool(
       .init(
         toolName: toolName,
         summary: summary,
@@ -727,8 +759,11 @@ public final class PraxisCapabilityFacade: Sendable {
   /// - Throws: Propagates provider or validation failures.
   public func uploadFile(_ command: PraxisCapabilityFileUploadCommand) async throws -> PraxisCapabilityFileUploadSnapshot {
     let summary = try normalizedCapabilityText(command.summary, fieldName: "summary")
-    let store = try requireFileStore()
-    let receipt = try await store.upload(
+    let providerSurface = try requireProviderSurface(
+      isSupported: { $0.supportsFileUpload },
+      errorMessage: "Thin capability file.upload requires a provider file store."
+    )
+    let receipt = try await providerSurface.upload(
       .init(
         summary: summary,
         purpose: command.purpose?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -752,8 +787,11 @@ public final class PraxisCapabilityFacade: Sendable {
     guard command.itemCount > 0 else {
       throw PraxisError.invalidInput("Thin capability batch.submit requires itemCount > 0.")
     }
-    let executor = try requireBatchExecutor()
-    let receipt = try await executor.enqueue(
+    let providerSurface = try requireProviderSurface(
+      isSupported: { $0.supportsBatchSubmission },
+      errorMessage: "Thin capability batch.submit requires a provider batch executor."
+    )
+    let receipt = try await providerSurface.enqueue(
       .init(
         summary: summary,
         itemCount: command.itemCount
@@ -773,7 +811,7 @@ public final class PraxisCapabilityFacade: Sendable {
   /// - Returns: The normalized session snapshot.
   /// - Throws: Propagates validation failures.
   public func openSession(_ command: PraxisOpenRuntimeSessionCommand = .init()) async throws -> PraxisRuntimeSessionSnapshot {
-    guard dependencies != nil else {
+    guard supportsSessionOpen else {
       throw PraxisError.unsupportedOperation("Thin capability session.open is not available in this facade profile.")
     }
 
@@ -811,8 +849,11 @@ public final class PraxisCapabilityFacade: Sendable {
     guard command.limit > 0 else {
       throw PraxisError.invalidInput("Thin capability search.web requires limit > 0.")
     }
-    let executor = try requireWebSearchExecutor()
-    let response = try await executor.search(
+    let providerSurface = try requireProviderSurface(
+      isSupported: { $0.supportsWebSearch },
+      errorMessage: "Thin capability search.web requires a provider web search executor."
+    )
+    let response = try await providerSurface.search(
       .init(
         query: query,
         locale: command.locale?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -899,59 +940,27 @@ public final class PraxisCapabilityFacade: Sendable {
     )
   }
 
-  private func requireInferenceExecutor(capability: String) throws -> any PraxisProviderInferenceExecutor {
-    guard let executor = dependencies?.providerRequestSurface.inferenceExecutor else {
-      throw PraxisError.dependencyMissing("Thin capability \(capability) requires a provider inference executor.")
+  private func requireProviderSurface(
+    isSupported: @Sendable (any PraxisProviderRequestSurfaceProtocol) -> Bool,
+    errorMessage: String
+  ) throws -> any PraxisProviderRequestSurfaceProtocol {
+    guard let providerSurface, isSupported(providerSurface) else {
+      throw PraxisError.dependencyMissing(errorMessage)
     }
-    return executor
-  }
-
-  private func requireEmbeddingExecutor() throws -> any PraxisProviderEmbeddingExecutor {
-    guard let executor = dependencies?.providerRequestSurface.embeddingExecutor else {
-      throw PraxisError.dependencyMissing("Thin capability embed.create requires a provider embedding executor.")
-    }
-    return executor
-  }
-
-  private func requireFileStore() throws -> any PraxisProviderFileStore {
-    guard let store = dependencies?.providerRequestSurface.fileStore else {
-      throw PraxisError.dependencyMissing("Thin capability file.upload requires a provider file store.")
-    }
-    return store
-  }
-
-  private func requireBatchExecutor() throws -> any PraxisProviderBatchExecutor {
-    guard let executor = dependencies?.providerRequestSurface.batchExecutor else {
-      throw PraxisError.dependencyMissing("Thin capability batch.submit requires a provider batch executor.")
-    }
-    return executor
-  }
-
-  private func requireMCPExecutor() throws -> any PraxisProviderMCPExecutor {
-    guard let executor = dependencies?.providerRequestSurface.mcpExecutor else {
-      throw PraxisError.dependencyMissing("Thin capability tool.call requires a provider MCP executor.")
-    }
-    return executor
-  }
-
-  private func requireWebSearchExecutor() throws -> any PraxisProviderWebSearchExecutor {
-    guard let executor = dependencies?.providerRequestSurface.webSearchExecutor else {
-      throw PraxisError.dependencyMissing("Thin capability search.web requires a provider web search executor.")
-    }
-    return executor
+    return providerSurface
   }
 
   private func requireBrowserExecutor() throws -> any PraxisBrowserExecutor {
-    guard let executor = dependencies?.hostAdapters.browserExecutor else {
+    guard let browserExecutor else {
       throw PraxisError.dependencyMissing("Thin capability search.fetch requires a browser executor.")
     }
-    return executor
+    return browserExecutor
   }
 
   private func requireBrowserGroundingCollector() throws -> any PraxisBrowserGroundingCollector {
-    guard let collector = dependencies?.hostAdapters.browserGroundingCollector else {
+    guard let browserGroundingCollector else {
       throw PraxisError.dependencyMissing("Thin capability search.ground requires a browser grounding collector.")
     }
-    return collector
+    return browserGroundingCollector
   }
 }

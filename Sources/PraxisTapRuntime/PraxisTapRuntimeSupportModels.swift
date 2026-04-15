@@ -77,6 +77,12 @@ public enum PraxisReplayNextAction: String, Sendable, Codable {
   case reReviewThenDispatch = "re_review_then_dispatch"
 }
 
+/// Describes one explicit replay lifecycle transition requested by a caller surface.
+public enum PraxisReplayLifecycleAction: String, Sendable, Codable {
+  case activate
+  case consume
+}
+
 public struct PraxisPendingReplay: Sendable, Equatable, Codable {
   public let replayID: String
   public let capabilityKey: String

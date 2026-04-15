@@ -137,6 +137,11 @@ public struct PraxisRuntimeCmpProjectClient: Sendable {
     PraxisRuntimeCmpApprovalClient(project: project, cmpFacade: cmpFacade)
   }
 
+  /// CMP flow and package delivery workflow grouped behind a dedicated scoped client.
+  public var flows: PraxisRuntimeCmpFlowClient {
+    PraxisRuntimeCmpFlowClient(project: project, cmpFacade: cmpFacade)
+  }
+
   /// Reads one peer approval summary together with the current project overview.
   ///
   /// - Parameter query: Structured approval query for one scoped approval readback.
@@ -286,4 +291,67 @@ public struct PraxisRuntimeCmpApprovalOverview: Sendable {
     approval.projectID
   }
 
+}
+
+/// Project-scoped CMP flow surface for package assembly and delivery progression.
+public struct PraxisRuntimeCmpFlowClient: Sendable {
+  private let project: PraxisRuntimeProjectRef
+  private let cmpFacade: PraxisCmpFacade
+
+  init(project: PraxisRuntimeProjectRef, cmpFacade: PraxisCmpFacade) {
+    self.project = project
+    self.cmpFacade = cmpFacade
+  }
+
+  /// Materializes one persisted CMP package for the scoped project.
+  ///
+  /// - Parameter request: The package-assembly request.
+  /// - Returns: The normalized materialization snapshot.
+  /// - Throws: Any materialization error raised by the underlying flow facade.
+  public func materialize(_ request: PraxisRuntimeCmpMaterializeRequest) async throws -> PraxisCmpFlowMaterializeSnapshot {
+    try await cmpFacade.materializeFlow(
+      .init(
+        projectID: project.rawValue,
+        agentID: request.agentID.rawValue,
+        targetAgentID: request.targetAgentID.rawValue,
+        snapshotID: request.snapshotID.map { .init(rawValue: $0.rawValue) },
+        projectionID: request.projectionID.map { .init(rawValue: $0.rawValue) },
+        packageKind: request.packageKind,
+        fidelityLabel: request.fidelityLabel
+      )
+    )
+  }
+
+  /// Dispatches one persisted CMP package without leaking raw context-package delivery details.
+  ///
+  /// - Parameter request: The package-scoped dispatch request.
+  /// - Returns: The normalized dispatch snapshot.
+  /// - Throws: Any package lookup, validation, or delivery error raised by the underlying flow facade.
+  public func dispatch(_ request: PraxisRuntimeCmpDispatchRequest) async throws -> PraxisCmpFlowDispatchSnapshot {
+    try await cmpFacade.dispatchStoredPackage(
+      .init(
+        projectID: project.rawValue,
+        agentID: request.agentID.rawValue,
+        packageID: .init(rawValue: request.packageID.rawValue),
+        targetKind: request.targetKind,
+        reason: request.reason
+      )
+    )
+  }
+
+  /// Retries one blocked persisted CMP package dispatch.
+  ///
+  /// - Parameter request: The retry request scoped to one stored package.
+  /// - Returns: The normalized dispatch snapshot.
+  /// - Throws: Any package lookup, validation, or delivery error raised by the underlying flow facade.
+  public func retryDispatch(_ request: PraxisRuntimeCmpRetryDispatchRequest) async throws -> PraxisCmpFlowDispatchSnapshot {
+    try await cmpFacade.retryDispatch(
+      .init(
+        projectID: project.rawValue,
+        agentID: request.agentID.rawValue,
+        packageID: .init(rawValue: request.packageID.rawValue),
+        reason: request.reason
+      )
+    )
+  }
 }

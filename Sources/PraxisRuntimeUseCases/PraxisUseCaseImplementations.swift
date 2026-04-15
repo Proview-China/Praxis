@@ -1937,6 +1937,12 @@ private func dispatchCmpFlow(
   }
   let routingPlan = mqPlanner.routingPlan(for: deliveryPlan, projectID: command.projectID)
   let topicName = routingPlan.destinationTopics.first?.topicName ?? "cmp.\(command.projectID).\(command.agentID).same"
+  let replayDispatchState = try await tapProvisioningDispatchState(
+    projectID: command.projectID,
+    targetAgentID: command.contextPackage.targetAgentID,
+    activatedAt: createdAt,
+    dependencies: dependencies
+  )
   let targetControl = try await cmpResolvedControlSurface(
     projectID: command.projectID,
     agentID: command.contextPackage.targetAgentID,
@@ -2156,6 +2162,15 @@ private func dispatchCmpFlow(
     latestDecisionSummary: decisionSummary,
     dependencies: dependencies
   )
+  if let replayDispatchState {
+    try await persistTapProvisioningDispatchOutcome(
+      projectID: command.projectID,
+      packageID: command.contextPackage.id,
+      dispatchStatus: receipt.status,
+      replayDispatchState: replayDispatchState,
+      dependencies: dependencies
+    )
+  }
   return PraxisCmpFlowDispatch(
     projectID: command.projectID,
     agentID: command.agentID,
@@ -2236,41 +2251,12 @@ private func retryCmpDispatch(
     dependencies: dependencies
   )
   let replayDispatchState: PraxisTapProvisioningDispatchState?
-  let checkpointPointer = tapInspectionCheckpointPointer(for: command.projectID)
-  let checkpointRecord = try await dependencies.hostAdapters.checkpointStore?.load(pointer: checkpointPointer)
-  let provisioningState = tapProvisioningCheckpointState(from: checkpointRecord?.snapshot.payload)
-  if let activationAttempt = provisioningState.activationAttempt,
-     let replayCandidate = tapProvisioningReplayCandidate(from: provisioningState),
-     let capabilityID = try optionalCapabilityID(
-      from: activationAttempt.capabilityKey,
-      context: "TAP provisioning checkpoint"
-     ),
-     let bundleSummary = provisioningState.bundleSummary,
-     let planSummary = provisioningState.planSummary
-  {
-    let lifecycle = PraxisActivationLifecycleService()
-    let completedActivation = lifecycle.completeActivation(
-      activationAttempt,
-      bindingKey: tapActivationBindingKey(projectID: command.projectID, capabilityID: capabilityID),
-      activatedAt: createdAt
-    )
-    let activationReceipt = provisioningState.activationReceipt ?? completedActivation.receipt
-    let readyReplay = lifecycle.markReplayReady(replayCandidate)
-    let updatedReplays = provisioningState.pendingReplays.map { replay in
-      replay.replayID == readyReplay.replayID ? readyReplay : replay
-    }
-    replayDispatchState = .init(
-      capabilityID: capabilityID,
-      bundleSummary: bundleSummary,
-      planSummary: planSummary,
-      activationAttempt: completedActivation.attempt,
-      activationReceipt: activationReceipt,
-      pendingReplays: updatedReplays,
-      replayID: readyReplay.replayID
-    )
-  } else {
-    replayDispatchState = nil
-  }
+  replayDispatchState = try await tapProvisioningDispatchState(
+    projectID: command.projectID,
+    targetAgentID: contextPackage.targetAgentID,
+    activatedAt: createdAt,
+    dependencies: dependencies
+  )
 
   let dispatch = try await dispatchCmpFlow(
     command: .init(
@@ -2282,75 +2268,71 @@ private func retryCmpDispatch(
     ),
     dependencies: dependencies
   )
-  guard let replayDispatchState else {
+  guard dispatch.result.receipt.status == .rejected, let replayDispatchState else {
     return dispatch
   }
 
-  let lifecycle = PraxisActivationLifecycleService()
-  let updatedReplays: [PraxisPendingReplay]
-  let activationSummary: String
-  let latestEventKind: PraxisTapRuntimeEventKind
-  let latestDecisionSummary: String
-
-  switch dispatch.result.receipt.status {
-  case .delivered:
-    updatedReplays = replayDispatchState.pendingReplays.map { replay in
-      replay.replayID == replayDispatchState.replayID ? lifecycle.consumeReplay(replay) : replay
-    }
-    activationSummary =
-      "Activation receipt \(replayDispatchState.activationReceipt.bindingKey) completed for \(replayDispatchState.capabilityID.rawValue); replay \(replayDispatchState.replayID) was consumed by dispatch package \(command.packageID.rawValue)."
-    latestEventKind = .dispatchReleased
-    latestDecisionSummary = activationSummary
-  case .rejected:
-    updatedReplays = replayDispatchState.pendingReplays
-    activationSummary =
-      "Activation receipt \(replayDispatchState.activationReceipt.bindingKey) completed for \(replayDispatchState.capabilityID.rawValue); replay \(replayDispatchState.replayID) remains ready while dispatch stays gated."
-    latestEventKind = .dispatchBlocked
-    latestDecisionSummary = activationSummary
-  case .prepared:
-    updatedReplays = replayDispatchState.pendingReplays
-    activationSummary =
-      "Activation receipt \(replayDispatchState.activationReceipt.bindingKey) completed for \(replayDispatchState.capabilityID.rawValue); replay \(replayDispatchState.replayID) remains ready until transport delivery succeeds."
-    latestEventKind = .dispatchReleased
-    latestDecisionSummary = activationSummary
-  case .acknowledged:
-    updatedReplays = replayDispatchState.pendingReplays.map { replay in
-      replay.replayID == replayDispatchState.replayID ? lifecycle.consumeReplay(replay) : replay
-    }
-    activationSummary =
-      "Activation receipt \(replayDispatchState.activationReceipt.bindingKey) completed for \(replayDispatchState.capabilityID.rawValue); replay \(replayDispatchState.replayID) was consumed after dispatch package \(command.packageID.rawValue) reached acknowledgement."
-    latestEventKind = .dispatchReleased
-    latestDecisionSummary = activationSummary
-  case .expired:
-    updatedReplays = replayDispatchState.pendingReplays
-    activationSummary =
-      "Activation receipt \(replayDispatchState.activationReceipt.bindingKey) completed for \(replayDispatchState.capabilityID.rawValue); replay \(replayDispatchState.replayID) remains ready because dispatch package \(command.packageID.rawValue) expired before delivery completed."
-    latestEventKind = .dispatchRetryRequested
-    latestDecisionSummary = activationSummary
-  }
-
-  try await appendTapInspectionReplayEvidence(
+  try await persistTapProvisioningDispatchOutcome(
     projectID: command.projectID,
-    capabilityID: replayDispatchState.capabilityID,
-    summary: activationSummary,
-    bundleSummary: replayDispatchState.bundleSummary,
-    pendingReplay: updatedReplays.first { $0.replayID == replayDispatchState.replayID } ?? replayDispatchState.pendingReplays[0],
-    dependencies: dependencies
-  )
-  try await persistTapInspectionCheckpoint(
-    projectID: command.projectID,
-    latestEventKind: latestEventKind,
-    latestCapabilityID: replayDispatchState.capabilityID,
-    latestDecisionSummary: latestDecisionSummary,
-    activationAttempt: replayDispatchState.activationAttempt,
-    activationReceipt: replayDispatchState.activationReceipt,
-    pendingReplays: updatedReplays,
-    bundleSummary: replayDispatchState.bundleSummary,
-    planSummary: replayDispatchState.planSummary,
-    activationSummary: activationSummary,
+    packageID: command.packageID,
+    dispatchStatus: dispatch.result.receipt.status,
+    replayDispatchState: replayDispatchState,
     dependencies: dependencies
   )
   return dispatch
+}
+
+private func dispatchStoredCmpPackage(
+  command: PraxisDispatchStoredCmpPackageCommand,
+  dependencies: PraxisDependencyGraph
+) async throws -> PraxisCmpFlowDispatch {
+  let packageDescriptor = try await cmpProjectPackageDescriptors(
+    projectID: command.projectID,
+    packageID: command.packageID,
+    dependencies: dependencies
+  ).first
+  guard let packageDescriptor else {
+    throw PraxisError.invalidInput(
+      "CMP package was not found for project \(command.projectID) and package \(command.packageID.rawValue)."
+    )
+  }
+  guard packageDescriptor.sourceAgentID == command.agentID else {
+    throw PraxisError.invalidInput(
+      "CMP dispatch requires source agent \(packageDescriptor.sourceAgentID) but received \(command.agentID) for package \(command.packageID.rawValue)."
+    )
+  }
+  guard packageDescriptor.status == .materialized else {
+    throw PraxisError.invalidInput(
+      "CMP dispatch requires package \(command.packageID.rawValue) to remain materialized before a persisted-package dispatch can begin."
+    )
+  }
+
+  let blockedByTapGate = packageDescriptor.metadata["blocked_by_tap_gate"]?.boolValue ?? false
+  let lastDispatchStatus = try cmpPersistedDispatchStatus(
+    from: packageDescriptor,
+    operation: "dispatch"
+  )
+  if blockedByTapGate && lastDispatchStatus == .rejected {
+    throw PraxisError.invalidInput(
+      "CMP dispatch for package \(command.packageID.rawValue) is currently blocked by the TAP gate; use retry dispatch after reviewer approval is restored."
+    )
+  }
+  if let lastDispatchStatus, lastDispatchStatus != .prepared {
+    throw PraxisError.invalidInput(
+      "CMP dispatch for package \(command.packageID.rawValue) is not available because the persisted package already recorded dispatch status \(lastDispatchStatus.rawValue)."
+    )
+  }
+
+  return try await dispatchCmpFlow(
+    command: .init(
+      projectID: command.projectID,
+      agentID: command.agentID,
+      contextPackage: cmpContextPackage(from: packageDescriptor),
+      targetKind: command.targetKind,
+      reason: command.reason
+    ),
+    dependencies: dependencies
+  )
 }
 
 private func requestCmpHistory(
@@ -3159,20 +3141,18 @@ private func tapRuntimeEventRecencyScore(for record: PraxisTapRuntimeEventRecord
 
 private func tapRuntimeEventPriority(for eventKind: PraxisTapRuntimeEventKind) -> Int {
   switch eventKind {
-  case .activationStaged:
+  case .peerApprovalApproved, .peerApprovalRejected, .gateReleased, .dispatchReleased, .replayConsumed:
+    return 9
+  case .dispatchRetryRequested, .dispatchBlocked, .peerApprovalWaiting:
     return 8
-  case .peerApprovalApproved, .peerApprovalRejected, .gateReleased, .dispatchReleased:
+  case .activationReady:
     return 7
-  case .provisionStaged:
+  case .activationStaged, .provisionStaged:
     return 6
-  case .dispatchRetryRequested:
-    return 5
-  case .dispatchBlocked, .peerApprovalWaiting:
-    return 4
   case .peerApprovalRequested:
-    return 3
+    return 5
   case .controlUpdated:
-    return 2
+    return 4
   }
 }
 
@@ -3218,7 +3198,7 @@ private func tapHistoryEntries(
 
 private func tapHistoryLegacyRequestedTier(for record: PraxisTapRuntimeEventRecord) -> PraxisTapCapabilityTier? {
   switch record.eventKind {
-  case .controlUpdated, .dispatchBlocked, .dispatchReleased, .dispatchRetryRequested:
+  case .controlUpdated, .activationReady, .replayConsumed, .dispatchBlocked, .dispatchReleased, .dispatchRetryRequested:
     return .b0
   default:
     return nil
@@ -3227,7 +3207,7 @@ private func tapHistoryLegacyRequestedTier(for record: PraxisTapRuntimeEventReco
 
 private func tapHistoryLegacyHumanGateState(for record: PraxisTapRuntimeEventRecord) -> PraxisHumanGateState? {
   switch record.eventKind {
-  case .controlUpdated, .dispatchReleased, .dispatchRetryRequested:
+  case .controlUpdated, .activationReady, .replayConsumed, .dispatchReleased, .dispatchRetryRequested:
     return .notRequired
   case .dispatchBlocked:
     let pendingApprovalCount = Int(record.metadata["pendingApprovalCount"]?.numberValue ?? 0)
@@ -3242,7 +3222,7 @@ private func tapHistoryLegacyRoute(
   humanGateState: PraxisHumanGateState
 ) -> PraxisReviewerRoute? {
   switch record.eventKind {
-  case .controlUpdated, .dispatchReleased:
+  case .controlUpdated, .activationReady, .replayConsumed, .dispatchReleased:
     return .autoApprove
   case .dispatchRetryRequested:
     return .toolReview
@@ -3260,6 +3240,10 @@ private func tapHistoryLegacyOutcome(
   switch record.eventKind {
   case .controlUpdated:
     return .baselineApproved
+  case .activationReady:
+    return .activationReady
+  case .replayConsumed:
+    return .replayConsumed
   case .dispatchReleased:
     return .gateReleased
   case .dispatchRetryRequested:
@@ -3609,6 +3593,49 @@ private func tapProvisioningReplayCandidate(
   return candidates.first
 }
 
+private struct PraxisTapReplayEventContext {
+  let targetAgentID: String?
+  let requestedTier: PraxisTapCapabilityTier
+}
+
+private func tapReplayEventContext(
+  projectID: String,
+  capabilityID: PraxisCapabilityID,
+  dependencies: PraxisDependencyGraph
+) async throws -> PraxisTapReplayEventContext {
+  let history = try await readbackTapHistory(
+    command: .init(projectID: projectID, limit: 50),
+    dependencies: dependencies
+  )
+  let latestEntry = history.entries.first { $0.capabilityKey == capabilityID }
+  return PraxisTapReplayEventContext(
+    targetAgentID: latestEntry?.targetAgentID,
+    requestedTier: latestEntry?.requestedTier ?? .b0
+  )
+}
+
+private func tapReplayTransitionSummary(
+  action: PraxisReplayLifecycleAction,
+  replay: PraxisPendingReplay,
+  activationReceipt: PraxisActivationReceipt?,
+  capabilityID: PraxisCapabilityID
+) -> String {
+  switch action {
+  case .activate:
+    if let activationReceipt {
+      return
+        "Activation receipt \(activationReceipt.bindingKey) is ready for \(capabilityID.rawValue); replay \(replay.replayID) is \(replay.status.rawValue) for \(replay.nextAction.rawValue)."
+    }
+    return "Replay \(replay.replayID) is \(replay.status.rawValue) for \(capabilityID.rawValue)."
+  case .consume:
+    if let activationReceipt {
+      return
+        "Activation receipt \(activationReceipt.bindingKey) remains recorded for \(capabilityID.rawValue); replay \(replay.replayID) is \(replay.status.rawValue)."
+    }
+    return "Replay \(replay.replayID) is \(replay.status.rawValue) for \(capabilityID.rawValue)."
+  }
+}
+
 private struct PraxisTapProvisioningDispatchState {
   let capabilityID: PraxisCapabilityID
   let bundleSummary: String
@@ -3617,6 +3644,143 @@ private struct PraxisTapProvisioningDispatchState {
   let activationReceipt: PraxisActivationReceipt
   let pendingReplays: [PraxisPendingReplay]
   let replayID: String
+}
+
+private func tapProvisioningDispatchState(
+  projectID: String,
+  targetAgentID: String,
+  activatedAt: String,
+  dependencies: PraxisDependencyGraph
+) async throws -> PraxisTapProvisioningDispatchState? {
+  let checkpointPointer = tapInspectionCheckpointPointer(for: projectID)
+  let checkpointRecord = try await dependencies.hostAdapters.checkpointStore?.load(pointer: checkpointPointer)
+  let provisioningState = tapProvisioningCheckpointState(from: checkpointRecord?.snapshot.payload)
+  guard let activationAttempt = provisioningState.activationAttempt,
+        let replayCandidate = tapProvisioningReplayCandidate(from: provisioningState),
+        let capabilityID = try optionalCapabilityID(
+          from: activationAttempt.capabilityKey,
+          context: "TAP provisioning checkpoint"
+        ),
+        let bundleSummary = provisioningState.bundleSummary,
+        let planSummary = provisioningState.planSummary else {
+    return nil
+  }
+
+  let eventContext = try await tapReplayEventContext(
+    projectID: projectID,
+    capabilityID: capabilityID,
+    dependencies: dependencies
+  )
+  if let replayTargetAgentID = eventContext.targetAgentID,
+     replayTargetAgentID != targetAgentID {
+    return nil
+  }
+
+  let lifecycle = PraxisActivationLifecycleService()
+  let completedActivation = if let activationReceipt = provisioningState.activationReceipt {
+    (
+      attempt: activationAttempt.status == .completed
+        ? activationAttempt
+        : lifecycle.completeActivation(
+          activationAttempt,
+          bindingKey: activationReceipt.bindingKey,
+          activatedAt: activationReceipt.activatedAt
+        ).attempt,
+      receipt: activationReceipt
+    )
+  } else {
+    lifecycle.completeActivation(
+      activationAttempt,
+      bindingKey: tapActivationBindingKey(projectID: projectID, capabilityID: capabilityID),
+      activatedAt: activatedAt
+    )
+  }
+  let readyReplay = lifecycle.markReplayReady(replayCandidate)
+  let updatedReplays = provisioningState.pendingReplays.map { replay in
+    replay.replayID == readyReplay.replayID ? readyReplay : replay
+  }
+  return .init(
+    capabilityID: capabilityID,
+    bundleSummary: bundleSummary,
+    planSummary: planSummary,
+    activationAttempt: completedActivation.attempt,
+    activationReceipt: completedActivation.receipt,
+    pendingReplays: updatedReplays,
+    replayID: readyReplay.replayID
+  )
+}
+
+private func persistTapProvisioningDispatchOutcome(
+  projectID: String,
+  packageID: PraxisCmpPackageID,
+  dispatchStatus: PraxisCmpDispatchStatus,
+  replayDispatchState: PraxisTapProvisioningDispatchState,
+  dependencies: PraxisDependencyGraph
+) async throws {
+  let lifecycle = PraxisActivationLifecycleService()
+  let updatedReplays: [PraxisPendingReplay]
+  let activationSummary: String
+  let latestEventKind: PraxisTapRuntimeEventKind
+  let latestDecisionSummary: String
+
+  switch dispatchStatus {
+  case .delivered:
+    updatedReplays = replayDispatchState.pendingReplays.map { replay in
+      replay.replayID == replayDispatchState.replayID ? lifecycle.consumeReplay(replay) : replay
+    }
+    activationSummary =
+      "Activation receipt \(replayDispatchState.activationReceipt.bindingKey) completed for \(replayDispatchState.capabilityID.rawValue); replay \(replayDispatchState.replayID) was consumed by dispatch package \(packageID.rawValue)."
+    latestEventKind = .dispatchReleased
+    latestDecisionSummary = activationSummary
+  case .rejected:
+    updatedReplays = replayDispatchState.pendingReplays
+    activationSummary =
+      "Activation receipt \(replayDispatchState.activationReceipt.bindingKey) completed for \(replayDispatchState.capabilityID.rawValue); replay \(replayDispatchState.replayID) remains ready while dispatch stays gated."
+    latestEventKind = .dispatchBlocked
+    latestDecisionSummary = activationSummary
+  case .prepared:
+    updatedReplays = replayDispatchState.pendingReplays
+    activationSummary =
+      "Activation receipt \(replayDispatchState.activationReceipt.bindingKey) completed for \(replayDispatchState.capabilityID.rawValue); replay \(replayDispatchState.replayID) remains ready until transport delivery succeeds."
+    latestEventKind = .dispatchReleased
+    latestDecisionSummary = activationSummary
+  case .acknowledged:
+    updatedReplays = replayDispatchState.pendingReplays.map { replay in
+      replay.replayID == replayDispatchState.replayID ? lifecycle.consumeReplay(replay) : replay
+    }
+    activationSummary =
+      "Activation receipt \(replayDispatchState.activationReceipt.bindingKey) completed for \(replayDispatchState.capabilityID.rawValue); replay \(replayDispatchState.replayID) was consumed after dispatch package \(packageID.rawValue) reached acknowledgement."
+    latestEventKind = .dispatchReleased
+    latestDecisionSummary = activationSummary
+  case .expired:
+    updatedReplays = replayDispatchState.pendingReplays
+    activationSummary =
+      "Activation receipt \(replayDispatchState.activationReceipt.bindingKey) completed for \(replayDispatchState.capabilityID.rawValue); replay \(replayDispatchState.replayID) remains ready because dispatch package \(packageID.rawValue) expired before delivery completed."
+    latestEventKind = .dispatchRetryRequested
+    latestDecisionSummary = activationSummary
+  }
+
+  try await appendTapInspectionReplayEvidence(
+    projectID: projectID,
+    capabilityID: replayDispatchState.capabilityID,
+    summary: activationSummary,
+    bundleSummary: replayDispatchState.bundleSummary,
+    pendingReplay: updatedReplays.first { $0.replayID == replayDispatchState.replayID } ?? replayDispatchState.pendingReplays[0],
+    dependencies: dependencies
+  )
+  try await persistTapInspectionCheckpoint(
+    projectID: projectID,
+    latestEventKind: latestEventKind,
+    latestCapabilityID: replayDispatchState.capabilityID,
+    latestDecisionSummary: latestDecisionSummary,
+    activationAttempt: replayDispatchState.activationAttempt,
+    activationReceipt: replayDispatchState.activationReceipt,
+    pendingReplays: updatedReplays,
+    bundleSummary: replayDispatchState.bundleSummary,
+    planSummary: replayDispatchState.planSummary,
+    activationSummary: activationSummary,
+    dependencies: dependencies
+  )
 }
 
 private func tapActivationBindingKey(
@@ -5028,6 +5192,215 @@ public final class PraxisReadbackTapProvisioningUseCase: PraxisReadbackTapProvis
   }
 }
 
+public final class PraxisAdvanceTapReplayUseCase: PraxisAdvanceTapReplayUseCaseProtocol {
+  public let dependencies: PraxisDependencyGraph
+
+  public init(dependencies: PraxisDependencyGraph) {
+    self.dependencies = dependencies
+  }
+
+  /// Advances one durable TAP replay record through an explicit lifecycle transition.
+  ///
+  /// - Parameter command: Structured project-scoped replay lifecycle request.
+  /// - Returns: The updated provisioning readback recovered from durable checkpoint state.
+  /// - Throws: Propagates validation, transition, persistence, or readback failures.
+  public func execute(_ command: PraxisAdvanceTapReplayCommand) async throws -> PraxisTapProvisioningReadback {
+    let projectID = command.projectID.trimmingCharacters(in: .whitespacesAndNewlines)
+    let agentID = command.agentID.trimmingCharacters(in: .whitespacesAndNewlines)
+    let replayID = command.replayID.trimmingCharacters(in: .whitespacesAndNewlines)
+    let providedSummary = command.summary?.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !projectID.isEmpty else {
+      throw PraxisError.invalidInput("Advancing TAP replay requires a non-empty projectID.")
+    }
+    guard !agentID.isEmpty else {
+      throw PraxisError.invalidInput("Advancing TAP replay requires a non-empty agentID.")
+    }
+    guard !replayID.isEmpty else {
+      throw PraxisError.invalidInput("Advancing TAP replay requires a non-empty replayID.")
+    }
+
+    let checkpointPointer = tapInspectionCheckpointPointer(for: projectID)
+    let checkpointRecord = try await dependencies.hostAdapters.checkpointStore?.load(pointer: checkpointPointer)
+    let provisioningState = tapProvisioningCheckpointState(from: checkpointRecord?.snapshot.payload)
+    guard provisioningState.hasRuntimeEvidence else {
+      throw PraxisError.invalidInput(
+        "TAP replay \(replayID) cannot advance because no durable provisioning evidence is stored for \(projectID)."
+      )
+    }
+    guard let replayIndex = provisioningState.pendingReplays.firstIndex(where: { $0.replayID == replayID }) else {
+      throw PraxisError.invalidInput(
+        "TAP replay \(replayID) was not found in the durable provisioning checkpoint for \(projectID)."
+      )
+    }
+    guard let activationAttempt = provisioningState.activationAttempt else {
+      throw PraxisError.invalidInput(
+        "TAP replay \(replayID) cannot advance because no activation attempt is stored for \(projectID)."
+      )
+    }
+    guard let capabilityID = try optionalCapabilityID(
+      from: provisioningState.pendingReplays[replayIndex].capabilityKey,
+      context: "TAP replay lifecycle"
+    ) else {
+      throw PraxisError.invalidInput(
+        "TAP replay \(replayID) cannot advance because its capability key is missing from durable state."
+      )
+    }
+    guard let bundleSummary = provisioningState.bundleSummary,
+          let planSummary = provisioningState.planSummary else {
+      throw PraxisError.invalidInput(
+        "TAP replay \(replayID) cannot advance because provisioning bundle evidence is incomplete for \(projectID)."
+      )
+    }
+
+    let lifecycle = PraxisActivationLifecycleService()
+    let currentReplay = provisioningState.pendingReplays[replayIndex]
+    let updatedAttempt: PraxisActivationAttemptRecord
+    let updatedReceipt: PraxisActivationReceipt?
+    let updatedReplay: PraxisPendingReplay
+    let eventKind: PraxisTapRuntimeEventKind
+    let outcome: PraxisCmpPeerApprovalOutcome
+
+    switch command.action {
+    case .activate:
+      switch currentReplay.status {
+      case .consumed:
+        throw PraxisError.invalidInput(
+          "TAP replay \(replayID) is already consumed and cannot be re-activated."
+        )
+      case .skipped:
+        throw PraxisError.invalidInput(
+          "TAP replay \(replayID) is marked skipped and does not support activation."
+        )
+      case .pending, .ready:
+        break
+      }
+      if let activationReceipt = provisioningState.activationReceipt {
+        updatedAttempt = activationAttempt.status == .completed
+          ? activationAttempt
+          : lifecycle.completeActivation(
+            activationAttempt,
+            bindingKey: activationReceipt.bindingKey,
+            activatedAt: activationReceipt.activatedAt
+          ).attempt
+        updatedReceipt = activationReceipt
+      } else {
+        let activatedAt = runtimeNow()
+        let completedActivation = lifecycle.completeActivation(
+          activationAttempt,
+          bindingKey: tapActivationBindingKey(projectID: projectID, capabilityID: capabilityID),
+          activatedAt: activatedAt
+        )
+        updatedAttempt = completedActivation.attempt
+        updatedReceipt = completedActivation.receipt
+      }
+      updatedReplay = lifecycle.markReplayReady(currentReplay)
+      eventKind = .activationReady
+      outcome = .activationReady
+    case .consume:
+      guard provisioningState.activationReceipt != nil else {
+        throw PraxisError.invalidInput(
+          "TAP replay \(replayID) cannot be consumed before activation receipt is available."
+        )
+      }
+      switch currentReplay.status {
+      case .pending:
+        throw PraxisError.invalidInput(
+          "TAP replay \(replayID) must be activated before it can be consumed."
+        )
+      case .skipped:
+        throw PraxisError.invalidInput(
+          "TAP replay \(replayID) is marked skipped and does not support consumption."
+        )
+      case .ready, .consumed:
+        break
+      }
+      updatedAttempt = activationAttempt.status == .completed
+        ? activationAttempt
+        : lifecycle.completeActivation(
+          activationAttempt,
+          bindingKey: provisioningState.activationReceipt!.bindingKey,
+          activatedAt: provisioningState.activationReceipt!.activatedAt
+        ).attempt
+      updatedReceipt = provisioningState.activationReceipt
+      updatedReplay = lifecycle.consumeReplay(currentReplay)
+      eventKind = .replayConsumed
+      outcome = .replayConsumed
+    }
+
+    var updatedReplays = provisioningState.pendingReplays
+    updatedReplays[replayIndex] = updatedReplay
+
+    let summary = providedSummary.flatMap { $0.isEmpty ? nil : $0 }
+      ?? tapReplayTransitionSummary(
+        action: command.action,
+        replay: updatedReplay,
+        activationReceipt: updatedReceipt,
+        capabilityID: capabilityID
+      )
+    let eventContext = try await tapReplayEventContext(
+      projectID: projectID,
+      capabilityID: capabilityID,
+      dependencies: dependencies
+    )
+    let createdAt = runtimeNow()
+    var metadata: [String: PraxisValue] = [
+      "requestedTier": .string(eventContext.requestedTier.rawValue),
+      "route": .string(PraxisReviewerRoute.autoApprove.rawValue),
+      "outcome": .string(outcome.rawValue),
+      "humanGateState": .string(PraxisHumanGateState.notRequired.rawValue),
+      "decisionSummary": .string(summary),
+      "replayID": .string(updatedReplay.replayID),
+      "replayStatus": .string(updatedReplay.status.rawValue),
+      "nextAction": .string(updatedReplay.nextAction.rawValue),
+      "activationStatus": .string(updatedAttempt.status.rawValue),
+    ]
+    if let targetAgentID = eventContext.targetAgentID {
+      metadata["targetAgentID"] = .string(targetAgentID)
+    }
+    if let updatedReceipt {
+      metadata["activationBindingKey"] = .string(updatedReceipt.bindingKey)
+      metadata["activatedAt"] = .string(updatedReceipt.activatedAt)
+    }
+    try await appendTapRuntimeEvent(
+      projectID: projectID,
+      agentID: agentID,
+      targetAgentID: eventContext.targetAgentID,
+      eventKind: eventKind,
+      capabilityKey: capabilityID.rawValue,
+      summary: summary,
+      detail: summary,
+      createdAt: createdAt,
+      metadata: metadata,
+      dependencies: dependencies
+    )
+    try await appendTapInspectionReplayEvidence(
+      projectID: projectID,
+      capabilityID: capabilityID,
+      summary: summary,
+      bundleSummary: bundleSummary,
+      pendingReplay: updatedReplay,
+      dependencies: dependencies
+    )
+    try await persistTapInspectionCheckpoint(
+      projectID: projectID,
+      latestEventKind: eventKind,
+      latestCapabilityID: capabilityID,
+      latestDecisionSummary: summary,
+      activationAttempt: updatedAttempt,
+      activationReceipt: updatedReceipt,
+      pendingReplays: updatedReplays,
+      bundleSummary: bundleSummary,
+      planSummary: planSummary,
+      activationSummary: summary,
+      dependencies: dependencies
+    )
+
+    return try await PraxisReadbackTapProvisioningUseCase(dependencies: dependencies).execute(
+      .init(projectID: projectID)
+    )
+  }
+}
+
 public final class PraxisInspectTapUseCase: PraxisInspectTapUseCaseProtocol {
   public let dependencies: PraxisDependencyGraph
 
@@ -5419,12 +5792,12 @@ private func tapInspectionGovernanceKind(
     .provisionRequest
   case .provisionStaged:
     .provisionRequest
-  case .activationStaged:
+  case .activationStaged, .activationReady:
     .activation
+  case .replayConsumed, .gateReleased:
+    .delivery
   case .escalatedToHuman:
     .humanGate
-  case .gateReleased:
-    .delivery
   case .approvedByHuman, .baselineApproved:
     .activation
   case .reviewRequired, .rejectedByHuman, .denied:
@@ -5444,7 +5817,7 @@ private func tapInspectionActionStatus(
     .readyForHandoff
   case .activationStaged:
     .recorded
-  case .approvedByHuman, .baselineApproved, .gateReleased:
+  case .activationReady, .approvedByHuman, .baselineApproved, .replayConsumed, .gateReleased:
     .completed
   case .rejectedByHuman, .denied:
     .blocked
@@ -5771,6 +6144,23 @@ public final class PraxisDispatchCmpFlowUseCase: PraxisDispatchCmpFlowUseCasePro
   /// - Throws: Propagates validation or host transport failures.
   public func execute(_ command: PraxisDispatchCmpFlowCommand) async throws -> PraxisCmpFlowDispatch {
     try await dispatchCmpFlow(command: command, dependencies: dependencies)
+  }
+}
+
+public final class PraxisDispatchStoredCmpPackageUseCase: PraxisDispatchStoredCmpPackageUseCaseProtocol {
+  public let dependencies: PraxisDependencyGraph
+
+  public init(dependencies: PraxisDependencyGraph) {
+    self.dependencies = dependencies
+  }
+
+  /// Dispatches one persisted CMP package without forcing callers to carry the raw context package object.
+  ///
+  /// - Parameter command: The package-scoped dispatch command.
+  /// - Returns: A dispatch receipt and delivery plan for the stored package.
+  /// - Throws: Propagates package lookup, validation, or host transport failures.
+  public func execute(_ command: PraxisDispatchStoredCmpPackageCommand) async throws -> PraxisCmpFlowDispatch {
+    try await dispatchStoredCmpPackage(command: command, dependencies: dependencies)
   }
 }
 

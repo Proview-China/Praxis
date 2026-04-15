@@ -1,6 +1,7 @@
 import PraxisCmpTypes
 import PraxisMpTypes
 import PraxisTapProvision
+import PraxisTapRuntime
 import PraxisTapTypes
 import PraxisToolingContracts
 
@@ -61,6 +62,26 @@ public struct PraxisRuntimeTapProvisionRequest: Sendable, Equatable {
     self.expectedArtifacts = expectedArtifacts
     self.requiredVerification = requiredVerification
     self.replayPolicy = replayPolicy
+  }
+}
+
+/// Replay lifecycle request payload for one scoped TAP recovery transition.
+public struct PraxisRuntimeTapReplayRequest: Sendable, Equatable {
+  public let agentID: PraxisRuntimeAgentRef
+  public let replayID: PraxisRuntimeReplayRef
+  public let action: PraxisReplayLifecycleAction
+  public let summary: String?
+
+  public init(
+    agentID: PraxisRuntimeAgentRef,
+    replayID: PraxisRuntimeReplayRef,
+    action: PraxisReplayLifecycleAction,
+    summary: String? = nil
+  ) {
+    self.agentID = agentID
+    self.replayID = replayID
+    self.action = action
+    self.summary = summary
   }
 }
 
@@ -165,6 +186,69 @@ public struct PraxisRuntimeCmpApprovalQuery: Sendable, Equatable {
     self.agentID = agentID
     self.targetAgentID = targetAgentID
     self.capabilityID = capabilityID
+  }
+}
+
+/// Materialization request payload for one scoped CMP package assembly.
+public struct PraxisRuntimeCmpMaterializeRequest: Sendable, Equatable {
+  public let agentID: PraxisRuntimeAgentRef
+  public let targetAgentID: PraxisRuntimeAgentRef
+  public let snapshotID: PraxisRuntimeCmpSnapshotRef?
+  public let projectionID: PraxisRuntimeCmpProjectionRef?
+  public let packageKind: PraxisCmpContextPackageKind
+  public let fidelityLabel: PraxisCmpContextPackageFidelityLabel?
+
+  public init(
+    agentID: PraxisRuntimeAgentRef,
+    targetAgentID: PraxisRuntimeAgentRef,
+    snapshotID: PraxisRuntimeCmpSnapshotRef? = nil,
+    projectionID: PraxisRuntimeCmpProjectionRef? = nil,
+    packageKind: PraxisCmpContextPackageKind,
+    fidelityLabel: PraxisCmpContextPackageFidelityLabel? = nil
+  ) {
+    self.agentID = agentID
+    self.targetAgentID = targetAgentID
+    self.snapshotID = snapshotID
+    self.projectionID = projectionID
+    self.packageKind = packageKind
+    self.fidelityLabel = fidelityLabel
+  }
+}
+
+/// Dispatch request payload for one persisted CMP package.
+public struct PraxisRuntimeCmpDispatchRequest: Sendable, Equatable {
+  public let agentID: PraxisRuntimeAgentRef
+  public let packageID: PraxisRuntimeCmpPackageRef
+  public let targetKind: PraxisCmpDispatchTargetKind
+  public let reason: String
+
+  public init(
+    agentID: PraxisRuntimeAgentRef,
+    packageID: PraxisRuntimeCmpPackageRef,
+    targetKind: PraxisCmpDispatchTargetKind,
+    reason: String
+  ) {
+    self.agentID = agentID
+    self.packageID = packageID
+    self.targetKind = targetKind
+    self.reason = reason
+  }
+}
+
+/// Retry request payload for one persisted CMP package dispatch.
+public struct PraxisRuntimeCmpRetryDispatchRequest: Sendable, Equatable {
+  public let agentID: PraxisRuntimeAgentRef
+  public let packageID: PraxisRuntimeCmpPackageRef
+  public let reason: String?
+
+  public init(
+    agentID: PraxisRuntimeAgentRef,
+    packageID: PraxisRuntimeCmpPackageRef,
+    reason: String? = nil
+  ) {
+    self.agentID = agentID
+    self.packageID = packageID
+    self.reason = reason
   }
 }
 

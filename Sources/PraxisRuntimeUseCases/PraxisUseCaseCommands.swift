@@ -230,6 +230,28 @@ public struct PraxisReadbackTapProvisioningCommand: Sendable, Equatable, Codable
   }
 }
 
+public struct PraxisAdvanceTapReplayCommand: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let agentID: String
+  public let replayID: String
+  public let action: PraxisReplayLifecycleAction
+  public let summary: String?
+
+  public init(
+    projectID: String,
+    agentID: String,
+    replayID: String,
+    action: PraxisReplayLifecycleAction,
+    summary: String? = nil
+  ) {
+    self.projectID = projectID
+    self.agentID = agentID
+    self.replayID = replayID
+    self.action = action
+    self.summary = summary
+  }
+}
+
 public struct PraxisTapProvisioningReadback: Sendable, Equatable, Codable {
   public let projectID: String
   public let summary: String
@@ -359,6 +381,8 @@ public enum PraxisCmpPeerApprovalOutcome: String, Sendable, Codable {
   case redirectedToProvisioning = "redirected_to_provisioning"
   case provisionStaged = "provision_staged"
   case activationStaged = "activation_staged"
+  case activationReady = "activation_ready"
+  case replayConsumed = "replay_consumed"
   case escalatedToHuman = "escalated_to_human"
   case denied
   case approvedByHuman = "approved_by_human"
@@ -1158,6 +1182,28 @@ public struct PraxisDispatchCmpFlowCommand: Sendable, Equatable, Codable {
     self.projectID = projectID
     self.agentID = agentID
     self.contextPackage = contextPackage
+    self.targetKind = targetKind
+    self.reason = reason
+  }
+}
+
+public struct PraxisDispatchStoredCmpPackageCommand: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let agentID: String
+  public let packageID: PraxisCmpPackageID
+  public let targetKind: PraxisCmpDispatchTargetKind
+  public let reason: String
+
+  public init(
+    projectID: String,
+    agentID: String,
+    packageID: PraxisCmpPackageID,
+    targetKind: PraxisCmpDispatchTargetKind,
+    reason: String
+  ) {
+    self.projectID = projectID
+    self.agentID = agentID
+    self.packageID = packageID
     self.targetKind = targetKind
     self.reason = reason
   }

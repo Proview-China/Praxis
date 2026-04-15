@@ -164,6 +164,7 @@ public final class PraxisCmpFlowFacade: Sendable {
   public let resolveCmpFlowUseCase: any PraxisResolveCmpFlowUseCaseProtocol
   public let materializeCmpFlowUseCase: any PraxisMaterializeCmpFlowUseCaseProtocol
   public let dispatchCmpFlowUseCase: any PraxisDispatchCmpFlowUseCaseProtocol
+  public let dispatchStoredCmpPackageUseCase: any PraxisDispatchStoredCmpPackageUseCaseProtocol
   public let retryCmpDispatchUseCase: any PraxisRetryCmpDispatchUseCaseProtocol
   public let requestCmpHistoryUseCase: any PraxisRequestCmpHistoryUseCaseProtocol
 
@@ -173,6 +174,7 @@ public final class PraxisCmpFlowFacade: Sendable {
     resolveCmpFlowUseCase: any PraxisResolveCmpFlowUseCaseProtocol,
     materializeCmpFlowUseCase: any PraxisMaterializeCmpFlowUseCaseProtocol,
     dispatchCmpFlowUseCase: any PraxisDispatchCmpFlowUseCaseProtocol,
+    dispatchStoredCmpPackageUseCase: any PraxisDispatchStoredCmpPackageUseCaseProtocol,
     retryCmpDispatchUseCase: any PraxisRetryCmpDispatchUseCaseProtocol,
     requestCmpHistoryUseCase: any PraxisRequestCmpHistoryUseCaseProtocol
   ) {
@@ -181,6 +183,7 @@ public final class PraxisCmpFlowFacade: Sendable {
     self.resolveCmpFlowUseCase = resolveCmpFlowUseCase
     self.materializeCmpFlowUseCase = materializeCmpFlowUseCase
     self.dispatchCmpFlowUseCase = dispatchCmpFlowUseCase
+    self.dispatchStoredCmpPackageUseCase = dispatchStoredCmpPackageUseCase
     self.retryCmpDispatchUseCase = retryCmpDispatchUseCase
     self.requestCmpHistoryUseCase = requestCmpHistoryUseCase
   }
@@ -192,6 +195,7 @@ public final class PraxisCmpFlowFacade: Sendable {
       resolveCmpFlowUseCase: PraxisResolveCmpFlowUseCase(dependencies: dependencies),
       materializeCmpFlowUseCase: PraxisMaterializeCmpFlowUseCase(dependencies: dependencies),
       dispatchCmpFlowUseCase: PraxisDispatchCmpFlowUseCase(dependencies: dependencies),
+      dispatchStoredCmpPackageUseCase: PraxisDispatchStoredCmpPackageUseCase(dependencies: dependencies),
       retryCmpDispatchUseCase: PraxisRetryCmpDispatchUseCase(dependencies: dependencies),
       requestCmpHistoryUseCase: PraxisRequestCmpHistoryUseCase(dependencies: dependencies)
     )
@@ -253,6 +257,19 @@ public final class PraxisCmpFlowFacade: Sendable {
 
   public func dispatchFlow(_ command: PraxisDispatchCmpFlowCommand) async throws -> PraxisCmpFlowDispatchSnapshot {
     let dispatch = try await dispatchCmpFlowUseCase.execute(command)
+    return PraxisCmpFlowDispatchSnapshot(
+      summary: dispatch.summary,
+      projectID: dispatch.projectID,
+      agentID: dispatch.agentID,
+      dispatchID: dispatch.result.receipt.id,
+      targetAgentID: dispatch.result.receipt.targetAgentID,
+      targetKind: dispatch.result.receipt.targetKind,
+      status: dispatch.result.receipt.status
+    )
+  }
+
+  public func dispatchStoredPackage(_ command: PraxisDispatchStoredCmpPackageCommand) async throws -> PraxisCmpFlowDispatchSnapshot {
+    let dispatch = try await dispatchStoredCmpPackageUseCase.execute(command)
     return PraxisCmpFlowDispatchSnapshot(
       summary: dispatch.summary,
       projectID: dispatch.projectID,
@@ -532,6 +549,7 @@ public final class PraxisCmpFacade: Sendable {
     resolveCmpFlowUseCase: any PraxisResolveCmpFlowUseCaseProtocol,
     materializeCmpFlowUseCase: any PraxisMaterializeCmpFlowUseCaseProtocol,
     dispatchCmpFlowUseCase: any PraxisDispatchCmpFlowUseCaseProtocol,
+    dispatchStoredCmpPackageUseCase: any PraxisDispatchStoredCmpPackageUseCaseProtocol,
     retryCmpDispatchUseCase: any PraxisRetryCmpDispatchUseCaseProtocol,
     requestCmpHistoryUseCase: any PraxisRequestCmpHistoryUseCaseProtocol,
     readbackCmpRolesUseCase: any PraxisReadbackCmpRolesUseCaseProtocol,
@@ -557,6 +575,7 @@ public final class PraxisCmpFacade: Sendable {
         resolveCmpFlowUseCase: resolveCmpFlowUseCase,
         materializeCmpFlowUseCase: materializeCmpFlowUseCase,
         dispatchCmpFlowUseCase: dispatchCmpFlowUseCase,
+        dispatchStoredCmpPackageUseCase: dispatchStoredCmpPackageUseCase,
         retryCmpDispatchUseCase: retryCmpDispatchUseCase,
         requestCmpHistoryUseCase: requestCmpHistoryUseCase
       ),
@@ -621,6 +640,10 @@ public final class PraxisCmpFacade: Sendable {
 
   public func dispatchFlow(_ command: PraxisDispatchCmpFlowCommand) async throws -> PraxisCmpFlowDispatchSnapshot {
     try await flowFacade.dispatchFlow(command)
+  }
+
+  public func dispatchStoredPackage(_ command: PraxisDispatchStoredCmpPackageCommand) async throws -> PraxisCmpFlowDispatchSnapshot {
+    try await flowFacade.dispatchStoredPackage(command)
   }
 
   public func retryDispatch(_ command: PraxisRetryCmpDispatchCommand) async throws -> PraxisCmpFlowDispatchSnapshot {

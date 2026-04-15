@@ -476,7 +476,10 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
     )
   }
 
-  private func response(from provisioning: PraxisTapProvisioningReadbackSnapshot) -> PraxisRuntimeInterfaceResponse {
+  private func response(
+    from provisioning: PraxisTapProvisioningReadbackSnapshot,
+    eventName: PraxisRuntimeInterfaceEventName = .tapProvisioningReadback
+  ) -> PraxisRuntimeInterfaceResponse {
     let primaryReplay = provisioning.replayRecords.first {
       switch $0.status {
       case .pending, .ready:
@@ -506,7 +509,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
       ),
       events: [
         .init(
-          name: .tapProvisioningReadback,
+          name: eventName,
           detail: provisioning.summary
         )
       ]
@@ -935,6 +938,20 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
         .init(projectID: projectID)
       )
       return response(from: provisioning)
+    case .advanceTapReplay(let payload):
+      let projectID = try requireRuntimeInterfaceField(payload.projectID, named: "projectID")
+      let agentID = try requireRuntimeInterfaceField(payload.agentID, named: "agentID")
+      let replayID = try requireRuntimeInterfaceField(payload.replayID, named: "replayID")
+      let provisioning = try await runtimeFacade.inspectionFacade.advanceTapReplay(
+        .init(
+          projectID: projectID,
+          agentID: agentID,
+          replayID: replayID,
+          action: payload.action,
+          summary: payload.summary
+        )
+      )
+      return response(from: provisioning, eventName: .tapReplayLifecycleUpdated)
     case .readbackTapStatus(let payload):
       guard !payload.projectID.isEmpty else {
         throw PraxisRuntimeInterfaceError.missingRequiredField("projectID")
@@ -1166,6 +1183,25 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
         )
       )
       return response(from: dispatch)
+    case .dispatchStoredCmpPackage(let payload):
+      let projectID = try requireRuntimeInterfaceField(payload.projectID, named: "projectID")
+      let agentID = try requireRuntimeInterfaceField(payload.agentID, named: "agentID")
+      let packageID = try requireRuntimeInterfaceReferenceIDField(payload.packageID, named: "packageID")
+      let reason = try requireRuntimeInterfaceText(payload.reason, named: "reason")
+      let dispatch = try await runtimeFacade.cmpFlowFacade.dispatchStoredPackage(
+        .init(
+          projectID: projectID,
+          agentID: agentID,
+          packageID: .init(rawValue: packageID.rawValue),
+          targetKind: payload.targetKind,
+          reason: reason
+        )
+      )
+      return response(
+        from: dispatch,
+        titlePrefix: "CMP Package Dispatch",
+        eventName: .cmpFlowStoredPackageDispatched
+      )
     case .retryCmpDispatch(let payload):
       let projectID = try requireRuntimeInterfaceField(payload.projectID, named: "projectID")
       let agentID = try requireRuntimeInterfaceField(payload.agentID, named: "agentID")

@@ -309,6 +309,14 @@ private struct StubDispatchCmpFlowUseCase: PraxisDispatchCmpFlowUseCaseProtocol 
   }
 }
 
+private struct StubDispatchStoredCmpPackageUseCase: PraxisDispatchStoredCmpPackageUseCaseProtocol {
+  let executeBody: @Sendable (PraxisDispatchStoredCmpPackageCommand) async throws -> PraxisCmpFlowDispatch
+
+  func execute(_ command: PraxisDispatchStoredCmpPackageCommand) async throws -> PraxisCmpFlowDispatch {
+    try await executeBody(command)
+  }
+}
+
 private struct StubRetryCmpDispatchUseCase: PraxisRetryCmpDispatchUseCaseProtocol {
   let executeBody: @Sendable (PraxisRetryCmpDispatchCommand) async throws -> PraxisCmpFlowDispatch
 
@@ -534,6 +542,9 @@ private func makeThrowingRuntimeInterface(
       }
       throw RuntimeInterfaceUnexpectedInvocationError(operation: "dispatchCmpFlow")
     },
+    dispatchStoredCmpPackageUseCase: StubDispatchStoredCmpPackageUseCase { _ in
+      throw RuntimeInterfaceUnexpectedInvocationError(operation: "dispatchStoredCmpPackage")
+    },
     retryCmpDispatchUseCase: StubRetryCmpDispatchUseCase { _ in
       if let retryCmpDispatchError {
         throw retryCmpDispatchError
@@ -745,6 +756,9 @@ private func makeStubCmpFacade(
   dispatchCmpFlow: @escaping @Sendable (PraxisDispatchCmpFlowCommand) async throws -> PraxisCmpFlowDispatch = { _ in
     throw RuntimeInterfaceUnexpectedInvocationError(operation: "dispatchCmpFlow")
   },
+  dispatchStoredCmpPackage: @escaping @Sendable (PraxisDispatchStoredCmpPackageCommand) async throws -> PraxisCmpFlowDispatch = { _ in
+    throw RuntimeInterfaceUnexpectedInvocationError(operation: "dispatchStoredCmpPackage")
+  },
   retryCmpDispatch: @escaping @Sendable (PraxisRetryCmpDispatchCommand) async throws -> PraxisCmpFlowDispatch = { _ in
     throw RuntimeInterfaceUnexpectedInvocationError(operation: "retryCmpDispatch")
   },
@@ -786,6 +800,7 @@ private func makeStubCmpFacade(
     resolveCmpFlowUseCase: StubResolveCmpFlowUseCase(executeBody: resolveCmpFlow),
     materializeCmpFlowUseCase: StubMaterializeCmpFlowUseCase(executeBody: materializeCmpFlow),
     dispatchCmpFlowUseCase: StubDispatchCmpFlowUseCase(executeBody: dispatchCmpFlow),
+    dispatchStoredCmpPackageUseCase: StubDispatchStoredCmpPackageUseCase(executeBody: dispatchStoredCmpPackage),
     retryCmpDispatchUseCase: StubRetryCmpDispatchUseCase(executeBody: retryCmpDispatch),
     requestCmpHistoryUseCase: StubRequestCmpHistoryUseCase(executeBody: requestCmpHistory),
     readbackCmpRolesUseCase: StubReadbackCmpRolesUseCase(executeBody: readbackCmpRoles),
@@ -1803,6 +1818,88 @@ struct HostRuntimeInterfaceTests {
   }
 
   @Test
+  func runtimeInterfaceDispatchesStoredCmpPackageThroughNeutralSurface() async throws {
+    let packageID = PraxisCmpPackageID(rawValue: "projection.runtime.local:checker.local:runtimeFill")
+    let runtimeInterface = makeStubbedRuntimeInterface(
+      cmpFacade: makeStubCmpFacade(
+        dispatchStoredCmpPackage: { command in
+          #expect(command.projectID == "cmp.local-runtime")
+          #expect(command.agentID == "runtime.local")
+          #expect(command.packageID == packageID)
+          #expect(command.targetKind == .peer)
+          #expect(command.reason == "Dispatch persisted package")
+          return PraxisCmpFlowDispatch(
+            projectID: command.projectID,
+            agentID: command.agentID,
+            summary: "Dispatched stored CMP package.",
+            result: .init(
+              status: .dispatched,
+              receipt: .init(
+                id: .init(rawValue: "dispatch.runtime.package"),
+                packageID: command.packageID,
+                sourceAgentID: command.agentID,
+                targetAgentID: "checker.local",
+                targetKind: command.targetKind,
+                status: .delivered,
+                createdAt: "2026-04-15T00:00:00Z",
+                deliveredAt: "2026-04-15T00:00:01Z"
+              )
+            ),
+            deliveryPlan: .init(
+              contextPackage: .init(
+                id: command.packageID,
+                sourceProjectionID: .init(rawValue: "projection.runtime.local"),
+                sourceSnapshotID: .init(rawValue: "snapshot.runtime.local"),
+                sourceAgentID: command.agentID,
+                targetAgentID: "checker.local",
+                kind: .runtimeFill,
+                packageRef: "context://cmp.local-runtime/projection.runtime.local/checker.local/runtimeFill",
+                fidelityLabel: .highSignal,
+                createdAt: "2026-04-15T00:00:00Z",
+                sourceSectionIDs: [.init(rawValue: "projection.runtime.local:section")]
+              ),
+              instructions: [
+                .init(
+                  packageID: command.packageID,
+                  sourceAgentID: command.agentID,
+                  targetAgentID: "checker.local",
+                  targetKind: command.targetKind,
+                  reason: command.reason,
+                  summary: "Dispatch stored package."
+                )
+              ]
+            )
+          )
+        }
+      )
+    )
+
+    let response = await runtimeInterface.handle(
+      .dispatchStoredCmpPackage(
+        .init(
+          payloadSummary: "Dispatch stored package",
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          packageID: runtimeInterfaceReferenceID(packageID.rawValue),
+          targetKind: .peer,
+          reason: "Dispatch persisted package"
+        )
+      )
+    )
+
+    #expect(response.status == .success)
+    #expect(response.error == nil)
+    #expect(response.snapshot?.kind == .cmpFlow)
+    #expect(response.snapshot?.title == "CMP Package Dispatch cmp.local-runtime")
+    #expect(response.snapshot?.targetKind == .peer)
+    #expect(response.snapshot?.dispatchStatus == .delivered)
+    #expect(response.snapshot?.summary == "Dispatched stored CMP package.")
+    #expect(response.events.map(\.name) == [.cmpFlowStoredPackageDispatched])
+    #expect(response.events.first?.detail == response.snapshot?.summary)
+    #expect(response.events.first?.intentID == runtimeInterfaceReferenceID("dispatch.runtime.package"))
+  }
+
+  @Test
   func runtimeInterfacePreservesOpaqueIncomingReferencesWithoutTrimming() async throws {
     let cmpFacade = makeStubCmpFacade(
       commitCmpFlow: { command in
@@ -1813,6 +1910,12 @@ struct HostRuntimeInterfaceTests {
           throw PraxisError.invalidInput("commitCmpFlow eventIDs were normalized unexpectedly.")
         }
         throw PraxisError.invalidInput("commitCmpFlow preserved padded eventIDs.")
+      },
+      dispatchStoredCmpPackage: { command in
+        guard command.packageID == .init(rawValue: " package.dispatch ") else {
+          throw PraxisError.invalidInput("dispatchStoredCmpPackage packageID was normalized unexpectedly.")
+        }
+        throw PraxisError.invalidInput("dispatchStoredCmpPackage preserved padded packageID.")
       },
       retryCmpDispatch: { command in
         guard command.packageID == .init(rawValue: " package.retry ") else {
@@ -1869,6 +1972,18 @@ struct HostRuntimeInterfaceTests {
         )
       )
     )
+    let dispatchStoredResponse = await runtimeInterface.handle(
+      .dispatchStoredCmpPackage(
+        .init(
+          payloadSummary: "Dispatch stored CMP package with padded package ID",
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          packageID: runtimeInterfaceReferenceID(" package.dispatch "),
+          targetKind: .peer,
+          reason: "Preserve raw package ID"
+        )
+      )
+    )
     let ingestResponse = await runtimeInterface.handle(
       .ingestMp(
         .init(
@@ -1888,6 +2003,9 @@ struct HostRuntimeInterfaceTests {
     #expect(retryResponse.status == .failure)
     #expect(retryResponse.error?.code == .invalidInput)
     #expect(retryResponse.error?.message == "retryCmpDispatch preserved padded packageID.")
+    #expect(dispatchStoredResponse.status == .failure)
+    #expect(dispatchStoredResponse.error?.code == .invalidInput)
+    #expect(dispatchStoredResponse.error?.message == "dispatchStoredCmpPackage preserved padded packageID.")
     #expect(ingestResponse.status == .failure)
     #expect(ingestResponse.error?.code == .invalidInput)
     #expect(ingestResponse.error?.message == "ingestMp preserved padded checkedSnapshotRef.")
@@ -5484,15 +5602,28 @@ struct HostRuntimeInterfaceTests {
         reason: "Retry after approval"
       )
     )
+    let dispatchStoredRequest = PraxisRuntimeInterfaceRequest.dispatchStoredCmpPackage(
+      .init(
+        payloadSummary: "Dispatch stored package",
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        packageID: runtimeInterfaceReferenceID("projection.runtime.local:checker.local:runtimeFill"),
+        targetKind: .peer,
+        reason: "Dispatch persisted package"
+      )
+    )
 
     let ingestData = try codec.encode(ingestRequest)
     let historyData = try codec.encode(historyRequest)
     let retryData = try codec.encode(retryRequest)
+    let dispatchStoredData = try codec.encode(dispatchStoredRequest)
     let historyJSON = String(decoding: historyData, as: UTF8.self)
     let retryJSON = String(decoding: retryData, as: UTF8.self)
+    let dispatchStoredJSON = String(decoding: dispatchStoredData, as: UTF8.self)
     let decodedIngestRequest = try codec.decodeRequest(ingestData)
     let decodedHistoryRequest = try codec.decodeRequest(historyData)
     let decodedRetryRequest = try codec.decodeRequest(retryData)
+    let decodedDispatchStoredRequest = try codec.decodeRequest(dispatchStoredData)
 
     #expect(
       historyJSON ==
@@ -5502,9 +5633,14 @@ struct HostRuntimeInterfaceTests {
       retryJSON ==
         #"{"kind":"retryCmpDispatch","retryCmpDispatch":{"agentID":"runtime.local","packageID":"projection.runtime.local:checker.local:runtimeFill","payloadSummary":"Retry dispatch","projectID":"cmp.local-runtime","reason":"Retry after approval"}}"#
     )
+    #expect(
+      dispatchStoredJSON ==
+        #"{"dispatchStoredCmpPackage":{"agentID":"runtime.local","packageID":"projection.runtime.local:checker.local:runtimeFill","payloadSummary":"Dispatch stored package","projectID":"cmp.local-runtime","reason":"Dispatch persisted package","targetKind":"peer"},"kind":"dispatchStoredCmpPackage"}"#
+    )
     #expect(decodedIngestRequest == ingestRequest)
     #expect(decodedHistoryRequest == historyRequest)
     #expect(decodedRetryRequest == retryRequest)
+    #expect(decodedDispatchStoredRequest == dispatchStoredRequest)
   }
 
   @Test
@@ -5697,6 +5833,26 @@ struct HostRuntimeInterfaceTests {
       .init(
         payloadSummary: "Read back TAP provisioning",
         projectID: "cmp.local-runtime"
+      )
+    )
+
+    let requestData = try codec.encode(request)
+    let decodedRequest = try codec.decodeRequest(requestData)
+
+    #expect(decodedRequest == request)
+  }
+
+  @Test
+  func runtimeInterfaceCodecEncodesTapReplayRequestsAsNestedPayloads() throws {
+    let codec = PraxisJSONRuntimeInterfaceCodec()
+    let request = PraxisRuntimeInterfaceRequest.advanceTapReplay(
+      .init(
+        payloadSummary: "Advance TAP replay",
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        replayID: "replay.cmp.local-runtime.tool.shell.exec.seed",
+        action: .activate,
+        summary: "Mark replay ready after activation"
       )
     )
 
@@ -5996,6 +6152,83 @@ struct HostRuntimeInterfaceTests {
     #expect(response.snapshot?.projectID == "cmp.local-runtime")
     #expect(response.snapshot?.found == false)
     #expect(response.events.first?.name == .tapProvisioningReadback)
+  }
+
+  @Test
+  func runtimeInterfaceAdvanceTapReplayRequiresReplayID() async throws {
+    let runtimeInterface = try PraxisRuntimeGatewayFactory.makeRuntimeInterface(
+      hostAdapters: PraxisHostAdapterRegistry.scaffoldDefaults(),
+      blueprint: PraxisRuntimeGatewayModule.bootstrap
+    )
+
+    let response = await runtimeInterface.handle(
+      .advanceTapReplay(
+        .init(
+          payloadSummary: "Advance TAP replay without replay ID",
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          replayID: "",
+          action: .activate
+        )
+      )
+    )
+
+    #expect(response.status == .failure)
+    #expect(response.snapshot == nil)
+    #expect(response.events.isEmpty)
+    #expect(response.error?.code == .missingRequiredField)
+    #expect(response.error?.missingField == "replayID")
+  }
+
+  @Test
+  func runtimeInterfaceRoutesTapReplayLifecycleUpdate() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-runtime-interface-tap-replay-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let hostAdapters = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+    let dependencies = try PraxisRuntimeGatewayFactory.makeCompositionRoot(
+      hostAdapters: hostAdapters,
+      blueprint: PraxisRuntimeGatewayModule.bootstrap
+    ).makeDependencyGraph()
+    let runtimeInterface = try PraxisRuntimeGatewayFactory.makeRuntimeInterface(
+      hostAdapters: hostAdapters,
+      blueprint: PraxisRuntimeGatewayModule.bootstrap
+    )
+    let staged = try await PraxisStageTapProvisionUseCase(dependencies: dependencies).execute(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityKey: capabilityID("tool.shell.exec"),
+        requestedTier: .b2,
+        summary: "Stage shell execution provisioning before runtime interface replay activation",
+        expectedArtifacts: ["shell.exec binding"],
+        requiredVerification: ["shell.exec smoke"],
+        replayPolicy: .reReviewThenDispatch
+      )
+    )
+
+    let response = await runtimeInterface.handle(
+      .advanceTapReplay(
+        .init(
+          payloadSummary: "Advance TAP replay",
+          projectID: "cmp.local-runtime",
+          agentID: "runtime.local",
+          replayID: staged.pendingReplay.replayID,
+          action: .activate
+        )
+      )
+    )
+
+    #expect(response.status == .success)
+    #expect(response.error == nil)
+    #expect(response.snapshot?.kind == .tapProvisioning)
+    #expect(response.snapshot?.projectID == "cmp.local-runtime")
+    #expect(response.snapshot?.activationStatus == .completed)
+    #expect(response.snapshot?.replayID?.rawValue == staged.pendingReplay.replayID)
+    #expect(response.snapshot?.replayStatus == .ready)
+    #expect(response.events.first?.name == .tapReplayLifecycleUpdated)
   }
 
   @Test

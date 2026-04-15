@@ -38,6 +38,7 @@ public enum PraxisRuntimeInterfaceCommandKind: String, Sendable, Equatable, Coda
   case resumeRun
   case inspectTap
   case readbackTapProvisioning
+  case advanceTapReplay
   case readbackTapStatus
   case readbackTapHistory
   case openCmpSession
@@ -56,6 +57,7 @@ public enum PraxisRuntimeInterfaceCommandKind: String, Sendable, Equatable, Coda
   case resolveCmpFlow
   case materializeCmpFlow
   case dispatchCmpFlow
+  case dispatchStoredCmpPackage
   case retryCmpDispatch
   case requestCmpHistory
   case smokeCmpProject
@@ -206,6 +208,31 @@ public struct PraxisRuntimeInterfaceTapProvisioningRequestPayload: Sendable, Equ
   ) {
     self.payloadSummary = payloadSummary
     self.projectID = projectID
+  }
+}
+
+public struct PraxisRuntimeInterfaceTapReplayRequestPayload: Sendable, Equatable, Codable {
+  public let payloadSummary: String
+  public let projectID: String
+  public let agentID: String
+  public let replayID: String
+  public let action: PraxisReplayLifecycleAction
+  public let summary: String?
+
+  public init(
+    payloadSummary: String,
+    projectID: String,
+    agentID: String,
+    replayID: String,
+    action: PraxisReplayLifecycleAction,
+    summary: String? = nil
+  ) {
+    self.payloadSummary = payloadSummary
+    self.projectID = projectID
+    self.agentID = agentID
+    self.replayID = replayID
+    self.action = action
+    self.summary = summary
   }
 }
 
@@ -690,6 +717,31 @@ public struct PraxisRuntimeInterfaceDispatchCmpFlowRequestPayload: Sendable, Equ
   }
 }
 
+public struct PraxisRuntimeInterfaceDispatchStoredCmpPackageRequestPayload: Sendable, Equatable, Codable {
+  public let payloadSummary: String
+  public let projectID: String
+  public let agentID: String
+  public let packageID: PraxisRuntimeInterfaceReferenceID
+  public let targetKind: PraxisCmpDispatchTargetKind
+  public let reason: String
+
+  public init(
+    payloadSummary: String,
+    projectID: String,
+    agentID: String,
+    packageID: PraxisRuntimeInterfaceReferenceID,
+    targetKind: PraxisCmpDispatchTargetKind,
+    reason: String
+  ) {
+    self.payloadSummary = payloadSummary
+    self.projectID = projectID
+    self.agentID = agentID
+    self.packageID = packageID
+    self.targetKind = targetKind
+    self.reason = reason
+  }
+}
+
 public struct PraxisRuntimeInterfaceRetryCmpDispatchRequestPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let projectID: String
@@ -1055,6 +1107,7 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
   case resumeRun(PraxisRuntimeInterfaceResumeRunRequestPayload)
   case inspectTap
   case readbackTapProvisioning(PraxisRuntimeInterfaceTapProvisioningRequestPayload)
+  case advanceTapReplay(PraxisRuntimeInterfaceTapReplayRequestPayload)
   case readbackTapStatus(PraxisRuntimeInterfaceTapStatusRequestPayload)
   case readbackTapHistory(PraxisRuntimeInterfaceTapHistoryRequestPayload)
   case openCmpSession(PraxisRuntimeInterfaceOpenCmpSessionRequestPayload)
@@ -1073,6 +1126,7 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
   case resolveCmpFlow(PraxisRuntimeInterfaceResolveCmpFlowRequestPayload)
   case materializeCmpFlow(PraxisRuntimeInterfaceMaterializeCmpFlowRequestPayload)
   case dispatchCmpFlow(PraxisRuntimeInterfaceDispatchCmpFlowRequestPayload)
+  case dispatchStoredCmpPackage(PraxisRuntimeInterfaceDispatchStoredCmpPackageRequestPayload)
   case retryCmpDispatch(PraxisRuntimeInterfaceRetryCmpDispatchRequestPayload)
   case requestCmpHistory(PraxisRuntimeInterfaceRequestCmpHistoryPayload)
   case smokeCmpProject(PraxisRuntimeInterfaceCmpProjectRequestPayload)
@@ -1101,6 +1155,8 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
       return .inspectTap
     case .readbackTapProvisioning:
       return .readbackTapProvisioning
+    case .advanceTapReplay:
+      return .advanceTapReplay
     case .readbackTapStatus:
       return .readbackTapStatus
     case .readbackTapHistory:
@@ -1137,6 +1193,8 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
       return .materializeCmpFlow
     case .dispatchCmpFlow:
       return .dispatchCmpFlow
+    case .dispatchStoredCmpPackage:
+      return .dispatchStoredCmpPackage
     case .retryCmpDispatch:
       return .retryCmpDispatch
     case .requestCmpHistory:
@@ -1178,6 +1236,8 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
       return payload.payloadSummary
     case .readbackTapProvisioning(let payload):
       return payload.payloadSummary
+    case .advanceTapReplay(let payload):
+      return payload.payloadSummary
     case .readbackTapStatus(let payload):
       return payload.payloadSummary
     case .readbackTapHistory(let payload):
@@ -1213,6 +1273,8 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
     case .materializeCmpFlow(let payload):
       return payload.payloadSummary
     case .dispatchCmpFlow(let payload):
+      return payload.payloadSummary
+    case .dispatchStoredCmpPackage(let payload):
       return payload.payloadSummary
     case .retryCmpDispatch(let payload):
       return payload.payloadSummary
@@ -1265,7 +1327,7 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
       return payload.sessionID
     case .requestMpHistory(let payload):
       return payload.sessionID
-    case .inspectArchitecture, .resumeRun, .inspectTap, .readbackTapProvisioning, .readbackTapStatus, .readbackTapHistory, .readbackCmpProject, .readbackCmpRoles, .readbackCmpControl, .updateCmpControl, .requestCmpPeerApproval, .decideCmpPeerApproval, .readbackCmpPeerApproval, .readbackCmpStatus, .bootstrapCmpProject, .recoverCmpProject, .resolveCmpFlow, .materializeCmpFlow, .dispatchCmpFlow, .retryCmpDispatch, .requestCmpHistory, .smokeCmpProject, .inspectCmp, .inspectMp, .smokeMp, .alignMp, .archiveMp, .buildCapabilityCatalog:
+    case .inspectArchitecture, .resumeRun, .inspectTap, .readbackTapProvisioning, .advanceTapReplay, .readbackTapStatus, .readbackTapHistory, .readbackCmpProject, .readbackCmpRoles, .readbackCmpControl, .updateCmpControl, .requestCmpPeerApproval, .decideCmpPeerApproval, .readbackCmpPeerApproval, .readbackCmpStatus, .bootstrapCmpProject, .recoverCmpProject, .resolveCmpFlow, .materializeCmpFlow, .dispatchCmpFlow, .dispatchStoredCmpPackage, .retryCmpDispatch, .requestCmpHistory, .smokeCmpProject, .inspectCmp, .inspectMp, .smokeMp, .alignMp, .archiveMp, .buildCapabilityCatalog:
       return nil
     }
   }
@@ -1278,7 +1340,7 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
       return payload.runID
     case .commitCmpFlow(let payload):
       return payload.runID
-    case .inspectArchitecture, .runGoal, .inspectTap, .openCmpSession, .readbackTapProvisioning, .readbackTapStatus, .readbackTapHistory, .readbackCmpProject, .readbackCmpRoles, .readbackCmpControl, .updateCmpControl, .requestCmpPeerApproval, .decideCmpPeerApproval, .readbackCmpPeerApproval, .readbackCmpStatus, .bootstrapCmpProject, .recoverCmpProject, .resolveCmpFlow, .materializeCmpFlow, .dispatchCmpFlow, .retryCmpDispatch, .requestCmpHistory, .smokeCmpProject, .inspectCmp, .inspectMp, .searchMp, .readbackMp, .smokeMp, .ingestMp, .alignMp, .promoteMp, .archiveMp, .resolveMp, .requestMpHistory, .buildCapabilityCatalog:
+    case .inspectArchitecture, .runGoal, .inspectTap, .openCmpSession, .readbackTapProvisioning, .advanceTapReplay, .readbackTapStatus, .readbackTapHistory, .readbackCmpProject, .readbackCmpRoles, .readbackCmpControl, .updateCmpControl, .requestCmpPeerApproval, .decideCmpPeerApproval, .readbackCmpPeerApproval, .readbackCmpStatus, .bootstrapCmpProject, .recoverCmpProject, .resolveCmpFlow, .materializeCmpFlow, .dispatchCmpFlow, .dispatchStoredCmpPackage, .retryCmpDispatch, .requestCmpHistory, .smokeCmpProject, .inspectCmp, .inspectMp, .searchMp, .readbackMp, .smokeMp, .ingestMp, .alignMp, .promoteMp, .archiveMp, .resolveMp, .requestMpHistory, .buildCapabilityCatalog:
       return nil
     }
   }
@@ -1286,6 +1348,8 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
   public var projectID: String? {
     switch self {
     case .readbackTapProvisioning(let payload):
+      return payload.projectID
+    case .advanceTapReplay(let payload):
       return payload.projectID
     case .readbackTapStatus(let payload):
       return payload.projectID
@@ -1323,6 +1387,8 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
       return payload.projectID
     case .dispatchCmpFlow(let payload):
       return payload.projectID
+    case .dispatchStoredCmpPackage(let payload):
+      return payload.projectID
     case .retryCmpDispatch(let payload):
       return payload.projectID
     case .requestCmpHistory(let payload):
@@ -1357,6 +1423,7 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
     case runGoal
     case resumeRun
     case readbackTapProvisioning
+    case advanceTapReplay
     case readbackTapStatus
     case readbackTapHistory
     case openCmpSession
@@ -1375,6 +1442,7 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
     case resolveCmpFlow
     case materializeCmpFlow
     case dispatchCmpFlow
+    case dispatchStoredCmpPackage
     case retryCmpDispatch
     case requestCmpHistory
     case smokeCmpProject
@@ -1435,6 +1503,13 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
         try container.decode(
           PraxisRuntimeInterfaceTapProvisioningRequestPayload.self,
           forKey: .readbackTapProvisioning
+        )
+      )
+    case .advanceTapReplay:
+      self = .advanceTapReplay(
+        try container.decode(
+          PraxisRuntimeInterfaceTapReplayRequestPayload.self,
+          forKey: .advanceTapReplay
         )
       )
     case .readbackTapStatus:
@@ -1563,6 +1638,13 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
           forKey: .dispatchCmpFlow
         )
       )
+    case .dispatchStoredCmpPackage:
+      self = .dispatchStoredCmpPackage(
+        try container.decode(
+          PraxisRuntimeInterfaceDispatchStoredCmpPackageRequestPayload.self,
+          forKey: .dispatchStoredCmpPackage
+        )
+      )
     case .retryCmpDispatch:
       self = .retryCmpDispatch(
         try container.decode(
@@ -1667,6 +1749,8 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
       try container.encode(payload, forKey: .resumeRun)
     case .readbackTapProvisioning(let payload):
       try container.encode(payload, forKey: .readbackTapProvisioning)
+    case .advanceTapReplay(let payload):
+      try container.encode(payload, forKey: .advanceTapReplay)
     case .readbackTapStatus(let payload):
       try container.encode(payload, forKey: .readbackTapStatus)
     case .readbackTapHistory(let payload):
@@ -1703,6 +1787,8 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
       try container.encode(payload, forKey: .materializeCmpFlow)
     case .dispatchCmpFlow(let payload):
       try container.encode(payload, forKey: .dispatchCmpFlow)
+    case .dispatchStoredCmpPackage(let payload):
+      try container.encode(payload, forKey: .dispatchStoredCmpPackage)
     case .retryCmpDispatch(let payload):
       try container.encode(payload, forKey: .retryCmpDispatch)
     case .requestCmpHistory(let payload):
@@ -1914,6 +2000,7 @@ public struct PraxisRuntimeInterfaceSnapshot: Sendable, Equatable, Codable {
 public enum PraxisRuntimeInterfaceEventName: String, Sendable, Equatable, Codable, CaseIterable {
   case cmpSessionOpened = "cmp.session.opened"
   case tapProvisioningReadback = "tap.provisioning.readback"
+  case tapReplayLifecycleUpdated = "tap.replay.lifecycle.updated"
   case tapStatusReadback = "tap.status.readback"
   case tapHistoryReadback = "tap.history.readback"
   case cmpRolesReadback = "cmp.roles.readback"
@@ -1930,6 +2017,7 @@ public enum PraxisRuntimeInterfaceEventName: String, Sendable, Equatable, Codabl
   case cmpFlowResolved = "cmp.flow.resolved"
   case cmpFlowMaterialized = "cmp.flow.materialized"
   case cmpFlowDispatched = "cmp.flow.dispatched"
+  case cmpFlowStoredPackageDispatched = "cmp.flow.package_dispatched"
   case cmpFlowDispatchRetried = "cmp.flow.dispatch_retried"
   case cmpFlowHistoryRequested = "cmp.flow.history_requested"
   case runStarted = "run.started"

@@ -1,11 +1,18 @@
 import Foundation
+import PraxisCmpTypes
 import PraxisMpTypes
+import PraxisRuntimeFacades
+import PraxisRuntimeGateway
 import PraxisRuntimeKit
+import PraxisTapProvision
+import PraxisTapRuntime
+import PraxisTapTypes
 
 private enum PraxisRuntimeKitSmokeSuite: String, CaseIterable {
   case run
   case cmpTap = "cmp-tap"
   case provisioning
+  case dispatch
   case recovery
   case mp
   case capabilities
@@ -57,10 +64,12 @@ extension PraxisRuntimeKitSmokeFailure: LocalizedError {
 
 private struct PraxisRuntimeKitSmokeHarness {
   let rootDirectory: URL
+  let runtimeFacade: PraxisRuntimeFacade
   let client: PraxisRuntimeClient
 
   init(rootDirectory: URL) throws {
     self.rootDirectory = rootDirectory
+    self.runtimeFacade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(rootDirectory: rootDirectory)
     self.client = try PraxisRuntimeClient.makeDefault(rootDirectory: rootDirectory)
   }
 
@@ -72,6 +81,8 @@ private struct PraxisRuntimeKitSmokeHarness {
       return [await execute(.cmpTap, body: cmpTapSuite)]
     case .provisioning:
       return [await execute(.provisioning, body: provisioningSuite)]
+    case .dispatch:
+      return [await execute(.dispatch, body: dispatchSuite)]
     case .mp:
       return [await execute(.mp, body: mpSuite)]
     case .recovery:
@@ -85,6 +96,7 @@ private struct PraxisRuntimeKitSmokeHarness {
         await execute(.run, body: runSuite),
         await execute(.cmpTap, body: cmpTapSuite),
         await execute(.provisioning, body: provisioningSuite),
+        await execute(.dispatch, body: dispatchSuite),
         await execute(.recovery, body: recoverySuite),
         await execute(.mp, body: mpSuite),
         await execute(.capabilities, body: capabilitiesSuite),
@@ -233,9 +245,20 @@ private struct PraxisRuntimeKitSmokeHarness {
         replayPolicy: .reReviewThenDispatch
       )
     )
-    let provisioning = try await tapProject.provisioning()
+    let stagedProvisioning = try await tapProject.provisioning()
+    let provisioning = try await tapProject.advanceReplay(
+      .init(
+        agentID: "runtime.local",
+        replayID: .init(staged.pendingReplayID),
+        action: .activate
+      )
+    )
     let inspection = try await tapProject.inspect(historyLimit: 10)
     let workbench = try await tapProject.reviewWorkbench(for: "checker.local", limit: 10)
+    let recoveredClient = try PraxisRuntimeClient.makeDefault(rootDirectory: rootDirectory)
+    let recoveredTapProject = recoveredClient.tap.project("cmp.local-runtime")
+    let recoveredProvisioning = try await recoveredTapProject.provisioning()
+    let recoveredWorkbench = try await recoveredTapProject.reviewWorkbench(for: "checker.local", limit: 10)
 
     try require(
       requested.outcome == .redirectedToProvisioning,
@@ -248,8 +271,16 @@ private struct PraxisRuntimeKitSmokeHarness {
     )
     try require(provisioning.found, "Provisioning smoke expected the durable provisioning readback to be available.")
     try require(
-      provisioning.activeReplayCount == 1,
-      "Provisioning smoke expected one active replay record after staging."
+      stagedProvisioning.activeReplayCount == 1,
+      "Provisioning smoke expected one active replay record immediately after staging."
+    )
+    try require(
+      provisioning.activationStatus == .completed,
+      "Provisioning smoke expected explicit replay activation to complete the activation receipt."
+    )
+    try require(
+      provisioning.primaryReplay?.status == .ready,
+      "Provisioning smoke expected explicit replay activation to move the replay into ready state."
     )
     try require(
       inspection.runSummary.contains("replay record"),
@@ -260,11 +291,113 @@ private struct PraxisRuntimeKitSmokeHarness {
       "Provisioning smoke expected TAP inspection to expose an activation/replay section."
     )
     try require(
-      workbench.latestDecisionSummary?.contains("Activation staged attempt") == true,
-      "Provisioning smoke expected the reviewer workbench to surface the staged activation summary."
+      workbench.latestDecisionSummary?.contains("is ready") == true,
+      "Provisioning smoke expected the reviewer workbench to surface the replay-ready activation summary."
+    )
+    try require(
+      workbench.provisioning == provisioning,
+      "Provisioning smoke expected the reviewer workbench to embed the same durable provisioning readback."
+    )
+    try require(
+      recoveredProvisioning.activeReplayCount == provisioning.activeReplayCount,
+      "Provisioning smoke expected a fresh client to recover the same active replay count."
+    )
+    try require(
+      recoveredWorkbench.provisioning == recoveredProvisioning,
+      "Provisioning smoke expected a recovered reviewer workbench to keep the durable provisioning readback."
     )
 
-    return "capability=\(staged.capabilityID) replay=\(staged.pendingReplayID) activeReplays=\(provisioning.activeReplayCount)"
+    return
+      "capability=\(staged.capabilityID) replay=\(staged.pendingReplayID) activeReplays=\(provisioning.activeReplayCount) recoveredReplay=\(recoveredProvisioning.primaryReplay?.status.rawValue ?? "none")"
+  }
+
+  private func dispatchSuite() async throws -> String {
+    let projectID = PraxisRuntimeProjectRef("cmp.local-runtime")
+    let cmpProject = client.cmp.project(projectID)
+    let tapProject = client.tap.project(projectID)
+
+    _ = try await runtimeFacade.cmpFacade.bootstrapProject(
+      .init(
+        projectID: projectID.rawValue,
+        agentIDs: ["runtime.local", "checker.local"],
+        defaultAgentID: "runtime.local"
+      )
+    )
+    let ingest = try await runtimeFacade.cmpFlowFacade.ingestCmpFlowUseCase.execute(
+      .init(
+        projectID: projectID.rawValue,
+        agentID: "runtime.local",
+        sessionID: "cmp.runtime-kit-dispatch",
+        taskSummary: "Capture runtime context for dispatch smoke",
+        materials: [.init(kind: .userInput, ref: "payload:user:runtime-kit-dispatch-smoke")],
+        requiresActiveSync: true
+      )
+    )
+    _ = try await runtimeFacade.cmpFlowFacade.commitCmpFlowUseCase.execute(
+      .init(
+        projectID: projectID.rawValue,
+        agentID: "runtime.local",
+        sessionID: "cmp.runtime-kit-dispatch",
+        eventIDs: ingest.result.acceptedEventIDs,
+        changeSummary: "Commit dispatch smoke context",
+        syncIntent: .toParent
+      )
+    )
+    _ = try await client.runs.run(
+      task: "Seed dispatch smoke projection",
+      sessionID: "session.runtime-kit-dispatch"
+    )
+    _ = try await runtimeFacade.cmpFlowFacade.resolveCmpFlowUseCase.execute(
+      .init(projectID: projectID.rawValue, agentID: "runtime.local")
+    )
+    let staged = try await tapProject.provision(
+      PraxisRuntimeTapProvisionRequest(
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        capabilityID: "tool.shell.exec",
+        requestedTier: PraxisTapCapabilityTier.b2,
+        summary: "Stage shell execution provisioning before dispatch smoke",
+        expectedArtifacts: ["shell.exec binding"],
+        requiredVerification: ["shell.exec smoke"],
+        replayPolicy: PraxisProvisionReplayPolicy.reReviewThenDispatch
+      )
+    )
+    _ = try await tapProject.advanceReplay(
+      PraxisRuntimeTapReplayRequest(
+        agentID: "runtime.local",
+        replayID: PraxisRuntimeReplayRef(staged.pendingReplayID),
+        action: PraxisReplayLifecycleAction.activate
+      )
+    )
+
+    let materialized = try await cmpProject.flows.materialize(
+      PraxisRuntimeCmpMaterializeRequest(
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        packageKind: PraxisCmpContextPackageKind.runtimeFill,
+        fidelityLabel: PraxisCmpContextPackageFidelityLabel.highSignal
+      )
+    )
+    let dispatched = try await cmpProject.flows.dispatch(
+      PraxisRuntimeCmpDispatchRequest(
+        agentID: "runtime.local",
+        packageID: PraxisRuntimeCmpPackageRef(materialized.packageID.rawValue),
+        targetKind: PraxisCmpDispatchTargetKind.peer,
+        reason: "Dispatch persisted package through RuntimeKit smoke"
+      )
+    )
+    let provisioning = try await tapProject.provisioning()
+
+    try require(dispatched.status == PraxisCmpDispatchStatus.delivered, "Dispatch smoke expected the persisted package dispatch to deliver.")
+    try require(provisioning.activationStatus == PraxisActivationAttemptStatus.completed, "Dispatch smoke expected replay activation to remain completed after delivery.")
+    try require(provisioning.activeReplayCount == 0, "Dispatch smoke expected delivery to consume the ready replay record.")
+    try require(
+      provisioning.replayRecords.first?.status == PraxisReplayStatus.consumed,
+      "Dispatch smoke expected the primary replay record to transition into consumed."
+    )
+
+    return
+      "package=\(materialized.packageID.rawValue) dispatch=\(dispatched.dispatchID.rawValue) status=\(dispatched.status.rawValue) replay=\(provisioning.replayRecords.first?.status.rawValue ?? "none")"
   }
 
   private func recoverySuite() async throws -> String {
@@ -462,7 +595,7 @@ private enum PraxisRuntimeKitSmokeArguments {
         rootDirectoryPath = arguments[index]
       case "--help", "-h":
         throw PraxisRuntimeKitSmokeFailure.invalidArguments(
-          "Usage: swift run PraxisRuntimeKitSmoke [--suite run|cmp-tap|provisioning|recovery|mp|capabilities|search|all] [--root /tmp/praxis-runtime-kit-smoke]"
+          "Usage: swift run PraxisRuntimeKitSmoke [--suite run|cmp-tap|provisioning|dispatch|recovery|mp|capabilities|search|all] [--root /tmp/praxis-runtime-kit-smoke]"
         )
       default:
         throw PraxisRuntimeKitSmokeFailure.invalidArguments("Unknown argument '\(arguments[index])'.")
