@@ -424,6 +424,75 @@ public struct PraxisRuntimeEmbeddingRequest: Sendable, Equatable {
   }
 }
 
+/// Caller-friendly request for one bounded shell execution.
+public struct PraxisRuntimeShellRunRequest: Sendable, Equatable {
+  public let summary: String
+  public let command: String
+  public let workingDirectory: String?
+  public let environment: [String: String]
+  public let timeoutSeconds: Double?
+  public let outputMode: PraxisToolingOutputMode
+  public let requiresPTY: Bool
+
+  public init(
+    summary: String,
+    command: String,
+    workingDirectory: String? = nil,
+    environment: [String: String] = [:],
+    timeoutSeconds: Double? = nil,
+    outputMode: PraxisToolingOutputMode = .buffered,
+    requiresPTY: Bool = false
+  ) {
+    self.summary = summary
+    self.command = command
+    self.workingDirectory = workingDirectory
+    self.environment = environment
+    self.timeoutSeconds = timeoutSeconds
+    self.outputMode = outputMode
+    self.requiresPTY = requiresPTY
+  }
+}
+
+/// Caller-friendly request for one bounded shell approval.
+public struct PraxisRuntimeShellApprovalRequest: Sendable, Equatable {
+  public let projectID: PraxisRuntimeProjectRef
+  public let agentID: PraxisRuntimeAgentRef
+  public let targetAgentID: PraxisRuntimeAgentRef
+  public let requestedTier: PraxisTapCapabilityTier
+  public let summary: String
+
+  public init(
+    projectID: PraxisRuntimeProjectRef,
+    agentID: PraxisRuntimeAgentRef,
+    targetAgentID: PraxisRuntimeAgentRef,
+    requestedTier: PraxisTapCapabilityTier,
+    summary: String
+  ) {
+    self.projectID = projectID
+    self.agentID = agentID
+    self.targetAgentID = targetAgentID
+    self.requestedTier = requestedTier
+    self.summary = summary
+  }
+}
+
+/// Caller-friendly query for one bounded shell approval readback.
+public struct PraxisRuntimeShellApprovalQuery: Sendable, Equatable {
+  public let projectID: PraxisRuntimeProjectRef
+  public let agentID: PraxisRuntimeAgentRef?
+  public let targetAgentID: PraxisRuntimeAgentRef?
+
+  public init(
+    projectID: PraxisRuntimeProjectRef,
+    agentID: PraxisRuntimeAgentRef? = nil,
+    targetAgentID: PraxisRuntimeAgentRef? = nil
+  ) {
+    self.projectID = projectID
+    self.agentID = agentID
+    self.targetAgentID = targetAgentID
+  }
+}
+
 /// Caller-friendly request for one thin tool call.
 public struct PraxisRuntimeToolCallRequest: Sendable, Equatable {
   public let toolName: String

@@ -667,6 +667,10 @@ private func hostCapabilityIDs(from dependencies: PraxisDependencyGraph) -> [Pra
   }
   if adapters.shellExecutor != nil {
     capabilityIDs.append(.init(rawValue: "tool.shell"))
+    capabilityIDs.append(.init(rawValue: "shell.run"))
+  }
+  if adapters.cmpPeerApprovalStore != nil {
+    capabilityIDs.append(.init(rawValue: "shell.approve"))
   }
   if adapters.browserExecutor != nil {
     capabilityIDs.append(.init(rawValue: "tool.browser"))
@@ -696,7 +700,10 @@ private func summarizeRegisteredHostSurfaces(from dependencies: PraxisDependency
 }
 
 private func tapStatusRiskLevel(from capabilityIDs: [PraxisCapabilityID]) -> PraxisTapRiskLevel {
-  if capabilityIDs.contains(.init(rawValue: "workspace.write")) || capabilityIDs.contains(.init(rawValue: "tool.shell")) {
+  if capabilityIDs.contains(.init(rawValue: "workspace.write"))
+    || capabilityIDs.contains(.init(rawValue: "tool.shell"))
+    || capabilityIDs.contains(.init(rawValue: "shell.run"))
+  {
     return .risky
   }
   return .normal

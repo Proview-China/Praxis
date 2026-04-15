@@ -15,6 +15,8 @@ swift run PraxisRuntimeKitCmpTapExample
 swift run PraxisRuntimeKitMpExample
 swift run PraxisRuntimeKitCapabilitiesExample
 swift run PraxisRuntimeKitSearchExample
+swift run PraxisRuntimeKitSmoke --suite shell
+swift run PraxisRuntimeKitSmoke --suite shell-approval
 swift run PraxisRuntimeKitSmoke --suite provisioning
 swift run PraxisRuntimeKitSmoke --suite all
 ```
@@ -28,9 +30,13 @@ swift run PraxisRuntimeKitSmoke --suite all
 - `PraxisRuntimeKitMpExample`
   展示 MP overview、search、resolve、history。
 - `PraxisRuntimeKitCapabilitiesExample`
-  展示 Phase 3 thin capability baseline：catalog、generate、stream、embed、tool、file、batch、session。
+  展示当前 thin capability baseline：catalog、generate、stream、embed、bounded `shell.approve` / `shell.run`、tool、file、batch、session。
 - `PraxisRuntimeKitSearchExample`
   展示 Phase 3 search chain：`search.web`、`search.fetch`、`search.ground`。
+- `PraxisRuntimeKitSmoke --suite shell`
+  展示 Phase 5 第一条 bounded shell 路径；macOS 走真实本地 shell，Linux 诚实返回 placeholder failed-to-launch 语义。
+- `PraxisRuntimeKitSmoke --suite shell-approval`
+  展示 Phase 5 第二条 bounded shell approval 路径；请求、readback 与 fresh-client recovery 都通过 CMP/TAP durable approval state 完成。
 - `PraxisRuntimeKitSmoke --suite provisioning`
   展示 Phase 4 的 host-neutral provisioning receipt、activation staging、project-scoped provisioning readback、pending replay，以及 inspection/readback 恢复链。
 
@@ -267,9 +273,11 @@ print(generated.outputText)
 | --- | --- | --- | --- |
 | `PraxisRuntimeClient.makeDefault(...)` | ready | compile-safe placeholder baseline | 两端都能装配 RuntimeKit；Linux 继续保持占位宿主面 |
 | `runs.run(...)` / `runs.resume(...)` | ready | ready | run lifecycle 主要依赖本地 SQLite / in-process runtime truth |
-| `capabilities.catalog()` | ready | ready | 当前返回的是 Phase 3 thin capability baseline registry，已包含 search 链，不含高副作用能力 |
+| `capabilities.catalog()` | ready | ready | 当前返回的是 thin capability baseline registry，已包含 search 链和 bounded `shell.approve` / `shell.run` |
 | `capabilities.generate(...)` / `stream(...)` | ready | ready | 当前复用本地 provider inference lane；`stream` 是 bounded projected stream，不宣称 token transport |
 | `capabilities.embed(...)` | ready | ready | 当前复用本地 embedding baseline |
+| `capabilities.requestShellApproval(...)` / `readbackShellApproval(...)` | ready | ready | 当前通过 CMP/TAP durable approval path 请求和恢复 bounded shell approval，对外不暴露底层 `tool.shell.exec` |
+| `capabilities.runShell(...)` | ready | placeholder-backed bounded seam | macOS 走真实本地 shell；Linux 当前返回 compile-safe placeholder `failedToLaunch` 语义，同时保留 risk label / bounded result projection |
 | `capabilities.callTool(...)` / `uploadFile(...)` / `submitBatch(...)` | ready | ready | 当前复用本地 MCP / file store / batch baseline |
 | `capabilities.openSession(...)` | ready | ready | 当前先提供 caller-scoped runtime session header，durable 恢复链后续再继续接深 |
 | `capabilities.searchWeb(...)` / `fetchSearchResult(...)` / `groundSearchResult(...)` | ready | placeholder-backed SDK seam | 当前 search 链先接 deterministic local baseline；Linux 仍未接真实 browser / search substrate |

@@ -16,6 +16,8 @@ private enum PraxisRuntimeKitSmokeSuite: String, CaseIterable {
   case recovery
   case mp
   case capabilities
+  case shell
+  case shellApproval = "shell-approval"
   case search
   case all
 
@@ -89,6 +91,10 @@ private struct PraxisRuntimeKitSmokeHarness {
       return [await execute(.recovery, body: recoverySuite)]
     case .capabilities:
       return [await execute(.capabilities, body: capabilitiesSuite)]
+    case .shell:
+      return [await execute(.shell, body: shellSuite)]
+    case .shellApproval:
+      return [await execute(.shellApproval, body: shellApprovalSuite)]
     case .search:
       return [await execute(.search, body: searchSuite)]
     case .all:
@@ -100,6 +106,8 @@ private struct PraxisRuntimeKitSmokeHarness {
         await execute(.recovery, body: recoverySuite),
         await execute(.mp, body: mpSuite),
         await execute(.capabilities, body: capabilitiesSuite),
+        await execute(.shell, body: shellSuite),
+        await execute(.shellApproval, body: shellApprovalSuite),
         await execute(.search, body: searchSuite),
       ]
     }
@@ -490,6 +498,30 @@ private struct PraxisRuntimeKitSmokeHarness {
         preferredModel: "local-embed-smoke"
       )
     )
+    let shell = try await client.capabilities.runShell(
+      .init(
+        summary: "Print a bounded shell smoke marker",
+        command: "printf 'runtime-kit-shell-capability-smoke\\n'",
+        workingDirectory: rootDirectory.path,
+        timeoutSeconds: 2
+      )
+    )
+    let shellApproval = try await client.capabilities.requestShellApproval(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        requestedTier: .b2,
+        summary: "Request bounded shell approval during capability smoke"
+      )
+    )
+    let shellApprovalReadback = try await client.capabilities.readbackShellApproval(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local"
+      )
+    )
     let toolCall = try await client.capabilities.callTool(
       .init(
         toolName: "web.search",
@@ -511,16 +543,99 @@ private struct PraxisRuntimeKitSmokeHarness {
     )
 
     try require(catalog.capabilityIDs.map(\.rawValue).contains("generate.create"), "Capability smoke expected generate.create in the thin capability catalog.")
+    try require(catalog.capabilityIDs.map(\.rawValue).contains("shell.approve"), "Capability smoke expected shell.approve in the thin capability catalog.")
     try require(catalog.capabilityIDs.map(\.rawValue).contains("session.open"), "Capability smoke expected session.open in the thin capability catalog.")
+    try require(catalog.capabilityIDs.map(\.rawValue).contains("shell.run"), "Capability smoke expected shell.run in the thin capability catalog.")
     try require(openedSession.sessionID.rawValue == "runtime.capabilities.smoke", "Capability smoke expected the opened session ID to round-trip unchanged.")
     try require(generated.outputText.isEmpty == false, "Capability smoke expected generate.create to produce output.")
     try require(streamed.chunks.isEmpty == false, "Capability smoke expected generate.stream to project at least one chunk.")
     try require(embedded.vectorLength > 0, "Capability smoke expected embed.create to return a positive vector length.")
+    try require(shellApproval.capabilityID.rawValue == "shell.approve", "Capability smoke expected shell.approve capability ID.")
+    try require(shellApproval.approvedCapabilityID.rawValue == "shell.run", "Capability smoke expected shell.approve to point at shell.run.")
+    try require(shellApproval.riskLevel == "risky", "Capability smoke expected shell.approve to preserve the risky shell classification.")
+    try require(shellApproval.outcome == "review_required", "Capability smoke expected shell.approve to stay on the review path when shell.run is already registered.")
+    try require(shellApprovalReadback.found, "Capability smoke expected shell.approve readback to recover the persisted approval state.")
+    try require(shellApprovalReadback.riskLevel == "risky", "Capability smoke expected shell.approve readback to preserve the risky shell classification.")
+    try require(shellApprovalReadback.outcome == "review_required", "Capability smoke expected shell.approve readback to preserve the review-required outcome.")
+    try require(shell.riskLabel == "risky", "Capability smoke expected shell.run to expose the risky side-effect label.")
     try require(toolCall.toolName == "web.search", "Capability smoke expected tool.call to round-trip the tool name.")
     try require(uploadedFile.fileID.isEmpty == false, "Capability smoke expected file.upload to return a stable file ID.")
     try require(submittedBatch.batchID.isEmpty == false, "Capability smoke expected batch.submit to return a stable batch ID.")
 
-    return "catalogEntries=\(catalog.entries.count) session=\(openedSession.sessionID.rawValue) streamChunks=\(streamed.chunks.count) batchID=\(submittedBatch.batchID)"
+    return "catalogEntries=\(catalog.entries.count) session=\(openedSession.sessionID.rawValue) shellApproval=\(shellApproval.outcome) shellRisk=\(shell.riskLabel) streamChunks=\(streamed.chunks.count) batchID=\(submittedBatch.batchID)"
+  }
+
+  private func shellSuite() async throws -> String {
+    let result = try await client.capabilities.runShell(
+      .init(
+        summary: "Emit one bounded shell smoke marker",
+        command: "printf 'runtime-kit-shell-smoke\\n'",
+        workingDirectory: rootDirectory.path,
+        timeoutSeconds: 2
+      )
+    )
+
+    try require(result.capabilityID.rawValue == "shell.run", "Shell smoke expected shell.run capability ID.")
+    try require(result.riskLabel == "risky", "Shell smoke expected risky side-effect labeling.")
+    try require(result.environmentKeys.isEmpty, "Shell smoke expected environment key projection to stay empty.")
+#if os(macOS)
+    try require(result.succeeded, "Shell smoke expected the macOS baseline shell executor to complete successfully.")
+    try require(
+      result.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "runtime-kit-shell-smoke",
+      "Shell smoke expected the bounded stdout marker to round-trip unchanged."
+    )
+#else
+    try require(
+      result.terminationReason == .failedToLaunch,
+      "Shell smoke expected non-macOS baseline to report placeholder launch failure."
+    )
+    try require(
+      result.stderr.contains("not available") || result.stderr.contains("unsupported"),
+      "Shell smoke expected placeholder stderr to explain the unsupported shell baseline."
+    )
+#endif
+
+    return "exit=\(result.exitCode) termination=\(result.terminationReason.rawValue) risk=\(result.riskLabel)"
+  }
+
+  private func shellApprovalSuite() async throws -> String {
+    let requested = try await client.capabilities.requestShellApproval(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        requestedTier: .b2,
+        summary: "Request bounded shell approval during dedicated shell approval smoke"
+      )
+    )
+    let readback = try await client.capabilities.readbackShellApproval(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local"
+      )
+    )
+    let recoveredClient = try PraxisRuntimeClient.makeDefault(rootDirectory: rootDirectory)
+    let recoveredReadback = try await recoveredClient.capabilities.readbackShellApproval(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local"
+      )
+    )
+
+    try require(requested.capabilityID.rawValue == "shell.approve", "Shell approval smoke expected shell.approve capability ID.")
+    try require(requested.approvedCapabilityID.rawValue == "shell.run", "Shell approval smoke expected shell.run to be the approved capability surface.")
+    try require(requested.riskLevel == "risky", "Shell approval smoke expected the approval request to stay on a risky shell capability key.")
+    try require(requested.outcome == "review_required", "Shell approval smoke expected the bounded shell approval to stay on the review path.")
+    try require(readback.found, "Shell approval smoke expected persisted approval readback.")
+    try require(readback.approvedCapabilityID?.rawValue == "shell.run", "Shell approval smoke expected the readback capability to stay normalized to shell.run.")
+    try require(readback.riskLevel == "risky", "Shell approval smoke expected persisted readback to keep the risky shell classification.")
+    try require(recoveredReadback.found, "Shell approval smoke expected a fresh client to recover the approval readback.")
+    try require(recoveredReadback.outcome == readback.outcome, "Shell approval smoke expected recovered readback to preserve the latest approval outcome.")
+    try require(recoveredReadback.humanGateState == readback.humanGateState, "Shell approval smoke expected recovered readback to preserve the human gate state.")
+
+    return "outcome=\(requested.outcome) humanGate=\(readback.humanGateState ?? "none") recovered=\(recoveredReadback.outcome ?? "none")"
   }
 
   private func searchSuite() async throws -> String {
@@ -595,7 +710,7 @@ private enum PraxisRuntimeKitSmokeArguments {
         rootDirectoryPath = arguments[index]
       case "--help", "-h":
         throw PraxisRuntimeKitSmokeFailure.invalidArguments(
-          "Usage: swift run PraxisRuntimeKitSmoke [--suite run|cmp-tap|provisioning|dispatch|recovery|mp|capabilities|search|all] [--root /tmp/praxis-runtime-kit-smoke]"
+          "Usage: swift run PraxisRuntimeKitSmoke [--suite run|cmp-tap|provisioning|dispatch|recovery|mp|capabilities|shell|shell-approval|search|all] [--root /tmp/praxis-runtime-kit-smoke]"
         )
       default:
         throw PraxisRuntimeKitSmokeFailure.invalidArguments("Unknown argument '\(arguments[index])'.")

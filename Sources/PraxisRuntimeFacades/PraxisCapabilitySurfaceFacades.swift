@@ -6,6 +6,7 @@ import PraxisCoreTypes
 import PraxisProviderContracts
 import PraxisRuntimeComposition
 import PraxisSession
+import PraxisTapTypes
 import PraxisToolingContracts
 
 /// Structured generation command for the thin capability surface.
@@ -45,6 +46,75 @@ public struct PraxisCapabilityEmbedCommand: Sendable, Equatable, Codable {
   ) {
     self.content = content
     self.preferredModel = preferredModel
+  }
+}
+
+/// Structured shell-run command for the bounded execution surface.
+public struct PraxisCapabilityShellRunCommand: Sendable, Equatable, Codable {
+  public let summary: String
+  public let command: String
+  public let workingDirectory: String?
+  public let environment: [String: String]
+  public let timeoutSeconds: Double?
+  public let outputMode: PraxisToolingOutputMode
+  public let requiresPTY: Bool
+
+  public init(
+    summary: String,
+    command: String,
+    workingDirectory: String? = nil,
+    environment: [String: String] = [:],
+    timeoutSeconds: Double? = nil,
+    outputMode: PraxisToolingOutputMode = .buffered,
+    requiresPTY: Bool = false
+  ) {
+    self.summary = summary
+    self.command = command
+    self.workingDirectory = workingDirectory
+    self.environment = environment
+    self.timeoutSeconds = timeoutSeconds
+    self.outputMode = outputMode
+    self.requiresPTY = requiresPTY
+  }
+}
+
+/// Structured shell-approval command for the bounded execution surface.
+public struct PraxisCapabilityShellApprovalCommand: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let agentID: String
+  public let targetAgentID: String
+  public let requestedTier: PraxisTapCapabilityTier
+  public let summary: String
+
+  public init(
+    projectID: String,
+    agentID: String,
+    targetAgentID: String,
+    requestedTier: PraxisTapCapabilityTier,
+    summary: String
+  ) {
+    self.projectID = projectID
+    self.agentID = agentID
+    self.targetAgentID = targetAgentID
+    self.requestedTier = requestedTier
+    self.summary = summary
+  }
+}
+
+/// Structured shell-approval readback query for the bounded execution surface.
+public struct PraxisCapabilityShellApprovalReadbackCommand: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let agentID: String?
+  public let targetAgentID: String?
+
+  public init(
+    projectID: String,
+    agentID: String? = nil,
+    targetAgentID: String? = nil
+  ) {
+    self.projectID = projectID
+    self.agentID = agentID
+    self.targetAgentID = targetAgentID
   }
 }
 
@@ -271,6 +341,159 @@ public struct PraxisCapabilityEmbeddingSnapshot: Sendable, Equatable, Codable {
     self.summary = summary
     self.vectorLength = vectorLength
     self.preferredModel = preferredModel
+  }
+}
+
+/// Result snapshot for one bounded shell execution.
+public struct PraxisCapabilityShellRunSnapshot: Sendable, Equatable, Codable {
+  public let capabilityID: PraxisCapabilityID
+  public let summary: String
+  public let command: String
+  public let workingDirectory: String?
+  public let environmentKeys: [String]
+  public let outputMode: PraxisToolingOutputMode
+  public let requiresPTY: Bool
+  public let riskLabel: String
+  public let stdout: String
+  public let stderr: String
+  public let exitCode: Int32
+  public let durationMilliseconds: Int?
+  public let terminationReason: PraxisShellTerminationReason
+  public let outputWasTruncated: Bool
+
+  public init(
+    capabilityID: PraxisCapabilityID,
+    summary: String,
+    command: String,
+    workingDirectory: String?,
+    environmentKeys: [String],
+    outputMode: PraxisToolingOutputMode,
+    requiresPTY: Bool,
+    riskLabel: String,
+    stdout: String,
+    stderr: String,
+    exitCode: Int32,
+    durationMilliseconds: Int? = nil,
+    terminationReason: PraxisShellTerminationReason,
+    outputWasTruncated: Bool = false
+  ) {
+    self.capabilityID = capabilityID
+    self.summary = summary
+    self.command = command
+    self.workingDirectory = workingDirectory
+    self.environmentKeys = environmentKeys
+    self.outputMode = outputMode
+    self.requiresPTY = requiresPTY
+    self.riskLabel = riskLabel
+    self.stdout = stdout
+    self.stderr = stderr
+    self.exitCode = exitCode
+    self.durationMilliseconds = durationMilliseconds
+    self.terminationReason = terminationReason
+    self.outputWasTruncated = outputWasTruncated
+  }
+}
+
+/// Result snapshot for one bounded shell approval request.
+public struct PraxisCapabilityShellApprovalSnapshot: Sendable, Equatable, Codable {
+  public let capabilityID: PraxisCapabilityID
+  public let approvedCapabilityID: PraxisCapabilityID
+  public let summary: String
+  public let projectID: String
+  public let agentID: String
+  public let targetAgentID: String
+  public let requestedTier: PraxisTapCapabilityTier
+  public let route: String
+  public let outcome: String
+  public let tapMode: String
+  public let riskLevel: String
+  public let humanGateState: String
+  public let requestedAt: String
+  public let decisionSummary: String
+
+  public init(
+    capabilityID: PraxisCapabilityID,
+    approvedCapabilityID: PraxisCapabilityID,
+    summary: String,
+    projectID: String,
+    agentID: String,
+    targetAgentID: String,
+    requestedTier: PraxisTapCapabilityTier,
+    route: String,
+    outcome: String,
+    tapMode: String,
+    riskLevel: String,
+    humanGateState: String,
+    requestedAt: String,
+    decisionSummary: String
+  ) {
+    self.capabilityID = capabilityID
+    self.approvedCapabilityID = approvedCapabilityID
+    self.summary = summary
+    self.projectID = projectID
+    self.agentID = agentID
+    self.targetAgentID = targetAgentID
+    self.requestedTier = requestedTier
+    self.route = route
+    self.outcome = outcome
+    self.tapMode = tapMode
+    self.riskLevel = riskLevel
+    self.humanGateState = humanGateState
+    self.requestedAt = requestedAt
+    self.decisionSummary = decisionSummary
+  }
+}
+
+/// Result snapshot for one bounded shell approval readback.
+public struct PraxisCapabilityShellApprovalReadbackSnapshot: Sendable, Equatable, Codable {
+  public let capabilityID: PraxisCapabilityID
+  public let approvedCapabilityID: PraxisCapabilityID?
+  public let summary: String
+  public let projectID: String
+  public let agentID: String?
+  public let targetAgentID: String?
+  public let requestedTier: PraxisTapCapabilityTier?
+  public let route: String?
+  public let outcome: String?
+  public let tapMode: String?
+  public let riskLevel: String?
+  public let humanGateState: String?
+  public let requestedAt: String?
+  public let decisionSummary: String?
+  public let found: Bool
+
+  public init(
+    capabilityID: PraxisCapabilityID,
+    approvedCapabilityID: PraxisCapabilityID? = nil,
+    summary: String,
+    projectID: String,
+    agentID: String? = nil,
+    targetAgentID: String? = nil,
+    requestedTier: PraxisTapCapabilityTier? = nil,
+    route: String? = nil,
+    outcome: String? = nil,
+    tapMode: String? = nil,
+    riskLevel: String? = nil,
+    humanGateState: String? = nil,
+    requestedAt: String? = nil,
+    decisionSummary: String? = nil,
+    found: Bool
+  ) {
+    self.capabilityID = capabilityID
+    self.approvedCapabilityID = approvedCapabilityID
+    self.summary = summary
+    self.projectID = projectID
+    self.agentID = agentID
+    self.targetAgentID = targetAgentID
+    self.requestedTier = requestedTier
+    self.route = route
+    self.outcome = outcome
+    self.tapMode = tapMode
+    self.riskLevel = riskLevel
+    self.humanGateState = humanGateState
+    self.requestedAt = requestedAt
+    self.decisionSummary = decisionSummary
+    self.found = found
   }
 }
 
@@ -505,6 +728,27 @@ private func normalizedCapabilityText(_ rawValue: String?, fieldName: String) th
   return trimmed
 }
 
+private func normalizedCapabilityPath(_ rawValue: String?) -> String? {
+  guard let trimmed = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+    return nil
+  }
+  return trimmed
+}
+
+private func normalizedCapabilityEnvironment(
+  _ environment: [String: String]
+) throws -> [String: String] {
+  var normalized: [String: String] = [:]
+  for (rawKey, rawValue) in environment {
+    let key = rawKey.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !key.isEmpty else {
+      throw PraxisError.invalidInput("Thin capability shell.run environment keys must not be blank.")
+    }
+    normalized[key] = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+  return normalized
+}
+
 private func chunkedCapabilityText(_ text: String, chunkCharacterCount: Int) -> [PraxisCapabilityGenerationChunkSnapshot] {
   guard !text.isEmpty else {
     return [.init(index: 0, text: "", isFinal: true)]
@@ -529,8 +773,12 @@ private func chunkedCapabilityText(_ text: String, chunkCharacterCount: Int) -> 
   return chunks
 }
 
+private let boundedShellExecutionCapabilityKey = PraxisThinCapabilityKey.shellRun.capabilityID
+
 private func thinCapabilityManifestIDs(
   providerSurface: (any PraxisProviderRequestSurfaceProtocol)?,
+  supportsShellApproval: Bool,
+  shellExecutor: (any PraxisShellExecutor)?,
   browserExecutor: (any PraxisBrowserExecutor)?,
   browserGroundingCollector: (any PraxisBrowserGroundingCollector)?,
   supportsSessionOpen: Bool
@@ -545,6 +793,12 @@ private func thinCapabilityManifestIDs(
   }
   if providerSurface?.supportsEmbedding == true {
     capabilityIDs.insert(PraxisThinCapabilityKey.embedCreate.capabilityID)
+  }
+  if supportsShellApproval {
+    capabilityIDs.insert(PraxisThinCapabilityKey.shellApprove.capabilityID)
+  }
+  if shellExecutor != nil {
+    capabilityIDs.insert(PraxisThinCapabilityKey.shellRun.capabilityID)
   }
   if providerSurface?.supportsToolCalls == true {
     capabilityIDs.insert(PraxisThinCapabilityKey.toolCall.capabilityID)
@@ -574,6 +828,10 @@ private func thinCapabilityManifestIDs(
 /// calls without leaking composition or transport-specific details to RuntimeKit callers.
 public final class PraxisCapabilityFacade: Sendable {
   private let providerSurface: (any PraxisProviderRequestSurfaceProtocol)?
+  private let cmpRolesFacade: PraxisCmpRolesFacade?
+  private let cmpReadbackFacade: PraxisCmpReadbackFacade?
+  private let supportsShellApproval: Bool
+  private let shellExecutor: (any PraxisShellExecutor)?
   private let browserExecutor: (any PraxisBrowserExecutor)?
   private let browserGroundingCollector: (any PraxisBrowserGroundingCollector)?
   private let supportsSessionOpen: Bool
@@ -586,6 +844,10 @@ public final class PraxisCapabilityFacade: Sendable {
     catalogBuilder: PraxisCapabilityCatalogBuilder = .init()
   ) {
     self.providerSurface = dependencies.providerRequestSurface
+    self.cmpRolesFacade = PraxisCmpRolesFacade(dependencies: dependencies)
+    self.cmpReadbackFacade = PraxisCmpReadbackFacade(dependencies: dependencies)
+    self.supportsShellApproval = dependencies.hostAdapters.cmpPeerApprovalStore != nil
+    self.shellExecutor = dependencies.hostAdapters.shellExecutor
     self.browserExecutor = dependencies.hostAdapters.browserExecutor
     self.browserGroundingCollector = dependencies.hostAdapters.browserGroundingCollector
     self.supportsSessionOpen = true
@@ -596,6 +858,10 @@ public final class PraxisCapabilityFacade: Sendable {
   public static func unsupported() -> PraxisCapabilityFacade {
     PraxisCapabilityFacade(
       providerSurface: nil,
+      cmpRolesFacade: nil,
+      cmpReadbackFacade: nil,
+      supportsShellApproval: false,
+      shellExecutor: nil,
       browserExecutor: nil,
       browserGroundingCollector: nil,
       supportsSessionOpen: false
@@ -604,6 +870,10 @@ public final class PraxisCapabilityFacade: Sendable {
 
   private init(
     providerSurface: (any PraxisProviderRequestSurfaceProtocol)?,
+    cmpRolesFacade: PraxisCmpRolesFacade? = nil,
+    cmpReadbackFacade: PraxisCmpReadbackFacade? = nil,
+    supportsShellApproval: Bool,
+    shellExecutor: (any PraxisShellExecutor)? = nil,
     browserExecutor: (any PraxisBrowserExecutor)? = nil,
     browserGroundingCollector: (any PraxisBrowserGroundingCollector)? = nil,
     supportsSessionOpen: Bool,
@@ -611,6 +881,10 @@ public final class PraxisCapabilityFacade: Sendable {
     catalogBuilder: PraxisCapabilityCatalogBuilder = .init()
   ) {
     self.providerSurface = providerSurface
+    self.cmpRolesFacade = cmpRolesFacade
+    self.cmpReadbackFacade = cmpReadbackFacade
+    self.supportsShellApproval = supportsShellApproval
+    self.shellExecutor = shellExecutor
     self.browserExecutor = browserExecutor
     self.browserGroundingCollector = browserGroundingCollector
     self.supportsSessionOpen = supportsSessionOpen
@@ -622,13 +896,15 @@ public final class PraxisCapabilityFacade: Sendable {
   ///
   /// - Returns: Catalog entries currently wired for the active host profile.
   public func catalog() -> PraxisCapabilityCatalogSnapshot {
-    guard providerSurface != nil || browserExecutor != nil || browserGroundingCollector != nil || supportsSessionOpen else {
+    guard providerSurface != nil || supportsShellApproval || shellExecutor != nil || browserExecutor != nil || browserGroundingCollector != nil || supportsSessionOpen else {
       return catalogBuilder.buildSnapshot(manifests: [])
     }
 
     let baseline = catalogBuilder.buildThinCapabilityBaseline()
     let availableIDs = thinCapabilityManifestIDs(
       providerSurface: providerSurface,
+      supportsShellApproval: supportsShellApproval,
+      shellExecutor: shellExecutor,
       browserExecutor: browserExecutor,
       browserGroundingCollector: browserGroundingCollector,
       supportsSessionOpen: supportsSessionOpen
@@ -722,6 +998,109 @@ public final class PraxisCapabilityFacade: Sendable {
       summary: "Thin capability \(PraxisThinCapabilityKey.embedCreate.rawValue) created an embedding response with vector length \(response.vectorLength).",
       vectorLength: response.vectorLength,
       preferredModel: response.model ?? command.preferredModel
+    )
+  }
+
+  /// Requests shell execution approval through the current CMP/TAP review path.
+  ///
+  /// - Parameter command: The caller-friendly shell-approval command.
+  /// - Returns: The normalized shell-approval snapshot.
+  /// - Throws: Propagates approval or validation failures.
+  public func requestShellApproval(
+    _ command: PraxisCapabilityShellApprovalCommand
+  ) async throws -> PraxisCapabilityShellApprovalSnapshot {
+    let projectID = try normalizedCapabilityText(command.projectID, fieldName: "projectID")
+    let agentID = try normalizedCapabilityText(command.agentID, fieldName: "agentID")
+    let targetAgentID = try normalizedCapabilityText(command.targetAgentID, fieldName: "targetAgentID")
+    let summary = try normalizedCapabilityText(command.summary, fieldName: "summary")
+    let rolesFacade = try requireCmpRolesFacade()
+    let approval = try await rolesFacade.requestPeerApproval(
+      .init(
+        projectID: projectID,
+        agentID: agentID,
+        targetAgentID: targetAgentID,
+        capabilityKey: boundedShellExecutionCapabilityKey,
+        requestedTier: command.requestedTier,
+        summary: summary
+      )
+    )
+    return mapShellApprovalSnapshot(approval)
+  }
+
+  /// Reads the latest shell execution approval state through the current CMP/TAP recovery path.
+  ///
+  /// - Parameter command: The caller-friendly shell-approval readback query.
+  /// - Returns: The normalized shell-approval readback snapshot.
+  /// - Throws: Propagates readback or validation failures.
+  public func readbackShellApproval(
+    _ command: PraxisCapabilityShellApprovalReadbackCommand
+  ) async throws -> PraxisCapabilityShellApprovalReadbackSnapshot {
+    let projectID = try normalizedCapabilityText(command.projectID, fieldName: "projectID")
+    let readbackFacade = try requireCmpReadbackFacade()
+    let readback = try await readbackFacade.readbackPeerApproval(
+      .init(
+        projectID: projectID,
+        agentID: normalizedCapabilityPath(command.agentID),
+        targetAgentID: normalizedCapabilityPath(command.targetAgentID),
+        capabilityKey: boundedShellExecutionCapabilityKey
+      )
+    )
+    return mapShellApprovalReadbackSnapshot(readback)
+  }
+
+  /// Executes one bounded shell command through the current host shell lane.
+  ///
+  /// - Parameter command: The caller-friendly shell-run command.
+  /// - Returns: The normalized bounded shell execution snapshot.
+  /// - Throws: Propagates shell adapter or validation failures.
+  public func runShell(_ command: PraxisCapabilityShellRunCommand) async throws -> PraxisCapabilityShellRunSnapshot {
+    let summary = try normalizedCapabilityText(command.summary, fieldName: "summary")
+    let shellCommand = try normalizedCapabilityText(command.command, fieldName: "command")
+    let environment = try normalizedCapabilityEnvironment(command.environment)
+    if let timeoutSeconds = command.timeoutSeconds, timeoutSeconds <= 0 {
+      throw PraxisError.invalidInput("Thin capability shell.run requires timeoutSeconds > 0 when provided.")
+    }
+    guard command.outputMode == .buffered else {
+      throw PraxisError.unsupportedOperation(
+        "Thin capability shell.run currently supports buffered output only."
+      )
+    }
+    guard !command.requiresPTY else {
+      throw PraxisError.unsupportedOperation(
+        "Thin capability shell.run does not support PTY execution yet."
+      )
+    }
+
+    let executor = try requireShellExecutor()
+    let receipt = try await executor.run(
+      .init(
+        command: shellCommand,
+        workingDirectory: normalizedCapabilityPath(command.workingDirectory),
+        environment: environment,
+        timeoutSeconds: command.timeoutSeconds,
+        outputMode: command.outputMode,
+        requiresPTY: command.requiresPTY
+      )
+    )
+    let riskLabel = "risky"
+    let completionWord = receipt.exitCode == 0 && receipt.terminationReason == .exited
+      ? "completed"
+      : "finished"
+    return PraxisCapabilityShellRunSnapshot(
+      capabilityID: PraxisThinCapabilityKey.shellRun.capabilityID,
+      summary: "Thin capability \(PraxisThinCapabilityKey.shellRun.rawValue) \(completionWord) bounded shell execution for \(summary) with exit code \(receipt.exitCode) under \(riskLabel) side-effect labeling.",
+      command: shellCommand,
+      workingDirectory: normalizedCapabilityPath(command.workingDirectory),
+      environmentKeys: environment.keys.sorted(),
+      outputMode: command.outputMode,
+      requiresPTY: command.requiresPTY,
+      riskLabel: riskLabel,
+      stdout: receipt.stdout,
+      stderr: receipt.stderr,
+      exitCode: receipt.exitCode,
+      durationMilliseconds: receipt.durationMilliseconds,
+      terminationReason: receipt.terminationReason,
+      outputWasTruncated: receipt.outputWasTruncated
     )
   }
 
@@ -950,6 +1329,27 @@ public final class PraxisCapabilityFacade: Sendable {
     return providerSurface
   }
 
+  private func requireCmpRolesFacade() throws -> PraxisCmpRolesFacade {
+    guard let cmpRolesFacade, supportsShellApproval else {
+      throw PraxisError.dependencyMissing("Thin capability shell.approve requires the CMP approval path.")
+    }
+    return cmpRolesFacade
+  }
+
+  private func requireCmpReadbackFacade() throws -> PraxisCmpReadbackFacade {
+    guard let cmpReadbackFacade, supportsShellApproval else {
+      throw PraxisError.dependencyMissing("Thin capability shell.approve readback requires the CMP approval path.")
+    }
+    return cmpReadbackFacade
+  }
+
+  private func requireShellExecutor() throws -> any PraxisShellExecutor {
+    guard let shellExecutor else {
+      throw PraxisError.dependencyMissing("Thin capability shell.run requires a shell executor.")
+    }
+    return shellExecutor
+  }
+
   private func requireBrowserExecutor() throws -> any PraxisBrowserExecutor {
     guard let browserExecutor else {
       throw PraxisError.dependencyMissing("Thin capability search.fetch requires a browser executor.")
@@ -963,4 +1363,47 @@ public final class PraxisCapabilityFacade: Sendable {
     }
     return browserGroundingCollector
   }
+}
+
+private func mapShellApprovalSnapshot(
+  _ approval: PraxisCmpPeerApprovalSnapshot
+) -> PraxisCapabilityShellApprovalSnapshot {
+  PraxisCapabilityShellApprovalSnapshot(
+    capabilityID: PraxisThinCapabilityKey.shellApprove.capabilityID,
+    approvedCapabilityID: PraxisThinCapabilityKey.shellRun.capabilityID,
+    summary: approval.summary,
+    projectID: approval.projectID,
+    agentID: approval.agentID,
+    targetAgentID: approval.targetAgentID,
+    requestedTier: approval.requestedTier,
+    route: approval.route.rawValue,
+    outcome: approval.outcome.rawValue,
+    tapMode: approval.tapMode.rawValue,
+    riskLevel: approval.riskLevel.rawValue,
+    humanGateState: approval.humanGateState.rawValue,
+    requestedAt: approval.requestedAt,
+    decisionSummary: approval.decisionSummary
+  )
+}
+
+private func mapShellApprovalReadbackSnapshot(
+  _ readback: PraxisCmpPeerApprovalReadbackSnapshot
+) -> PraxisCapabilityShellApprovalReadbackSnapshot {
+  PraxisCapabilityShellApprovalReadbackSnapshot(
+    capabilityID: PraxisThinCapabilityKey.shellApprove.capabilityID,
+    approvedCapabilityID: readback.found ? PraxisThinCapabilityKey.shellRun.capabilityID : nil,
+    summary: readback.summary,
+    projectID: readback.projectID,
+    agentID: readback.agentID,
+    targetAgentID: readback.targetAgentID,
+    requestedTier: readback.requestedTier,
+    route: readback.route?.rawValue,
+    outcome: readback.outcome?.rawValue,
+    tapMode: readback.tapMode?.rawValue,
+    riskLevel: readback.riskLevel?.rawValue,
+    humanGateState: readback.humanGateState?.rawValue,
+    requestedAt: readback.requestedAt,
+    decisionSummary: readback.decisionSummary,
+    found: readback.found
+  )
 }

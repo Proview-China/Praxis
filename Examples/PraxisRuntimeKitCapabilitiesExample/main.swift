@@ -37,6 +37,30 @@ struct PraxisRuntimeKitCapabilitiesExampleMain {
         preferredModel: "local-embed-example"
       )
     )
+    let shell = try await client.capabilities.runShell(
+      .init(
+        summary: "Print a bounded shell marker",
+        command: "printf 'runtime-kit-shell-example\\n'",
+        workingDirectory: rootDirectory.path,
+        timeoutSeconds: 2
+      )
+    )
+    let shellApproval = try await client.capabilities.requestShellApproval(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        requestedTier: .b2,
+        summary: "Request bounded shell execution for the capabilities example"
+      )
+    )
+    let shellApprovalReadback = try await client.capabilities.readbackShellApproval(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local"
+      )
+    )
     let toolCall = try await client.capabilities.callTool(
       .init(
         toolName: "web.search",
@@ -63,6 +87,9 @@ struct PraxisRuntimeKitCapabilitiesExampleMain {
     print("Generate output: \(generated.outputText)")
     print("Stream chunks: \(streamed.chunks.map(\.text).joined(separator: " | "))")
     print("Embedding vector length: \(embedded.vectorLength)")
+    print("Shell approval: capability=\(shellApproval.approvedCapabilityID.rawValue) outcome=\(shellApproval.outcome)")
+    print("Shell approval readback found: \(shellApprovalReadback.found)")
+    print("Shell run: risk=\(shell.riskLabel) exit=\(shell.exitCode) output=\(shell.stdout.trimmingCharacters(in: .whitespacesAndNewlines))")
     print("Tool call: \(toolCall.toolName) -> \(toolCall.summary)")
     print("Uploaded file ID: \(uploadedFile.fileID)")
     print("Submitted batch ID: \(submittedBatch.batchID)")

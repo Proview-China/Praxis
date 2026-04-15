@@ -4,6 +4,8 @@ import PraxisCoreTypes
 import PraxisProviderContracts
 import PraxisRuntimeFacades
 import PraxisSession
+import PraxisTapTypes
+import PraxisToolingContracts
 
 /// Caller-friendly thin capability entrypoint for Phase 3 baseline operations.
 ///
@@ -80,6 +82,64 @@ public struct PraxisRuntimeCapabilityClient: Sendable {
       )
     )
     return PraxisRuntimeEmbeddingResult(snapshot: snapshot)
+  }
+
+  /// Requests one bounded shell approval through the CMP/TAP review path.
+  ///
+  /// - Parameter request: Caller-friendly shell approval request.
+  /// - Returns: A normalized shell approval result.
+  /// - Throws: Any validation or approval failure raised by the underlying capability facade.
+  public func requestShellApproval(
+    _ request: PraxisRuntimeShellApprovalRequest
+  ) async throws -> PraxisRuntimeShellApprovalResult {
+    let snapshot = try await capabilityFacade.requestShellApproval(
+      .init(
+        projectID: request.projectID.rawValue,
+        agentID: request.agentID.rawValue,
+        targetAgentID: request.targetAgentID.rawValue,
+        requestedTier: request.requestedTier,
+        summary: request.summary
+      )
+    )
+    return PraxisRuntimeShellApprovalResult(snapshot: snapshot)
+  }
+
+  /// Reads the latest bounded shell approval state through the CMP/TAP recovery path.
+  ///
+  /// - Parameter query: Caller-friendly shell approval readback query.
+  /// - Returns: A normalized shell approval readback result.
+  /// - Throws: Any validation or readback failure raised by the underlying capability facade.
+  public func readbackShellApproval(
+    _ query: PraxisRuntimeShellApprovalQuery
+  ) async throws -> PraxisRuntimeShellApprovalReadback {
+    let snapshot = try await capabilityFacade.readbackShellApproval(
+      .init(
+        projectID: query.projectID.rawValue,
+        agentID: query.agentID?.rawValue,
+        targetAgentID: query.targetAgentID?.rawValue
+      )
+    )
+    return PraxisRuntimeShellApprovalReadback(snapshot: snapshot)
+  }
+
+  /// Executes one bounded shell command.
+  ///
+  /// - Parameter request: Caller-friendly bounded shell execution request.
+  /// - Returns: A normalized shell execution result.
+  /// - Throws: Any validation or shell adapter failure raised by the underlying capability facade.
+  public func runShell(_ request: PraxisRuntimeShellRunRequest) async throws -> PraxisRuntimeShellRunResult {
+    let snapshot = try await capabilityFacade.runShell(
+      .init(
+        summary: request.summary,
+        command: request.command,
+        workingDirectory: request.workingDirectory,
+        environment: request.environment,
+        timeoutSeconds: request.timeoutSeconds,
+        outputMode: request.outputMode,
+        requiresPTY: request.requiresPTY
+      )
+    )
+    return PraxisRuntimeShellRunResult(snapshot: snapshot)
   }
 
   /// Calls one provider-backed tool lane.
@@ -318,6 +378,128 @@ public struct PraxisRuntimeEmbeddingResult: Sendable, Equatable {
     summary = snapshot.summary
     vectorLength = snapshot.vectorLength
     preferredModel = snapshot.preferredModel
+  }
+}
+
+/// Caller-friendly bounded shell execution result.
+public struct PraxisRuntimeShellRunResult: Sendable, Equatable {
+  public let capabilityID: PraxisRuntimeCapabilityRef
+  public let summary: String
+  public let command: String
+  public let workingDirectory: String?
+  public let environmentKeys: [String]
+  public let outputMode: PraxisToolingOutputMode
+  public let requiresPTY: Bool
+  public let riskLabel: String
+  public let stdout: String
+  public let stderr: String
+  public let exitCode: Int32
+  public let durationMilliseconds: Int?
+  public let terminationReason: PraxisShellTerminationReason
+  public let outputWasTruncated: Bool
+
+  init(snapshot: PraxisCapabilityShellRunSnapshot) {
+    capabilityID = .init(snapshot.capabilityID.rawValue)
+    summary = snapshot.summary
+    command = snapshot.command
+    workingDirectory = snapshot.workingDirectory
+    environmentKeys = snapshot.environmentKeys
+    outputMode = snapshot.outputMode
+    requiresPTY = snapshot.requiresPTY
+    riskLabel = snapshot.riskLabel
+    stdout = snapshot.stdout
+    stderr = snapshot.stderr
+    exitCode = snapshot.exitCode
+    durationMilliseconds = snapshot.durationMilliseconds
+    terminationReason = snapshot.terminationReason
+    outputWasTruncated = snapshot.outputWasTruncated
+  }
+
+  /// Whether the bounded shell execution exited successfully.
+  public var succeeded: Bool {
+    exitCode == 0 && terminationReason == .exited
+  }
+}
+
+/// Caller-friendly bounded shell approval result.
+public struct PraxisRuntimeShellApprovalResult: Sendable, Equatable {
+  public let capabilityID: PraxisRuntimeCapabilityRef
+  public let approvedCapabilityID: PraxisRuntimeCapabilityRef
+  public let summary: String
+  public let projectID: PraxisRuntimeProjectRef
+  public let agentID: PraxisRuntimeAgentRef
+  public let targetAgentID: PraxisRuntimeAgentRef
+  public let requestedTier: PraxisTapCapabilityTier
+  public let route: String
+  public let outcome: String
+  public let tapMode: String
+  public let riskLevel: String
+  public let humanGateState: String
+  public let requestedAt: String
+  public let decisionSummary: String
+
+  init(snapshot: PraxisCapabilityShellApprovalSnapshot) {
+    capabilityID = .init(snapshot.capabilityID.rawValue)
+    approvedCapabilityID = .init(snapshot.approvedCapabilityID.rawValue)
+    summary = snapshot.summary
+    projectID = .init(snapshot.projectID)
+    agentID = .init(snapshot.agentID)
+    targetAgentID = .init(snapshot.targetAgentID)
+    requestedTier = snapshot.requestedTier
+    route = snapshot.route
+    outcome = snapshot.outcome
+    tapMode = snapshot.tapMode
+    riskLevel = snapshot.riskLevel
+    humanGateState = snapshot.humanGateState
+    requestedAt = snapshot.requestedAt
+    decisionSummary = snapshot.decisionSummary
+  }
+
+  /// Whether the shell approval request was redirected into provisioning instead of immediate execution.
+  public var isProvisioningRedirect: Bool {
+    outcome == "redirected_to_provisioning"
+  }
+}
+
+/// Caller-friendly bounded shell approval readback result.
+public struct PraxisRuntimeShellApprovalReadback: Sendable, Equatable {
+  public let capabilityID: PraxisRuntimeCapabilityRef
+  public let approvedCapabilityID: PraxisRuntimeCapabilityRef?
+  public let summary: String
+  public let projectID: PraxisRuntimeProjectRef
+  public let agentID: PraxisRuntimeAgentRef?
+  public let targetAgentID: PraxisRuntimeAgentRef?
+  public let requestedTier: PraxisTapCapabilityTier?
+  public let route: String?
+  public let outcome: String?
+  public let tapMode: String?
+  public let riskLevel: String?
+  public let humanGateState: String?
+  public let requestedAt: String?
+  public let decisionSummary: String?
+  public let found: Bool
+
+  init(snapshot: PraxisCapabilityShellApprovalReadbackSnapshot) {
+    capabilityID = .init(snapshot.capabilityID.rawValue)
+    approvedCapabilityID = snapshot.approvedCapabilityID.map { .init($0.rawValue) }
+    summary = snapshot.summary
+    projectID = .init(snapshot.projectID)
+    agentID = snapshot.agentID.map { PraxisRuntimeAgentRef($0) }
+    targetAgentID = snapshot.targetAgentID.map { PraxisRuntimeAgentRef($0) }
+    requestedTier = snapshot.requestedTier
+    route = snapshot.route
+    outcome = snapshot.outcome
+    tapMode = snapshot.tapMode
+    riskLevel = snapshot.riskLevel
+    humanGateState = snapshot.humanGateState
+    requestedAt = snapshot.requestedAt
+    decisionSummary = snapshot.decisionSummary
+    found = snapshot.found
+  }
+
+  /// Whether the recovered shell approval is currently waiting on a human gate.
+  public var isWaitingApproval: Bool {
+    humanGateState == "waitingApproval"
   }
 }
 

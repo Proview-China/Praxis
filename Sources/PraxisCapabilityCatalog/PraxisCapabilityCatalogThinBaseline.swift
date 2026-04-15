@@ -6,6 +6,8 @@ public enum PraxisThinCapabilityKey: String, Sendable, Codable, CaseIterable {
   case generateCreate = "generate.create"
   case generateStream = "generate.stream"
   case embedCreate = "embed.create"
+  case shellApprove = "shell.approve"
+  case shellRun = "shell.run"
   case toolCall = "tool.call"
   case fileUpload = "file.upload"
   case batchSubmit = "batch.submit"
@@ -80,6 +82,28 @@ public extension PraxisCapabilityCatalogBuilder {
           .init(key: "backend", value: "provider.embedding")
         ],
         tags: ["phase3", "thin-baseline", "embedding"]
+      ),
+      .init(
+        id: PraxisThinCapabilityKey.shellApprove.capabilityID,
+        name: "Shell Approve",
+        summary: "Request bounded shell execution approval through the current CMP/TAP review path without leaking host approval internals.",
+        kind: .tool,
+        supportsPrepare: false,
+        routeHints: [
+          .init(key: "backend", value: "cmp.peer-approval")
+        ],
+        tags: ["phase5", "bounded-execution", "shell", "approval", "risky"]
+      ),
+      .init(
+        id: PraxisThinCapabilityKey.shellRun.capabilityID,
+        name: "Shell Run",
+        summary: "Run one bounded shell command through the current host shell lane with explicit side-effect labeling.",
+        kind: .tool,
+        supportsPrepare: false,
+        routeHints: [
+          .init(key: "backend", value: "host.shell")
+        ],
+        tags: ["phase5", "bounded-execution", "shell", "risky"]
       ),
       .init(
         id: PraxisThinCapabilityKey.toolCall.capabilityID,
@@ -161,7 +185,7 @@ public extension PraxisCapabilityCatalogBuilder {
     ]
 
     return PraxisThinCapabilityBaseline(
-      summary: "Phase 3 thin capability baseline covers generation, embeddings, tool calls, file upload, batch submission, runtime session opening, and the first search chain.",
+      summary: "Thin capability baseline covers generation, embeddings, bounded shell approval and execution, tool calls, file upload, batch submission, runtime session opening, and the first search chain.",
       manifests: manifests
     )
   }

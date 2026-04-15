@@ -699,6 +699,30 @@ struct PraxisRuntimeKitTests {
         preferredModel: "local-embed-test"
       )
     )
+    let shell = try await client.capabilities.runShell(
+      .init(
+        summary: "Emit a bounded runtime shell marker",
+        command: "printf 'runtime-kit-capability-test\\n'",
+        workingDirectory: rootDirectory.path,
+        timeoutSeconds: 2
+      )
+    )
+    let shellApproval = try await client.capabilities.requestShellApproval(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        requestedTier: .b2,
+        summary: "Request bounded shell approval for RuntimeKit capability coverage"
+      )
+    )
+    let shellApprovalReadback = try await client.capabilities.readbackShellApproval(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local"
+      )
+    )
     let toolCall = try await client.capabilities.callTool(
       .init(
         toolName: "web.search",
@@ -745,6 +769,8 @@ struct PraxisRuntimeKitTests {
 
     #expect(catalog.capabilityIDs.map(\.rawValue).contains("generate.create"))
     #expect(catalog.capabilityIDs.map(\.rawValue).contains("session.open"))
+    #expect(catalog.capabilityIDs.map(\.rawValue).contains("shell.approve"))
+    #expect(catalog.capabilityIDs.map(\.rawValue).contains("shell.run"))
     #expect(catalog.capabilityIDs.map(\.rawValue).contains("search.web"))
     #expect(catalog.capabilityIDs.map(\.rawValue).contains("search.fetch"))
     #expect(catalog.capabilityIDs.map(\.rawValue).contains("search.ground"))
@@ -756,6 +782,24 @@ struct PraxisRuntimeKitTests {
     #expect(streamed.chunks.isEmpty == false)
     #expect(embedded.capabilityID.rawValue == "embed.create")
     #expect(embedded.vectorLength > 0)
+    #expect(shellApproval.capabilityID.rawValue == "shell.approve")
+    #expect(shellApproval.approvedCapabilityID.rawValue == "shell.run")
+    #expect(shellApproval.riskLevel == "risky")
+    #expect(shellApproval.outcome == "review_required")
+    #expect(shellApprovalReadback.found)
+    #expect(shellApprovalReadback.approvedCapabilityID?.rawValue == "shell.run")
+    #expect(shellApprovalReadback.riskLevel == "risky")
+    #expect(shellApprovalReadback.outcome == "review_required")
+    #expect(shell.capabilityID.rawValue == "shell.run")
+    #expect(shell.riskLabel == "risky")
+    #expect(shell.environmentKeys.isEmpty)
+#if os(macOS)
+    #expect(shell.succeeded)
+    #expect(shell.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "runtime-kit-capability-test")
+#else
+    #expect(shell.terminationReason == .failedToLaunch)
+    #expect(shell.stderr.isEmpty == false)
+#endif
     #expect(toolCall.capabilityID.rawValue == "tool.call")
     #expect(toolCall.toolName == "web.search")
     #expect(fileUpload.capabilityID.rawValue == "file.upload")
@@ -772,5 +816,71 @@ struct PraxisRuntimeKitTests {
     #expect(grounded.capabilityID.rawValue == "search.ground")
     #expect(grounded.pages.isEmpty == false)
     #expect(grounded.facts.count == 3)
+  }
+
+  @Test
+  func capabilityClientRecoversShellApprovalAcrossFreshClientsWithoutLeakingLegacyCapabilityKeys() async throws {
+    let rootDirectory = try makeRuntimeKitTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let firstClient = try PraxisRuntimeClient.makeDefault(rootDirectory: rootDirectory)
+    let requested = try await firstClient.capabilities.requestShellApproval(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        requestedTier: .b2,
+        summary: "Request bounded shell approval for recovery coverage"
+      )
+    )
+
+    let secondClient = try PraxisRuntimeClient.makeDefault(rootDirectory: rootDirectory)
+    let recovered = try await secondClient.capabilities.readbackShellApproval(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local"
+      )
+    )
+
+    #expect(requested.capabilityID.rawValue == "shell.approve")
+    #expect(requested.approvedCapabilityID.rawValue == "shell.run")
+    #expect(requested.riskLevel == "risky")
+    #expect(recovered.found)
+    #expect(recovered.approvedCapabilityID?.rawValue == "shell.run")
+    #expect(recovered.riskLevel == "risky")
+    #expect(recovered.outcome == requested.outcome)
+    #expect(recovered.humanGateState == requested.humanGateState)
+  }
+
+  @Test
+  func capabilityClientRejectsUnsupportedShellStreamingAndPTYRequests() async throws {
+    let rootDirectory = try makeRuntimeKitTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let client = try PraxisRuntimeClient.makeDefault(rootDirectory: rootDirectory)
+
+    await #expect(throws: PraxisError.self) {
+      _ = try await client.capabilities.runShell(
+        .init(
+          summary: "Attempt unsupported RuntimeKit shell streaming",
+          command: "printf 'streaming\\n'",
+          workingDirectory: rootDirectory.path,
+          timeoutSeconds: 2,
+          outputMode: .streaming
+        )
+      )
+    }
+    await #expect(throws: PraxisError.self) {
+      _ = try await client.capabilities.runShell(
+        .init(
+          summary: "Attempt unsupported RuntimeKit shell PTY",
+          command: "printf 'pty\\n'",
+          workingDirectory: rootDirectory.path,
+          timeoutSeconds: 2,
+          requiresPTY: true
+        )
+      )
+    }
   }
 }

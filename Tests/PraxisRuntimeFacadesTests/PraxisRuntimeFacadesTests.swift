@@ -5,6 +5,7 @@ import PraxisCmpFiveAgent
 import PraxisCmpDelivery
 import PraxisCmpTypes
 import PraxisCapabilityResults
+import PraxisCoreTypes
 import PraxisGoal
 import PraxisInfraContracts
 import PraxisMpFiveAgent
@@ -91,6 +92,120 @@ struct PraxisRuntimeFacadesTests {
     #expect(facade.cmpFacade.rolesFacade === facade.cmpRolesFacade)
     #expect(facade.cmpFacade.controlFacade === facade.cmpControlFacade)
     #expect(facade.cmpFacade.readbackFacade === facade.cmpReadbackFacade)
+  }
+
+  @Test
+  func capabilityFacadeProjectsBoundedShellExecution() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-runtime-facades-shell-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: rootDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let facade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(
+      hostAdapters: PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory),
+      blueprint: PraxisRuntimeGatewayModule.bootstrap
+    )
+
+    let catalog = facade.capabilityFacade.catalog()
+    let shell = try await facade.capabilityFacade.runShell(
+      .init(
+        summary: "Emit one facade shell marker",
+        command: "printf 'runtime-facade-shell-test\\n'",
+        workingDirectory: rootDirectory.path,
+        environment: ["PRAXIS_TEST_ENV": "smoke"],
+        timeoutSeconds: 2
+      )
+    )
+
+    #expect(catalog.entries.map(\.manifest.id.rawValue).contains("shell.run"))
+    #expect(shell.capabilityID == capabilityID("shell.run"))
+    #expect(shell.environmentKeys == ["PRAXIS_TEST_ENV"])
+    #expect(shell.riskLabel == "risky")
+    #expect(shell.outputMode == .buffered)
+#if os(macOS)
+    #expect(shell.exitCode == 0)
+    #expect(shell.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "runtime-facade-shell-test")
+#else
+    #expect(shell.terminationReason == .failedToLaunch)
+    #expect(shell.stderr.isEmpty == false)
+#endif
+  }
+
+  @Test
+  func capabilityFacadeProjectsBoundedShellApprovalWithoutLeakingLegacyCapabilityKeys() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-runtime-facades-shell-approval-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: rootDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let facade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(
+      hostAdapters: PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory),
+      blueprint: PraxisRuntimeGatewayModule.bootstrap
+    )
+
+    let catalog = facade.capabilityFacade.catalog()
+    let approval = try await facade.capabilityFacade.requestShellApproval(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local",
+        requestedTier: .b2,
+        summary: "Request bounded shell approval for facade coverage"
+      )
+    )
+    let readback = try await facade.capabilityFacade.readbackShellApproval(
+      .init(
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "checker.local"
+      )
+    )
+
+    #expect(catalog.entries.map(\.manifest.id.rawValue).contains("shell.approve"))
+    #expect(approval.capabilityID == capabilityID("shell.approve"))
+    #expect(approval.approvedCapabilityID == capabilityID("shell.run"))
+    #expect(approval.riskLevel == "risky")
+    #expect(approval.outcome == "review_required")
+    #expect(readback.found)
+    #expect(readback.approvedCapabilityID == capabilityID("shell.run"))
+    #expect(readback.riskLevel == "risky")
+    #expect(readback.outcome == "review_required")
+  }
+
+  @Test
+  func capabilityFacadeRejectsUnsupportedShellStreamingAndPTYRequests() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-runtime-facades-shell-options-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: rootDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let facade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(
+      hostAdapters: PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory),
+      blueprint: PraxisRuntimeGatewayModule.bootstrap
+    )
+
+    await #expect(throws: PraxisError.self) {
+      _ = try await facade.capabilityFacade.runShell(
+        .init(
+          summary: "Attempt unsupported streaming shell output",
+          command: "printf 'streaming\\n'",
+          workingDirectory: rootDirectory.path,
+          timeoutSeconds: 2,
+          outputMode: .streaming
+        )
+      )
+    }
+    await #expect(throws: PraxisError.self) {
+      _ = try await facade.capabilityFacade.runShell(
+        .init(
+          summary: "Attempt unsupported PTY shell execution",
+          command: "printf 'pty\\n'",
+          workingDirectory: rootDirectory.path,
+          timeoutSeconds: 2,
+          requiresPTY: true
+        )
+      )
+    }
   }
 
   @Test
