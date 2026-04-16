@@ -23,11 +23,11 @@ test("formatChatGPTPlanLabel normalizes known subscription tiers", () => {
 });
 
 test("resolveChatGPTPlanTone maps subscription tiers onto display tones", () => {
-  assert.equal(resolveChatGPTPlanTone("pro"), "planPro");
-  assert.equal(resolveChatGPTPlanTone("pro5x"), "planPro5x");
-  assert.equal(resolveChatGPTPlanTone("plus"), "planPlus");
-  assert.equal(resolveChatGPTPlanTone("go"), "planGo");
-  assert.equal(resolveChatGPTPlanTone("free"), "planFree");
+  assert.equal(resolveChatGPTPlanTone("pro"), "success");
+  assert.equal(resolveChatGPTPlanTone("pro5x"), "fast");
+  assert.equal(resolveChatGPTPlanTone("plus"), "info");
+  assert.equal(resolveChatGPTPlanTone("go"), "warning");
+  assert.equal(resolveChatGPTPlanTone("free"), "default");
   assert.equal(resolveChatGPTPlanTone("unknown"), undefined);
 });
 
@@ -42,7 +42,7 @@ test("buildCoreIdentityLabelPresentation prefers subscription identity for offic
   assert.equal(presentation.text, "ChatGPT Account with Plus Subscription");
   assert.deepEqual(presentation.valueSegments, [
     { text: "ChatGPT Account with " },
-    { text: "Plus", tone: "planPlus" },
+    { text: "Plus", tone: "info" },
     { text: " Subscription" },
   ]);
 });

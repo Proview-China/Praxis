@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type { ProviderId, SdkLayer } from "../../rax/index.js";
 import { loadResolvedRoleConfig } from "../../raxcode-config.js";
-import { loadOpenAILiveConfig, resolveProviderGenerationVariant, resolveOpenAIGenerationVariant } from "../../rax/live-config.js";
+import { loadOpenAILiveConfig, type OpenAILiveConfig } from "../../rax/live-config.js";
 import {
   executeModelInference,
   type ModelInferenceExecutionResult,
@@ -13,6 +13,53 @@ import {
 } from "../integrations/model-route-features.js";
 import type { GoalFrameCompiled, ModelInferenceIntent } from "../types/index.js";
 import type { CmpRoleLiveLlmExecutor } from "./types.js";
+
+type ProviderGenerationVariant =
+  | "responses"
+  | "chat_completions_compat"
+  | "messages"
+  | "generateContent";
+
+function isChatgptCodexBackendBaseURL(baseURL: string): boolean {
+  return /chatgpt\.com\/backend-api\/codex\/?$/iu.test(baseURL.trim());
+}
+
+function resolveOpenAIGenerationVariant(
+  config: Pick<OpenAILiveConfig, "baseURL"> & { apiStyle?: string },
+): ProviderGenerationVariant {
+  const apiStyle = config.apiStyle?.trim().toLowerCase();
+  if (apiStyle === "responses") {
+    return "responses";
+  }
+  if (
+    apiStyle === "chat_completions"
+    || apiStyle === "chat/completions"
+    || apiStyle === "chat_completions_compat"
+    || apiStyle === "chat-completions"
+  ) {
+    return "chat_completions_compat";
+  }
+  return isChatgptCodexBackendBaseURL(config.baseURL)
+    ? "responses"
+    : "chat_completions_compat";
+}
+
+function resolveProviderGenerationVariant(input: {
+  provider: ProviderId;
+  baseURL: string;
+  apiStyle?: string;
+}): ProviderGenerationVariant {
+  if (input.provider === "openai") {
+    return resolveOpenAIGenerationVariant({
+      baseURL: input.baseURL,
+      apiStyle: input.apiStyle,
+    });
+  }
+  if (input.provider === "anthropic") {
+    return "messages";
+  }
+  return "generateContent";
+}
 
 export interface CreateCmpRoleLiveLlmModelExecutorInput {
   provider?: ProviderId;

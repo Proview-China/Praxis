@@ -8,8 +8,6 @@ import type { TapAgentModelRoute } from "../integrations/tap-agent-model.js";
 import type { createAgentCoreRuntime } from "../index.js";
 import {
   loadOpenAILiveConfig,
-  resolveOpenAIGenerationVariant,
-  resolveProviderGenerationVariant,
 } from "../../rax/live-config.js";
 import {
   DEFAULT_RAXCODE_LIVE_CHAT_MODEL_PLAN,
@@ -208,6 +206,16 @@ export interface LiveCliSkillOverlayEntry {
   bodyRef?: string;
 }
 
+export interface LiveCliWorkspaceInitContext {
+  schemaVersion: "core-workspace-init-context/v1";
+  sourcePath: string;
+  bodyRef: string;
+  summary: string;
+  excerpt: string;
+  updatedAt: string;
+  freshness: "fresh" | "changed";
+}
+
 export interface LiveCliState {
   runtime: LiveCliRuntime;
   sessionId: string;
@@ -218,7 +226,7 @@ export interface LiveCliState {
   skillOverlayEntries?: LiveCliSkillOverlayEntry[];
   memoryOverlayEntries?: LiveCliSkillOverlayEntry[];
   mpRoutedPackage?: import("../core-prompt/types.js").CoreMpRoutedPackageV1;
-  workspaceInitContext?: import("../core-prompt/types.js").CoreWorkspaceInitContextV1;
+  workspaceInitContext?: LiveCliWorkspaceInitContext;
   latestCmp?: CmpTurnArtifacts;
   pendingCmpSync?: Promise<void>;
   cmpInfraReady?: Promise<void>;
@@ -3568,13 +3576,9 @@ export function toTapAgentModelRoute(
 ): Partial<TapAgentModelRoute> {
   const resolved = roleId ? loadResolvedRoleConfig(roleId as Parameters<typeof loadResolvedRoleConfig>[0]) : null;
   const provider = resolved?.profile.provider ?? "openai";
-  const variant = resolved
-    ? resolveProviderGenerationVariant({
-        provider: resolved.profile.provider,
-        baseURL: resolved.profile.route.baseURL,
-        apiStyle: resolved.profile.route.apiStyle,
-      })
-    : resolveOpenAIGenerationVariant(loadOpenAILiveConfig("core.main"));
+  const variant = resolved?.profile.route.apiStyle === "messages" || resolved?.profile.route.apiStyle === "generateContent"
+    ? "provider-native"
+    : "responses";
   const routeKind = resolved
     ? resolveProviderRouteKind({
       provider: resolved.profile.provider,

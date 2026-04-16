@@ -22,7 +22,6 @@ import {
   loadInitCompilerRepoExcerpts,
   parseInitArtifact,
   parseInitCompilerResult,
-  type InitCompilerQuestion,
 } from "./live-agent-chat/init-compiler.js";
 import {
   parseHumanGateDecisionEnvelope,
@@ -73,13 +72,8 @@ import {
   createCoreTaskStatusDisciplineLines,
   createCoreUserInputContractLines,
   createCoreValidationLadderLines,
-  createCoreWorkspaceInitDisciplineLines,
   createCoreWorkflowProtocolLines,
 } from "./core-prompt/index.js";
-import type {
-  CoreOverlayIndexEntryV1,
-  CoreWorkspaceInitContextV1,
-} from "./core-prompt/types.js";
 import {
   createGoalSource,
 } from "./goal/index.js";
@@ -177,12 +171,6 @@ import type {
   HumanGatePanelEntry,
 } from "./tui-input/human-gate-panel.js";
 import {
-  loadDirectTuiSessionSnapshot,
-  resolveDirectTuiSnapshotTurnIndex,
-  restoreDirectTuiDialogueTurnsFromSnapshot,
-} from "./tui-input/direct-session-store.js";
-import { resolveFastServiceTierSupportFromCache } from "./tui-input/model-catalog.js";
-import {
   createAgentLineage,
   createCmpBranchFamily,
 } from "./cmp-types/index.js";
@@ -190,7 +178,6 @@ import {
   createRaxCmpConfig,
   createRaxCmpFacade,
   rax,
-  type ProviderId,
   type RaxCmpPort,
 } from "../rax/index.js";
 import {
@@ -198,13 +185,10 @@ import {
   isChatgptCodexBackendBaseURL,
   loadOpenAILiveConfig,
   prepareResponsesParamsForOpenAIAuth,
-  resolveProviderGenerationVariant,
-  resolveOpenAIGenerationVariant,
 } from "../rax/live-config.js";
 import {
   isRaxcodeRoleId,
   loadRaxcodeConfigFile,
-  loadResolvedRoleConfig,
   loadRaxcodeRuntimeConfigSnapshot,
   resolveConfiguredWorkspaceRoot,
   RaxcodeConfigError,
@@ -212,30 +196,16 @@ import {
 } from "../raxcode-config.js";
 import { refreshOpenAIOAuthIfNeeded } from "../raxcode-openai-auth.js";
 import {
-  resolveAppRoot,
   resolveLiveReportsDir,
-  resolveWorkspaceRaxodeAgentsMarkdownPath,
-  resolveWorkspaceRaxodeInitStatePath,
+  resolveWorkspaceRaxodeAgentsDir,
   resolveWorkspaceRaxodeRoot,
 } from "../runtime-paths.js";
 import {
   readWorkspaceRaxodeGitReadback,
 } from "./tui-input/workspace-raxode-store.js";
-import {
-  resolveProviderRouteKind,
-  sanitizeProviderRouteFeatureOptions,
-} from "./integrations/model-route-features.js";
 
 let CURRENT_UI_MODE: "full" | "direct" = "full";
 const execFile = promisify(execFileCallback);
-
-interface LiveCliRouteConfig {
-  provider: ProviderId;
-  baseURL: string;
-  model: string;
-  contextWindowTokens?: number;
-  openAIConfig?: ReturnType<typeof loadOpenAILiveConfig>;
-}
 
 interface CmpPanelSnapshotEntry {
   sectionId: string;
@@ -305,15 +275,12 @@ interface InitPanelSnapshotPayload {
   summaryLines: string[];
   status:
     | "idle"
-    | "validating_workspace"
     | "awaiting_seed"
     | "analyzing_repo"
     | "asking_questions"
     | "synthesizing_agents"
-    | "synthesizing"
     | "registering_git"
     | "completed"
-    | "interrupted"
     | "ready"
     | "failed"
     | "degraded";
@@ -358,29 +325,14 @@ async function executeCliModelInference(
   params: ModelInferenceExecutionParams,
 ): Promise<ModelInferenceExecutionResult> {
   const metadata = params.intent.frame.metadata ?? {};
+  const provider = readString(metadata.provider) ?? "openai";
+  const variant = readString(metadata.variant) ?? "responses";
   const roleId = typeof metadata.roleId === "string" && isRaxcodeRoleId(metadata.roleId)
     ? metadata.roleId
     : "core.main";
-  const resolvedRole = loadResolvedRoleConfig(roleId);
-  const provider = readString(metadata.provider) ?? resolvedRole.profile.provider;
-  const variant = readString(metadata.variant) ?? resolveProviderGenerationVariant({
-    provider: resolvedRole.profile.provider,
-    baseURL: resolvedRole.profile.route.baseURL,
-    apiStyle: resolvedRole.profile.route.apiStyle,
-  });
-  const routeKind = resolveProviderRouteKind({
-    provider: resolvedRole.profile.provider,
-    baseURL: resolvedRole.profile.route.baseURL,
-    apiStyle: resolvedRole.profile.route.apiStyle,
-    variant,
-  });
-  const model = readString(metadata.model) ?? resolvedRole.profile.model;
-  const sanitized = sanitizeProviderRouteFeatureOptions(routeKind, {
-    reasoningEffort: readString(metadata.reasoningEffort) as string | undefined,
-    serviceTier: readString(metadata.serviceTier) as "fast" | undefined,
-  });
-  const reasoningEffort = sanitized.reasoningEffort;
-  const requestedServiceTier = sanitized.serviceTier;
+  const model = readString(metadata.model) ?? loadOpenAILiveConfig(roleId).model;
+  const reasoningEffort = readString(metadata.reasoningEffort) as string | undefined;
+  const serviceTier = readString(metadata.serviceTier) as "fast" | undefined;
   const maxOutputTokens = readPositiveInteger(metadata.maxOutputTokens);
   const promptMessages = readPromptMessagesMetadata(metadata.promptMessages);
   const inputImageUrls = Array.isArray(metadata.inputImageUrls)
@@ -394,10 +346,6 @@ async function executeCliModelInference(
 
   await refreshOpenAIOAuthIfNeeded();
   const config = loadOpenAILiveConfig(roleId);
-  const serviceTier = requestedServiceTier === "fast"
-    && resolveFastServiceTierSupportFromCache(config, model, resolveAppRoot())
-    ? "fast"
-    : undefined;
   const client = createOpenAIClient(config);
   const label = inferStreamLabel(params);
   const logger = metadata.cliLogger instanceof LiveChatLogger
@@ -827,7 +775,6 @@ function createCoreUserInputAssembly(input: {
   skillEntries?: import("./core-prompt/types.js").CoreOverlayIndexEntryV1[];
   memoryEntries?: import("./core-prompt/types.js").CoreOverlayIndexEntryV1[];
   mpRoutedPackage?: import("./core-prompt/types.js").CoreMpRoutedPackageV1;
-  workspaceInitContext?: import("./core-prompt/types.js").CoreWorkspaceInitContextV1;
   toolResultText?: string;
   capabilityHistoryText?: string;
   groundingEvidenceText?: string;
@@ -858,7 +805,6 @@ function createCoreUserInputAssembly(input: {
     transcript: input.transcript,
     cmp: input.cmp,
     mpRoutedPackage: input.mpRoutedPackage,
-    workspaceInitContext: input.workspaceInitContext,
     availableCapabilitiesText: `Currently registered TAP capabilities: ${availableCapabilities || "(none)"}.`,
     capabilityUsageIndexText,
     skillEntries: input.skillEntries,
@@ -877,9 +823,6 @@ function createCoreUserInputAssembly(input: {
       "Use the CMP package summary below as the current executable context.",
       "Execution mode is active.",
       "TAP governance is configured in bapr + prefer_auto for this CLI.",
-      ...createCoreWorkspaceInitDisciplineLines({
-        forceFinalAnswer: input.forceFinalAnswer,
-      }),
       ...createCoreCmpHandoffLines({
         cmpContextPackage: contextualInput.cmpContextPackage,
         forceFinalAnswer: input.forceFinalAnswer,
@@ -1014,18 +957,16 @@ function createCoreActionPlannerAssembly(
     transcript: state.transcript,
     cmp,
     mpRoutedPackage: state.mpRoutedPackage,
-    workspaceInitContext: state.workspaceInitContext,
     availableCapabilitiesText: `Available capabilities: ${availableCapabilities.join(", ") || "(none)"}`,
     capabilityUsageIndexText,
     skillEntries: state.skillOverlayEntries,
-    memoryEntries: mergeCoreMemoryOverlayEntries(state),
+    memoryEntries: state.memoryOverlayEntries,
   });
   const modeInstructions = [
       "Return strict JSON only.",
       "Choose the next action for the frontstage core agent.",
       "Execution mode is active.",
       "TAP governance is bapr + prefer_auto for this CLI.",
-      ...createCoreWorkspaceInitDisciplineLines({}),
       ...createCoreCmpHandoffLines({
         cmpContextPackage: contextualInput.cmpContextPackage,
       }),
@@ -1084,13 +1025,13 @@ function createCoreActionPlannerAssembly(
 
 function createCoreContextTelemetry(input: {
   state: LiveCliState;
-  config: LiveCliRouteConfig;
+  config: ReturnType<typeof loadOpenAILiveConfig>;
   promptKind: CoreContextSnapshot["promptKind"];
   promptText: string;
 }): CoreContextSnapshot {
   return createCoreContextSnapshot({
-    provider: input.config.provider,
-    model: input.config.model,
+    provider: "openai",
+    model: LIVE_CHAT_MODEL_PLAN.core.model,
     promptKind: input.promptKind,
     promptText: input.promptText,
     transcriptText: formatTranscript(input.state.transcript.slice(-6)),
@@ -1106,7 +1047,7 @@ async function runCoreModelPass(input: {
   promptBlocks?: import("./types/kernel-goal.js").GoalPromptBlock[];
   promptMessages?: Array<{ role: "system" | "developer" | "user"; content: string }>;
   cmp?: CmpTurnArtifacts;
-  config: LiveCliRouteConfig;
+  config: ReturnType<typeof loadOpenAILiveConfig>;
   inputImageUrls?: string[];
   reasoningEffortOverride?: string;
 }): Promise<{
@@ -1141,46 +1082,28 @@ async function runCoreModelPass(input: {
     goalId: randomUUID(),
     sessionId: input.state.sessionId,
     userInput: input.userInput,
-      metadata: (() => {
-        const resolvedCoreRole = loadResolvedRoleConfig("core.main");
-        const variant = resolveProviderGenerationVariant({
-          provider: resolvedCoreRole.profile.provider,
-          baseURL: resolvedCoreRole.profile.route.baseURL,
-          apiStyle: resolvedCoreRole.profile.route.apiStyle,
-        });
-        const routeKind = resolveProviderRouteKind({
-          provider: resolvedCoreRole.profile.provider,
-          baseURL: resolvedCoreRole.profile.route.baseURL,
-          apiStyle: resolvedCoreRole.profile.route.apiStyle,
-          variant,
-        });
-        const sanitized = sanitizeProviderRouteFeatureOptions(routeKind, {
-          reasoningEffort: input.reasoningEffortOverride ?? resolveReasoningEffort(LIVE_CHAT_MODEL_PLAN.core),
-          serviceTier: LIVE_CHAT_MODEL_PLAN.core.serviceTier,
-        });
-        return {
-          roleId: "core.main",
-          provider: resolvedCoreRole.profile.provider,
-          model: LIVE_CHAT_MODEL_PLAN.core.model,
-          variant,
-          ...(input.promptMessages?.length
-            ? { promptMessages: input.promptMessages }
-            : {}),
-          reasoningEffort: sanitized.reasoningEffort,
-          serviceTier: sanitized.serviceTier,
-          cliHarness: "praxis-live-cli",
-          cliLogger: input.state.logger,
-          cliTurnIndex: input.state.turnIndex,
-          cliUiMode: input.state.uiMode,
-          ...(input.inputImageUrls?.length
-            ? { inputImageUrls: input.inputImageUrls }
-            : {}),
-          ...(input.cmp ? {
-            cmpPackageId: input.cmp.packageId,
-            cmpPackageRef: input.cmp.packageRef,
-        } : {}),
-        };
-      })(),
+      metadata: {
+        roleId: "core.main",
+        provider: "openai",
+        model: LIVE_CHAT_MODEL_PLAN.core.model,
+        variant: "responses",
+        ...(input.promptMessages?.length
+          ? { promptMessages: input.promptMessages }
+          : {}),
+        reasoningEffort: input.reasoningEffortOverride ?? resolveReasoningEffort(LIVE_CHAT_MODEL_PLAN.core),
+        serviceTier: LIVE_CHAT_MODEL_PLAN.core.serviceTier,
+        cliHarness: "praxis-live-cli",
+        cliLogger: input.state.logger,
+        cliTurnIndex: input.state.turnIndex,
+        cliUiMode: input.state.uiMode,
+        ...(input.inputImageUrls?.length
+          ? { inputImageUrls: input.inputImageUrls }
+          : {}),
+        ...(input.cmp ? {
+          cmpPackageId: input.cmp.packageId,
+          cmpPackageRef: input.cmp.packageRef,
+      } : {}),
+    },
   });
 
   if (input.promptBlocks?.length) {
@@ -1305,22 +1228,6 @@ async function runCoreActionPlanner(
 ): Promise<CoreActionEnvelope> {
   const assembly = createCoreActionPlannerAssembly(state, userMessage, cmp);
   const instructionText = assembly.promptText;
-  const resolvedCoreRole = loadResolvedRoleConfig("core.main");
-  const variant = resolveProviderGenerationVariant({
-    provider: resolvedCoreRole.profile.provider,
-    baseURL: resolvedCoreRole.profile.route.baseURL,
-    apiStyle: resolvedCoreRole.profile.route.apiStyle,
-  });
-  const routeKind = resolveProviderRouteKind({
-    provider: resolvedCoreRole.profile.provider,
-    baseURL: resolvedCoreRole.profile.route.baseURL,
-    apiStyle: resolvedCoreRole.profile.route.apiStyle,
-    variant,
-  });
-  const sanitized = sanitizeProviderRouteFeatureOptions(routeKind, {
-    reasoningEffort: resolveReasoningEffort(LIVE_CHAT_MODEL_PLAN.core),
-    serviceTier: LIVE_CHAT_MODEL_PLAN.core.serviceTier,
-  });
   const intent = {
     intentId: randomUUID(),
     sessionId: state.sessionId,
@@ -1338,13 +1245,13 @@ async function runCoreActionPlanner(
       cacheKey: `core-action-envelope:${randomUUID()}`,
       metadata: {
         roleId: "core.main",
-        provider: resolvedCoreRole.profile.provider,
+        provider: "openai",
         model: LIVE_CHAT_MODEL_PLAN.core.model,
-        variant,
+        variant: "responses",
         promptBlocks: assembly.promptBlocks,
         promptMessages: assembly.promptMessages,
-        reasoningEffort: sanitized.reasoningEffort,
-        serviceTier: sanitized.serviceTier,
+        reasoningEffort: resolveReasoningEffort(LIVE_CHAT_MODEL_PLAN.core),
+        serviceTier: LIVE_CHAT_MODEL_PLAN.core.serviceTier,
         streamLabel: "core/action",
         cliLogger: state.logger,
         cliTurnIndex: state.turnIndex,
@@ -1360,7 +1267,6 @@ async function runCoreActionPlanner(
 }
 
 async function runCmpTurn(state: LiveCliState, userMessage: string): Promise<CmpTurnArtifacts> {
-  await state.cmpInfraReady?.catch(() => undefined);
   const turnId = `${state.turnIndex}`;
   const timestamp = new Date().toISOString();
   const agentId = "cmp-live-cli-main";
@@ -2006,54 +1912,22 @@ function buildCapabilitiesPanelSnapshot(state: LiveCliState): CapabilityPanelSna
   };
 }
 
-function createBootingCmpPanelSnapshot(): CmpPanelSnapshotPayload {
-  return {
-    summaryLines: [
-      "CMP viewer is warming up.",
-      "Checking CMP readback truth and section availability.",
-      "db=warming_up readback=warming_up",
-    ],
-    status: "booting",
-    sourceKind: "warming_up",
-    emptyReason: "CMP readback is still warming up.",
-    truthStatus: "warming_up",
-    readbackStatus: "warming_up",
-    entries: [],
-  };
-}
-
-function createBootingMpPanelSnapshot(cwd: string): MpPanelSnapshotPayload {
-  const rootPath = resolve(cwd, "memory", "generated", "mp-overlay-cache");
-  return {
-    summaryLines: [
-      "MP viewer is warming up.",
-      `source=warming_up · ${rootPath}`,
-      "Waiting for LanceDB and overlay bootstrap.",
-    ],
-    status: "booting",
-    sourceKind: "warming_up",
-    emptyReason: "MP LanceDB and memory overlay bootstrap are still warming up.",
-    sourceClass: "warming_up",
-    rootPath,
-    recordCount: 0,
-    entries: [],
-  };
-}
-
-function compactInitLine(value: string, maxChars = 160): string {
+function compactInitLine(value: string, maxChars = 220): string {
   const normalized = value.replace(/\s+/gu, " ").trim();
-  if (normalized.length <= maxChars) {
-    return normalized;
+  if (!normalized) {
+    return "";
   }
-  return `${normalized.slice(0, maxChars - 1).trimEnd()}…`;
+  return normalized.length <= maxChars
+    ? normalized
+    : `${normalized.slice(0, maxChars - 1).trimEnd()}…`;
 }
 
 function resolveLiveInitArtifactPath(workspaceRoot: string): string {
-  return resolveWorkspaceRaxodeAgentsMarkdownPath(workspaceRoot);
+  return resolve(resolveWorkspaceRaxodeRoot(workspaceRoot), "AGENTS.md");
 }
 
 function resolveLiveInitStatePath(workspaceRoot: string): string {
-  return resolveWorkspaceRaxodeInitStatePath(workspaceRoot);
+  return resolve(resolveWorkspaceRaxodeRoot(workspaceRoot), "init-state.json");
 }
 
 function summarizeWorkspaceInitPreamble(parsed: ReturnType<typeof parseInitArtifact>): string {
@@ -2114,37 +1988,6 @@ async function refreshWorkspaceInitContext(
   }
 }
 
-function createWorkspaceInitOverlayEntry(
-  workspaceInitContext: CoreWorkspaceInitContextV1 | undefined,
-): CoreOverlayIndexEntryV1[] {
-  if (!workspaceInitContext) {
-    return [];
-  }
-  return [{
-    id: "workspace-init:agents",
-    label: "workspace/.raxode/AGENTS.md",
-    summary: `workspace init context. ${workspaceInitContext.summary}`,
-    bodyRef: workspaceInitContext.bodyRef,
-  }];
-}
-
-function mergeCoreMemoryOverlayEntries(state: LiveCliState): CoreOverlayIndexEntryV1[] | undefined {
-  const merged = [
-    ...createWorkspaceInitOverlayEntry(state.workspaceInitContext),
-    ...(state.memoryOverlayEntries ?? []),
-  ];
-  if (merged.length === 0) {
-    return undefined;
-  }
-  const deduped = new Map<string, CoreOverlayIndexEntryV1>();
-  for (const entry of merged) {
-    if (!deduped.has(entry.id)) {
-      deduped.set(entry.id, entry);
-    }
-  }
-  return [...deduped.values()].slice(0, 6);
-}
-
 function createInitProjectId(workspaceRoot: string): string {
   const slug = basename(workspaceRoot)
     .replace(/[^a-z0-9]+/giu, "-")
@@ -2169,36 +2012,32 @@ async function inspectWorkspaceInitReality(workspaceRoot: string): Promise<{
   } catch {
     agentsExists = false;
   }
+
+  let repoState: "empty" | "non_empty" = "empty";
+  try {
+    const visible = await readdir(workspaceRoot);
+    repoState = visible.some((entry) => entry !== ".git" && entry !== ".raxode") ? "non_empty" : "empty";
+  } catch {
+    repoState = "empty";
+  }
+
   let initStateRecord: WorkspaceInitStateRecord | undefined;
   try {
-    const raw = await readFile(initStatePath, "utf8");
-    const parsed = JSON.parse(raw) as Partial<WorkspaceInitStateRecord>;
-    if (
-      parsed
-      && typeof parsed.status === "string"
-      && typeof parsed.initializedAt === "string"
-      && typeof parsed.gitRegistered === "boolean"
-      && typeof parsed.projectId === "string"
-      && typeof parsed.defaultAgentId === "string"
-    ) {
-      initStateRecord = parsed as WorkspaceInitStateRecord;
+    const content = await readFile(initStatePath, "utf8");
+    const parsed = JSON.parse(content) as WorkspaceInitStateRecord;
+    if (parsed && typeof parsed === "object") {
+      initStateRecord = parsed;
     }
   } catch {
     initStateRecord = undefined;
   }
-  const visibleEntries = await readdir(workspaceRoot, { withFileTypes: true }).catch(() => []);
-  const repoState = visibleEntries.some((entry) =>
-    entry.name !== ".git"
-    && entry.name !== ".raxode"
-    && entry.name !== ".DS_Store")
-    ? "non_empty"
-    : "empty";
+
   const gitRegistered = initStateRecord?.gitRegistered === true;
-  const initState = !agentsExists
-    ? "uninitialized"
-    : gitRegistered
-      ? "initialized"
-      : "partial";
+  const initState = agentsExists && gitRegistered
+    ? "initialized"
+    : agentsExists
+      ? "partial"
+      : "uninitialized";
   return {
     repoState,
     gitRegistered,
@@ -2222,8 +2061,6 @@ function buildInitSummaryLines(state: LiveCliState): string[] {
     return initFlow.summaryLines;
   }
   switch (initFlow.status) {
-    case "validating_workspace":
-      return ["Checking workspace reality before initialization starts."];
     case "awaiting_seed":
       return ["The current repository is empty. You need to provide an initialization prompt."];
     case "analyzing_repo":
@@ -2244,14 +2081,6 @@ function buildInitSummaryLines(state: LiveCliState): string[] {
       return [
         "Raxode is registering shared git_infra for this workspace.",
         "Creating or validating the branch family and project readback.",
-      ];
-    case "completed":
-    case "ready":
-      return [];
-    case "interrupted":
-      return [
-        "Initialization was interrupted.",
-        "You can continue later from /init.",
       ];
     case "failed":
       return [
@@ -2351,49 +2180,15 @@ async function loadPersistedInitArtifactIntoState(
   await refreshWorkspaceInitContext(state, workspaceRoot);
 }
 
-function restoreDirectSessionSnapshotIntoState(
-  state: LiveCliState,
-  fallbackDir: string,
-): void {
-  const snapshot = loadDirectTuiSessionSnapshot(state.sessionId, fallbackDir);
-  if (!snapshot) {
-    return;
-  }
-  const restoredTranscript = restoreDirectTuiDialogueTurnsFromSnapshot(snapshot);
-  if (restoredTranscript.length > 0) {
-    state.transcript = restoredTranscript;
-  }
-  const restoredTurnIndex = resolveDirectTuiSnapshotTurnIndex(snapshot);
-  if (restoredTurnIndex > 0) {
-    state.turnIndex = restoredTurnIndex;
-  }
-  if (!state.initFlow && snapshot.compiledInitPreamble) {
-    state.initFlow = {
-      status: "ready",
-      artifactPath: snapshot.initArtifactPath,
-      compiledSessionPreamble: snapshot.compiledInitPreamble,
-      completionSummary: undefined,
-      initState: "initialized",
-      gitState: "registered",
-      updatedAt: snapshot.updatedAt,
-      summaryLines: [],
-      clarificationHistory: [],
-    };
-  }
-}
-
 async function runInitCompilerInference(
-  config: LiveCliRouteConfig,
+  config: ReturnType<typeof loadOpenAILiveConfig>,
   promptText: string,
 ): Promise<string> {
-  if (!config.openAIConfig) {
-    throw new Error("Init compiler currently requires an OpenAI-compatible core route.");
-  }
   await refreshOpenAIOAuthIfNeeded();
-  const client = createOpenAIClient(config.openAIConfig);
+  const client = createOpenAIClient(config);
   const response = await client.responses.create({
     ...prepareResponsesParamsForOpenAIAuth(
-      config.openAIConfig,
+      config,
       {
         model: config.model,
         input: promptText,
@@ -2438,7 +2233,7 @@ function buildInitCompilerRetryPrompt(promptText: string): string {
 async function handleInitRequest(
   state: LiveCliState,
   text: string,
-  config: LiveCliRouteConfig,
+  config: ReturnType<typeof loadOpenAILiveConfig>,
   workspaceRoot: string,
 ): Promise<void> {
   const trimmedText = text.trim();
@@ -2464,9 +2259,7 @@ async function handleInitRequest(
   }
 
   const previous = state.initFlow;
-  const seedText = previous?.seedText?.trim().length
-    ? previous.seedText
-    : trimmedText;
+  const seedText = previous?.seedText?.trim().length ? previous.seedText : trimmedText;
   const clarificationHistory = previous?.clarificationHistory ?? [];
   state.initFlow = {
     status: "analyzing_repo",
@@ -2500,10 +2293,7 @@ async function handleInitRequest(
     repoExcerpts,
   });
 
-  let compileResult:
-    | ReturnType<typeof parseInitCompilerResult>
-    | ReturnType<typeof createFallbackInitCompilerResult>
-    | undefined;
+  let compileResult: ReturnType<typeof parseInitCompilerResult> | undefined;
   let initCompilerRaw = "";
   try {
     initCompilerRaw = await runInitCompilerInference(config, compilerPrompt);
@@ -2511,7 +2301,6 @@ async function handleInitRequest(
   } catch {
     compileResult = undefined;
   }
-
   if (!compileResult) {
     try {
       initCompilerRaw = await runInitCompilerInference(config, buildInitCompilerRetryPrompt(compilerPrompt));
@@ -2520,28 +2309,12 @@ async function handleInitRequest(
       compileResult = undefined;
     }
   }
-
   if (!compileResult) {
-    state.pendingQuestion = undefined;
-    state.initFlow = {
-      status: "failed",
-      repoState: reality.repoState,
-      initState: reality.initState,
-      gitState: reality.gitRegistered ? "registered" : "unregistered",
+    compileResult = createFallbackInitCompilerResult({
       seedText,
-      updatedAt: new Date().toISOString(),
-      summaryLines: [
-        "Initialization could not continue because the init compiler did not return a valid structured result.",
-        "Please retry /init so Raxode can regenerate a real question set or a real finalized initialization result.",
-      ],
-      clarificationHistory,
-      errorMessage: initCompilerRaw.trim().length > 0
-        ? "Init compiler returned an invalid structured response."
-        : "Init compiler returned no usable response.",
-    };
-    await emitInitPanelSnapshot(state);
-    await emitQuestionPanelSnapshot(state);
-    return;
+      clarifications: clarificationHistory.map((entry) => entry.answerText),
+      repoExcerpts,
+    });
   }
 
   if (compileResult.kind === "questions") {
@@ -2590,6 +2363,7 @@ async function handleInitRequest(
     clarificationHistory,
   };
   await emitInitPanelSnapshot(state);
+
   const defaultAgentId = "main";
   const projectId = createInitProjectId(workspaceRoot);
   await state.runtime.bootstrapCmpProjectInfra({
@@ -2624,7 +2398,7 @@ async function handleInitRequest(
       mpBranchName: gitReadback.branchFamily.mpBranchName,
       tapBranchName: gitReadback.branchFamily.tapBranchName,
     },
-    agentsPath: artifactPath,
+    agentsPath: resolveWorkspaceRaxodeAgentsDir(workspaceRoot),
     artifactPath,
   });
   await refreshWorkspaceInitContext(state, workspaceRoot);
@@ -2638,8 +2412,7 @@ async function handleInitRequest(
     compiledSessionPreamble: compileResult.compiledSessionPreamble,
     completionSummary: compileResult.completionSummary,
     updatedAt: new Date().toISOString(),
-    summaryLines: [
-    ],
+    summaryLines: [],
     clarificationHistory,
   };
   state.pendingQuestion = undefined;
@@ -2831,6 +2604,40 @@ function normalizeRequestUserInputPayload(input: unknown): QuestionAskPayload | 
   };
 }
 
+function createBootingCmpPanelSnapshot(): CmpPanelSnapshotPayload {
+  return {
+    summaryLines: [
+      "CMP viewer is warming up.",
+      "Checking CMP readback truth and section availability.",
+      "db=warming_up readback=warming_up",
+    ],
+    status: "booting",
+    sourceKind: "warming_up",
+    emptyReason: "CMP readback is still warming up.",
+    truthStatus: "warming_up",
+    readbackStatus: "warming_up",
+    entries: [],
+  };
+}
+
+function createBootingMpPanelSnapshot(cwd: string): MpPanelSnapshotPayload {
+  const rootPath = resolve(cwd, "memory", "generated", "mp-overlay-cache");
+  return {
+    summaryLines: [
+      "MP viewer is warming up.",
+      `source=warming_up · ${rootPath}`,
+      "Waiting for LanceDB and overlay bootstrap.",
+    ],
+    status: "booting",
+    sourceKind: "warming_up",
+    emptyReason: "MP LanceDB and memory overlay bootstrap are still warming up.",
+    sourceClass: "warming_up",
+    rootPath,
+    recordCount: 0,
+    entries: [],
+  };
+}
+
 async function emitInitialViewerPanelSnapshots(state: LiveCliState): Promise<void> {
   const cwd = process.cwd();
   await Promise.all([
@@ -2846,8 +2653,14 @@ async function emitInitialViewerPanelSnapshots(state: LiveCliState): Promise<voi
       panel: "capabilities",
       snapshot: buildCapabilitiesPanelSnapshot(state),
     }),
-    emitInitPanelSnapshot(state),
-    emitQuestionPanelSnapshot(state),
+    state.logger.log("panel_snapshot", {
+      panel: "init",
+      snapshot: buildInitPanelSnapshot(state),
+    }),
+    state.logger.log("panel_snapshot", {
+      panel: "question",
+      snapshot: buildQuestionPanelSnapshot(state),
+    }),
   ]);
 }
 
@@ -2876,8 +2689,6 @@ async function emitViewerPanelSnapshots(state: LiveCliState): Promise<void> {
             ? { groups: [] }
             : panel === "question"
               ? { questions: [] }
-            : panel === "init"
-              ? {}
               : { entries: [] }),
         },
       });
@@ -3875,7 +3686,7 @@ async function runCoreTurn(
   state: LiveCliState,
   userMessage: string,
   cmp: CmpTurnArtifacts | undefined,
-  config: LiveCliRouteConfig,
+  config: ReturnType<typeof loadOpenAILiveConfig>,
   initialInputImageUrls?: string[],
 ): Promise<CoreTurnArtifacts> {
   const maxCapabilityLoops = 4;
@@ -3982,10 +3793,9 @@ async function runCoreTurn(
         transcript: state.transcript,
         cmp,
         mpRoutedPackage: state.mpRoutedPackage,
-        workspaceInitContext: state.workspaceInitContext,
         runtime: state.runtime,
         skillEntries: state.skillOverlayEntries,
-        memoryEntries: mergeCoreMemoryOverlayEntries(state),
+        memoryEntries: state.memoryOverlayEntries,
         toolResultText: pendingToolResultText,
         capabilityHistoryText: capabilityLoopHistory.join("\n\n"),
         groundingEvidenceText: browserGroundingEvidenceText,
@@ -4263,10 +4073,9 @@ async function runCoreTurn(
       transcript: state.transcript,
       cmp,
       mpRoutedPackage: state.mpRoutedPackage,
-      workspaceInitContext: state.workspaceInitContext,
       runtime: state.runtime,
       skillEntries: state.skillOverlayEntries,
-      memoryEntries: mergeCoreMemoryOverlayEntries(state),
+      memoryEntries: state.memoryOverlayEntries,
       toolResultText,
       capabilityHistoryText: capabilityLoopHistory.join("\n\n"),
       groundingEvidenceText: browserGroundingEvidenceText,
@@ -4452,12 +4261,11 @@ async function handleUserTurn(
     pastedContents?: DirectInputPastedContentAttachment[];
     fileRefs?: DirectInputFileReference[];
   },
-  config: LiveCliRouteConfig,
+  config: ReturnType<typeof loadOpenAILiveConfig>,
   options: {
     enableCmpSync?: boolean;
   } = {},
 ): Promise<void> {
-  await refreshWorkspaceInitContext(state, resolveConfiguredWorkspaceRoot());
   const userMessage = (inputPayload.pastedContents ?? []).reduce((value, entry) =>
     value.replaceAll(entry.tokenText, entry.text),
   inputPayload.text);
@@ -4706,7 +4514,6 @@ function createRuntime() {
         "read_notebook",
         "view_image",
         "browser.playwright",
-        "question.ask",
         "request_user_input",
         "request_permissions",
         "audio.transcribe",
@@ -4790,8 +4597,10 @@ function createRuntime() {
       },
       executors: {
         icma: createCmpRoleLiveLlmModelExecutor({
+          provider: "openai",
           model: LIVE_CHAT_MODEL_PLAN.cmp.icma.model,
           layer: "api",
+          variant: "responses",
           roleId: "cmp.icma",
           reasoningEffort: resolveReasoningEffort(LIVE_CHAT_MODEL_PLAN.cmp.icma),
           serviceTier: LIVE_CHAT_MODEL_PLAN.cmp.icma.serviceTier,
@@ -4799,8 +4608,10 @@ function createRuntime() {
           executor: executeCliModelInference,
         }),
         iterator: createCmpRoleLiveLlmModelExecutor({
+          provider: "openai",
           model: LIVE_CHAT_MODEL_PLAN.cmp.iterator.model,
           layer: "api",
+          variant: "responses",
           roleId: "cmp.iterator",
           reasoningEffort: resolveReasoningEffort(LIVE_CHAT_MODEL_PLAN.cmp.iterator),
           serviceTier: LIVE_CHAT_MODEL_PLAN.cmp.iterator.serviceTier,
@@ -4808,8 +4619,10 @@ function createRuntime() {
           executor: executeCliModelInference,
         }),
         checker: createCmpRoleLiveLlmModelExecutor({
+          provider: "openai",
           model: LIVE_CHAT_MODEL_PLAN.cmp.checker.model,
           layer: "api",
+          variant: "responses",
           roleId: "cmp.checker",
           reasoningEffort: resolveReasoningEffort(LIVE_CHAT_MODEL_PLAN.cmp.checker),
           serviceTier: LIVE_CHAT_MODEL_PLAN.cmp.checker.serviceTier,
@@ -4817,8 +4630,10 @@ function createRuntime() {
           executor: executeCliModelInference,
         }),
         dbagent: createCmpRoleLiveLlmModelExecutor({
+          provider: "openai",
           model: LIVE_CHAT_MODEL_PLAN.cmp.dbagent.model,
           layer: "api",
+          variant: "responses",
           roleId: "cmp.dbagent",
           reasoningEffort: resolveReasoningEffort(LIVE_CHAT_MODEL_PLAN.cmp.dbagent),
           serviceTier: LIVE_CHAT_MODEL_PLAN.cmp.dbagent.serviceTier,
@@ -4826,8 +4641,10 @@ function createRuntime() {
           executor: executeCliModelInference,
         }),
         dispatcher: createCmpRoleLiveLlmModelExecutor({
+          provider: "openai",
           model: LIVE_CHAT_MODEL_PLAN.cmp.dispatcher.model,
           layer: "api",
+          variant: "responses",
           roleId: "cmp.dispatcher",
           reasoningEffort: resolveReasoningEffort(LIVE_CHAT_MODEL_PLAN.cmp.dispatcher),
           serviceTier: LIVE_CHAT_MODEL_PLAN.cmp.dispatcher.serviceTier,
@@ -4973,7 +4790,7 @@ function startLiveCliStartupWarmup(
     try {
       await emitViewerPanelSnapshots(state);
     } catch {
-      // background viewer refresh should never block direct input readiness
+      // startup refresh should never block direct input readiness
     }
   });
   state.startupWarmupReady = warmup;
@@ -4992,16 +4809,7 @@ async function main(): Promise<void> {
   });
   const workspaceRoot = resolveConfiguredWorkspaceRoot();
   await refreshOpenAIOAuthIfNeeded();
-  const resolvedCoreRole = loadResolvedRoleConfig("core.main");
-  const config: LiveCliRouteConfig = {
-    provider: resolvedCoreRole.profile.provider,
-    baseURL: resolvedCoreRole.profile.route.baseURL,
-    model: resolvedCoreRole.profile.model,
-    contextWindowTokens: resolvedCoreRole.profile.contextWindowTokens,
-    openAIConfig: resolvedCoreRole.profile.provider === "openai"
-      ? loadOpenAILiveConfig("core.main")
-      : undefined,
-  };
+  const config = loadOpenAILiveConfig("core.main");
   const logPath = createLiveChatLogPath();
   await mkdir(resolveLiveReportsDir(), { recursive: true });
   const logger = new LiveChatLogger(logPath);
@@ -5022,13 +4830,12 @@ async function main(): Promise<void> {
     logger,
     turnIndex: 0,
   };
-  restoreDirectSessionSnapshotIntoState(state, workspaceRoot);
   await loadPersistedInitArtifactIntoState(state, workspaceRoot);
 
   if (options.uiMode === "direct") {
-    printStartupDirect({ baseURL: config.baseURL });
+    printStartupDirect(config);
   } else {
-    printStartup({ baseURL: config.baseURL });
+    printStartup(config);
   }
   console.log(`log file: ${logPath}`);
   await logger.log("session_start", {
@@ -5200,7 +5007,7 @@ async function main(): Promise<void> {
           continue;
         }
         if (line === "/init") {
-          printInitViewPlaceholder();
+          await handleInitRequest(state, "", config, workspaceRoot);
           continue;
         }
         if (line === "/resume") {

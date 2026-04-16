@@ -69,17 +69,17 @@ export function resolveChatGPTPlanTone(planType?: string): PraxisSlashPanelField
     case "pro-20x":
     case "pro_20x":
     case "pro":
-      return "planPro";
+      return "success";
     case "pro5x":
     case "pro-5x":
     case "pro_5x":
-      return "planPro5x";
+      return "fast";
     case "plus":
-      return "planPlus";
+      return "info";
     case "go":
-      return "planGo";
+      return "warning";
     case "free":
-      return "planFree";
+      return "default";
     default:
       return undefined;
   }

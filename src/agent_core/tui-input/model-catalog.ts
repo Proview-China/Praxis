@@ -6,7 +6,6 @@ import Anthropic from "@anthropic-ai/sdk";
 import {
   CHATGPT_BACKEND_CLIENT_VERSION,
   createOpenAIClient,
-  isGmnOpenAIGatewayBaseURL,
   isChatgptCodexBackendBaseURL,
   loadOpenAILiveConfig,
   prepareResponsesParamsForOpenAIAuth,
@@ -14,7 +13,28 @@ import {
 } from "../../rax/live-config.js";
 import { loadResolvedEmbeddingConfig, type RaxcodeResolvedEmbeddingConfig } from "../../raxcode-config.js";
 import { resolveCacheDir } from "../../runtime-paths.js";
-import { mapAnthropicReasoningEffortToThinking } from "../../integrations/anthropic/api/shared.js";
+
+function isGmnOpenAIGatewayBaseURL(baseURL: string): boolean {
+  return /^https:\/\/gmn\.chuangzuoli\.com(?:\/v1)?\/?$/iu.test(baseURL.trim());
+}
+
+function mapAnthropicReasoningEffortToThinking(
+  reasoningEffort?: string,
+): Anthropic.MessageCreateParams["thinking"] | undefined {
+  switch (reasoningEffort) {
+    case "low":
+      return { type: "enabled", budget_tokens: 1024 };
+    case "medium":
+      return { type: "enabled", budget_tokens: 4096 };
+    case "high":
+      return { type: "enabled", budget_tokens: 8192 };
+    case "max":
+    case "xhigh":
+      return { type: "enabled", budget_tokens: 16384 };
+    default:
+      return undefined;
+  }
+}
 
 export interface AvailableModelCatalogEntry {
   id: string;

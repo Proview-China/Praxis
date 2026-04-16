@@ -6,8 +6,7 @@ import {
   createOpenAIClient,
   loadOpenAILiveConfig,
   prepareResponsesParamsForOpenAIAuth,
-  resolveProviderGenerationVariant,
-  resolveOpenAIGenerationVariant,
+  type OpenAILiveConfig,
 } from "../../rax/live-config.js";
 import type { ProviderId, SdkLayer } from "../../rax/index.js";
 import { rax } from "../../rax/index.js";
@@ -23,11 +22,75 @@ import {
 } from "./prompt-message-parts.js";
 import { resolveFastServiceTierSupportFromCache } from "../tui-input/model-catalog.js";
 import { resolveAppRoot } from "../../runtime-paths.js";
-import { mapAnthropicReasoningEffortToThinking } from "../../integrations/anthropic/api/shared.js";
 import {
   resolveProviderRouteKind,
   sanitizeProviderRouteFeatureOptions,
 } from "./model-route-features.js";
+
+type ProviderGenerationVariant =
+  | "responses"
+  | "chat_completions_compat"
+  | "messages"
+  | "generateContent";
+
+function isChatgptCodexBackendBaseURL(baseURL: string): boolean {
+  return /chatgpt\.com\/backend-api\/codex\/?$/iu.test(baseURL.trim());
+}
+
+function resolveOpenAIGenerationVariant(
+  config: Pick<OpenAILiveConfig, "baseURL"> & { apiStyle?: string },
+): ProviderGenerationVariant {
+  const apiStyle = config.apiStyle?.trim().toLowerCase();
+  if (apiStyle === "responses") {
+    return "responses";
+  }
+  if (
+    apiStyle === "chat_completions"
+    || apiStyle === "chat/completions"
+    || apiStyle === "chat_completions_compat"
+    || apiStyle === "chat-completions"
+  ) {
+    return "chat_completions_compat";
+  }
+  return isChatgptCodexBackendBaseURL(config.baseURL)
+    ? "responses"
+    : "chat_completions_compat";
+}
+
+function resolveProviderGenerationVariant(input: {
+  provider: ProviderId;
+  baseURL: string;
+  apiStyle?: string;
+}): ProviderGenerationVariant {
+  if (input.provider === "openai") {
+    return resolveOpenAIGenerationVariant({
+      baseURL: input.baseURL,
+      apiStyle: input.apiStyle,
+    });
+  }
+  if (input.provider === "anthropic") {
+    return "messages";
+  }
+  return "generateContent";
+}
+
+function mapAnthropicReasoningEffortToThinking(
+  reasoningEffort?: string,
+): Anthropic.MessageCreateParams["thinking"] | undefined {
+  switch (reasoningEffort) {
+    case "low":
+      return { type: "enabled", budget_tokens: 1024 };
+    case "medium":
+      return { type: "enabled", budget_tokens: 4096 };
+    case "high":
+      return { type: "enabled", budget_tokens: 8192 };
+    case "max":
+    case "xhigh":
+      return { type: "enabled", budget_tokens: 16384 };
+    default:
+      return undefined;
+  }
+}
 
 type GenerateFacade = Pick<FullRaxFacade, "generate">;
 
