@@ -82,6 +82,9 @@ export interface CoreCmpWorksitePackagePayloadV1 {
   primaryContext?: string;
   backgroundContext?: string;
   timelineSummary?: string;
+  packageFamilySummary?: string;
+  activeLineSummary?: string;
+  orchestrationSummary?: string;
   sourceAnchorRefs?: string[];
   unresolvedStateSummary?: string;
   reviewStateSummary?: string;
@@ -131,6 +134,7 @@ export interface CoreMpRoutedPackageGovernanceV1 {
   routeLabel?: string;
   governanceReason?: string;
   fallbackReason?: string;
+  qualityGateSummary?: string;
 }
 
 export interface CoreMpRoutedPackageRetrievalV1 {
@@ -138,6 +142,12 @@ export interface CoreMpRoutedPackageRetrievalV1 {
   primaryCount?: number;
   supportingCount?: number;
   omittedCount?: number;
+  candidateIntakeCount?: number;
+  candidateRejectedCount?: number;
+  candidateProvenanceSummary?: string;
+  candidateRejectionSummary?: string;
+  fallbackSuppressed?: boolean;
+  fallbackStage?: "none" | "repo_memory_snapshot" | "managed_records";
 }
 
 export interface CoreMpRoutedPackageV1 {

@@ -24,6 +24,7 @@ import type {
 } from "../cmp-five-agent/index.js";
 import type { CoreCmpWorksitePackageV1 } from "../core-prompt/types.js";
 import type {
+  CmpStoredSection,
   CommitContextDeltaInput,
   CommitContextDeltaResult,
   DispatchContextPackageInput,
@@ -37,6 +38,11 @@ import type {
   ResolveCheckedSnapshotInput,
   ResolveCheckedSnapshotResult,
 } from "../cmp-types/index.js";
+import type {
+  MpMemoryConfidenceLevel,
+  MpMemoryKind,
+  MpScopeDescriptor,
+} from "../mp-types/index.js";
 import type {
   BootstrapCmpProjectInfraInput,
   CmpRuntimeDeliveryTruthSummary,
@@ -147,11 +153,48 @@ export interface AgentCoreCmpTapReviewApertureV1 {
   snapshotId?: string;
   checkerReason?: string;
   routeRationale?: string;
+  routeStateSummary?: string;
   reviewStateSummary?: string;
+  unresolvedStateSummary?: string;
   sourceAnchorRefs?: string[];
   pendingPeerApprovalCount?: number;
   parentPromoteReviewCount?: number;
   reinterventionPendingCount?: number;
+}
+
+export interface AgentCoreCmpMpCandidateV1 {
+  storedSection: CmpStoredSection;
+  checkedSnapshotRef: string;
+  branchRef: string;
+  scope: MpScopeDescriptor;
+  confidence: MpMemoryConfidenceLevel;
+  observedAt?: string;
+  capturedAt?: string;
+  sourceRefs?: string[];
+  memoryKind?: MpMemoryKind;
+  metadata?: Record<string, unknown>;
+}
+
+export interface AgentCoreCmpMpCandidateExportV1 {
+  schemaVersion: "cmp-mp-candidate-export/v1";
+  sessionId: string;
+  agentId: string;
+  currentObjective?: string;
+  packageRef?: string;
+  packageFamilyId?: string;
+  snapshotId?: string;
+  routeRationale?: string;
+  scopePolicy?: string;
+  routeStateSummary?: string;
+  reviewStateSummary?: string;
+  unresolvedStateSummary?: string;
+  packageFamilySummary?: string;
+  activeLineSummary?: string;
+  orchestrationSummary?: string;
+  timelineSummary?: string;
+  candidateExportSummary?: string;
+  sourceAnchorRefs?: string[];
+  candidates: AgentCoreCmpMpCandidateV1[];
 }
 
 export interface AgentCoreCmpProjectApi {
@@ -265,6 +308,12 @@ export interface AgentCoreCmpWorksiteApi {
     currentObjective?: string;
     requestedCapabilityKey?: string;
   }): AgentCoreCmpTapReviewApertureV1 | undefined;
+  exportMpCandidates(input: {
+    sessionId: string;
+    agentId?: string;
+    currentObjective?: string;
+    limit?: number;
+  }): AgentCoreCmpMpCandidateExportV1;
 }
 
 export interface AgentCoreCmpApi {

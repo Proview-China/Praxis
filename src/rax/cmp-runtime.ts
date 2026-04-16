@@ -160,6 +160,9 @@ export function createRaxCmpRuntime(input: CreateRaxCmpRuntimeInput): RaxCmpRunt
       exportTapPackage(input) {
         return agentCoreRuntime.cmp.worksite.exportTapPackage(input);
       },
+      exportMpCandidates(input) {
+        return agentCoreRuntime.cmp.worksite.exportMpCandidates(input);
+      },
     },
   };
 }

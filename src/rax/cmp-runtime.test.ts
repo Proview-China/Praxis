@@ -102,6 +102,7 @@ test("createRaxCmpRuntime exposes full cmp workflow surface through agent_core r
   assert.equal(typeof runtime.roles.resolveCapabilityAccess, "function");
   assert.equal(typeof runtime.roles.dispatchCapability, "function");
   assert.equal(typeof runtime.worksite.exportCorePackage, "function");
+  assert.equal(typeof runtime.worksite.exportMpCandidates, "function");
 });
 
 test("createRaxCmpRuntime can carry peer approval from pending to approved through the real five-agent summary", async () => {
@@ -249,8 +250,14 @@ test("createRaxCmpRuntime proxies CMP worksite exports through the runtime port"
     sessionId: "session-runtime-worksite",
     currentObjective: "现在继续 runtime worksite",
   });
+  const mpCandidates = await runtime.worksite.exportMpCandidates({
+    sessionId: "session-runtime-worksite",
+    currentObjective: "现在继续 runtime worksite",
+  });
 
   assert.equal(worksite.schemaVersion, "core-cmp-worksite-package/v1");
   assert.equal(worksite.identity?.packageRef, "cmp-package:runtime-worksite");
   assert.equal(worksite.objective?.currentObjective, "现在继续 runtime worksite");
+  assert.equal(mpCandidates.schemaVersion, "cmp-mp-candidate-export/v1");
+  assert.equal(mpCandidates.packageRef, "cmp-package:runtime-worksite");
 });

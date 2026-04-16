@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { discoverMpOverlayArtifacts, discoverMpOverlayEntries } from "./rax-mp-overlay-source.js";
+import {
+  discoverMpOverlayArtifacts,
+  discoverMpOverlayEntries,
+  normalizeCmpCandidateExportInput,
+} from "./rax-mp-overlay-source.js";
 
 function createMemoryRoot(): string {
   const root = mkdtempSync(path.join(tmpdir(), "praxis-mp-overlay-source-"));
@@ -198,6 +202,7 @@ test("discoverMpOverlayArtifacts returns an absent routed package when repo memo
   assert.equal(artifacts.routedPackage.deliveryStatus, "absent");
   assert.equal(artifacts.routedPackage.schemaVersion, "core-mp-routed-package/v2");
   assert.match(artifacts.routedPackage.summary, /currently unavailable|fell back/i);
+  assert.equal(artifacts.routedPackage.retrieval?.fallbackStage, "repo_memory_snapshot");
 });
 
 test("discoverMpOverlayArtifacts preserves memory-body refs without double prefix", async () => {
@@ -441,9 +446,269 @@ test("discoverMpOverlayArtifacts materializes CMP candidates before native routi
 
   assert.deepEqual(calls, ["create", "bootstrap", "materializeFromCmpCandidates", "routeForCore"]);
   assert.equal(artifacts.routedPackage.sourceClass, "cmp_seeded_memory");
+  assert.equal(artifacts.routedPackage.retrieval?.candidateIntakeCount, 1);
+  assert.equal(artifacts.routedPackage.retrieval?.candidateRejectedCount, 0);
+  assert.match(artifacts.routedPackage.retrieval?.candidateProvenanceSummary ?? "", /package:cmp-package:1/u);
+  assert.match(artifacts.routedPackage.governance?.qualityGateSummary ?? "", /accepted 1 candidate/u);
+  assert.equal(artifacts.routedPackage.retrieval?.fallbackSuppressed, true);
+  assert.equal(artifacts.routedPackage.retrieval?.fallbackStage, "none");
   assert.equal((receivedRouteInput as { payload: { currentObjective?: string } }).payload.currentObjective, "继续当前实现");
   assert.match(
     (receivedRouteInput as { payload: { queryText: string } }).payload.queryText,
     /推进当前 worksite/u,
   );
+  assert.deepEqual(
+    (receivedRouteInput as { payload: { fallbackEntries?: unknown[] } }).payload.fallbackEntries,
+    [],
+  );
+});
+
+test("normalizeCmpCandidateExportInput accepts only package-grade CMP candidates", () => {
+  const normalized = normalizeCmpCandidateExportInput({
+    schemaVersion: "cmp-mp-candidate-export/v1",
+    sessionId: "session-1",
+    agentId: "cmp-main",
+    packageRef: "cmp-package:1",
+    packageFamilyId: "family-1",
+    snapshotId: "snapshot-1",
+    routeRationale: "core worksite return",
+    scopePolicy: "project_shared",
+    candidates: [
+      {
+        storedSection: { id: "stored-1", storageRef: "postgresql:stored-1" },
+        checkedSnapshotRef: "snapshot-1",
+        branchRef: "mp/main",
+        scope: {
+          projectId: "proj-1",
+          agentId: "main",
+          scopeLevel: "project",
+          sessionMode: "shared",
+        },
+        confidence: "high",
+      },
+      {
+        storedSection: { id: "stored-missing-snapshot", storageRef: "postgresql:stored-missing-snapshot" },
+        branchRef: "mp/main",
+        scope: {
+          projectId: "proj-1",
+          agentId: "main",
+          scopeLevel: "project",
+          sessionMode: "shared",
+        },
+      },
+      {
+        storedSection: { id: "stored-1", storageRef: "postgresql:stored-1" },
+        checkedSnapshotRef: "snapshot-1",
+        branchRef: "mp/main",
+        scope: {
+          projectId: "proj-1",
+          agentId: "main",
+          scopeLevel: "project",
+          sessionMode: "shared",
+        },
+      },
+      "bad-candidate",
+    ],
+  });
+
+  assert.equal(normalized.acceptedCount, 1);
+  assert.equal(normalized.rejectedCount, 3);
+  assert.equal(normalized.candidates[0]?.checkedSnapshotRef, "snapshot-1");
+  assert.equal(normalized.provenance.packageRef, "cmp-package:1");
+  assert.equal(normalized.rejectedByReason.missing_required_fields, 1);
+  assert.equal(normalized.rejectedByReason.duplicate_candidate, 1);
+  assert.equal(normalized.rejectedByReason.invalid_candidate_shape, 1);
+});
+
+test("discoverMpOverlayArtifacts filters invalid CMP candidates and keeps intake diagnostics", async () => {
+  const cwd = createMemoryRoot();
+  const calls: string[] = [];
+  const artifacts = await discoverMpOverlayArtifacts({
+    cwd,
+    userMessage: "继续 payment refactor",
+    currentObjective: "继续 payment refactor",
+    cmpCandidatePayloads: {
+      schemaVersion: "cmp-mp-candidate-export/v1",
+      packageRef: "cmp-package:quality",
+      snapshotId: "snapshot-quality",
+      candidates: [
+        {
+          storedSection: { id: "stored-valid", storageRef: "postgresql:stored-valid" },
+          checkedSnapshotRef: "snapshot-valid",
+          branchRef: "mp/main",
+          scope: {
+            projectId: "proj-1",
+            agentId: "main",
+            scopeLevel: "project",
+            sessionMode: "shared",
+          },
+        },
+        {
+          storedSection: { id: "stored-invalid", storageRef: "postgresql:stored-invalid" },
+          branchRef: "mp/main",
+          scope: {
+            projectId: "proj-1",
+            agentId: "main",
+            scopeLevel: "project",
+            sessionMode: "shared",
+          },
+        },
+        {
+          storedSection: { id: "stored-valid", storageRef: "postgresql:stored-valid" },
+          checkedSnapshotRef: "snapshot-valid",
+          branchRef: "mp/main",
+          scope: {
+            projectId: "proj-1",
+            agentId: "main",
+            scopeLevel: "project",
+            sessionMode: "shared",
+          },
+        },
+      ],
+    },
+    facade: {
+      mp: {
+        create() {
+          calls.push("create");
+          return { runtime: { getMpManagedRecords() { return []; } } };
+        },
+        async bootstrap() {
+          calls.push("bootstrap");
+          return { status: "bootstrapped" };
+        },
+        async materializeFromCmpCandidates(input: any) {
+          calls.push("materializeFromCmpCandidates");
+          assert.equal(input.payload.candidates.length, 1);
+          assert.equal(input.payload.candidates[0]?.checkedSnapshotRef, "snapshot-valid");
+          return {
+            status: "materialized_from_cmp_candidates",
+            records: [],
+            supersededMemoryIds: [],
+            staleMemoryIds: [],
+            summary: undefined,
+          };
+        },
+        async routeForCore() {
+          calls.push("routeForCore");
+          return {
+            status: "routed",
+            routeKind: "resolve",
+            primaryRecords: [
+              {
+                memoryId: "memory-valid",
+                semanticGroupId: "payment-refactor",
+                bodyRef: "payment-refactor",
+                sourceStoredSectionId: "stored-valid",
+                memoryKind: "summary",
+                freshness: { status: "fresh" },
+                confidence: "high",
+                alignment: { alignmentStatus: "aligned" },
+                tags: ["payment"],
+              },
+            ],
+            supportingRecords: [],
+            fallbackEntries: [],
+            readback: {
+              receiptId: "receipt-valid",
+              routeKind: "resolve",
+              deliveryStatus: "available",
+              objectiveSummary: "继续 payment refactor",
+              objectiveMatchSummary: "matched payment memory",
+              governanceReason: "selected via MP resolve routing discipline",
+              primaryMemoryRefs: ["memory-valid"],
+              supportingMemoryRefs: [],
+              omittedMemoryRefs: [],
+              candidateCount: 1,
+            },
+          };
+        },
+      },
+    } as never,
+  });
+
+  assert.deepEqual(calls, ["create", "bootstrap", "materializeFromCmpCandidates", "routeForCore"]);
+  assert.equal(artifacts.routedPackage.retrieval?.candidateIntakeCount, 1);
+  assert.equal(artifacts.routedPackage.retrieval?.candidateRejectedCount, 2);
+  assert.match(artifacts.routedPackage.retrieval?.candidateRejectionSummary ?? "", /missing_required_fields:1/u);
+  assert.match(artifacts.routedPackage.retrieval?.candidateRejectionSummary ?? "", /duplicate_candidate:1/u);
+  assert.match(artifacts.routedPackage.retrieval?.candidateProvenanceSummary ?? "", /package:cmp-package:quality/u);
+  assert.equal(artifacts.routedPackage.retrieval?.fallbackStage, "none");
+});
+
+test("discoverMpOverlayArtifacts suppresses repo fallback during CMP-seeded route and only re-enables it as a last resort", async () => {
+  const cwd = createMemoryRoot();
+  let receivedFallbackEntries: unknown[] | undefined;
+  const artifacts = await discoverMpOverlayArtifacts({
+    cwd,
+    userMessage: "继续 last resort fallback",
+    currentObjective: "继续 last resort fallback",
+    cmpCandidatePayloads: {
+      schemaVersion: "cmp-mp-candidate-export/v1",
+      packageRef: "cmp-package:fallback",
+      candidates: [{
+        storedSection: { id: "stored-fallback", storageRef: "postgresql:stored-fallback" },
+        checkedSnapshotRef: "snapshot-fallback",
+        branchRef: "mp/main",
+        scope: {
+          projectId: "proj-1",
+          agentId: "main",
+          scopeLevel: "project",
+          sessionMode: "shared",
+        },
+      }],
+    },
+    facade: {
+      mp: {
+        create() {
+          return {
+            runtime: {
+              getMpManagedRecords() {
+                return [];
+              },
+            },
+          };
+        },
+        async bootstrap() {
+          return { status: "bootstrapped" };
+        },
+        async materializeFromCmpCandidates() {
+          return {
+            status: "materialized_from_cmp_candidates",
+            records: [],
+            supersededMemoryIds: [],
+            staleMemoryIds: [],
+          };
+        },
+        async routeForCore(input: any) {
+          receivedFallbackEntries = input.payload.fallbackEntries;
+          return {
+            status: "routed",
+            routeKind: "resolve",
+            primaryRecords: [],
+            supportingRecords: [],
+            fallbackEntries: [],
+            readback: {
+              receiptId: "receipt-no-bundle",
+              routeKind: "resolve",
+              deliveryStatus: "absent",
+              objectiveSummary: "继续 last resort fallback",
+              objectiveMatchSummary: "no native bundle after cmp intake",
+              governanceReason: "native route had no eligible bundle",
+              fallbackReason: "no native bundle",
+              primaryMemoryRefs: [],
+              supportingMemoryRefs: [],
+              omittedMemoryRefs: [],
+              candidateCount: 0,
+            },
+          };
+        },
+      },
+    } as never,
+  });
+
+  assert.deepEqual(receivedFallbackEntries, []);
+  assert.equal(artifacts.routedPackage.sourceClass, "repo_memory_fallback");
+  assert.equal(artifacts.routedPackage.retrieval?.fallbackSuppressed, true);
+  assert.equal(artifacts.routedPackage.retrieval?.fallbackStage, "repo_memory_snapshot");
+  assert.match(artifacts.routedPackage.governance?.governanceReason ?? "", /re-enabled as a last resort/u);
 });

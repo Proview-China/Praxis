@@ -102,6 +102,9 @@ export function renderCoreCmpWorksitePackageV1(input: CoreCmpWorksitePackageV1):
         input.payload.primaryContext ? `- primary_context: ${input.payload.primaryContext}` : undefined,
         input.payload.backgroundContext ? `- background_context: ${input.payload.backgroundContext}` : undefined,
         input.payload.timelineSummary ? `- timeline_summary: ${input.payload.timelineSummary}` : undefined,
+        input.payload.packageFamilySummary ? `- package_family_summary: ${input.payload.packageFamilySummary}` : undefined,
+        input.payload.activeLineSummary ? `- active_line_summary: ${input.payload.activeLineSummary}` : undefined,
+        input.payload.orchestrationSummary ? `- orchestration_summary: ${input.payload.orchestrationSummary}` : undefined,
         input.payload.sourceAnchorRefs?.length ? `- source_anchor_refs: ${input.payload.sourceAnchorRefs.join(" | ")}` : undefined,
         input.payload.unresolvedStateSummary ? `- unresolved_state_summary: ${input.payload.unresolvedStateSummary}` : undefined,
         input.payload.reviewStateSummary ? `- review_state_summary: ${input.payload.reviewStateSummary}` : undefined,
@@ -169,6 +172,7 @@ export function renderCoreMpRoutedPackageV1(input: CoreMpRoutedPackageV1): strin
         input.governance.routeLabel ? `- route_label: ${input.governance.routeLabel}` : undefined,
         input.governance.governanceReason ? `- governance_reason: ${input.governance.governanceReason}` : undefined,
         input.governance.fallbackReason ? `- fallback_reason: ${input.governance.fallbackReason}` : undefined,
+        input.governance.qualityGateSummary ? `- quality_gate_summary: ${input.governance.qualityGateSummary}` : undefined,
       ].filter((line): line is string => Boolean(line)).join("\n")
       : undefined,
     input.retrieval
@@ -178,6 +182,22 @@ export function renderCoreMpRoutedPackageV1(input: CoreMpRoutedPackageV1): strin
         input.retrieval.primaryCount !== undefined ? `- primary_count: ${input.retrieval.primaryCount}` : undefined,
         input.retrieval.supportingCount !== undefined ? `- supporting_count: ${input.retrieval.supportingCount}` : undefined,
         input.retrieval.omittedCount !== undefined ? `- omitted_count: ${input.retrieval.omittedCount}` : undefined,
+        input.retrieval.candidateIntakeCount !== undefined
+          ? `- candidate_intake_count: ${input.retrieval.candidateIntakeCount}`
+          : undefined,
+        input.retrieval.candidateRejectedCount !== undefined
+          ? `- candidate_rejected_count: ${input.retrieval.candidateRejectedCount}`
+          : undefined,
+        input.retrieval.candidateProvenanceSummary
+          ? `- candidate_provenance_summary: ${input.retrieval.candidateProvenanceSummary}`
+          : undefined,
+        input.retrieval.candidateRejectionSummary
+          ? `- candidate_rejection_summary: ${input.retrieval.candidateRejectionSummary}`
+          : undefined,
+        input.retrieval.fallbackSuppressed !== undefined
+          ? `- fallback_suppressed: ${input.retrieval.fallbackSuppressed ? "true" : "false"}`
+          : undefined,
+        input.retrieval.fallbackStage ? `- fallback_stage: ${input.retrieval.fallbackStage}` : undefined,
       ].filter((line): line is string => Boolean(line)).join("\n")
       : undefined,
   ].filter((section): section is string => Boolean(section));

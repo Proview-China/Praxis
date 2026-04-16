@@ -5,6 +5,10 @@ export interface AgentCoreCmpWorksiteDerivedState {
   packageFamilyId?: string;
   primaryPackageId?: string;
   primaryPackageRef?: string;
+  packageFamilySummary?: string;
+  activeLineSummary?: string;
+  orchestrationSummary?: string;
+  timelineSummary?: string;
   sourceAnchorRefs: string[];
   reviewStateSummary?: string;
   routeStateSummary?: string;

@@ -157,6 +157,15 @@ function adaptLegacyCmpRuntimeStub(runtime: LegacyCmpRuntimeStub): RaxCmpPort {
       exportTapPackage(input) {
         return runtime.exportCmpTapReviewPackage?.(input);
       },
+      exportMpCandidates(input) {
+        return runtime.exportCmpMpCandidates?.(input) ?? {
+          schemaVersion: "cmp-mp-candidate-export/v1",
+          sessionId: input.sessionId,
+          agentId: input.agentId ?? "unknown",
+          currentObjective: input.currentObjective,
+          candidates: [],
+        };
+      },
     },
   };
 }

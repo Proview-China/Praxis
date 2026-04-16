@@ -142,6 +142,9 @@ test("renderCoreCmpWorksitePackageV1 renders worksite-specific fields", () => {
       activeTurnIndex: 6,
     },
     payload: {
+      packageFamilySummary: "family family-1, primary cmp-worksite:1",
+      activeLineSummary: "family family-1, mode core_return",
+      orchestrationSummary: "peer approvals 1, parent reviews 1",
       unresolvedStateSummary: "parent review 1, peer approval pending 1",
     },
     governance: {
@@ -156,6 +159,9 @@ test("renderCoreCmpWorksitePackageV1 renders worksite-specific fields", () => {
   assert.match(rendered, /schema_version: core-cmp-worksite-package\/v1/);
   assert.match(rendered, /package_family_id: family-1/);
   assert.match(rendered, /active_turn_index: 6/);
+  assert.match(rendered, /package_family_summary: family family-1, primary cmp-worksite:1/);
+  assert.match(rendered, /active_line_summary: family family-1, mode core_return/);
+  assert.match(rendered, /orchestration_summary: peer approvals 1, parent reviews 1/);
   assert.match(rendered, /unresolved_state_summary: parent review 1, peer approval pending 1/);
   assert.match(rendered, /recovery_status: degraded/);
   assert.match(rendered, /latest_stages: checker:checked \| dispatcher:route/);
@@ -182,12 +188,19 @@ test("renderCoreMpRoutedPackageV1 renders mp routed package summary", () => {
     governance: {
       routeLabel: "mp_native_resolve",
       governanceReason: "selected via MP resolve routing discipline",
+      qualityGateSummary: "accepted 2 candidate(s); rejected 1 (duplicate_candidate:1)",
     },
     retrieval: {
       receiptId: "receipt-1",
       primaryCount: 1,
       supportingCount: 1,
       omittedCount: 0,
+      candidateIntakeCount: 2,
+      candidateRejectedCount: 1,
+      candidateProvenanceSummary: "package:cmp-package:1 / snapshot:snapshot-1",
+      candidateRejectionSummary: "duplicate_candidate:1",
+      fallbackSuppressed: true,
+      fallbackStage: "none",
     },
   });
 
@@ -197,5 +210,11 @@ test("renderCoreMpRoutedPackageV1 renders mp routed package summary", () => {
   assert.match(rendered, /primary_memory_refs: memory-1/);
   assert.match(rendered, /current_objective: 继续推进 MP native routing/);
   assert.match(rendered, /governance_reason: selected via MP resolve routing discipline/);
+  assert.match(rendered, /quality_gate_summary: accepted 2 candidate\(s\); rejected 1 \(duplicate_candidate:1\)/);
   assert.match(rendered, /receipt_id: receipt-1/);
+  assert.match(rendered, /candidate_intake_count: 2/);
+  assert.match(rendered, /candidate_rejected_count: 1/);
+  assert.match(rendered, /candidate_provenance_summary: package:cmp-package:1 \/ snapshot:snapshot-1/);
+  assert.match(rendered, /candidate_rejection_summary: duplicate_candidate:1/);
+  assert.match(rendered, /fallback_suppressed: true/);
 });

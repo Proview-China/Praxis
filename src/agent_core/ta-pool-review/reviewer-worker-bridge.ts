@@ -290,7 +290,13 @@ export function parseReviewerWorkerVoteOutput(
     );
   }
 
-  if (typeof output.reason !== "string" || !output.reason.trim()) {
+  const normalizedReason = typeof output.reason === "string" ? output.reason.trim() : "";
+  const fallbackReason = normalizedReason
+    || (typeof output.humanSummary === "string" ? output.humanSummary.trim() : "")
+    || (typeof output.userFacingExplanation === "string" ? output.userFacingExplanation.trim() : "")
+    || (typeof output.deferredReason === "string" ? output.deferredReason.trim() : "")
+    || `Reviewer voted ${vote}.`;
+  if (!fallbackReason) {
     throw new Error("Reviewer worker output requires a non-empty reason.");
   }
 
@@ -321,7 +327,7 @@ export function parseReviewerWorkerVoteOutput(
     workerKind: "reviewer",
     lane: REVIEWER_WORKER_BRIDGE_LANE,
     vote: vote as ReviewVote,
-    reason: output.reason.trim(),
+    reason: fallbackReason,
     reviewerId: typeof output.reviewerId === "string" ? output.reviewerId.trim() || undefined : undefined,
     decisionId: typeof output.decisionId === "string" ? output.decisionId.trim() || undefined : undefined,
     createdAt: typeof output.createdAt === "string" ? output.createdAt : undefined,

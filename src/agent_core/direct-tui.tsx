@@ -1,5 +1,5 @@
 import { execFile as execFileCallback, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync, statSync, writeSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeSync } from "node:fs";
 import { mkdir, open, rename, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { extname, resolve } from "node:path";
@@ -819,15 +819,60 @@ const FOOTER_MODE_OPTIONS = [
   },
 ] as const;
 const RUSH_OVERLAY_COLOR = "orange";
-const RUSH_OVERLAY_TOTAL_FRAMES = 120;
-const RUSH_OVERLAY_SPEED_SWELL = 0.82;
-const RUSH_OVERLAY_ART_LINES = [
-  "███████   ██    ██  ███████  ██    ██",
-  "██    ██  ██    ██  ██       ██    ██",
-  "███████   ██    ██  ███████  ████████",
-  "██    ██  ██    ██       ██  ██    ██",
-  "██    ██   ██████   ███████  ██    ██",
+const RUSH_OVERLAY_FRAME_SOURCE = "/home/proview/Downloads/praxis_rocket_tui_15frames.txt";
+const RUSH_OVERLAY_TOTAL_FRAMES = 78;
+const RUSH_OVERLAY_FLAME_FRAME_STEP = 2;
+const RUSH_OVERLAY_SPEED_SWELL = 0.97;
+const RUSH_OVERLAY_HORIZONTAL_SCALE = 1;
+const RUSH_OVERLAY_BODY_SHIFT = 7;
+const RUSH_OVERLAY_FLAME_SHIFT = 10;
+const RUSH_OVERLAY_NOSE_COLOR = "whiteBright";
+const RUSH_OVERLAY_BODY_COLOR = "redBright";
+const RUSH_OVERLAY_TAIL_COLOR = "yellowBright";
+const RUSH_OVERLAY_WINDOW_RIM_COLOR = "gray";
+const RUSH_OVERLAY_NOZZLE_COLOR = "gray";
+const RUSH_OVERLAY_FLAME_INNER_COLOR = "yellowBright";
+const RUSH_OVERLAY_FLAME_MID_COLOR = "orange";
+const RUSH_OVERLAY_FLAME_OUTER_COLOR = "redBright";
+const RUSH_OVERLAY_BODY_TEMPLATE = [
+  "           ▄██▄",
+  "         ▄██████▄",
+  "        ██████████",
+  "        ██████████",
+  "        ██████████",
+  "        ███ ▄▄ ███",
+  "        ███ ██ ███",
+  "        ███ ▀▀ ███",
+  "        ██████████",
+  "       ▄██████████▄",
+  "      █████    █████",
+  "      ████      ████",
+  "         ██    ██",
+  "         ███  ███",
+  "        ▄███  ███▄",
+  "         ███  ███",
+  "        ▄████████▄",
 ] as const;
+const RUSH_OVERLAY_FALLBACK_FRAME = [
+  "         ▄██▄         ",
+  "        ██████        ",
+  "        ██▄▄██        ",
+  "        █ ▄▄ █        ",
+  "        █ ▀▀ █        ",
+  "        ██████        ",
+  "       ▄██████▄       ",
+  "      ████  ████      ",
+  "         █  █         ",
+  "         ████         ",
+  "        ▄█  █▄        ",
+  "         ██ ██        ",
+  "        ░▒▓▒░         ",
+  "        ░▒▓▓▒░        ",
+  "        ░▒▓▓▒▒░       ",
+  "       ░░▒▓▓▒░░       ",
+  "       ░▒▒▓▒▒░        ",
+] as const;
+const RUSH_OVERLAY_FRAMES = loadRushOverlayFrames();
 const RUN_STATUS_DOT_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
 const SYNC_OUTPUT_BEGIN = "\u001B[?2026h";
 const SYNC_OUTPUT_END = "\u001B[?2026l";
@@ -1115,6 +1160,7 @@ interface CmpViewerSnapshot {
   truthStatus?: string;
   readbackStatus?: string;
   detailLines?: string[];
+  routingLines?: string[];
   roleLines?: string[];
   requestLines?: string[];
   issueLines?: string[];
@@ -1140,6 +1186,7 @@ interface MpViewerSnapshot {
   rootPath?: string;
   recordCount?: number;
   detailLines?: string[];
+  routingLines?: string[];
   roleLines?: string[];
   flowLines?: string[];
   issueLines?: string[];
@@ -1518,6 +1565,11 @@ interface RushOverlayState {
   startedTick: number;
 }
 
+interface RushOverlayRenderedRow {
+  line: string;
+  sourceRowIndex: number;
+}
+
 interface TerminalOverlaySegment {
   text: string;
   color?: string;
@@ -1574,6 +1626,30 @@ function buildModelEffortOptions(): string[] {
     }
   }
   return options;
+}
+
+function parseRushOverlayFrames(source: string): string[][] {
+  const normalized = source.replace(/\r/gu, "");
+  const matches = [...normalized.matchAll(/\[Frame\s+\d+\]\n([\s\S]*?)(?=\n\[Frame\s+\d+\]|\s*$)/gu)];
+  return matches
+    .map((match) => (match[1] ?? "")
+      .replace(/\n+$/u, "")
+      .split("\n")
+      .filter((line) => line.length > 0))
+    .filter((frame) => frame.length > 0);
+}
+
+function loadRushOverlayFrames(): string[][] {
+  try {
+    const fileText = readFileSync(RUSH_OVERLAY_FRAME_SOURCE, "utf8");
+    const parsed = parseRushOverlayFrames(fileText);
+    if (parsed.length > 0) {
+      return parsed;
+    }
+  } catch {
+    // Fall back to the bundled frame when the external file is unavailable.
+  }
+  return [Array.from(RUSH_OVERLAY_FALLBACK_FRAME)];
 }
 
 function panelToneColor(tone: SlashPanelNoticeTone | PraxisSlashPanelField["tone"] | undefined): string {
@@ -2000,6 +2076,30 @@ function buildWorkflowEntries(detailValue: string | undefined): ViewerStatusEntr
   ];
 }
 
+function parseViewerNamedSummaryLines(lines: string[] | undefined): Array<{
+  label: string;
+  entries: ViewerStatusEntry[];
+}> {
+  if (!lines || lines.length === 0) {
+    return [];
+  }
+  return lines.flatMap((line) => {
+    const separatorIndex = line.indexOf(":");
+    if (separatorIndex <= 0) {
+      return [];
+    }
+    const label = line.slice(0, separatorIndex).trim();
+    const value = line.slice(separatorIndex + 1).trim();
+    if (!label || !value) {
+      return [];
+    }
+    const entries = parseViewerAssignmentEntries(value);
+    return entries.length > 0
+      ? [{ label, entries }]
+      : [];
+  });
+}
+
 function buildCmpViewerBodyLines(
   snapshot: CmpViewerSnapshot | null,
   pageIndex: number,
@@ -2009,6 +2109,7 @@ function buildCmpViewerBodyLines(
   const meta = buildViewerPageMeta(pageIndex, entries.length);
   const visibleEntries = entries.slice(meta.start, meta.end);
   const issueEntries = buildIssueEntries(snapshot?.issueLines, snapshot?.emptyReason);
+  const requestBlocks = parseViewerNamedSummaryLines(snapshot?.requestLines);
   const lines: PraxisSlashPanelBodyLine[] = [
     { text: formatViewerPageLine("CMP sections", meta, entries.length), tone: "info" },
     ...buildViewerStatusBlockLines({
@@ -2042,6 +2143,13 @@ function buildCmpViewerBodyLines(
       lineWidth,
       emptyValue: "no role telemetry yet",
     }),
+    ...requestBlocks.flatMap((block) =>
+      buildViewerStatusBlockLines({
+        label: block.label[0]?.toUpperCase() + block.label.slice(1),
+        labelTone: block.label === "bridge" ? "green" : "info",
+        entries: block.entries,
+        lineWidth,
+      })),
     ...buildViewerStatusBlockLines({
       label: "Issue",
       labelTone: "orange",
@@ -2159,6 +2267,13 @@ function buildMpViewerBodyLines(
       }),
       lineWidth,
       emptyValue: "MP summary is not available yet.",
+    }),
+    ...buildViewerStatusBlockLines({
+      label: "Route",
+      labelTone: "info",
+      entries: parseViewerAssignmentEntries(snapshot?.routingLines?.join(", ") ?? ""),
+      lineWidth,
+      emptyValue: "route diagnostics unavailable",
     }),
     ...buildViewerStatusBlockLines({
       label: "Source",
@@ -3750,64 +3865,142 @@ function buildModelPickerOverlaySnapshot(
   };
 }
 
-function sliceTextByDisplayWidth(
-  text: string,
-  startWidth: number,
-  maxWidth: number,
-): string {
-  if (maxWidth <= 0) {
-    return "";
-  }
-  let output = "";
-  let offset = 0;
-  for (const grapheme of splitGraphemes(text)) {
-    const width = Math.max(1, stringWidth(grapheme));
-    const nextOffset = offset + width;
-    if (nextOffset <= startWidth) {
-      offset = nextOffset;
-      continue;
-    }
-    if (offset >= startWidth + maxWidth) {
-      break;
-    }
-    output += grapheme;
-    offset = nextOffset;
-  }
-  return output;
-}
-
-function buildSlidingOverlaySegments(
-  text: string,
-  offset: number,
-  viewportWidth: number,
-  color: string,
-): TerminalOverlaySegment[] {
-  const safeViewportWidth = Math.max(1, viewportWidth);
-  const lineWidth = stringWidth(text);
-  const leftPadding = Math.max(0, Math.min(safeViewportWidth, offset));
-  const visibleStart = Math.max(0, -offset);
-  const visibleWidth = Math.max(0, Math.min(lineWidth - visibleStart, safeViewportWidth - leftPadding));
-  const visibleText = visibleWidth > 0
-    ? sliceTextByDisplayWidth(text, visibleStart, visibleWidth)
-    : "";
-  const renderedVisibleWidth = stringWidth(visibleText);
-  const rightPadding = Math.max(0, safeViewportWidth - leftPadding - renderedVisibleWidth);
-  const segments: TerminalOverlaySegment[] = [];
-  if (leftPadding > 0) {
-    segments.push({ text: " ".repeat(leftPadding) });
-  }
-  if (visibleText.length > 0) {
-    segments.push({ text: visibleText, color });
-  }
-  if (rightPadding > 0) {
-    segments.push({ text: " ".repeat(rightPadding) });
-  }
-  return segments.length > 0 ? segments : [{ text: " ".repeat(safeViewportWidth) }];
-}
-
 function easeRushOverlayProgress(progress: number): number {
   const normalized = Math.max(0, Math.min(1, progress));
   return normalized + ((RUSH_OVERLAY_SPEED_SWELL / (2 * Math.PI)) * Math.sin(2 * Math.PI * normalized));
+}
+
+function downgradeRushFlameLine(line: string, level: 1 | 2): string {
+  return [...line].map((char) => {
+    if (level === 1) {
+      if (char === "▓") {
+        return "▒";
+      }
+      if (char === "▒") {
+        return "░";
+      }
+      return char;
+    }
+    if (char === "▓" || char === "▒") {
+      return "░";
+    }
+    if (char === "░") {
+      return " ";
+    }
+    return char;
+  }).join("");
+}
+
+function scaleRushRocketLine(line: string): string {
+  return splitGraphemes(line).map((char) => char.repeat(RUSH_OVERLAY_HORIZONTAL_SCALE)).join("");
+}
+
+function trimRushCommonIndent(lines: readonly string[]): string[] {
+  const indents = lines
+    .filter((line) => line.trim().length > 0)
+    .map((line) => {
+      const match = line.match(/^ */u);
+      return match?.[0].length ?? 0;
+    });
+  const commonIndent = indents.length > 0 ? Math.min(...indents) : 0;
+  return lines.map((line) => line.slice(commonIndent));
+}
+
+function buildRushRocketFrameLines(frame: string[]): RushOverlayRenderedRow[] {
+  const bodyRows = trimRushCommonIndent(Array.from(RUSH_OVERLAY_BODY_TEMPLATE));
+  const flameRows = trimRushCommonIndent(frame.slice(12));
+  const extraFlameRows = flameRows.length > 0
+    ? [
+        downgradeRushFlameLine(flameRows[flameRows.length - 2] ?? flameRows[flameRows.length - 1] ?? "", 1),
+        downgradeRushFlameLine(flameRows[flameRows.length - 1] ?? "", 2),
+        downgradeRushFlameLine(flameRows[flameRows.length - 1] ?? "", 1),
+        downgradeRushFlameLine(downgradeRushFlameLine(flameRows[flameRows.length - 1] ?? "", 1), 2),
+      ].filter((line) => line.trim().length > 0)
+    : [];
+  const combinedRows = [
+    ...bodyRows.map((line, sourceRowIndex) => ({ line: `${" ".repeat(RUSH_OVERLAY_BODY_SHIFT)}${line}`, sourceRowIndex })),
+    ...flameRows.map((line, flameIndex) => ({
+      line: `${" ".repeat(RUSH_OVERLAY_FLAME_SHIFT)}${line}`,
+      sourceRowIndex: bodyRows.length + flameIndex,
+    })),
+    ...extraFlameRows.map((line, extraIndex) => ({
+      line: `${" ".repeat(RUSH_OVERLAY_FLAME_SHIFT)}${line}`,
+      sourceRowIndex: bodyRows.length + flameRows.length + extraIndex,
+    })),
+  ];
+  return combinedRows.flatMap((row) => {
+    const scaledRow: RushOverlayRenderedRow = {
+      line: scaleRushRocketLine(row.line),
+      sourceRowIndex: row.sourceRowIndex,
+    };
+    return [scaledRow];
+  });
+}
+
+function isRushWindowRimPosition(sourceRowIndex: number, charIndex: number): boolean {
+  return false;
+}
+
+function resolveRushOverlayCharColor(sourceRowIndex: number, charIndex: number, char: string): string | undefined {
+  if (char.trim().length === 0) {
+    return undefined;
+  }
+  if (isRushWindowRimPosition(sourceRowIndex, charIndex)) {
+    return RUSH_OVERLAY_WINDOW_RIM_COLOR;
+  }
+  if (sourceRowIndex <= 2) {
+    return RUSH_OVERLAY_NOSE_COLOR;
+  }
+  if (sourceRowIndex <= 11) {
+    return RUSH_OVERLAY_BODY_COLOR;
+  }
+  if (sourceRowIndex <= 16) {
+    return RUSH_OVERLAY_TAIL_COLOR;
+  }
+  if (sourceRowIndex === 17) {
+    return RUSH_OVERLAY_NOZZLE_COLOR;
+  }
+  if (char === "▓") {
+    return RUSH_OVERLAY_FLAME_INNER_COLOR;
+  }
+  if (char === "▒") {
+    return RUSH_OVERLAY_FLAME_MID_COLOR;
+  }
+  if (char === "░") {
+    return RUSH_OVERLAY_FLAME_OUTER_COLOR;
+  }
+  return RUSH_OVERLAY_COLOR;
+}
+
+function buildRushOverlayLineSegments(line: string, sourceRowIndex: number): TerminalOverlaySegment[] {
+  const segments: TerminalOverlaySegment[] = [];
+  let currentColor: string | undefined;
+  let currentText = "";
+  splitGraphemes(line).forEach((char, charIndex) => {
+    const color = resolveRushOverlayCharColor(sourceRowIndex, charIndex, char);
+    if (currentText.length === 0) {
+      currentText = char;
+      currentColor = color;
+      return;
+    }
+    if (color === currentColor) {
+      currentText += char;
+      return;
+    }
+    segments.push({
+      text: currentText,
+      ...(currentColor ? { color: currentColor } : {}),
+    });
+    currentText = char;
+    currentColor = color;
+  });
+  if (currentText.length > 0) {
+    segments.push({
+      text: currentText,
+      ...(currentColor ? { color: currentColor } : {}),
+    });
+  }
+  return segments.length > 0 ? segments : [{ text: "" }];
 }
 
 function buildRushOverlaySnapshot(
@@ -3815,18 +4008,33 @@ function buildRushOverlaySnapshot(
   terminalRows: number,
   terminalColumns: number,
 ): TerminalOverlaySnapshot {
-  const safeTerminalColumns = Math.max(1, terminalColumns);
+  const rawRocketFrame = RUSH_OVERLAY_FRAMES[Math.floor(frame / RUSH_OVERLAY_FLAME_FRAME_STEP) % RUSH_OVERLAY_FRAMES.length]
+    ?? RUSH_OVERLAY_FRAMES[0]
+    ?? Array.from(RUSH_OVERLAY_FALLBACK_FRAME);
+  const rocketFrame = buildRushRocketFrameLines(rawRocketFrame);
+  const frameHeight = rocketFrame.length;
+  const frameWidth = rocketFrame.reduce((max, row) => Math.max(max, stringWidth(row.line)), 0);
   const progress = Math.max(0, Math.min(1, frame / RUSH_OVERLAY_TOTAL_FRAMES));
   const easedProgress = easeRushOverlayProgress(progress);
-  const artWidth = RUSH_OVERLAY_ART_LINES.reduce((max, line) => Math.max(max, stringWidth(line)), 0);
-  const startOffset = -artWidth;
-  const endOffset = safeTerminalColumns;
-  const horizontalOffset = Math.round(startOffset + ((endOffset - startOffset) * easedProgress));
+  const startBottom = terminalRows + frameHeight;
+  const endBottom = -1;
+  const bottom = Math.round(startBottom + ((endBottom - startBottom) * easedProgress));
+  const visibleRows = rocketFrame.flatMap((row, rowIndex) => {
+    const screenRow = bottom - ((frameHeight - 1) - rowIndex);
+    if (screenRow < 1 || screenRow > terminalRows) {
+      return [];
+    }
+    return [{
+      screenRow,
+      line: row.line,
+      sourceRowIndex: row.sourceRowIndex,
+    }];
+  });
   return {
-    top: Math.max(1, Math.floor((terminalRows - RUSH_OVERLAY_ART_LINES.length) / 2)),
-    left: 1,
-    lines: RUSH_OVERLAY_ART_LINES.map((line) => ({
-      segments: buildSlidingOverlaySegments(line, horizontalOffset, safeTerminalColumns, RUSH_OVERLAY_COLOR),
+    top: visibleRows[0]?.screenRow ?? 1,
+    left: Math.max(1, Math.floor((terminalColumns - frameWidth) / 2)),
+    lines: visibleRows.map(({ line, sourceRowIndex }) => ({
+      segments: buildRushOverlayLineSegments(line, sourceRowIndex),
     })),
   };
 }
@@ -5679,6 +5887,9 @@ function normalizeMpViewerSnapshot(input: unknown): MpViewerSnapshot | null {
       : undefined,
     detailLines: Array.isArray(record.detailLines)
       ? record.detailLines.filter((line): line is string => typeof line === "string" && line.trim().length > 0)
+      : undefined,
+    routingLines: Array.isArray(record.routingLines)
+      ? record.routingLines.filter((line): line is string => typeof line === "string" && line.trim().length > 0)
       : undefined,
     roleLines: Array.isArray(record.roleLines)
       ? record.roleLines.filter((line): line is string => typeof line === "string" && line.trim().length > 0)

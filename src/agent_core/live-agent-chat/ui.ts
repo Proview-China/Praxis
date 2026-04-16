@@ -111,6 +111,7 @@ function formatSlashCommandHelpLines(): string[] {
   return [
     ...builtInLines,
     `${String(builtInLines.length + 1).padStart(2, "0")} /rewind <turn>`.padEnd(maxLabelWidth + 5, " ") + "  rewind the in-memory conversation to a prior turn",
+    `${String(builtInLines.length + 2).padStart(2, "0")} /cmp worksite`.padEnd(maxLabelWidth + 5, " ") + "  show the focused CMP worksite and MP bridge summary",
   ];
 }
 
@@ -305,6 +306,7 @@ export function formatDirectMpSnapshotLines(snapshot: MpPanelSnapshotPayload): s
     `status=${snapshot.status} source=${snapshot.sourceKind}/${snapshot.sourceClass}`,
     snapshot.rootPath ? `rootPath=${truncate(snapshot.rootPath, 84)}` : undefined,
     ...(snapshot.detailLines ?? []).slice(0, 3),
+    ...(snapshot.routingLines ?? []).slice(0, 6).map((line) => `route: ${line}`),
     ...(snapshot.issueLines ?? []).slice(0, 2).map((line) => `issue: ${line}`),
     ...(snapshot.roleLines ?? []).slice(0, 5),
   ].filter((line): line is string => typeof line === "string" && line.length > 0);
@@ -458,7 +460,7 @@ export function formatDirectCmpSnapshotLines(
     snapshot.summaryLines[2] ?? `db=${snapshot.truthStatus ?? "unknown"} readback=${snapshot.readbackStatus ?? "unknown"}`,
     `status=${snapshot.status} source=${snapshot.sourceKind} truth=${snapshot.truthStatus ?? "unknown"} readback=${snapshot.readbackStatus ?? "unknown"}`,
     ...(snapshot.detailLines ?? []).slice(0, 3),
-    ...(snapshot.requestLines ?? []).slice(0, 2),
+    ...(snapshot.requestLines ?? []).slice(0, 4),
     ...(snapshot.issueLines ?? []).slice(0, 2).map((line) => `issue: ${line}`),
     ...(snapshot.roleLines ?? []).slice(0, 5),
   ];
@@ -482,12 +484,30 @@ export function formatDirectCmpSnapshotLines(
   return lines;
 }
 
+export function formatDirectCmpWorksiteSnapshotLines(
+  snapshot: CmpPanelSnapshotPayload,
+): string[] {
+  const worksiteLines = (snapshot.requestLines ?? []).filter((line) =>
+    line.startsWith("worksite:")
+    || line.startsWith("orchestration:")
+    || line.startsWith("bridge:")
+    || line.startsWith("requests:"));
+  return worksiteLines.length > 0
+    ? worksiteLines
+    : [snapshot.emptyReason ?? "CMP worksite summary is not available yet."];
+}
+
 export function printCmpViewerSnapshot(
   snapshot: CmpPanelSnapshotPayload,
   latestTurn?: CmpTurnArtifacts,
 ): void {
   console.log("");
   printDirectBox("CMP View", formatDirectCmpSnapshotLines(snapshot, latestTurn));
+}
+
+export function printCmpWorksiteSnapshot(snapshot: CmpPanelSnapshotPayload): void {
+  console.log("");
+  printDirectBox("CMP Worksite", formatDirectCmpWorksiteSnapshotLines(snapshot));
 }
 
 export function printTapArtifacts(runtime: LiveCliRuntime, sessionId: string, runId?: string): void {

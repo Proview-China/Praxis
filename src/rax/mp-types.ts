@@ -222,6 +222,14 @@ export interface RaxMpMaterializeFromCmpCandidatesInput {
   };
 }
 
+export type RaxMpCmpCandidatePayload = RaxMpIngestInput["payload"];
+
+export interface RaxMpCmpCandidateExportEnvelope {
+  schemaVersion?: "cmp-mp-candidate-export/v1";
+  candidates: RaxMpCmpCandidatePayload[];
+  metadata?: Record<string, unknown>;
+}
+
 export interface RaxMpMaterializeFromCmpCandidatesResult {
   status: "materialized_from_cmp_candidates";
   records: MpMemoryRecord[];

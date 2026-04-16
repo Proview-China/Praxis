@@ -5,6 +5,10 @@ import {
 } from "../index.js";
 import { rax } from "../../rax/runtime.js";
 import type {
+  RaxMpCmpCandidateExportEnvelope,
+  RaxMpCmpCandidatePayload,
+} from "../../rax/mp-types.js";
+import type {
   CoreCmpWorksitePackageV1,
   CoreMpRoutedPackageV1,
   CoreOverlayIndexEntryV1,
@@ -60,6 +64,260 @@ function cloneFallbackEntry(entry: CoreOverlayIndexEntryV1): CoreOverlayIndexEnt
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object";
+}
+
+function asNonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+type CmpCandidateRejectionReason =
+  | "invalid_candidate_shape"
+  | "missing_stored_section_identity"
+  | "missing_required_fields"
+  | "missing_scope_descriptor"
+  | "duplicate_candidate";
+
+interface NormalizedCmpCandidateEnvelopeMetadata {
+  sessionId?: string;
+  agentId?: string;
+  currentObjective?: string;
+  packageRef?: string;
+  packageFamilyId?: string;
+  snapshotId?: string;
+  routeRationale?: string;
+  scopePolicy?: string;
+  reviewStateSummary?: string;
+  unresolvedStateSummary?: string;
+  sourceAnchorRefs?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+function readStoredSectionIdentity(storedSection: Record<string, unknown>): {
+  storedSectionId?: string;
+  storageRef?: string;
+} {
+  return {
+    storedSectionId: asNonEmptyString(storedSection.id) ?? asNonEmptyString(storedSection.storedSectionId),
+    storageRef: asNonEmptyString(storedSection.storageRef),
+  };
+}
+
+function normalizeScopeDescriptor(scope: unknown): RaxMpCmpCandidatePayload["scope"] | undefined {
+  if (!isRecord(scope)) {
+    return undefined;
+  }
+  const projectId = asNonEmptyString(scope.projectId);
+  const agentId = asNonEmptyString(scope.agentId);
+  const scopeLevel = asNonEmptyString(scope.scopeLevel);
+  const sessionMode = asNonEmptyString(scope.sessionMode);
+  if (!projectId || !agentId || !scopeLevel || !sessionMode) {
+    return undefined;
+  }
+  return scope as unknown as RaxMpCmpCandidatePayload["scope"];
+}
+
+function normalizeCmpCandidatePayload(candidate: unknown): {
+  candidate?: RaxMpCmpCandidatePayload;
+  rejectionReason?: CmpCandidateRejectionReason;
+} {
+  if (!isRecord(candidate)) {
+    return {
+      rejectionReason: "invalid_candidate_shape",
+    };
+  }
+  const storedSection = candidate.storedSection;
+  const checkedSnapshotRef = asNonEmptyString(candidate.checkedSnapshotRef);
+  const branchRef = asNonEmptyString(candidate.branchRef);
+  if (!isRecord(storedSection)) {
+    return {
+      rejectionReason: "missing_required_fields",
+    };
+  }
+  const scope = normalizeScopeDescriptor(candidate.scope);
+  const storedSectionIdentity = readStoredSectionIdentity(storedSection);
+  if (!storedSectionIdentity.storedSectionId && !storedSectionIdentity.storageRef) {
+    return {
+      rejectionReason: "missing_stored_section_identity",
+    };
+  }
+  if (!checkedSnapshotRef || !branchRef) {
+    return {
+      rejectionReason: "missing_required_fields",
+    };
+  }
+  if (!scope) {
+    return {
+      rejectionReason: "missing_scope_descriptor",
+    };
+  }
+  const normalized: RaxMpCmpCandidatePayload = {
+    storedSection: storedSection as unknown as RaxMpCmpCandidatePayload["storedSection"],
+    checkedSnapshotRef,
+    branchRef,
+    scope,
+  };
+  const confidence = asNonEmptyString(candidate.confidence);
+  if (confidence === "high" || confidence === "medium" || confidence === "low") {
+    normalized.confidence = confidence;
+  }
+  const observedAt = asNonEmptyString(candidate.observedAt);
+  if (observedAt) {
+    normalized.observedAt = observedAt;
+  }
+  const capturedAt = asNonEmptyString(candidate.capturedAt);
+  if (capturedAt) {
+    normalized.capturedAt = capturedAt;
+  }
+  const memoryKind = asNonEmptyString(candidate.memoryKind);
+  if (memoryKind) {
+    normalized.memoryKind = memoryKind as RaxMpCmpCandidatePayload["memoryKind"];
+  }
+  if (Array.isArray(candidate.sourceRefs)) {
+    const sourceRefs = candidate.sourceRefs
+      .map((value) => asNonEmptyString(value))
+      .filter((value): value is string => Boolean(value));
+    if (sourceRefs.length > 0) {
+      normalized.sourceRefs = sourceRefs;
+    }
+  }
+  if (isRecord(candidate.metadata)) {
+    normalized.metadata = candidate.metadata;
+  }
+  return {
+    candidate: normalized,
+  };
+}
+
+function buildCmpCandidateDedupKey(candidate: RaxMpCmpCandidatePayload): string {
+  const storedSection = candidate.storedSection as unknown as Record<string, unknown>;
+  const identity = readStoredSectionIdentity(storedSection);
+  return [
+    identity.storedSectionId ?? identity.storageRef ?? "unknown",
+    candidate.checkedSnapshotRef,
+    candidate.branchRef,
+  ].join("|");
+}
+
+function summarizeCandidateRejections(
+  rejectedByReason: Partial<Record<CmpCandidateRejectionReason, number>>,
+): string | undefined {
+  const entries = Object.entries(rejectedByReason)
+    .filter((entry): entry is [CmpCandidateRejectionReason, number] => typeof entry[1] === "number" && entry[1] > 0);
+  if (entries.length === 0) {
+    return undefined;
+  }
+  return entries.map(([reason, count]) => `${reason}:${count}`).join(", ");
+}
+
+function summarizeCandidateProvenance(metadata: NormalizedCmpCandidateEnvelopeMetadata): string | undefined {
+  const parts = [
+    metadata.packageRef ? `package:${metadata.packageRef}` : undefined,
+    metadata.packageFamilyId ? `family:${metadata.packageFamilyId}` : undefined,
+    metadata.snapshotId ? `snapshot:${metadata.snapshotId}` : undefined,
+    metadata.routeRationale ? `route:${metadata.routeRationale}` : undefined,
+    metadata.scopePolicy ? `scope:${metadata.scopePolicy}` : undefined,
+  ].filter((value): value is string => Boolean(value));
+  return parts.length > 0 ? parts.join(" / ") : undefined;
+}
+
+function summarizeWorksiteCandidateProvenance(
+  worksitePackage: CoreCmpWorksitePackageV1 | undefined,
+): string | undefined {
+  if (!worksitePackage) {
+    return undefined;
+  }
+  const parts = [
+    worksitePackage.identity?.packageRef ? `package:${worksitePackage.identity.packageRef}` : undefined,
+    worksitePackage.identity?.packageFamilyId ? `family:${worksitePackage.identity.packageFamilyId}` : undefined,
+    worksitePackage.payload?.sourceAnchorRefs?.[0] ? `anchor:${worksitePackage.payload.sourceAnchorRefs[0]}` : undefined,
+    worksitePackage.governance?.routeRationale ? `route:${worksitePackage.governance.routeRationale}` : undefined,
+    worksitePackage.governance?.scopePolicy ? `scope:${worksitePackage.governance.scopePolicy}` : undefined,
+  ].filter((value): value is string => Boolean(value));
+  return parts.length > 0 ? parts.join(" / ") : undefined;
+}
+
+function summarizeCandidateQualityGate(input: {
+  acceptedCount: number;
+  rejectedCount: number;
+  rejectedByReason: Partial<Record<CmpCandidateRejectionReason, number>>;
+}): string | undefined {
+  if (input.acceptedCount === 0 && input.rejectedCount === 0) {
+    return undefined;
+  }
+  const parts = [`accepted ${input.acceptedCount} candidate(s)`];
+  if (input.rejectedCount > 0) {
+    const rejectionSummary = summarizeCandidateRejections(input.rejectedByReason);
+    parts.push(`rejected ${input.rejectedCount}${rejectionSummary ? ` (${rejectionSummary})` : ""}`);
+  }
+  return parts.join("; ");
+}
+
+export function normalizeCmpCandidateExportInput(input: unknown): {
+  candidates: RaxMpCmpCandidatePayload[];
+  acceptedCount: number;
+  rejectedCount: number;
+  rejectedByReason: Partial<Record<CmpCandidateRejectionReason, number>>;
+  provenance: NormalizedCmpCandidateEnvelopeMetadata;
+  metadata?: RaxMpCmpCandidateExportEnvelope["metadata"];
+} {
+  const envelope = isRecord(input) && Array.isArray(input.candidates)
+    ? input as unknown as RaxMpCmpCandidateExportEnvelope
+    : undefined;
+  const provenance: NormalizedCmpCandidateEnvelopeMetadata = isRecord(input)
+    ? {
+      sessionId: asNonEmptyString(input.sessionId),
+      agentId: asNonEmptyString(input.agentId),
+      currentObjective: asNonEmptyString(input.currentObjective),
+      packageRef: asNonEmptyString(input.packageRef),
+      packageFamilyId: asNonEmptyString(input.packageFamilyId),
+      snapshotId: asNonEmptyString(input.snapshotId),
+      routeRationale: asNonEmptyString(input.routeRationale),
+      scopePolicy: asNonEmptyString(input.scopePolicy),
+      reviewStateSummary: asNonEmptyString(input.reviewStateSummary),
+      unresolvedStateSummary: asNonEmptyString(input.unresolvedStateSummary),
+      sourceAnchorRefs: Array.isArray(input.sourceAnchorRefs)
+        ? input.sourceAnchorRefs.map((value) => asNonEmptyString(value)).filter((value): value is string => Boolean(value))
+        : undefined,
+      metadata: isRecord(input.metadata) ? input.metadata : undefined,
+    }
+    : {};
+  const rawCandidates = Array.isArray(input)
+    ? input
+    : Array.isArray(envelope?.candidates)
+      ? envelope.candidates
+      : [];
+  const rejectedByReason: Partial<Record<CmpCandidateRejectionReason, number>> = {};
+  const candidates: RaxMpCmpCandidatePayload[] = [];
+  const seenKeys = new Set<string>();
+  for (const rawCandidate of rawCandidates) {
+    const normalized = normalizeCmpCandidatePayload(rawCandidate);
+    if (!normalized.candidate) {
+      if (normalized.rejectionReason) {
+        rejectedByReason[normalized.rejectionReason] = (rejectedByReason[normalized.rejectionReason] ?? 0) + 1;
+      }
+      continue;
+    }
+    const dedupKey = buildCmpCandidateDedupKey(normalized.candidate);
+    if (seenKeys.has(dedupKey)) {
+      rejectedByReason.duplicate_candidate = (rejectedByReason.duplicate_candidate ?? 0) + 1;
+      continue;
+    }
+    seenKeys.add(dedupKey);
+    candidates.push(normalized.candidate);
+  }
+  const rejectedCount = rawCandidates.length - candidates.length;
+  return {
+    candidates,
+    acceptedCount: candidates.length,
+    rejectedCount,
+    rejectedByReason,
+    provenance,
+    metadata: provenance.metadata ?? envelope?.metadata,
+  };
+}
+
 function createMpRoutingQueryText(input: {
   userMessage: string;
   currentObjective?: string;
@@ -100,7 +358,7 @@ export async function discoverMpOverlayEntries(input: {
   rootPath?: string;
   agentId?: string;
   cmpWorksitePackage?: CoreCmpWorksitePackageV1;
-  cmpCandidatePayloads?: Parameters<typeof rax.mp.materializeFromCmpCandidates>[0]["payload"]["candidates"];
+  cmpCandidatePayloads?: unknown;
   facade?: typeof rax;
 }): Promise<CoreOverlayIndexEntryV1[]> {
   const artifacts = await discoverMpOverlayArtifacts(input);
@@ -116,7 +374,7 @@ export async function discoverMpOverlayArtifacts(input: {
   rootPath?: string;
   agentId?: string;
   cmpWorksitePackage?: CoreCmpWorksitePackageV1;
-  cmpCandidatePayloads?: Parameters<typeof rax.mp.materializeFromCmpCandidates>[0]["payload"]["candidates"];
+  cmpCandidatePayloads?: unknown;
   facade?: typeof rax;
 }): Promise<{
   entries: CoreOverlayIndexEntryV1[];
@@ -157,12 +415,17 @@ export async function discoverMpOverlayArtifacts(input: {
       },
     });
 
-    const cmpCandidatePayloads = input.cmpCandidatePayloads ?? [];
-    if (cmpCandidatePayloads.length > 0) {
+    const normalizedCmpCandidates = normalizeCmpCandidateExportInput(input.cmpCandidatePayloads);
+    const candidateProvenanceSummary = summarizeCandidateProvenance(normalizedCmpCandidates.provenance)
+      ?? summarizeWorksiteCandidateProvenance(input.cmpWorksitePackage);
+    const candidateRejectionSummary = summarizeCandidateRejections(normalizedCmpCandidates.rejectedByReason);
+    const qualityGateSummary = summarizeCandidateQualityGate(normalizedCmpCandidates);
+    const fallbackSuppressed = normalizedCmpCandidates.acceptedCount > 0 && repoFallback.entries.length > 0;
+    if (normalizedCmpCandidates.acceptedCount > 0) {
       await facade.mp.materializeFromCmpCandidates({
         session,
         payload: {
-          candidates: cmpCandidatePayloads,
+          candidates: normalizedCmpCandidates.candidates,
         },
       });
     }
@@ -185,7 +448,9 @@ export async function discoverMpOverlayArtifacts(input: {
         sourceLineages: [requesterLineage],
         limit: input.limit ?? 6,
         routeHint: "resolve",
-        fallbackEntries: repoFallback.entries.map((entry) => cloneFallbackEntry(entry)),
+        fallbackEntries: fallbackSuppressed
+          ? []
+          : repoFallback.entries.map((entry) => cloneFallbackEntry(entry)),
         governanceSignals: createMpRoutingGovernanceSignals({
           cmpWorksitePackage: input.cmpWorksitePackage,
           fallbackPackage: repoFallback.routedPackage,
@@ -193,7 +458,12 @@ export async function discoverMpOverlayArtifacts(input: {
         metadata: {
           currentObjective: input.currentObjective ?? input.userMessage,
           cmpWorksitePackageRef: input.cmpWorksitePackage?.identity?.packageRef,
-          cmpCandidateCount: cmpCandidatePayloads.length,
+          cmpCandidateCount: normalizedCmpCandidates.acceptedCount,
+          cmpCandidateRejectedCount: normalizedCmpCandidates.rejectedCount,
+          cmpCandidateMetadata: normalizedCmpCandidates.metadata,
+          cmpCandidateProvenance: normalizedCmpCandidates.provenance,
+          cmpCandidateRejectedReasons: normalizedCmpCandidates.rejectedByReason,
+          cmpFallbackSuppressed: fallbackSuppressed,
         },
       },
     });
@@ -211,7 +481,7 @@ export async function discoverMpOverlayArtifacts(input: {
             ? "mp_native_history"
             : routed.readback.routeKind === "fallback"
               ? "repo_memory_fallback"
-              : cmpCandidatePayloads.length > 0
+              : normalizedCmpCandidates.acceptedCount > 0
                 ? "cmp_seeded_memory"
                 : "mp_native_resolve",
           records: [...routed.primaryRecords, ...routed.supportingRecords],
@@ -224,6 +494,13 @@ export async function discoverMpOverlayArtifacts(input: {
           fallbackReason: routed.readback.fallbackReason,
           receiptId: routed.readback.receiptId,
           omittedCount: routed.readback.omittedMemoryRefs.length,
+          candidateIntakeCount: normalizedCmpCandidates.acceptedCount,
+          candidateRejectedCount: normalizedCmpCandidates.rejectedCount,
+          candidateProvenanceSummary,
+          candidateRejectionSummary,
+          qualityGateSummary,
+          fallbackSuppressed,
+          fallbackStage: routed.readback.routeKind === "fallback" ? "repo_memory_snapshot" : "none",
         }),
       };
     }
@@ -249,14 +526,81 @@ export async function discoverMpOverlayArtifacts(input: {
           fallbackReason: "managed_records_fallback",
           receiptId: `mp-fallback:${projectId}:managed`,
           omittedCount: 0,
+          candidateIntakeCount: normalizedCmpCandidates.acceptedCount,
+          candidateRejectedCount: normalizedCmpCandidates.rejectedCount,
+          candidateProvenanceSummary,
+          candidateRejectionSummary,
+          qualityGateSummary,
+          fallbackSuppressed,
+          fallbackStage: "managed_records",
+        }),
+      };
+    }
+
+    if (fallbackSuppressed && repoFallback.entries.length > 0) {
+      return {
+        entries: repoFallback.entries,
+        routedPackage: applyCmpDiagnosticsToFallbackPackage(repoFallback.routedPackage, {
+          candidateIntakeCount: normalizedCmpCandidates.acceptedCount,
+          candidateRejectedCount: normalizedCmpCandidates.rejectedCount,
+          candidateProvenanceSummary,
+          candidateRejectionSummary,
+          qualityGateSummary,
+          fallbackSuppressed,
+          governanceReason: "CMP-seeded native route returned no eligible bundle, so repo-memory fallback was re-enabled as a last resort",
+          fallbackReason: "repo_memory_bootstrap_after_cmp_seeded_route",
         }),
       };
     }
   } catch {
-    return repoFallback;
+    const normalizedCmpCandidates = normalizeCmpCandidateExportInput(input.cmpCandidatePayloads);
+    return {
+      entries: repoFallback.entries,
+      routedPackage: applyCmpDiagnosticsToFallbackPackage(repoFallback.routedPackage, {
+        candidateIntakeCount: normalizedCmpCandidates.acceptedCount,
+        candidateRejectedCount: normalizedCmpCandidates.rejectedCount,
+        candidateProvenanceSummary: summarizeCandidateProvenance(normalizedCmpCandidates.provenance),
+        candidateRejectionSummary: summarizeCandidateRejections(normalizedCmpCandidates.rejectedByReason),
+        qualityGateSummary: summarizeCandidateQualityGate(normalizedCmpCandidates),
+        fallbackSuppressed: normalizedCmpCandidates.acceptedCount > 0 && repoFallback.entries.length > 0,
+      }),
+    };
   }
 
   return repoFallback;
+}
+
+function applyCmpDiagnosticsToFallbackPackage(
+  routedPackage: CoreMpRoutedPackageV1,
+  input: {
+    candidateIntakeCount: number;
+    candidateRejectedCount: number;
+    candidateProvenanceSummary?: string;
+    candidateRejectionSummary?: string;
+    qualityGateSummary?: string;
+    fallbackSuppressed?: boolean;
+    governanceReason?: string;
+    fallbackReason?: string;
+  },
+): CoreMpRoutedPackageV1 {
+  return {
+    ...routedPackage,
+    governance: {
+      ...(routedPackage.governance ?? {}),
+      governanceReason: input.governanceReason ?? routedPackage.governance?.governanceReason,
+      fallbackReason: input.fallbackReason ?? routedPackage.governance?.fallbackReason,
+      qualityGateSummary: input.qualityGateSummary,
+    },
+    retrieval: {
+      ...(routedPackage.retrieval ?? {}),
+      candidateIntakeCount: input.candidateIntakeCount,
+      candidateRejectedCount: input.candidateRejectedCount,
+      candidateProvenanceSummary: input.candidateProvenanceSummary,
+      candidateRejectionSummary: input.candidateRejectionSummary,
+      fallbackSuppressed: input.fallbackSuppressed,
+      fallbackStage: routedPackage.retrieval?.fallbackStage ?? "repo_memory_snapshot",
+    },
+  };
 }
 
 function toRoutedPackage(input: {
@@ -277,6 +621,13 @@ function toRoutedPackage(input: {
   fallbackReason?: string;
   receiptId?: string;
   omittedCount?: number;
+  candidateIntakeCount?: number;
+  candidateRejectedCount?: number;
+  candidateProvenanceSummary?: string;
+  candidateRejectionSummary?: string;
+  qualityGateSummary?: string;
+  fallbackSuppressed?: boolean;
+  fallbackStage?: "none" | "repo_memory_snapshot" | "managed_records";
 }): CoreMpRoutedPackageV1 {
   const freshest = input.records[0];
   const deliveryStatus = input.deliveryStatus ?? (input.records.length > 0 ? "available" : "absent");
@@ -311,12 +662,19 @@ function toRoutedPackage(input: {
       routeLabel: input.sourceClass,
       governanceReason: input.governanceReason,
       fallbackReason: input.fallbackReason,
+      qualityGateSummary: input.qualityGateSummary,
     },
     retrieval: {
       receiptId: input.receiptId,
       primaryCount: input.primaryRecords.length,
       supportingCount: input.supportingRecords.length,
       omittedCount: input.omittedCount,
+      candidateIntakeCount: input.candidateIntakeCount,
+      candidateRejectedCount: input.candidateRejectedCount,
+      candidateProvenanceSummary: input.candidateProvenanceSummary,
+      candidateRejectionSummary: input.candidateRejectionSummary,
+      fallbackSuppressed: input.fallbackSuppressed,
+      fallbackStage: input.fallbackStage ?? "none",
     },
   };
 }
@@ -368,6 +726,9 @@ function createRepoFallbackArtifacts(input: {
         primaryCount: Math.min(entries.length, 3),
         supportingCount: Math.max(entries.length - 3, 0),
         omittedCount: 0,
+        candidateIntakeCount: 0,
+        candidateRejectedCount: 0,
+        fallbackStage: "repo_memory_snapshot",
       },
     },
   };

@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   formatDirectCmpSnapshotLines,
+  formatDirectCmpWorksiteSnapshotLines,
   formatDirectMpSnapshotLines,
 } from "./ui.js";
 
@@ -18,6 +19,12 @@ test("formatDirectMpSnapshotLines renders live MP snapshot details instead of pl
     sourceClass: "lancedb",
     rootPath: "/tmp/mp-cache",
     recordCount: 2,
+    routingLines: [
+      "delivery_status=available source_class=cmp_seeded_memory",
+      "current_objective=continue payment refactor",
+      "candidate_intake=2 rejected=1",
+      "fallback_suppressed=true stage=none",
+    ],
     entries: [
       {
         memoryId: "memory:1",
@@ -31,6 +38,8 @@ test("formatDirectMpSnapshotLines renders live MP snapshot details instead of pl
 
   assert.match(lines.join("\n"), /LanceDB-backed MP memory records are available\./u);
   assert.match(lines.join("\n"), /source=lancedb\/lancedb/u);
+  assert.match(lines.join("\n"), /route: delivery_status=available source_class=cmp_seeded_memory/u);
+  assert.match(lines.join("\n"), /route: fallback_suppressed=true stage=none/u);
   assert.match(lines.join("\n"), /memory:1/u);
   assert.doesNotMatch(lines.join("\n"), /not wired into the direct CLI yet/u);
 });
@@ -59,6 +68,10 @@ test("formatDirectCmpSnapshotLines renders live CMP snapshot even without latest
     sourceKind: "cmp_readback",
     truthStatus: "ready",
     readbackStatus: "ready",
+    requestLines: [
+      "worksite: delivery=available, package=cmp-package:worksite-1, family=family-1, turn=4",
+      "bridge: candidates=2, policy=checked_governed_package_grade, snapshot=snapshot-1",
+    ],
     entries: [
       {
         sectionId: "section-1",
@@ -72,6 +85,8 @@ test("formatDirectCmpSnapshotLines renders live CMP snapshot even without latest
   });
 
   assert.match(lines.join("\n"), /db=ready readback=ready/u);
+  assert.match(lines.join("\n"), /worksite: delivery=available/u);
+  assert.match(lines.join("\n"), /bridge: candidates=2/u);
   assert.match(lines.join("\n"), /persisted · historical_context · cmp-live-cli-main/u);
   assert.doesNotMatch(lines.join("\n"), /还没有 CMP 结果/u);
 });
@@ -118,4 +133,25 @@ test("formatDirectCmpSnapshotLines keeps latest cmp turn as secondary context", 
   assert.match(lines.join("\n"), /latest cmp turn:/u);
   assert.match(lines.join("\n"), /cmp-package:pkg-1/u);
   assert.match(lines.join("\n"), /route via cmp/u);
+});
+
+test("formatDirectCmpWorksiteSnapshotLines keeps only the focused worksite and bridge lines", () => {
+  const lines = formatDirectCmpWorksiteSnapshotLines({
+    summaryLines: ["CMP summary"],
+    status: "ready",
+    sourceKind: "cmp_readback",
+    requestLines: [
+      "requests: peerPending=1, peerApproved=0, reinterventionPending=0, reinterventionServed=0",
+      "worksite: delivery=available, package=cmp-package:worksite-1, family=family-1, turn=4",
+      "orchestration: review=parent review 1, unresolved=pending peer approvals=1, route=core_agent_return",
+      "bridge: candidates=2, policy=checked_governed_package_grade, snapshot=snapshot-1",
+    ],
+    entries: [],
+  });
+
+  assert.equal(lines.length, 4);
+  assert.match(lines[0] ?? "", /requests:/u);
+  assert.match(lines[1] ?? "", /worksite:/u);
+  assert.match(lines[2] ?? "", /orchestration:/u);
+  assert.match(lines[3] ?? "", /bridge:/u);
 });

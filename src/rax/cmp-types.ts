@@ -23,6 +23,7 @@ import type {
   CmpFiveAgentSummary,
 } from "../agent_core/cmp-five-agent/index.js";
 import type {
+  AgentCoreCmpMpCandidateExportV1,
   AgentCoreCmpTapReviewApertureV1,
   AgentCoreCmpWorksiteState,
 } from "../agent_core/cmp-api/index.js";
@@ -671,6 +672,12 @@ export interface RaxCmpWorksitePort {
     currentObjective?: string;
     requestedCapabilityKey?: string;
   }): Promise<AgentCoreCmpTapReviewApertureV1 | undefined> | AgentCoreCmpTapReviewApertureV1 | undefined;
+  exportMpCandidates(input: {
+    sessionId: string;
+    agentId?: string;
+    currentObjective?: string;
+    limit?: number;
+  }): Promise<AgentCoreCmpMpCandidateExportV1> | AgentCoreCmpMpCandidateExportV1;
 }
 
 export interface RaxCmpPort {

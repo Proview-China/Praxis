@@ -232,6 +232,25 @@ test("reviewer worker bridge rejects forbidden execution-bearing fields so it st
   );
 });
 
+test("reviewer worker bridge can fall back to humanSummary when reason is omitted", () => {
+  const request = createRequest();
+
+  const decision = compileReviewerWorkerVote({
+    request,
+    promptPack: createReviewerWorkerPromptPack(),
+    output: {
+      schemaVersion: REVIEWER_WORKER_OUTPUT_SCHEMA_VERSION,
+      workerKind: "reviewer",
+      lane: REVIEWER_WORKER_BRIDGE_LANE,
+      vote: "allow",
+      humanSummary: "可以批准这次受限 shell 请求。",
+      userFacingExplanation: "这次只是在临时仓里读取 git status，风险可控。",
+    },
+  });
+
+  assert.equal(decision.reason, "可以批准这次受限 shell 请求。");
+});
+
 test("reviewer worker bridge rejects non-allow votes that carry compiler directives", () => {
   const request = createRequest();
 

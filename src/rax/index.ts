@@ -105,6 +105,8 @@ export type {
   RaxMpAcceptanceReadiness,
   RaxMpBootstrapInput,
   RaxMpBootstrapResult,
+  RaxMpCmpCandidateExportEnvelope,
+  RaxMpCmpCandidatePayload,
   RaxMpCompactInput,
   RaxMpCreateInput,
   RaxMpFacade,

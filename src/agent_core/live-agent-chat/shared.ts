@@ -116,6 +116,34 @@ export interface CoreTurnArtifacts {
       routeReason?: string;
     };
   };
+  primaryToolExecution?: {
+    capabilityKey: string;
+    status: string;
+    output?: unknown;
+    error?: unknown;
+    diagnostics?: {
+      capabilityKey: string;
+      requestedTier?: string;
+      requestedMode?: string;
+      effectiveMode?: string;
+      automationDepth?: string;
+      explanationStyle?: string;
+      derivedRiskLevel?: string;
+      matchedToolPolicy?: string;
+      matchedToolPolicySelector?: string;
+      forceHumanByRisk?: boolean;
+      accessStatus?: string;
+      accessAssignment?: string;
+      accessMatchedPattern?: string;
+      safetyOutcome?: string;
+      safetyReason?: string;
+      safetyMatchedPattern?: string;
+      requestedScopeKind?: string;
+      externalPathPrefixes?: string[];
+      routeDecision?: string;
+      routeReason?: string;
+    };
+  };
 }
 
 export interface ParsedTapRequest {
@@ -284,6 +312,7 @@ export interface MpPanelSnapshotPayload {
   rootPath?: string;
   recordCount?: number;
   detailLines?: string[];
+  routingLines?: string[];
   roleLines?: string[];
   flowLines?: string[];
   issueLines?: string[];

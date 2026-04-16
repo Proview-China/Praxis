@@ -1,4 +1,5 @@
 import type {
+  AgentCoreCmpMpCandidateExportV1,
   AgentCoreCmpTapReviewApertureV1,
   AgentCoreCmpWorksiteApi,
   AgentCoreCmpWorksiteState,
@@ -6,6 +7,8 @@ import type {
 } from "../cmp-api/index.js";
 import type { CoreCmpWorksitePackageV1 } from "../core-prompt/types.js";
 import type { CmpFiveAgentSummary, CmpFiveAgentRuntimeSnapshot } from "../cmp-five-agent/index.js";
+import type { CheckedSnapshot, CmpStoredSection } from "../cmp-types/index.js";
+import { createMpScopeDescriptor, type MpMemoryKind } from "../mp-types/index.js";
 import type { AgentCoreCmpStateStore } from "./state-store.js";
 import type { AgentCoreCmpWorksiteStateRecord } from "./state-store.js";
 
@@ -76,6 +79,44 @@ function readStringArray(value: unknown): string[] {
     .map((entry) => entry.trim()))];
 }
 
+function isCmpStoredSectionLike(value: unknown): value is CmpStoredSection {
+  const record = asRecord(value);
+  return Boolean(
+    record
+    && typeof record.id === "string"
+    && typeof record.projectId === "string"
+    && typeof record.agentId === "string"
+    && typeof record.sourceSectionId === "string"
+    && typeof record.plane === "string"
+    && typeof record.storageRef === "string"
+    && typeof record.state === "string"
+    && typeof record.visibility === "string"
+    && typeof record.persistedAt === "string"
+    && typeof record.updatedAt === "string",
+  );
+}
+
+function readCmpStoredSectionsFromSnapshot(snapshot: CheckedSnapshot): CmpStoredSection[] {
+  const storedSections = snapshot.metadata?.cmpStoredSections;
+  if (!Array.isArray(storedSections)) {
+    return [];
+  }
+  return storedSections
+    .filter(isCmpStoredSectionLike)
+    .map((section) => ({
+      ...section,
+      metadata: section.metadata ? structuredClone(section.metadata) : undefined,
+    }));
+}
+
+function filterExportableCmpStoredSections(storedSections: CmpStoredSection[]): CmpStoredSection[] {
+  return storedSections.filter((section) =>
+    section.state === "stored"
+    || section.state === "checked"
+    || section.state === "promoted"
+    || section.state === "dispatched");
+}
+
 function readSourceAnchorRefs(snapshot: CmpFiveAgentRuntimeSnapshot, summary: CmpFiveAgentSummary): string[] {
   const dispatcherBundle = asRecord(summary.latestRoleMetadata.dispatcher?.bundle);
   const fromDispatcher = readStringArray(dispatcherBundle?.sourceAnchorRefs);
@@ -127,6 +168,204 @@ function createRouteStateSummary(summary: CmpFiveAgentSummary): string | undefin
     readString(body?.packageKind),
   ].filter((value): value is string => Boolean(value));
   return pieces.length > 0 ? pieces.join(" / ") : undefined;
+}
+
+function createPackageFamilySummary(snapshot: CmpFiveAgentRuntimeSnapshot): string | undefined {
+  const family = snapshot.packageFamilies.at(-1);
+  if (!family) {
+    return undefined;
+  }
+  const taskSnapshotIds = Array.isArray(family.taskSnapshotIds) ? family.taskSnapshotIds : [];
+  const parts = [
+    `family ${family.familyId}`,
+    `primary ${family.primaryPackageRef}`,
+    family.timelinePackageRef ? `timeline ${family.timelinePackageRef}` : undefined,
+    taskSnapshotIds.length > 0 ? `task snapshots ${taskSnapshotIds.length}` : undefined,
+  ].filter((value): value is string => Boolean(value));
+  return parts.join(", ");
+}
+
+function createActiveLineSummary(input: {
+  summary: CmpFiveAgentSummary;
+  snapshot: CmpFiveAgentRuntimeSnapshot;
+}): string | undefined {
+  const family = input.snapshot.packageFamilies.at(-1);
+  const latestDispatch = input.snapshot.dispatcherRecords.at(-1);
+  const parts = [
+    family?.familyId ? `family ${family.familyId}` : undefined,
+    latestDispatch?.packageMode ? `mode ${latestDispatch.packageMode}` : undefined,
+    latestDispatch?.targetAgentId ? `target ${latestDispatch.targetAgentId}` : undefined,
+    input.summary.flow.childSeedToIcmaCount > 0 ? `child seeds ${input.summary.flow.childSeedToIcmaCount}` : undefined,
+    input.summary.flow.passiveReturnCount > 0 ? `passive returns ${input.summary.flow.passiveReturnCount}` : undefined,
+  ].filter((value): value is string => Boolean(value));
+  return parts.length > 0 ? parts.join(", ") : undefined;
+}
+
+function createOrchestrationSummary(summary: CmpFiveAgentSummary): string | undefined {
+  const parts = [
+    summary.parentPromoteReviewCount > 0 ? `parent reviews ${summary.parentPromoteReviewCount}` : undefined,
+    summary.flow.pendingPeerApprovalCount > 0 ? `peer approvals ${summary.flow.pendingPeerApprovalCount}` : undefined,
+    summary.flow.reinterventionPendingCount > 0 ? `reinterventions ${summary.flow.reinterventionPendingCount}` : undefined,
+    summary.flow.childSeedToIcmaCount > 0 ? `child seeds ${summary.flow.childSeedToIcmaCount}` : undefined,
+    summary.flow.passiveReturnCount > 0 ? `passive returns ${summary.flow.passiveReturnCount}` : undefined,
+  ].filter((value): value is string => Boolean(value));
+  return parts.length > 0 ? parts.join(", ") : undefined;
+}
+
+function createTimelineSummary(snapshot: CmpFiveAgentRuntimeSnapshot): string | undefined {
+  const family = snapshot.packageFamilies.at(-1);
+  if (!family) {
+    return undefined;
+  }
+  const taskSnapshotIds = Array.isArray(family.taskSnapshotIds) ? family.taskSnapshotIds : [];
+  const parts = [
+    family.timelinePackageRef ? `timeline ${family.timelinePackageRef}` : undefined,
+    taskSnapshotIds.length > 0 ? `task snapshots ${taskSnapshotIds.length}` : undefined,
+  ].filter((value): value is string => Boolean(value));
+  return parts.length > 0 ? parts.join(", ") : undefined;
+}
+
+function resolvePackageFamilySummary(record: AgentCoreCmpWorksiteStateRecord): string | undefined {
+  return record.derived.packageFamilySummary
+    ?? (record.latestCmp.packageRef ? `primary ${record.latestCmp.packageRef}` : undefined);
+}
+
+function resolveActiveLineSummary(record: AgentCoreCmpWorksiteStateRecord): string | undefined {
+  return record.derived.activeLineSummary
+    ?? [
+      record.latestCmp.packageRef ? `package ${record.latestCmp.packageRef}` : undefined,
+      record.latestCmp.routeRationale ? `route ${record.latestCmp.routeRationale}` : undefined,
+    ].filter((value): value is string => Boolean(value)).join(", ");
+}
+
+function resolveOrchestrationSummary(record: AgentCoreCmpWorksiteStateRecord): string | undefined {
+  return record.derived.orchestrationSummary
+    ?? record.derived.reviewStateSummary
+    ?? record.derived.unresolvedStateSummary;
+}
+
+function resolveTimelineSummary(record: AgentCoreCmpWorksiteStateRecord): string | undefined {
+  return record.derived.timelineSummary
+    ?? record.latestCmp.timelineStrategy;
+}
+
+function inferMpMemoryKind(storedSection: CmpStoredSection): MpMemoryKind {
+  const sectionKind = typeof storedSection.metadata?.sectionKind === "string"
+    ? storedSection.metadata.sectionKind
+    : undefined;
+  switch (sectionKind) {
+    case "runtime_context":
+      return "status_snapshot";
+    case "historical_context":
+      return "episodic";
+    default:
+      return "semantic";
+  }
+}
+
+function createMpCandidateConfidence(
+  record: AgentCoreCmpWorksiteStateRecord,
+  snapshot: CheckedSnapshot,
+): "high" | "medium" | "low" {
+  if (record.deliveryStatus === "available" && snapshot.qualityLabel === "usable") {
+    return "high";
+  }
+  if (record.deliveryStatus === "partial") {
+    return "low";
+  }
+  return "medium";
+}
+
+function buildMpCandidateExport(
+  record: AgentCoreCmpWorksiteStateRecord,
+  snapshot: CheckedSnapshot | undefined,
+  input: {
+    currentObjective?: string;
+    limit?: number;
+  },
+): AgentCoreCmpMpCandidateExportV1 {
+  const storedSections = snapshot ? filterExportableCmpStoredSections(readCmpStoredSectionsFromSnapshot(snapshot)) : [];
+  const limit = typeof input.limit === "number" && Number.isFinite(input.limit) && input.limit > 0
+    ? Math.max(1, Math.floor(input.limit))
+    : storedSections.length;
+  const sourceRefs = [
+    ...record.derived.sourceAnchorRefs,
+    record.latestCmp.packageRef,
+    snapshot?.snapshotId,
+  ].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+  const candidates = record.deliveryStatus === "available" && snapshot
+    ? storedSections.slice(0, limit).map((storedSection, index) => ({
+      storedSection,
+      checkedSnapshotRef: snapshot.snapshotId,
+      branchRef: snapshot.branchRef,
+      scope: createMpScopeDescriptor({
+        projectId: storedSection.projectId,
+        agentId: storedSection.agentId,
+        sessionId: record.sessionId,
+        scopeLevel: "agent_isolated",
+        sessionMode: "bridged",
+        lineagePath: [storedSection.agentId],
+        metadata: {
+          source: "cmp_worksite_export",
+          cmpSuggestedScopeLevel: "project",
+          cmpPackageRef: record.latestCmp.packageRef,
+        },
+      }),
+      confidence: createMpCandidateConfidence(record, snapshot),
+      observedAt: snapshot.checkedAt,
+      capturedAt: record.updatedAt,
+      sourceRefs,
+      memoryKind: inferMpMemoryKind(storedSection),
+      metadata: {
+        schemaVersion: "cmp-mp-candidate/v1",
+        candidateSource: "cmp_worksite_export",
+        candidateOrdinal: index + 1,
+        cmpSessionId: record.sessionId,
+        cmpAgentId: record.agentId,
+        cmpCurrentObjective: input.currentObjective ?? record.currentObjective,
+        cmpPackageId: record.latestCmp.packageId,
+        cmpPackageRef: record.latestCmp.packageRef,
+        cmpPackageFamilyId: record.derived.packageFamilyId,
+        cmpPackageFamilySummary: record.derived.packageFamilySummary,
+        cmpPrimaryPackageRef: record.derived.primaryPackageRef,
+        cmpProjectionId: record.latestCmp.projectionId,
+        cmpSnapshotId: snapshot.snapshotId,
+        cmpRouteRationale: record.latestCmp.routeRationale,
+        cmpRouteStateSummary: record.derived.routeStateSummary,
+        cmpScopePolicy: record.latestCmp.scopePolicy,
+        cmpReviewStateSummary: record.derived.reviewStateSummary,
+        cmpUnresolvedStateSummary: record.derived.unresolvedStateSummary,
+        cmpOrchestrationSummary: record.derived.orchestrationSummary,
+        cmpTimelineSummary: record.derived.timelineSummary,
+        cmpSourceAnchorRefs: [...record.derived.sourceAnchorRefs],
+        cmpRecoveryStatus: record.derived.recoveryStatus,
+        cmpTaskSummary: record.latestCmp.intent,
+        cmpOperatorGuide: record.latestCmp.operatorGuide,
+      },
+    }))
+    : [];
+
+  return {
+    schemaVersion: "cmp-mp-candidate-export/v1",
+    sessionId: record.sessionId,
+    agentId: record.agentId,
+    currentObjective: input.currentObjective ?? record.currentObjective,
+    packageRef: record.latestCmp.packageRef,
+    packageFamilyId: record.derived.packageFamilyId,
+    snapshotId: snapshot?.snapshotId ?? record.latestCmp.snapshotId,
+    routeRationale: record.latestCmp.routeRationale,
+    scopePolicy: record.latestCmp.scopePolicy,
+    routeStateSummary: record.derived.routeStateSummary,
+    reviewStateSummary: record.derived.reviewStateSummary,
+    unresolvedStateSummary: record.derived.unresolvedStateSummary,
+    packageFamilySummary: resolvePackageFamilySummary(record),
+    activeLineSummary: resolveActiveLineSummary(record),
+    orchestrationSummary: resolveOrchestrationSummary(record),
+    timelineSummary: resolveTimelineSummary(record),
+    candidateExportSummary: `policy=checked_governed_package_grade, exportable=${storedSections.length}, emitted=${candidates.length}`,
+    sourceAnchorRefs: [...record.derived.sourceAnchorRefs],
+    candidates,
+  };
 }
 
 function toConfidenceLabel(
@@ -193,6 +432,10 @@ function createDerivedState(input: {
     packageFamilyId: packageFamily?.familyId,
     primaryPackageId: packageFamily?.primaryPackageId,
     primaryPackageRef: packageFamily?.primaryPackageRef,
+    packageFamilySummary: createPackageFamilySummary(input.snapshot),
+    activeLineSummary: createActiveLineSummary(input),
+    orchestrationSummary: createOrchestrationSummary(input.summary),
+    timelineSummary: createTimelineSummary(input.snapshot),
     sourceAnchorRefs: readSourceAnchorRefs(input.snapshot, input.summary),
     reviewStateSummary: createReviewStateSummary(input.summary),
     routeStateSummary: createRouteStateSummary(input.summary),
@@ -299,7 +542,10 @@ export function createAgentCoreCmpWorksiteService(
             ? `active package family ${record.derived.packageFamilyId} with primary ${record.derived.primaryPackageRef}`
             : `latest package ${record.latestCmp.packageRef}`,
           backgroundContext: record.latestCmp.childGuide,
-          timelineSummary: record.latestCmp.timelineStrategy,
+          timelineSummary: resolveTimelineSummary(record),
+          packageFamilySummary: resolvePackageFamilySummary(record),
+          activeLineSummary: resolveActiveLineSummary(record),
+          orchestrationSummary: resolveOrchestrationSummary(record),
           sourceAnchorRefs: record.derived.sourceAnchorRefs,
           unresolvedStateSummary: record.derived.unresolvedStateSummary,
           reviewStateSummary: record.derived.reviewStateSummary,
@@ -344,12 +590,28 @@ export function createAgentCoreCmpWorksiteService(
         snapshotId: record.latestCmp.snapshotId,
         checkerReason: record.latestCmp.checkerReason,
         routeRationale: record.latestCmp.routeRationale,
+        routeStateSummary: record.derived.routeStateSummary,
         reviewStateSummary: record.derived.reviewStateSummary,
+        unresolvedStateSummary: record.derived.unresolvedStateSummary,
         sourceAnchorRefs: record.derived.sourceAnchorRefs,
         pendingPeerApprovalCount: record.derived.pendingPeerApprovalCount,
         parentPromoteReviewCount: record.derived.parentPromoteReviewCount,
         reinterventionPendingCount: record.derived.reinterventionPendingCount,
       };
+    },
+    exportMpCandidates(input) {
+      const record = findCurrentRecord(stateStore, input);
+      if (!record) {
+        return {
+          schemaVersion: "cmp-mp-candidate-export/v1",
+          sessionId: input.sessionId,
+          agentId: input.agentId ?? "unknown",
+          currentObjective: input.currentObjective,
+          candidates: [],
+        };
+      }
+      const snapshot = stateStore.runtime.getCmpCheckedSnapshot(record.latestCmp.snapshotId);
+      return buildMpCandidateExport(record, snapshot, input);
     },
   };
 }

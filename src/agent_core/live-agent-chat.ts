@@ -32,6 +32,9 @@ import {
   runCmpSidecarTurn,
 } from "./live-agent-chat/cmp-sidecar.js";
 import {
+  refreshLiveMpOverlayForTurn,
+} from "./live-agent-chat/mp-overlay-turn.js";
+import {
   createCmpFiveAgentConfiguration,
   createCmpFiveAgentRuntime,
   createCmpRoleLiveLlmModelExecutor,
@@ -156,6 +159,7 @@ import {
   printDirectAnswer,
   printAgentsViewPlaceholder,
   printCmpViewerSnapshot,
+  printCmpWorksiteSnapshot,
   printDirectBullet,
   printDirectCapabilities,
   printInitViewPlaceholder,
@@ -265,6 +269,23 @@ interface CapabilityPanelSnapshotPayload {
   lastAttempt?: TapCapabilityDiagnosticSnapshotPayload;
   writeDiagnostics?: TapCapabilityDiagnosticSnapshotPayload[];
   groups: CapabilityPanelSnapshotGroup[];
+}
+
+function isDiagnosticReadbackHelperCapability(capabilityKey: string | undefined): boolean {
+  switch (capabilityKey) {
+    case "docs.read":
+    case "doc.read":
+    case "git.status":
+    case "git.diff":
+    case "code.read":
+    case "code.read_many":
+    case "code.grep":
+    case "code.glob":
+    case "code.ls":
+      return true;
+    default:
+      return false;
+  }
 }
 
 interface InitPanelSnapshotPayload {
@@ -1437,6 +1458,9 @@ function createCmpViewerRuntimePort(state: LiveCliState): RaxCmpPort {
       exportTapPackage(input) {
         return state.runtime.cmp.worksite.exportTapPackage(input);
       },
+      exportMpCandidates(input) {
+        return state.runtime.cmp.worksite.exportMpCandidates(input);
+      },
     },
   };
 }
@@ -1517,15 +1541,25 @@ async function buildCmpPanelSnapshot(state: LiveCliState): Promise<CmpPanelSnaps
       `readiness: object=${summary.statusPanel.readiness.objectModel} loop=${summary.statusPanel.readiness.fiveAgentLoop} llm=${summary.statusPanel.readiness.liveLlm} infra=${summary.statusPanel.readiness.liveInfra} final=${summary.statusPanel.readiness.finalAcceptance}`,
     ]
     : (truthLines.length > 0 ? [`truth: ${truthLines.join(", ")}`] : []);
+  const cmpWorksitePackage = state.runtime.cmp.worksite.exportCorePackage({
+    sessionId: state.sessionId,
+  });
+  const cmpCandidateExport = state.runtime.cmp.worksite.exportMpCandidates({
+    sessionId: state.sessionId,
+    limit: 6,
+  });
   const roleLines = summary?.statusPanel
     ? Object.entries(summary.statusPanel.roles).map(([role, roleSummary]) =>
       `${role}: count=${roleSummary.count} stage=${roleSummary.latestStage ?? "idle"} live=${roleSummary.liveStatus ?? "unknown"}${roleSummary.semanticSummary ? ` · ${roleSummary.semanticSummary}` : ""}`)
     : [];
-  const requestLines = summary?.statusPanel
-    ? [
-      `requests: peerPending=${summary.statusPanel.requests.pendingPeerApprovalCount} peerApproved=${summary.statusPanel.requests.approvedPeerApprovalCount} reinterventionPending=${summary.statusPanel.requests.reinterventionPendingCount} reinterventionServed=${summary.statusPanel.requests.reinterventionServedCount}`,
-    ]
-    : [];
+  const requestLines = [
+    summary?.statusPanel
+      ? `requests: peerPending=${summary.statusPanel.requests.pendingPeerApprovalCount}, peerApproved=${summary.statusPanel.requests.approvedPeerApprovalCount}, reinterventionPending=${summary.statusPanel.requests.reinterventionPendingCount}, reinterventionServed=${summary.statusPanel.requests.reinterventionServedCount}`
+      : undefined,
+    `worksite: delivery=${cmpWorksitePackage.deliveryStatus}, package=${cmpWorksitePackage.identity?.packageRef ?? "none"}, family=${cmpWorksitePackage.identity?.packageFamilyId ?? "none"}, turn=${cmpWorksitePackage.objective?.activeTurnIndex ?? 0}`,
+    `orchestration: review=${cmpWorksitePackage.payload?.reviewStateSummary ?? "none"}, unresolved=${cmpWorksitePackage.payload?.unresolvedStateSummary ?? "none"}, route=${cmpWorksitePackage.payload?.routeStateSummary ?? "none"}`,
+    `bridge: candidates=${cmpCandidateExport.candidates.length}, policy=${cmpCandidateExport.candidateExportSummary ?? "unknown"}, snapshot=${cmpCandidateExport.snapshotId ?? "none"}`,
+  ].filter((line): line is string => Boolean(line));
   const issueLines = summary?.issues?.slice(0, 3) ?? [];
   const sourceKind = (dbTruth !== "unknown" || readbackStatus !== "unknown")
     ? "cmp_readback"
@@ -1547,7 +1581,10 @@ async function buildCmpPanelSnapshot(state: LiveCliState): Promise<CmpPanelSnaps
       objectModelSectionCount !== undefined
         ? `${objectModelSectionCount} DB-backed sections tracked`
         : `${entries.length} sections tracked`,
-      lifecycleSummary || issueLines[0] || "No section lifecycle data yet",
+      cmpWorksitePackage.payload?.orchestrationSummary
+        ?? lifecycleSummary
+        ?? issueLines[0]
+        ?? "No section lifecycle data yet",
       `db=${dbTruth} readback=${readbackStatus}`,
     ],
     status,
@@ -1679,6 +1716,44 @@ async function buildMpPanelSnapshot(state: LiveCliState): Promise<MpPanelSnapsho
     ]
     : ["workflow: mp five-agent readback not observed in the current runtime"];
   const issueLines = mpReadbackSummary?.issues?.slice(0, 3) ?? [];
+  const routingLines = state.mpRoutedPackage
+    ? [
+      `delivery_status=${state.mpRoutedPackage.deliveryStatus} source_class=${state.mpRoutedPackage.sourceClass}`,
+      ...(state.mpRoutedPackage.objective?.currentObjective
+        ? [`current_objective=${state.mpRoutedPackage.objective.currentObjective}`]
+        : []),
+      ...(state.mpRoutedPackage.governance?.routeLabel
+        ? [`route_label=${state.mpRoutedPackage.governance.routeLabel}`]
+        : []),
+      ...(state.mpRoutedPackage.governance?.governanceReason
+        ? [`governance_reason=${state.mpRoutedPackage.governance.governanceReason}`]
+        : []),
+      ...(state.mpRoutedPackage.governance?.qualityGateSummary
+        ? [`quality_gate=${state.mpRoutedPackage.governance.qualityGateSummary}`]
+        : []),
+      ...(state.mpRoutedPackage.retrieval?.receiptId
+        ? [`receipt_id=${state.mpRoutedPackage.retrieval.receiptId}`]
+        : []),
+      ...(state.mpRoutedPackage.retrieval?.candidateIntakeCount !== undefined
+        ? [
+          `candidate_intake=${state.mpRoutedPackage.retrieval.candidateIntakeCount} rejected=${state.mpRoutedPackage.retrieval.candidateRejectedCount ?? 0}`,
+        ]
+        : []),
+      ...(state.mpRoutedPackage.retrieval?.candidateProvenanceSummary
+        ? [`candidate_provenance=${state.mpRoutedPackage.retrieval.candidateProvenanceSummary}`]
+        : []),
+      ...(state.mpRoutedPackage.retrieval?.candidateRejectionSummary
+        ? [`candidate_rejections=${state.mpRoutedPackage.retrieval.candidateRejectionSummary}`]
+        : []),
+      ...(state.mpRoutedPackage.retrieval?.fallbackSuppressed !== undefined
+        ? [
+          `fallback_suppressed=${state.mpRoutedPackage.retrieval.fallbackSuppressed ? "true" : "false"} stage=${state.mpRoutedPackage.retrieval.fallbackStage ?? "none"}`,
+        ]
+        : state.mpRoutedPackage.retrieval?.fallbackStage
+          ? [`fallback_stage=${state.mpRoutedPackage.retrieval.fallbackStage}`]
+          : []),
+    ]
+    : undefined;
   try {
     const lancedbSnapshot = await loadMpLanceViewerEntries({
       rootPath,
@@ -1711,6 +1786,7 @@ async function buildMpPanelSnapshot(state: LiveCliState): Promise<MpPanelSnapsho
         rootPath,
         recordCount: lancedbSnapshot.entries.length,
         detailLines,
+        routingLines,
         roleLines,
         flowLines,
         issueLines,
@@ -1753,6 +1829,7 @@ async function buildMpPanelSnapshot(state: LiveCliState): Promise<MpPanelSnapsho
       `records: viewer=${entries.length} source=${sourceClass}`,
       ...flowLines,
     ],
+    routingLines,
     roleLines,
     flowLines,
     issueLines: issueLines.length > 0 ? issueLines : ["viewer is showing overlay/fallback records, not live LanceDB-backed runtime truth"],
@@ -1848,21 +1925,23 @@ function buildCapabilitiesPanelSnapshot(state: LiveCliState): CapabilityPanelSna
     routeDecision: diagnostic.routeDecision,
     routeReason: diagnostic.routeReason,
   }));
-  const lastAttempt = state.lastTurn?.core.toolExecution?.diagnostics
+  const selectedToolExecution = state.lastTurn?.core.primaryToolExecution
+    ?? state.lastTurn?.core.toolExecution;
+  const lastAttempt = selectedToolExecution?.diagnostics
     ? {
-      ...state.lastTurn.core.toolExecution.diagnostics,
-      finalStatus: state.lastTurn.core.toolExecution.status,
+      ...selectedToolExecution.diagnostics,
+      finalStatus: selectedToolExecution.status,
       errorCode:
-        state.lastTurn.core.toolExecution.error
-        && typeof state.lastTurn.core.toolExecution.error === "object"
-        && typeof (state.lastTurn.core.toolExecution.error as { code?: unknown }).code === "string"
-          ? (state.lastTurn.core.toolExecution.error as { code: string }).code
+        selectedToolExecution.error
+        && typeof selectedToolExecution.error === "object"
+        && typeof (selectedToolExecution.error as { code?: unknown }).code === "string"
+          ? (selectedToolExecution.error as { code: string }).code
           : undefined,
       errorMessage:
-        state.lastTurn.core.toolExecution.error
-        && typeof state.lastTurn.core.toolExecution.error === "object"
-        && typeof (state.lastTurn.core.toolExecution.error as { message?: unknown }).message === "string"
-          ? (state.lastTurn.core.toolExecution.error as { message: string }).message
+        selectedToolExecution.error
+        && typeof selectedToolExecution.error === "object"
+        && typeof (selectedToolExecution.error as { message?: unknown }).message === "string"
+          ? (selectedToolExecution.error as { message: string }).message
           : undefined,
     }
     : undefined;
@@ -2868,54 +2947,114 @@ async function executeCoreCapabilityRequest(
         metadata: bridgeMetadata,
       },
     };
-    const dispatch = await state.runtime.dispatchCapabilityIntentViaTaPool(capabilityIntent, {
-      agentId: `live-cli-core:${state.sessionId}`,
-      requestedTier,
-      mode: requestedMode,
-      reason: request.reason,
-      metadata: bridgeMetadata,
-    });
-    if (dispatch.status !== "dispatched") {
-      return {
-        capabilityKey: request.capabilityKey,
-        status: dispatch.status,
-        error: {
-          code: `ta_${dispatch.status}`,
-          message: dispatch.humanGate?.reason
-            ?? dispatch.reviewDecision?.reason
-            ?? dispatch.safety?.reason
-            ?? `Capability ${request.capabilityKey} did not reach execution; TAP returned ${dispatch.status}.`,
-          details: {
-            accessRequest: dispatch.accessRequest,
-            reviewDecision: dispatch.reviewDecision,
-            humanGate: dispatch.humanGate,
-            safety: dispatch.safety,
+    if (diagnostics.routeDecision !== "allow") {
+      if (diagnostics.routeDecision === "review" && !state.runtime.runCoordinator.getRun(runId)) {
+        await state.runtime.createRunFromSource({
+          sessionId: state.sessionId,
+          runId,
+          source: createGoalSource({
+            goalId: `${state.sessionId}:cli-direct-capability-goal:${state.turnIndex}`,
+            sessionId: state.sessionId,
+            runId,
+            userInput: request.reason ?? `Review and execute ${request.capabilityKey} for the direct CLI bridge.`,
+            metadata: {
+              cliBridge: "core-action-envelope",
+              cliUiMode: state.uiMode,
+              capabilityKey: request.capabilityKey,
+            },
+          }),
+          metadata: {
+            cliBridge: "core-action-envelope",
+            cliUiMode: state.uiMode,
+            capabilityKey: request.capabilityKey,
           },
-        },
-        diagnostics,
-      };
-    }
+        });
+      }
 
-    const kernelResult = state.runtime.readKernelResult(runId);
-    if (!kernelResult) {
+      const dispatch = await state.runtime.dispatchCapabilityIntentViaTaPool(capabilityIntent, {
+        agentId: `live-cli-core:${state.sessionId}`,
+        requestedTier,
+        mode: requestedMode,
+        reason: request.reason,
+        metadata: bridgeMetadata,
+      });
+      if (dispatch.status !== "dispatched") {
+        return {
+          capabilityKey: request.capabilityKey,
+          status: dispatch.status,
+          error: {
+            code: `ta_${dispatch.status}`,
+            message: dispatch.humanGate?.reason
+              ?? dispatch.reviewDecision?.reason
+              ?? dispatch.safety?.reason
+              ?? `Capability ${request.capabilityKey} did not reach execution; TAP returned ${dispatch.status}.`,
+            details: {
+              accessRequest: dispatch.accessRequest,
+              reviewDecision: dispatch.reviewDecision,
+              humanGate: dispatch.humanGate,
+              safety: dispatch.safety,
+            },
+          },
+          diagnostics,
+        };
+      }
+
+      const kernelResult = state.runtime.readKernelResult(runId);
+      if (!kernelResult) {
+        return {
+          capabilityKey: request.capabilityKey,
+          status: "failed",
+          error: {
+            code: "ta_kernel_result_missing",
+            message: `Capability ${request.capabilityKey} was dispatched through TAP but no kernel result was recorded for run ${runId}.`,
+          },
+          diagnostics,
+        };
+      }
+
       return {
         capabilityKey: request.capabilityKey,
-        status: "failed",
-        error: {
-          code: "ta_kernel_result_missing",
-          message: `Capability ${request.capabilityKey} was dispatched but no kernel result was recorded for run ${runId}.`,
-        },
+        status: kernelResult.status,
+        output: kernelResult.output,
+        error: kernelResult.error,
         diagnostics,
       };
     }
 
-    return {
-      capabilityKey: request.capabilityKey,
-      status: kernelResult.status,
-      output: kernelResult.output,
-      error: kernelResult.error,
-      diagnostics,
-    };
+    const plan = createInvocationPlanFromCapabilityIntent(capabilityIntent);
+    const lease = await state.runtime.capabilityGateway.acquire(plan);
+    const prepared = await state.runtime.capabilityGateway.prepare(lease, plan);
+
+    return await new Promise(async (resolve, reject) => {
+      const unsubscribe = state.runtime.capabilityGateway.onResult((result) => {
+        if (result.metadata?.preparedId !== prepared.preparedId) {
+          return;
+        }
+        unsubscribe();
+        if (result.status !== "success" && result.status !== "partial") {
+          resolve({
+            capabilityKey: request.capabilityKey,
+            status: result.status,
+            error: result.error,
+            diagnostics,
+          });
+          return;
+        }
+        resolve({
+          capabilityKey: request.capabilityKey,
+          status: result.status,
+          output: result.output,
+          diagnostics,
+        });
+      });
+
+      try {
+        await state.runtime.capabilityGateway.dispatch(prepared);
+      } catch (error) {
+        unsubscribe();
+        reject(error);
+      }
+    });
   } catch (error) {
     return {
       capabilityKey: request.capabilityKey,
@@ -3856,6 +3995,7 @@ async function runCoreTurn(
   let latestEventTypes: string[] = [];
   let latestTaskStatus: CoreTaskStatus = "completed";
   let latestToolExecution: NonNullable<CoreTurnArtifacts["toolExecution"]> | undefined;
+  let latestPrimaryToolExecution: NonNullable<CoreTurnArtifacts["primaryToolExecution"]> | undefined;
   let latestUsage: CoreTurnArtifacts["usage"] | undefined;
   let completedCapabilityLoops = 0;
   let browserTurnSummary: BrowserTurnSummary = {};
@@ -3894,6 +4034,7 @@ async function runCoreTurn(
       usage: latestUsage,
       plannerRawAnswer: params.plannerRawAnswer,
       toolExecution: latestToolExecution,
+      primaryToolExecution: latestPrimaryToolExecution,
       eventTypes: params.eventTypes,
     };
   };
@@ -4013,6 +4154,7 @@ async function runCoreTurn(
               usage: latestUsage,
               plannerRawAnswer: rawAnswer,
               toolExecution: latestToolExecution,
+              primaryToolExecution: latestPrimaryToolExecution,
               eventTypes: [
                 ...fallback.eventTypes,
                 "core.reply_questionnaire_salvaged",
@@ -4163,6 +4305,7 @@ async function runCoreTurn(
           usage: latestUsage,
           plannerRawAnswer: rawAnswer,
           toolExecution: resolvedToolExecution,
+          primaryToolExecution: latestPrimaryToolExecution ?? resolvedToolExecution,
           eventTypes: latestEventTypes.length > 0 ? latestEventTypes : ["core.capability_bridge.executed"],
         };
       }
@@ -4204,6 +4347,9 @@ async function runCoreTurn(
         : undefined;
 
     latestToolExecution = resolvedToolExecution;
+    if (!isDiagnosticReadbackHelperCapability(toolResultCapabilityKey) || !latestPrimaryToolExecution) {
+      latestPrimaryToolExecution = resolvedToolExecution;
+    }
     latestTaskStatus = "incomplete";
     completedCapabilityLoops += 1;
     if (toolResultCapabilityKey === "browser.playwright") {
@@ -4258,6 +4404,7 @@ async function runCoreTurn(
           usage: latestUsage,
           plannerRawAnswer: JSON.stringify(deterministicFollowup),
           toolExecution: resolvedToolExecution,
+          primaryToolExecution: latestPrimaryToolExecution ?? resolvedToolExecution,
           eventTypes: latestEventTypes.length > 0 ? latestEventTypes : ["core.action_planner.reply"],
         };
       }
@@ -4361,6 +4508,7 @@ async function runCoreTurn(
         usage: latestUsage,
         plannerRawAnswer: rawAnswer,
         toolExecution: resolvedToolExecution,
+        primaryToolExecution: latestPrimaryToolExecution ?? resolvedToolExecution,
         eventTypes: latestEventTypes,
       };
     }
@@ -4445,6 +4593,7 @@ async function runCoreTurn(
       usage: latestUsage,
       plannerRawAnswer: rawAnswer,
       toolExecution: resolvedToolExecution,
+      primaryToolExecution: latestPrimaryToolExecution ?? resolvedToolExecution,
       eventTypes: latestEventTypes,
     };
   }
@@ -5017,56 +5166,6 @@ function startLiveCliStartupWarmup(
   return warmup;
 }
 
-function readCmpMpCandidatePayloads(state: LiveCliState, currentObjective: string) {
-  const worksite = state.runtime.cmp.worksite as {
-    exportMpCandidates?: (input: {
-      sessionId: string;
-      agentId?: string;
-      currentObjective?: string;
-      limit?: number;
-    }) => unknown;
-  };
-  if (typeof worksite.exportMpCandidates !== "function") {
-    return undefined;
-  }
-  const exported = worksite.exportMpCandidates({
-    sessionId: state.sessionId,
-    currentObjective,
-    limit: 12,
-  });
-  if (Array.isArray(exported)) {
-    return exported;
-  }
-  if (exported && typeof exported === "object" && Array.isArray((exported as { candidates?: unknown[] }).candidates)) {
-    return (exported as { candidates: unknown[] }).candidates;
-  }
-  return undefined;
-}
-
-async function refreshLiveMpOverlayForTurn(
-  state: LiveCliState,
-  workspaceRoot: string,
-  currentObjective: string,
-): Promise<void> {
-  const cmpWorksitePackage = state.runtime.cmp.worksite.exportCorePackage({
-    sessionId: state.sessionId,
-    currentObjective,
-  });
-  const cmpCandidatePayloads = readCmpMpCandidatePayloads(state, currentObjective);
-  const refresh = discoverMpOverlayArtifacts({
-    cwd: workspaceRoot,
-    userMessage: currentObjective,
-    currentObjective,
-    cmpWorksitePackage,
-    cmpCandidatePayloads,
-  }).then((mpOverlay) => {
-    state.memoryOverlayEntries = mpOverlay.entries;
-    state.mpRoutedPackage = mpOverlay.routedPackage;
-  }).catch(() => undefined);
-  state.mpOverlayReady = refresh.then(() => undefined);
-  await refresh;
-}
-
 async function main(): Promise<void> {
   const options = parseCliOptions(process.argv.slice(2));
   CURRENT_UI_MODE = options.uiMode;
@@ -5334,6 +5433,12 @@ async function main(): Promise<void> {
           await state.cmpInfraReady?.catch(() => undefined);
           const snapshots = await emitViewerPanelSnapshots(state);
           printCmpViewerSnapshot(snapshots.cmp, state.latestCmp ?? state.lastTurn?.cmp);
+          continue;
+        }
+        if (line === "/cmp worksite") {
+          await state.cmpInfraReady?.catch(() => undefined);
+          const snapshots = await emitViewerPanelSnapshots(state);
+          printCmpWorksiteSnapshot(snapshots.cmp);
           continue;
         }
         if (line === "/tap") {
