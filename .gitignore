@@ -11,6 +11,7 @@ Thumbs.db
 .github/skills/
 
 # Node / Web
+node_modules
 node_modules/
 dist/
 .next/
@@ -35,6 +36,22 @@ tmp/
 
 # Logs
 *.log
+
+# Local browser automation traces and screenshots
+.playwright-mcp/
+
+# Agent runtime scratch state
+.raxode/agents/agent.task_*.json
+
+# Large local overlay caches regenerated from source state
+memory/generated/mp-overlay-cache/
+
+# One-off local TUI/Ink scratch scripts
+/test_ink_*.mjs
+/test_proxy.js
+/test_rows.mjs
+/test_tui*.js
+/test_tui*.mjs
 
 # Local secrets / live smoke config
 .env.local
