@@ -86,29 +86,67 @@ test("direct session store saves, lists, loads, and renames snapshots", () => {
   }
 });
 
-test("direct session store reads legacy snapshots with agentLabels and no agents", () => {
-  const home = mkdtempSync(join(tmpdir(), "praxis-direct-session-store-legacy-"));
+test("direct session store scopes sessions to the current cwd", () => {
+  const home = mkdtempSync(join(tmpdir(), "praxis-direct-session-store-scope-home-"));
+  const workspaceA = mkdtempSync(join(tmpdir(), "praxis-direct-session-scope-a-"));
+  const workspaceB = mkdtempSync(join(tmpdir(), "praxis-direct-session-scope-b-"));
+  const oldHome = process.env.RAXCODE_HOME;
+  process.env.RAXCODE_HOME = home;
+
+  try {
+    saveDirectTuiSessionSnapshot({
+      schemaVersion: 1,
+      sessionId: "session-a",
+      agentId: "agent.core:main",
+      name: "alpha",
+      workspace: workspaceA,
+      route: "https://example.test",
+      model: "gpt-5.4",
+      createdAt: "2026-04-14T00:00:00.000Z",
+      updatedAt: "2026-04-14T00:00:01.000Z",
+      agents: [],
+      messages: [],
+    }, workspaceA);
+
+    assert.equal(listDirectTuiSessions(workspaceA).length, 1);
+    assert.equal(listDirectTuiSessions(workspaceB).length, 0);
+    assert.equal(loadDirectTuiSessionSnapshot("session-a", workspaceA)?.sessionId, "session-a");
+    assert.equal(loadDirectTuiSessionSnapshot("session-a", workspaceB), null);
+  } finally {
+    if (oldHome === undefined) {
+      delete process.env.RAXCODE_HOME;
+    } else {
+      process.env.RAXCODE_HOME = oldHome;
+    }
+    rmSync(home, { recursive: true, force: true });
+    rmSync(workspaceA, { recursive: true, force: true });
+    rmSync(workspaceB, { recursive: true, force: true });
+  }
+});
+
+test("direct session store ignores legacy global sessions", () => {
+  const home = mkdtempSync(join(tmpdir(), "praxis-direct-session-store-legacy-home-"));
   const workspace = mkdtempSync(join(tmpdir(), "praxis-direct-session-legacy-workspace-"));
   const oldHome = process.env.RAXCODE_HOME;
   process.env.RAXCODE_HOME = home;
 
   try {
-    const sessionsDir = join(home, "sessions");
-    mkdirSync(sessionsDir, { recursive: true });
-    writeFileSync(join(sessionsDir, "direct-tui-index.json"), `${JSON.stringify({
-        schemaVersion: 1,
-        sessions: [{
-          sessionId: "legacy-session",
-          name: "legacy",
-          workspace,
-          route: "https://example.test",
+    const legacySessionsDir = join(home, "sessions");
+    mkdirSync(legacySessionsDir, { recursive: true });
+    writeFileSync(join(legacySessionsDir, "direct-tui-index.json"), `${JSON.stringify({
+      schemaVersion: 1,
+      sessions: [{
+        sessionId: "legacy-session",
+        name: "legacy",
+        workspace,
+        route: "https://example.test",
         model: "gpt-5.4",
         createdAt: "2026-04-14T00:00:00.000Z",
         updatedAt: "2026-04-14T00:00:01.000Z",
         messageCount: 0,
       }],
     }, null, 2)}\n`, "utf8");
-    writeFileSync(join(sessionsDir, "legacy-session.json"), `${JSON.stringify({
+    writeFileSync(join(legacySessionsDir, "legacy-session.json"), `${JSON.stringify({
       schemaVersion: 1,
       sessionId: "legacy-session",
       agentId: "agent.core:legacy-session",
@@ -119,19 +157,11 @@ test("direct session store reads legacy snapshots with agentLabels and no agents
       createdAt: "2026-04-14T00:00:00.000Z",
       updatedAt: "2026-04-14T00:00:01.000Z",
       selectedAgentId: "agent.core:legacy-session",
-      agentLabels: {
-        "agent.core:legacy-session": "legacy core",
-      },
       messages: [],
     }, null, 2)}\n`, "utf8");
 
-    const loaded = loadDirectTuiSessionSnapshot("legacy-session", workspace);
-    assert.equal(loaded?.agentId, "agent.core:legacy-session");
-    assert.equal(loaded?.selectedAgentId, "agent.core:legacy-session");
-    assert.deepEqual(loaded?.agents, []);
-    assert.deepEqual(loaded?.agentLabels, {
-      "agent.core:legacy-session": "legacy core",
-    });
+    assert.deepEqual(listDirectTuiSessions(workspace), []);
+    assert.equal(loadDirectTuiSessionSnapshot("legacy-session", workspace), null);
   } finally {
     if (oldHome === undefined) {
       delete process.env.RAXCODE_HOME;

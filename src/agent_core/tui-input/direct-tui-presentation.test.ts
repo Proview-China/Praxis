@@ -3,8 +3,10 @@ import test from "node:test";
 
 import { createSurfaceMessage } from "../surface/types.js";
 import {
+  createDirectTuiCmpActivityKey,
   deriveDirectTuiCmpStatusDescriptor,
   hasDirectTuiFormalConversation,
+  isDirectTuiCmpActivityStage,
   resolveDirectTuiAssistantTurnResultAction,
   resolveDirectTuiConversationPhase,
   shouldBreakDirectTuiAssistantSegmentOnStageStart,
@@ -137,6 +139,24 @@ test("foreground tool stages still break assistant segments by default", () => {
   assert.equal(shouldBreakDirectTuiAssistantSegmentOnStageStart("core/capability_bridge"), true);
   assert.equal(shouldBreakDirectTuiAssistantSegmentOnStageStart("workspace/readback"), true);
   assert.equal(shouldBreakDirectTuiAssistantSegmentOnStageStart(undefined), true);
+});
+
+test("cmp activity stage detection excludes infra bootstrap", () => {
+  assert.equal(isDirectTuiCmpActivityStage("cmp/icma"), true);
+  assert.equal(isDirectTuiCmpActivityStage("cmp/dispatcher"), true);
+  assert.equal(isDirectTuiCmpActivityStage("cmp/infra_bootstrap"), false);
+  assert.equal(isDirectTuiCmpActivityStage("core/run"), false);
+});
+
+test("cmp activity keys are created only for real cmp execution stages", () => {
+  assert.equal(createDirectTuiCmpActivityKey({
+    turnIndex: 11,
+    stage: "cmp/checker",
+  }), "11:cmp/checker");
+  assert.equal(createDirectTuiCmpActivityKey({
+    turnIndex: 11,
+    stage: "cmp/infra_bootstrap",
+  }), null);
 });
 
 test("cmp status descriptor animates only for active cmp stages", () => {

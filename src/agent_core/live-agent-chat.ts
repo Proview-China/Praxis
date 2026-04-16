@@ -3886,7 +3886,13 @@ async function runCoreTurn(
             : undefined,
         }
         : undefined,
-      );
+      {
+        projectId: createMpViewerProjectId(resolveConfiguredWorkspaceRoot()),
+        rootPath: resolve(resolveConfiguredWorkspaceRoot(), "memory", "generated", "mp-overlay-cache"),
+        agentId: "main",
+        depth: 0,
+      },
+    );
     if (state.uiMode === "direct") {
       printDirectSub(`调用能力 ${capabilityRequest.capabilityKey}`);
     }

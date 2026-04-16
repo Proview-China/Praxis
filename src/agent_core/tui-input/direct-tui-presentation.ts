@@ -46,6 +46,27 @@ export function shouldBreakDirectTuiAssistantSegmentOnStageStart(stage?: string 
   return true;
 }
 
+export function isDirectTuiCmpActivityStage(stage?: string | null): boolean {
+  const normalizedStage = stage?.trim();
+  if (!normalizedStage || !normalizedStage.startsWith("cmp/")) {
+    return false;
+  }
+  return normalizedStage !== "cmp/infra_bootstrap";
+}
+
+export function createDirectTuiCmpActivityKey(input: {
+  turnIndex?: number | null;
+  stage?: string | null;
+}): string | null {
+  if (!isDirectTuiCmpActivityStage(input.stage)) {
+    return null;
+  }
+  const normalizedTurnIndex = typeof input.turnIndex === "number" && Number.isFinite(input.turnIndex)
+    ? input.turnIndex
+    : 0;
+  return `${normalizedTurnIndex}:${input.stage?.trim()}`;
+}
+
 export interface DirectTuiCmpStatusDescriptor {
   label: string;
   animated: boolean;

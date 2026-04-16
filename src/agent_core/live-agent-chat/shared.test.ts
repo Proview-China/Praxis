@@ -1001,6 +1001,86 @@ test("applyCliDefaultsToCapabilityRequest rewrites file-looking code.ls requests
   assert.equal(request.input.path, "README.md");
 });
 
+test("applyCliDefaultsToCapabilityRequest injects MP defaults for routed memory requests", async () => {
+  const request = await applyCliDefaultsToCapabilityRequest(
+    {
+      capabilityKey: "mp.resolve",
+      reason: "inspect memory pool",
+      input: {},
+    },
+    { model: "gpt-5.4" } as never,
+    "所以请你仔细看看 mp 里面的内容",
+    undefined,
+    {
+      projectId: "project.mp-overlay.praxis-integrate",
+      rootPath: "/tmp/praxis/mp-overlay",
+      agentId: "main",
+      depth: 0,
+    },
+  );
+
+  assert.equal(request.input.projectId, "project.mp-overlay.praxis-integrate");
+  assert.equal(request.input.rootPath, "/tmp/praxis/mp-overlay");
+  assert.deepEqual(request.input.agentIds, ["main"]);
+  assert.equal(request.input.queryText, "所以请你仔细看看 mp 里面的内容");
+  assert.deepEqual(request.input.requesterLineage, {
+    projectId: "project.mp-overlay.praxis-integrate",
+    agentId: "main",
+    depth: 0,
+  });
+  assert.deepEqual(request.input.sourceLineages, [{
+    projectId: "project.mp-overlay.praxis-integrate",
+    agentId: "main",
+    depth: 0,
+  }]);
+});
+
+test("applyCliDefaultsToCapabilityRequest preserves explicit MP config while filling missing lineage fields", async () => {
+  const request = await applyCliDefaultsToCapabilityRequest(
+    {
+      capabilityKey: "mp.search",
+      reason: "search memory pool",
+      input: {
+        projectId: "explicit-project",
+        rootPath: "/explicit/root",
+        queryText: "existing query",
+        requesterLineage: {
+          agentId: "child-a",
+        },
+        sourceLineages: [
+          {
+            agentId: "child-b",
+            depth: 2,
+          },
+        ],
+      },
+    },
+    { model: "gpt-5.4" } as never,
+    "忽略这句，因为 query 已经存在",
+    undefined,
+    {
+      projectId: "fallback-project",
+      rootPath: "/fallback/root",
+      agentId: "main",
+      depth: 0,
+    },
+  );
+
+  assert.equal(request.input.projectId, "explicit-project");
+  assert.equal(request.input.rootPath, "/explicit/root");
+  assert.equal(request.input.queryText, "existing query");
+  assert.deepEqual(request.input.requesterLineage, {
+    projectId: "fallback-project",
+    agentId: "child-a",
+    depth: 0,
+  });
+  assert.deepEqual(request.input.sourceLineages, [{
+    projectId: "fallback-project",
+    agentId: "child-b",
+    depth: 2,
+  }]);
+});
+
 test("trimStructuredValue summarizes image data URLs instead of keeping raw base64", () => {
   const trimmed = trimStructuredValue({
     imageUrls: [
@@ -1188,10 +1268,7 @@ test("summarizeToolOutputForCore exposes search.ground partial status and error 
 });
 
 test("updateLiveCliViewerSnapshots stores the latest cmp and mp snapshots on state", () => {
-  const state = {} as {
-    latestCmpViewerSnapshot?: unknown;
-    latestMpViewerSnapshot?: unknown;
-  };
+  const state = {} as Parameters<typeof updateLiveCliViewerSnapshots>[0];
   const cmp = {
     summaryLines: ["cmp"],
     status: "ready" as const,

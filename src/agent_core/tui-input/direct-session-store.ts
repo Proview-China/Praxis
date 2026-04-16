@@ -8,7 +8,6 @@ import {
 import { isAbsolute, join, resolve } from "node:path";
 
 import {
-  resolveSessionsDir,
   resolveWorkspaceRaxodeSessionsDir,
 } from "../../runtime-paths.js";
 
@@ -151,23 +150,19 @@ function resolveWorkspaceSessionsDir(fallbackDir = process.cwd()): string {
   return resolveWorkspaceRaxodeSessionsDir(fallbackDir);
 }
 
-function resolveLegacySessionsDir(fallbackDir = process.cwd()): string {
-  return resolveSessionsDir(fallbackDir);
-}
-
 function ensureSessionsDir(fallbackDir = process.cwd()): string {
   const directory = resolveWorkspaceSessionsDir(fallbackDir);
   mkdirSync(directory, { recursive: true });
   return directory;
 }
 
-function indexPath(fallbackDir = process.cwd(), legacy = false): string {
-  const directory = legacy ? resolveLegacySessionsDir(fallbackDir) : ensureSessionsDir(fallbackDir);
-  return join(directory, legacy ? "direct-tui-index.json" : "index.json");
+function indexPath(fallbackDir = process.cwd()): string {
+  const directory = ensureSessionsDir(fallbackDir);
+  return join(directory, "index.json");
 }
 
-function snapshotPath(sessionId: string, fallbackDir = process.cwd(), legacy = false): string {
-  const directory = legacy ? resolveLegacySessionsDir(fallbackDir) : ensureSessionsDir(fallbackDir);
+function snapshotPath(sessionId: string, fallbackDir = process.cwd()): string {
+  const directory = ensureSessionsDir(fallbackDir);
   return join(directory, `${encodeURIComponent(sessionId)}.json`);
 }
 
@@ -182,32 +177,17 @@ function normalizeDirectTuiSessionSelector(selector: string): string {
   return selector.trim().toLowerCase();
 }
 
-function agentsPath(fallbackDir = process.cwd(), legacy = false): string {
-  const directory = legacy ? resolveLegacySessionsDir(fallbackDir) : ensureSessionsDir(fallbackDir);
+function agentsPath(fallbackDir = process.cwd()): string {
+  const directory = ensureSessionsDir(fallbackDir);
   return join(directory, "direct-tui-agents.json");
 }
 
 function loadIndexFile(fallbackDir = process.cwd()): DirectTuiSessionIndexFile {
   const workspacePath = indexPath(fallbackDir);
   if (!existsSync(workspacePath)) {
-    const legacyPath = indexPath(fallbackDir, true);
-    if (!existsSync(legacyPath)) {
-      return {
-        schemaVersion: 1,
-        sessions: [],
-      };
-    }
-    const parsed = JSON.parse(readFileSync(legacyPath, "utf8")) as Partial<DirectTuiSessionIndexFile>;
     return {
       schemaVersion: 1,
-      sessions: Array.isArray(parsed.sessions)
-        ? parsed.sessions.filter((entry): entry is DirectTuiSessionIndexRecord =>
-          Boolean(entry)
-          && typeof entry === "object"
-          && typeof (entry as DirectTuiSessionIndexRecord).sessionId === "string"
-          && typeof (entry as DirectTuiSessionIndexRecord).workspace === "string"
-          && (entry as DirectTuiSessionIndexRecord).workspace === fallbackDir)
-        : [],
+      sessions: [],
     };
   }
   const parsed = JSON.parse(readFileSync(workspacePath, "utf8")) as Partial<DirectTuiSessionIndexFile>;
@@ -327,30 +307,9 @@ export function resolveDirectTuiSessionSelection(
 function loadAgentsFile(fallbackDir = process.cwd()): DirectTuiAgentRegistryFile {
   const workspacePath = agentsPath(fallbackDir);
   if (!existsSync(workspacePath)) {
-    const legacyPath = agentsPath(fallbackDir, true);
-    if (!existsSync(legacyPath)) {
-      return {
-        schemaVersion: 1,
-        agents: [],
-      };
-    }
-    const parsed = JSON.parse(readFileSync(legacyPath, "utf8")) as Partial<DirectTuiAgentRegistryFile>;
     return {
       schemaVersion: 1,
-      agents: Array.isArray(parsed.agents)
-        ? parsed.agents.filter((entry): entry is DirectTuiAgentRegistryRecord =>
-          Boolean(entry)
-          && typeof entry === "object"
-          && typeof (entry as DirectTuiAgentRegistryRecord).agentId === "string"
-          && typeof (entry as DirectTuiAgentRegistryRecord).workspace === "string"
-          && (entry as DirectTuiAgentRegistryRecord).workspace === fallbackDir
-          && typeof (entry as DirectTuiAgentRegistryRecord).name === "string"
-          && typeof (entry as DirectTuiAgentRegistryRecord).kind === "string"
-          && typeof (entry as DirectTuiAgentRegistryRecord).status === "string"
-          && typeof (entry as DirectTuiAgentRegistryRecord).summary === "string"
-          && typeof (entry as DirectTuiAgentRegistryRecord).createdAt === "string"
-          && typeof (entry as DirectTuiAgentRegistryRecord).updatedAt === "string")
-        : [],
+      agents: [],
     };
   }
   const parsed = JSON.parse(readFileSync(workspacePath, "utf8")) as Partial<DirectTuiAgentRegistryFile>;
@@ -422,12 +381,8 @@ export function loadDirectTuiSessionSnapshot(
   sessionId: string,
   fallbackDir = process.cwd(),
 ): DirectTuiSessionSnapshot | null {
-  const workspacePath = snapshotPath(sessionId, fallbackDir);
-  const legacyPath = snapshotPath(sessionId, fallbackDir, true);
-  const filePath = existsSync(workspacePath)
-    ? workspacePath
-    : (existsSync(legacyPath) ? legacyPath : null);
-  if (!filePath) {
+  const filePath = snapshotPath(sessionId, fallbackDir);
+  if (!existsSync(filePath)) {
     return null;
   }
   const parsed = JSON.parse(readFileSync(filePath, "utf8")) as Partial<DirectTuiSessionSnapshot>;
@@ -435,9 +390,6 @@ export function loadDirectTuiSessionSnapshot(
     typeof parsed.workspace === "string" ? parsed.workspace : undefined,
     fallbackDir,
   );
-  if (filePath === legacyPath && workspace !== resolve(fallbackDir)) {
-    return null;
-  }
   return {
     schemaVersion: 1,
     sessionId,

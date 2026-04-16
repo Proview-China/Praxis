@@ -154,7 +154,9 @@ import {
   formatHumanGateDecisionEnvelope,
 } from "./live-agent-chat/human-gate-envelope.js";
 import {
+  createDirectTuiCmpActivityKey,
   deriveDirectTuiCmpStatusDescriptor,
+  isDirectTuiCmpActivityStage,
   resolveDirectTuiAssistantTurnResultAction,
   shouldBreakDirectTuiAssistantSegmentOnStageStart,
   shouldRenderDirectTuiConversationHeader,
@@ -789,8 +791,8 @@ const CMP_CONTEXT_ANIMATION_COLORS = [
   "magentaBright",
 ] as const;
 const CMP_CONTEXT_SPINNER_FRAMES = ["◐", "◓", "◑", "◒"] as const;
-const FOOTER_CONTEXT_BREATH_FRAMES = ["🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘"] as const;
-const FOOTER_CONTEXT_BREATH_COLORS = ["gray", "cyan", "cyanBright", "greenBright", "cyanBright"] as const;
+const FOOTER_CONTEXT_BREATH_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
+const FOOTER_CONTEXT_BREATH_COLORS = ["cyan", "cyanBright", "greenBright", "yellowBright", "cyanBright"] as const;
 const FOOTER_CONTEXT_BREATH_INTERVAL_MS = 150;
 const RUN_STATUS_DOT_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
 const SYNC_OUTPUT_BEGIN = "\u001B[?2026h";
@@ -845,12 +847,32 @@ const EXIT_SUMMARY_TOTAL_STEPS = Math.ceil(
   Math.max(...EXIT_SUMMARY_ART_LINES.map((line) => stringWidth(line))) / EXIT_SUMMARY_REVEAL_WIDTH_PER_STEP,
 );
 
-function isExitBlockingTask(task: Pick<SurfaceTask, "status">): boolean {
-  return task.status === "queued" || task.status === "running";
+function isUserFacingExitBlockingTask(
+  task: Pick<SurfaceTask, "status" | "kind" | "blocking" | "foregroundable">,
+): boolean {
+  if (
+    task.status !== "queued"
+    && task.status !== "running"
+    && task.status !== "waiting"
+    && task.status !== "blocked"
+  ) {
+    return false;
+  }
+  if (task.blocking === true) {
+    return true;
+  }
+  if (task.foregroundable === false) {
+    return false;
+  }
+  return task.kind !== "cmp_sync"
+    && task.kind !== "cmp_passive_reply"
+    && task.kind !== "mp_materialize";
 }
 
-function hasExitBlockingTasks(tasks: readonly Pick<SurfaceTask, "status">[]): boolean {
-  return tasks.some((task) => isExitBlockingTask(task));
+function hasExitBlockingTasks(
+  tasks: readonly Pick<SurfaceTask, "status" | "kind" | "blocking" | "foregroundable">[],
+): boolean {
+  return tasks.some((task) => isUserFacingExitBlockingTask(task));
 }
 const EXIT_SUMMARY_DISPLAY_MS = EXIT_SUMMARY_TOTAL_STEPS * EXIT_SUMMARY_FRAME_MS + EXIT_SUMMARY_FRAME_MS;
 
@@ -2016,6 +2038,25 @@ function buildCmpViewerBodyLines(
   };
 }
 
+function padViewerBodyLinesForTrailingPage(
+  lines: PraxisSlashPanelBodyLine[],
+  meta: { pageIndex: number; pageCount: number },
+  visibleEntryCount: number,
+  pageSize = VIEWER_PAGE_SIZE,
+): PraxisSlashPanelBodyLine[] {
+  if (meta.pageCount <= 1 || visibleEntryCount >= pageSize) {
+    return lines;
+  }
+  const fillerCount = Math.max(0, pageSize - visibleEntryCount);
+  if (fillerCount === 0) {
+    return lines;
+  }
+  return [
+    ...lines,
+    ...Array.from({ length: fillerCount }, () => ({ text: " " })),
+  ];
+}
+
 function buildMpViewerBodyLines(
   snapshot: MpViewerSnapshot | null,
   pageIndex: number,
@@ -2132,7 +2173,7 @@ function buildMpViewerBodyLines(
     }),
   ];
   return {
-    lines,
+    lines: padViewerBodyLinesForTrailingPage(lines, meta, visibleEntries.length),
     meta: {
       pageIndex: meta.pageIndex,
       pageCount: meta.pageCount,
@@ -6487,8 +6528,9 @@ const ComposerPane = memo(function ComposerPane({
         <Text color={TUI_THEME.textMuted}>WorkSpace: </Text>
         <Text color={TUI_THEME.text}>{workspaceLabel}</Text>
         <Text color={TUI_THEME.text}>    </Text>
-        <Text color={cmpContextActive ? contextBreathColor : TUI_THEME.text}>{cmpContextActive ? `${contextBreathFrame} ` : "  "}</Text>
-        <Text color={cmpContextColor}>Context </Text>
+        <Text color={cmpContextActive ? contextBreathColor : cmpContextColor}>
+          {cmpContextActive ? `${contextBreathFrame} Context ` : "Context "}
+        </Text>
         <Text color={TUI_THEME.text}>{contextBar} </Text>
         <Text color={TUI_THEME.text}>{contextPercent} </Text>
         <Text color={TUI_THEME.textMuted}>of </Text>
@@ -6578,6 +6620,7 @@ function PraxisDirectTuiApp(): JSX.Element {
   const [questionViewerSnapshot, setQuestionViewerSnapshot] = useState<QuestionViewerSnapshot | null>(null);
   const [questionPanelState, setQuestionPanelState] = useState<QuestionPanelState>(() => createEmptyQuestionPanelState());
   const [runIndicator, setRunIndicator] = useState<{ startedAt: string; label: string } | null>(null);
+  const [activeCmpStages, setActiveCmpStages] = useState<Array<{ key: string; stage: string }>>([]);
   const [workspaceIndexSnapshot, setWorkspaceIndexSnapshot] = useState<WorkspaceIndexSnapshot | null>(null);
   const [workspaceIndexStatus, setWorkspaceIndexStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [workspaceIndexError, setWorkspaceIndexError] = useState<string | null>(null);
@@ -7670,6 +7713,7 @@ function PraxisDirectTuiApp(): JSX.Element {
     interruptedTurnIdsRef.current.clear();
     activeTasksRef.current = [];
     activeTurnIdsRef.current = new Set<string>();
+    setActiveCmpStages([]);
     assistantSegmentIndexRef.current.clear();
     activeAssistantMessageIdRef.current.clear();
     emittedAssistantTextRef.current.clear();
@@ -7755,19 +7799,12 @@ function PraxisDirectTuiApp(): JSX.Element {
     () => selectInterruptibleTasks(surfaceState).filter((task) => isInterruptibleForegroundTask(task)),
     [surfaceState],
   );
-  const activeCmpTask = useMemo(
-    () => activeTasks.find((task) => task.kind === "cmp_sync"),
-    [activeTasks],
-  );
   const activeCmpStage = useMemo(() => {
-    const stageFromMetadata = activeCmpTask?.metadata?.stage;
-    const candidate = typeof stageFromMetadata === "string" && stageFromMetadata.trim().length > 0
-      ? stageFromMetadata
-      : (activeCmpTask?.title ?? activeCmpTask?.summary);
-    return typeof candidate === "string" && candidate.startsWith("cmp/")
-      ? candidate
+    const latestStage = activeCmpStages[activeCmpStages.length - 1]?.stage;
+    return typeof latestStage === "string" && latestStage.trim().length > 0
+      ? latestStage
       : undefined;
-  }, [activeCmpTask?.metadata, activeCmpTask?.summary, activeCmpTask?.title]);
+  }, [activeCmpStages]);
   const transcriptMessages = useMemo(
     () => selectTranscriptMessages(surfaceState),
     [surfaceState],
@@ -7797,6 +7834,9 @@ function PraxisDirectTuiApp(): JSX.Element {
   useEffect(() => {
     transcriptMessagesRef.current = transcriptMessages;
   }, [transcriptMessages]);
+  useEffect(() => {
+    setActiveCmpStages([]);
+  }, [backendEpoch]);
   const allSessionRecords = useMemo(
     () => listDirectTuiSessions(currentCwd),
     [currentCwd, sessionIndexRevision],
@@ -8222,7 +8262,7 @@ function PraxisDirectTuiApp(): JSX.Element {
     }
     return "fresh";
   }, [configFile?.ui.animationMode, runtimeConfig?.ui.animationMode]);
-  const cmpContextActive = cmpStatusDescriptor.animated;
+  const cmpContextActive = cmpStatusDescriptor.animated && isDirectTuiCmpActivityStage(activeCmpStage);
   const startupAnimationStep = useMemo(() => {
     const maxStep = STARTUP_WORD.length + STARTUP_RAINBOW_COLORS.length;
     if (directTuiAnimationMode !== "fresh") {
@@ -8747,6 +8787,16 @@ function PraxisDirectTuiApp(): JSX.Element {
           }
 
           if (record.event === "stage_start") {
+            const cmpStage = typeof record.stage === "string" ? record.stage : undefined;
+            const cmpActivityKey = createDirectTuiCmpActivityKey({
+              turnIndex: record.turnIndex,
+              stage: cmpStage,
+            });
+            if (cmpActivityKey && cmpStage) {
+              setActiveCmpStages((previous) => previous.some((entry) => entry.key === cmpActivityKey)
+                ? previous
+                : [...previous, { key: cmpActivityKey, stage: cmpStage }]);
+            }
             if (shouldBreakDirectTuiAssistantSegmentOnStageStart(record.stage)) {
               closeAssistantSegment(turnId);
             }
@@ -8904,6 +8954,13 @@ function PraxisDirectTuiApp(): JSX.Element {
           }
 
           if (record.event === "stage_end") {
+            const cmpActivityKey = createDirectTuiCmpActivityKey({
+              turnIndex: record.turnIndex,
+              stage: record.stage,
+            });
+            if (cmpActivityKey) {
+              setActiveCmpStages((previous) => previous.filter((entry) => entry.key !== cmpActivityKey));
+            }
             dispatchSurfaceEvent({
               type: "task.completed",
               at,
@@ -9765,9 +9822,7 @@ function PraxisDirectTuiApp(): JSX.Element {
   };
 
   const requestImmediateQuit = (options?: { force?: boolean }) => {
-    const hasBlockingTasks = hasExitBlockingTasks(activeTasksRef.current)
-      || interruptibleTasksRef.current.length > 0
-      || activeTurnIdsRef.current.size > 0;
+    const hasBlockingTasks = hasExitBlockingTasks(activeTasksRef.current);
     if (!options?.force && hasBlockingTasks) {
       openSlashPanel("exit");
       setSlashPanelNotice({
@@ -11235,8 +11290,8 @@ function PraxisDirectTuiApp(): JSX.Element {
     }
 
     if (activeFileMention && composerPopup) {
-      if (key.pageUp || key.pageDown) {
-        const delta = key.pageUp ? -1 : 1;
+      if (key.pageUp || key.pageDown || key.leftArrow || key.rightArrow) {
+        const delta = (key.pageUp || key.leftArrow) ? -1 : 1;
         setComposerPopupPageIndex((previous) => {
           if (composerPopup.pageCount === 0) {
             return 0;
@@ -12224,11 +12279,7 @@ function PraxisDirectTuiApp(): JSX.Element {
       : COMPOSER_PLACEHOLDER;
   const cmpContextColor = cmpContextActive
     ? CMP_CONTEXT_ANIMATION_COLORS[Math.floor(cmpContextAnimationFrame / 3) % CMP_CONTEXT_ANIMATION_COLORS.length]
-    : cmpStatusDescriptor.tone === "danger"
-      ? TUI_THEME.red
-      : cmpStatusDescriptor.tone === "warning"
-        ? TUI_THEME.yellow
-        : TUI_THEME.textMuted;
+    : TUI_THEME.textMuted;
   const composerCursor = measureComposerCursor(composerDisplayState.value, composerDisplayState.cursorOffset);
   const composerCursorRow = Math.max(
     1,

@@ -2759,6 +2759,95 @@ export function resolveCliDefaultCarrierRoute(
   };
 }
 
+export interface CliMpCapabilityDefaults {
+  projectId: string;
+  rootPath: string;
+  agentId?: string;
+  depth?: number;
+}
+
+const MP_DEFAULTABLE_CAPABILITY_KEYS = new Set([
+  "mp.ingest",
+  "mp.align",
+  "mp.resolve",
+  "mp.history.request",
+  "mp.search",
+  "mp.materialize",
+  "mp.promote",
+  "mp.archive",
+  "mp.split",
+  "mp.merge",
+  "mp.reindex",
+  "mp.compact",
+]);
+
+function isMpCapabilityKey(capabilityKey: string): boolean {
+  return MP_DEFAULTABLE_CAPABILITY_KEYS.has(capabilityKey);
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || Array.isArray(value) || typeof value !== "object") {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
+}
+
+function applyMpLineageDefaults(
+  value: unknown,
+  defaults: CliMpCapabilityDefaults,
+): Record<string, unknown> {
+  const record = asRecord(value) ?? {};
+  return {
+    ...record,
+    projectId: readString(record.projectId) ?? defaults.projectId,
+    agentId: readString(record.agentId) ?? defaults.agentId ?? "main",
+    depth: typeof record.depth === "number" ? record.depth : defaults.depth ?? 0,
+  };
+}
+
+function applyMpCapabilityDefaults(
+  request: CoreCapabilityRequest,
+  userMessage: string,
+  defaults?: CliMpCapabilityDefaults,
+): CoreCapabilityRequest {
+  if (!defaults || !isMpCapabilityKey(request.capabilityKey)) {
+    return request;
+  }
+
+  const nextInput: Record<string, unknown> = {
+    ...request.input,
+    projectId: readString(request.input.projectId) ?? defaults.projectId,
+    rootPath: readString(request.input.rootPath) ?? defaults.rootPath,
+  };
+
+  const agentIds = Array.isArray(request.input.agentIds)
+    ? request.input.agentIds.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+    : [];
+  if (agentIds.length === 0) {
+    nextInput.agentIds = [defaults.agentId ?? "main"];
+  }
+
+  if (
+    request.capabilityKey === "mp.search"
+    || request.capabilityKey === "mp.resolve"
+    || request.capabilityKey === "mp.history.request"
+  ) {
+    const requesterLineage = applyMpLineageDefaults(request.input.requesterLineage, defaults);
+    const sourceLineages = Array.isArray(request.input.sourceLineages)
+      ? request.input.sourceLineages
+        .map((entry) => applyMpLineageDefaults(entry, defaults))
+      : [];
+    nextInput.queryText = readString(request.input.queryText) ?? userMessage;
+    nextInput.requesterLineage = requesterLineage;
+    nextInput.sourceLineages = sourceLineages.length > 0 ? sourceLineages : [requesterLineage];
+  }
+
+  return {
+    ...request,
+    input: nextInput,
+  };
+}
+
 export async function applyCliDefaultsToCapabilityRequest(
   request: CoreCapabilityRequest,
   config: Pick<OpenAILiveConfig, "model">,
@@ -2768,6 +2857,7 @@ export async function applyCliDefaultsToCapabilityRequest(
     browser?: string;
     isolated?: boolean;
   },
+  mpDefaults?: CliMpCapabilityDefaults,
 ): Promise<CoreCapabilityRequest> {
   const normalizeCodeReadIntent = (nextRequest: CoreCapabilityRequest): CoreCapabilityRequest => {
     if (nextRequest.capabilityKey !== "code.ls") {
@@ -2875,7 +2965,7 @@ export async function applyCliDefaultsToCapabilityRequest(
       };
     }
 
-    return normalizeCodeReadIntent(request);
+    return normalizeCodeReadIntent(applyMpCapabilityDefaults(request, userMessage, mpDefaults));
   }
 
   const query = readString(request.input.query)
