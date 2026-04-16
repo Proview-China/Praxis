@@ -7,6 +7,7 @@ import PraxisRuntimeFacades
 import PraxisRuntimeUseCases
 import PraxisRun
 import PraxisSession
+import PraxisToolingContracts
 import PraxisTransition
 
 private func requireRuntimeInterfaceField(
@@ -1474,6 +1475,51 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
           kind: .catalog,
           title: "Capability Catalog",
           summary: inspection.summary
+        )
+      )
+    case .describeCodeSandbox(let payload):
+      let sandbox = try await runtimeFacade.capabilityFacade.describeCodeSandbox(
+        .init(
+          profile: payload.profile,
+          workingDirectory: payload.workingDirectory,
+          requestedRuntime: payload.requestedRuntime
+        )
+      )
+      return .success(
+        snapshot: .init(
+          kind: .codeSandbox,
+          title: "Code Sandbox",
+          summary: sandbox.summary,
+          capabilityKey: .init(rawValue: "code.sandbox"),
+          codeSandboxProfile: sandbox.profile,
+          codeSandboxEnforcementMode: sandbox.enforcementMode,
+          allowedCodeRuntimes: sandbox.allowedRuntimes,
+          readableRoots: sandbox.readableRoots,
+          writableRoots: sandbox.writableRoots,
+          allowsNetworkAccess: sandbox.allowsNetworkAccess,
+          allowsSubprocesses: sandbox.allowsSubprocesses
+        )
+      )
+    case .listProviderSkills:
+      let skills = try await runtimeFacade.capabilityFacade.listSkills()
+      return .success(
+        snapshot: .init(
+          kind: .providerSkills,
+          title: "Provider Skills",
+          summary: skills.summary,
+          capabilityKey: .init(rawValue: "skill.list"),
+          providerSkillKeys: skills.skillKeys
+        )
+      )
+    case .listProviderMCPTools:
+      let tools = try await runtimeFacade.capabilityFacade.listProviderMCPTools()
+      return .success(
+        snapshot: .init(
+          kind: .providerMCPTools,
+          title: "Provider MCP Tools",
+          summary: tools.summary,
+          capabilityKey: .init(rawValue: "tool.call"),
+          providerMCPToolNames: tools.toolNames
         )
       )
     }

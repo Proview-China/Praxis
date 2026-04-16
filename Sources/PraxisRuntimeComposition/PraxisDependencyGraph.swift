@@ -30,6 +30,7 @@ public final class PraxisDependencyGraph: PraxisDependencyResolving, @unchecked 
       batchExecutor: hostAdapters.providerBatchExecutor,
       skillRegistry: hostAdapters.providerSkillRegistry,
       skillActivator: hostAdapters.providerSkillActivator,
+      mcpToolRegistry: hostAdapters.providerMCPToolRegistry,
       mcpExecutor: hostAdapters.providerMCPExecutor
     )
   }
@@ -40,6 +41,14 @@ public final class PraxisDependencyGraph: PraxisDependencyResolving, @unchecked 
 
   public var shellExecutor: (any PraxisShellExecutor)? {
     hostAdapters.shellExecutor
+  }
+
+  public var codeExecutor: (any PraxisCodeExecutor)? {
+    hostAdapters.codeExecutor
+  }
+
+  public var codeSandboxDescriber: (any PraxisCodeSandboxDescriber)? {
+    hostAdapters.codeSandboxDescriber
   }
 
   public var checkpointStore: (any PraxisCheckpointStoreContract)? {
@@ -57,6 +66,8 @@ public final class PraxisDependencyGraph: PraxisDependencyResolving, @unchecked 
     providerInferenceSurfaceProvenance: PraxisHostAdapterSurfaceProvenance? = nil,
     workspaceReader: (any PraxisWorkspaceReader)? = nil,
     shellExecutor: (any PraxisShellExecutor)? = nil,
+    codeExecutor: (any PraxisCodeExecutor)? = nil,
+    codeSandboxDescriber: (any PraxisCodeSandboxDescriber)? = nil,
     checkpointStore: (any PraxisCheckpointStoreContract)? = nil,
     userInputDriver: (any PraxisUserInputDriver)? = nil,
   ) {
@@ -72,11 +83,14 @@ public final class PraxisDependencyGraph: PraxisDependencyResolving, @unchecked 
       providerBatchExecutor: hostAdapters.providerBatchExecutor,
       providerSkillRegistry: hostAdapters.providerSkillRegistry,
       providerSkillActivator: hostAdapters.providerSkillActivator,
+      providerMCPToolRegistry: hostAdapters.providerMCPToolRegistry,
       providerMCPExecutor: hostAdapters.providerMCPExecutor,
       workspaceReader: workspaceReader ?? hostAdapters.workspaceReader,
       workspaceSearcher: hostAdapters.workspaceSearcher,
       workspaceWriter: hostAdapters.workspaceWriter,
       shellExecutor: shellExecutor ?? hostAdapters.shellExecutor,
+      codeExecutor: codeExecutor ?? hostAdapters.codeExecutor,
+      codeSandboxDescriber: codeSandboxDescriber ?? hostAdapters.codeSandboxDescriber,
       browserExecutor: hostAdapters.browserExecutor,
       browserGroundingCollector: hostAdapters.browserGroundingCollector,
       gitAvailabilityProbe: hostAdapters.gitAvailabilityProbe,

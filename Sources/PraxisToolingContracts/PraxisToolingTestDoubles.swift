@@ -17,6 +17,58 @@ public actor PraxisFakeShellExecutor: PraxisShellExecutor {
   }
 }
 
+/// In-memory fake code executor for HostContracts and HostRuntime tests.
+public actor PraxisFakeCodeExecutor: PraxisCodeExecutor {
+  private var resultsBySource: [String: PraxisCodeResult]
+  private var executedCommands: [PraxisCodeCommand] = []
+
+  public init(resultsBySource: [String: PraxisCodeResult] = [:]) {
+    self.resultsBySource = resultsBySource
+  }
+
+  public func run(_ command: PraxisCodeCommand) async throws -> PraxisCodeResult {
+    executedCommands.append(command)
+    return resultsBySource[command.source]
+      ?? PraxisCodeResult(runtime: command.runtime, launcher: "fake-code", stdout: "", stderr: "", exitCode: 0)
+  }
+
+  public func allExecutedCommands() async -> [PraxisCodeCommand] {
+    executedCommands
+  }
+}
+
+/// In-memory fake code sandbox describer for HostContracts and HostRuntime tests.
+public actor PraxisFakeCodeSandboxDescriber: PraxisCodeSandboxDescriber {
+  private var requests: [PraxisCodeSandboxRequest] = []
+  private let descriptorFactory: @Sendable (PraxisCodeSandboxRequest) -> PraxisCodeSandboxDescriptor
+
+  public init(
+    descriptorFactory: @escaping @Sendable (PraxisCodeSandboxRequest) -> PraxisCodeSandboxDescriptor = {
+      PraxisCodeSandboxDescriptor(
+        profile: $0.profile,
+        enforcementMode: .declaredOnly,
+        allowedRuntimes: [$0.requestedRuntime],
+        readableRoots: [],
+        writableRoots: [],
+        allowsNetworkAccess: false,
+        allowsSubprocesses: false,
+        summary: "Fake code sandbox descriptor."
+      )
+    }
+  ) {
+    self.descriptorFactory = descriptorFactory
+  }
+
+  public func describe(_ request: PraxisCodeSandboxRequest) async throws -> PraxisCodeSandboxDescriptor {
+    requests.append(request)
+    return descriptorFactory(request)
+  }
+
+  public func allRequests() async -> [PraxisCodeSandboxRequest] {
+    requests
+  }
+}
+
 /// Spy browser executor that records navigation requests.
 public actor PraxisSpyBrowserExecutor: PraxisBrowserExecutor {
   private var requests: [PraxisBrowserNavigationRequest] = []

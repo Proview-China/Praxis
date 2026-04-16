@@ -13,6 +13,7 @@ public protocol PraxisProviderRequestSurfaceProtocol: Sendable {
   var supportsBatchSubmission: Bool { get }
   var supportsSkillRegistry: Bool { get }
   var supportsSkillActivation: Bool { get }
+  var supportsMCPToolRegistry: Bool { get }
   var supportsToolCalls: Bool { get }
 
   /// Runs one provider inference request through the aggregated surface.
@@ -63,6 +64,12 @@ public protocol PraxisProviderRequestSurfaceProtocol: Sendable {
   /// - Throws: `PraxisError.dependencyMissing` when no skill activator is wired.
   func activate(_ request: PraxisProviderSkillActivationRequest) async throws -> PraxisProviderSkillActivationReceipt
 
+  /// Lists provider MCP tool names through the aggregated surface.
+  ///
+  /// - Returns: Stable provider MCP tool names.
+  /// - Throws: `PraxisError.dependencyMissing` when no MCP tool registry is wired.
+  func listToolNames() async throws -> [String]
+
   /// Calls one provider MCP tool through the aggregated surface.
   ///
   /// - Parameter request: Normalized MCP tool-call request.
@@ -80,6 +87,7 @@ public struct PraxisProviderRequestSurface: PraxisProviderRequestSurfaceProtocol
   private let batchExecutor: (any PraxisProviderBatchExecutor)?
   private let skillRegistry: (any PraxisProviderSkillRegistry)?
   private let skillActivator: (any PraxisProviderSkillActivator)?
+  private let mcpToolRegistry: (any PraxisProviderMCPToolRegistry)?
   private let mcpExecutor: (any PraxisProviderMCPExecutor)?
 
   public init(
@@ -90,6 +98,7 @@ public struct PraxisProviderRequestSurface: PraxisProviderRequestSurfaceProtocol
     batchExecutor: (any PraxisProviderBatchExecutor)? = nil,
     skillRegistry: (any PraxisProviderSkillRegistry)? = nil,
     skillActivator: (any PraxisProviderSkillActivator)? = nil,
+    mcpToolRegistry: (any PraxisProviderMCPToolRegistry)? = nil,
     mcpExecutor: (any PraxisProviderMCPExecutor)? = nil
   ) {
     self.inferenceExecutor = inferenceExecutor
@@ -99,6 +108,7 @@ public struct PraxisProviderRequestSurface: PraxisProviderRequestSurfaceProtocol
     self.batchExecutor = batchExecutor
     self.skillRegistry = skillRegistry
     self.skillActivator = skillActivator
+    self.mcpToolRegistry = mcpToolRegistry
     self.mcpExecutor = mcpExecutor
   }
 
@@ -130,8 +140,12 @@ public struct PraxisProviderRequestSurface: PraxisProviderRequestSurfaceProtocol
     skillActivator != nil
   }
 
+  public var supportsMCPToolRegistry: Bool {
+    mcpToolRegistry != nil
+  }
+
   public var supportsToolCalls: Bool {
-    mcpExecutor != nil
+    mcpToolRegistry != nil && mcpExecutor != nil
   }
 
   public func infer(_ request: PraxisProviderInferenceRequest) async throws -> PraxisProviderInferenceResponse {
@@ -190,6 +204,14 @@ public struct PraxisProviderRequestSurface: PraxisProviderRequestSurfaceProtocol
       errorMessage: "Provider request surface requires a skill activator."
     )
     return try await activator.activate(request)
+  }
+
+  public func listToolNames() async throws -> [String] {
+    let registry = try requireDependency(
+      mcpToolRegistry,
+      errorMessage: "Provider request surface requires an MCP tool registry."
+    )
+    return try await registry.listToolNames()
   }
 
   public func callTool(_ request: PraxisProviderMCPToolCallRequest) async throws -> PraxisProviderMCPToolCallReceipt {

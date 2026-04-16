@@ -53,6 +53,13 @@ public protocol PraxisProviderSkillActivator: Sendable {
   func activate(_ request: PraxisProviderSkillActivationRequest) async throws -> PraxisProviderSkillActivationReceipt
 }
 
+public protocol PraxisProviderMCPToolRegistry: Sendable {
+  /// Lists available provider MCP tool names.
+  ///
+  /// - Returns: Stable provider MCP tool names.
+  func listToolNames() async throws -> [String]
+}
+
 public protocol PraxisProviderMCPExecutor: Sendable {
   /// Calls a provider-hosted MCP tool.
   ///

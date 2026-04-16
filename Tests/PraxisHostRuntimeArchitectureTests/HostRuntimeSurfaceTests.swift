@@ -2540,6 +2540,7 @@ struct HostRuntimeSurfaceTests {
         serverName: "local-provider"
       )
     )
+    let mcpToolNames = try await secondRegistry.providerMCPToolRegistry?.listToolNames()
     let groundingBundle = try await secondRegistry.browserGroundingCollector?.collectEvidence(
       .init(
         taskSummary: "Verify runtime docs page",
@@ -2626,6 +2627,7 @@ struct HostRuntimeSurfaceTests {
     #expect(secondRegistry.audioTranscriptionSurfaceProvenance == .localBaseline)
     #expect(secondRegistry.speechSynthesisSurfaceProvenance == .localBaseline)
     #expect(secondRegistry.imageGenerationSurfaceProvenance == .localBaseline)
+    #expect(mcpToolNames?.contains("web.search") == true)
     #expect(mcpReceipt?.status == .succeeded)
     #expect(mcpReceipt?.summary.contains("Local MCP baseline") == true)
     #expect(groundingBundle?.pages.count == 1)
@@ -2661,6 +2663,66 @@ struct HostRuntimeSurfaceTests {
     #expect(speechResponse?.audioAssetRef.contains("speech") == true)
     #expect(imageResponse?.mimeType == "image/png")
     #expect(imageResponse?.assetRef.contains("images") == true)
+  }
+
+  @Test
+  func localWorkspacePatchFailureRollsBackPartialMutation() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-local-workspace-patch-rollback-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+    let writer = try #require(registry.workspaceWriter)
+
+    _ = try await writer.apply(
+      .init(
+        changes: [
+          .init(
+            kind: .createFile,
+            path: "notes/runtime.txt",
+            content: "alpha\nbeta\ngamma\n"
+          )
+        ],
+        changeSummary: "Seed workspace file for patch rollback"
+      )
+    )
+
+    await #expect(throws: PraxisError.self) {
+      _ = try await writer.apply(
+        .init(
+          changes: [
+            .init(
+              kind: .applyPatch,
+              path: "notes/runtime.txt",
+              patch: """
+              @@ -1,3 +1,3 @@
+               alpha
+              -beta
+              +patched
+               gamma
+              @@ -7,1 +7,1 @@
+              -missing
+              +still-missing
+              """
+            )
+          ],
+          changeSummary: "Attempt malformed multi-hunk patch"
+        )
+      )
+    }
+
+    let contents = try String(
+      contentsOf: rootDirectory.appendingPathComponent("notes/runtime.txt", isDirectory: false),
+      encoding: .utf8
+    )
+    #expect(contents == "alpha\nbeta\ngamma\n")
+  }
+
+  @Test
+  func localDefaultsGateCodeExecutorOnSwiftToolchainReadiness() {
+    let registry = PraxisHostAdapterRegistry.localDefaults()
+
+    #expect((registry.codeExecutor != nil) == PraxisLocalHostPlatformSupport.supportsBoundedCodeExecution)
   }
 
   @Test

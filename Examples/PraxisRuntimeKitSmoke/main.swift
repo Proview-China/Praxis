@@ -16,6 +16,9 @@ private enum PraxisRuntimeKitSmokeSuite: String, CaseIterable {
   case recovery
   case mp
   case capabilities
+  case code
+  case codeSandbox = "code-sandbox"
+  case codePatch = "code-patch"
   case shell
   case shellApproval = "shell-approval"
   case search
@@ -91,6 +94,12 @@ private struct PraxisRuntimeKitSmokeHarness {
       return [await execute(.recovery, body: recoverySuite)]
     case .capabilities:
       return [await execute(.capabilities, body: capabilitiesSuite)]
+    case .code:
+      return [await execute(.code, body: codeSuite)]
+    case .codeSandbox:
+      return [await execute(.codeSandbox, body: codeSandboxSuite)]
+    case .codePatch:
+      return [await execute(.codePatch, body: codePatchSuite)]
     case .shell:
       return [await execute(.shell, body: shellSuite)]
     case .shellApproval:
@@ -106,6 +115,9 @@ private struct PraxisRuntimeKitSmokeHarness {
         await execute(.recovery, body: recoverySuite),
         await execute(.mp, body: mpSuite),
         await execute(.capabilities, body: capabilitiesSuite),
+        await execute(.code, body: codeSuite),
+        await execute(.codeSandbox, body: codeSandboxSuite),
+        await execute(.codePatch, body: codePatchSuite),
         await execute(.shell, body: shellSuite),
         await execute(.shellApproval, body: shellApprovalSuite),
         await execute(.search, body: searchSuite),
@@ -498,6 +510,22 @@ private struct PraxisRuntimeKitSmokeHarness {
         preferredModel: "local-embed-smoke"
       )
     )
+    let sandbox = try await client.capabilities.describeCodeSandbox(
+      .init(
+        workingDirectory: rootDirectory.path,
+        requestedRuntime: .swift
+      )
+    )
+    let codeAvailable = catalog.capabilityIDs.map(\.rawValue).contains("code.run")
+    let code = codeAvailable ? try await client.capabilities.runCode(
+      .init(
+        summary: "Print a bounded code smoke marker",
+        runtime: .swift,
+        source: "print(\"runtime-kit-code-capability-smoke\")",
+        workingDirectory: rootDirectory.path,
+        timeoutSeconds: 2
+      )
+    ) : nil
     let shell = try await client.capabilities.runShell(
       .init(
         summary: "Print a bounded shell smoke marker",
@@ -522,6 +550,14 @@ private struct PraxisRuntimeKitSmokeHarness {
         targetAgentID: "checker.local"
       )
     )
+    let listedSkills = try await client.capabilities.listSkills()
+    let activatedSkill = try await client.capabilities.activateSkill(
+      .init(
+        skillKey: "runtime.inspect",
+        reason: "Capability smoke coverage"
+      )
+    )
+    let listedProviderMCPTools = try await client.capabilities.listProviderMCPTools()
     let toolCall = try await client.capabilities.callTool(
       .init(
         toolName: "web.search",
@@ -543,13 +579,29 @@ private struct PraxisRuntimeKitSmokeHarness {
     )
 
     try require(catalog.capabilityIDs.map(\.rawValue).contains("generate.create"), "Capability smoke expected generate.create in the thin capability catalog.")
+    try require(catalog.capabilityIDs.map(\.rawValue).contains("code.sandbox"), "Capability smoke expected code.sandbox in the thin capability catalog.")
     try require(catalog.capabilityIDs.map(\.rawValue).contains("shell.approve"), "Capability smoke expected shell.approve in the thin capability catalog.")
     try require(catalog.capabilityIDs.map(\.rawValue).contains("session.open"), "Capability smoke expected session.open in the thin capability catalog.")
     try require(catalog.capabilityIDs.map(\.rawValue).contains("shell.run"), "Capability smoke expected shell.run in the thin capability catalog.")
+    try require(catalog.capabilityIDs.map(\.rawValue).contains("skill.list"), "Capability smoke expected skill.list in the thin capability catalog.")
+    try require(catalog.capabilityIDs.map(\.rawValue).contains("skill.activate"), "Capability smoke expected skill.activate in the thin capability catalog.")
     try require(openedSession.sessionID.rawValue == "runtime.capabilities.smoke", "Capability smoke expected the opened session ID to round-trip unchanged.")
     try require(generated.outputText.isEmpty == false, "Capability smoke expected generate.create to produce output.")
     try require(streamed.chunks.isEmpty == false, "Capability smoke expected generate.stream to project at least one chunk.")
     try require(embedded.vectorLength > 0, "Capability smoke expected embed.create to return a positive vector length.")
+    try require(sandbox.capabilityID.rawValue == "code.sandbox", "Capability smoke expected code.sandbox capability ID.")
+    try require(sandbox.profile == .workspaceWriteLimited, "Capability smoke expected code.sandbox to keep the requested profile.")
+    try require(sandbox.writableRoots == [rootDirectory.path], "Capability smoke expected code.sandbox to declare the workspace root as writable.")
+    try require(sandbox.readableRoots.contains(rootDirectory.path), "Capability smoke expected code.sandbox to include the workspace root as readable.")
+    try require(sandbox.allowsNetworkAccess == false, "Capability smoke expected code.sandbox to default network access to false.")
+    try require(sandbox.allowsSubprocesses == false, "Capability smoke expected code.sandbox to default subprocess access to false.")
+    if let code {
+      try require(code.capabilityID.rawValue == "code.run", "Capability smoke expected code.run capability ID.")
+      try require(code.runtime == .swift, "Capability smoke expected code.run to keep the requested runtime.")
+      try require(code.riskLabel == "risky", "Capability smoke expected code.run to expose the risky side-effect label.")
+    } else {
+      try require(!codeAvailable, "Capability smoke expected code.run to be absent only when the catalog withholds it.")
+    }
     try require(shellApproval.capabilityID.rawValue == "shell.approve", "Capability smoke expected shell.approve capability ID.")
     try require(shellApproval.approvedCapabilityID.rawValue == "shell.run", "Capability smoke expected shell.approve to point at shell.run.")
     try require(shellApproval.riskLevel == "risky", "Capability smoke expected shell.approve to preserve the risky shell classification.")
@@ -558,11 +610,151 @@ private struct PraxisRuntimeKitSmokeHarness {
     try require(shellApprovalReadback.riskLevel == "risky", "Capability smoke expected shell.approve readback to preserve the risky shell classification.")
     try require(shellApprovalReadback.outcome == "review_required", "Capability smoke expected shell.approve readback to preserve the review-required outcome.")
     try require(shell.riskLabel == "risky", "Capability smoke expected shell.run to expose the risky side-effect label.")
+    try require(listedSkills.skillKeys.contains("runtime.inspect"), "Capability smoke expected skill.list to expose runtime.inspect.")
+    try require(activatedSkill.skillKey == "runtime.inspect", "Capability smoke expected skill.activate to preserve the requested skill key.")
+    try require(activatedSkill.activated, "Capability smoke expected skill.activate to report an activated receipt.")
+    try require(listedProviderMCPTools.toolNames == ["web.search"], "Capability smoke expected provider MCP tool discovery to expose web.search.")
     try require(toolCall.toolName == "web.search", "Capability smoke expected tool.call to round-trip the tool name.")
     try require(uploadedFile.fileID.isEmpty == false, "Capability smoke expected file.upload to return a stable file ID.")
     try require(submittedBatch.batchID.isEmpty == false, "Capability smoke expected batch.submit to return a stable batch ID.")
+    let patchSummary: String
+    if catalog.capabilityIDs.map(\.rawValue).contains("code.patch") {
+      let patchTargetURL = rootDirectory.appendingPathComponent("capability-patch.txt", isDirectory: false)
+      try "before\nvalue\n".write(to: patchTargetURL, atomically: true, encoding: .utf8)
+      let patch = try await client.capabilities.patchCode(
+        .init(
+          summary: "Patch one bounded workspace smoke file",
+          changes: [
+            .init(
+              path: "capability-patch.txt",
+              patch: """
+              @@ -1,2 +1,2 @@
+               before
+              -value
+              +after
+              """
+            )
+          ]
+        )
+      )
+      try require(patch.capabilityID.rawValue == "code.patch", "Capability smoke expected code.patch capability ID.")
+      try require(patch.appliedChangeCount == 1, "Capability smoke expected code.patch to apply exactly one change.")
+      try require(patch.changedPaths == ["capability-patch.txt"], "Capability smoke expected code.patch to preserve the changed path.")
+      try require(patch.riskLabel == "risky", "Capability smoke expected code.patch to expose the risky side-effect label.")
+      let patchedContents = try String(contentsOf: patchTargetURL, encoding: .utf8)
+      try require(
+        patchedContents == "before\nafter",
+        "Capability smoke expected code.patch to update the target file contents."
+      )
+      patchSummary = "patchCount=\(patch.appliedChangeCount)"
+    } else {
+      patchSummary = "patch=unavailable"
+    }
 
-    return "catalogEntries=\(catalog.entries.count) session=\(openedSession.sessionID.rawValue) shellApproval=\(shellApproval.outcome) shellRisk=\(shell.riskLabel) streamChunks=\(streamed.chunks.count) batchID=\(submittedBatch.batchID)"
+    let codeSummary = code?.riskLabel ?? "unavailable"
+    return "catalogEntries=\(catalog.entries.count) session=\(openedSession.sessionID.rawValue) sandbox=\(sandbox.enforcementMode.rawValue) codeRisk=\(codeSummary) \(patchSummary) shellApproval=\(shellApproval.outcome) shellRisk=\(shell.riskLabel) skillActivation=\(activatedSkill.activated) mcpTools=\(listedProviderMCPTools.toolNames.count) streamChunks=\(streamed.chunks.count) batchID=\(submittedBatch.batchID)"
+  }
+
+  private func codeSuite() async throws -> String {
+    let catalog = client.capabilities.catalog()
+    guard catalog.capabilityIDs.map(\.rawValue).contains("code.run") else {
+      return "unavailable"
+    }
+
+    let result = try await client.capabilities.runCode(
+      .init(
+        summary: "Emit one bounded code smoke marker",
+        runtime: .swift,
+        source: "print(\"runtime-kit-code-smoke\")",
+        workingDirectory: rootDirectory.path,
+        timeoutSeconds: 2
+      )
+    )
+
+    try require(result.capabilityID.rawValue == "code.run", "Code smoke expected code.run capability ID.")
+    try require(result.runtime == .swift, "Code smoke expected the runtime to stay on swift.")
+    try require(result.riskLabel == "risky", "Code smoke expected risky side-effect labeling.")
+    try require(result.environmentKeys.isEmpty, "Code smoke expected environment key projection to stay empty.")
+#if os(macOS)
+    try require(result.succeeded, "Code smoke expected the macOS baseline code executor to complete successfully.")
+    try require(
+      result.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "runtime-kit-code-smoke",
+      "Code smoke expected the bounded stdout marker to round-trip unchanged."
+    )
+#else
+    try require(
+      result.terminationReason == .failedToLaunch,
+      "Code smoke expected non-macOS baseline to report placeholder launch failure."
+    )
+    try require(
+      result.stderr.contains("not available") || result.stderr.contains("unsupported"),
+      "Code smoke expected placeholder stderr to explain the unsupported code baseline."
+    )
+#endif
+
+    return "exit=\(result.exitCode) runtime=\(result.runtime.rawValue) termination=\(result.terminationReason.rawValue) risk=\(result.riskLabel)"
+  }
+
+  private func codeSandboxSuite() async throws -> String {
+    let catalog = client.capabilities.catalog()
+    try require(
+      catalog.capabilityIDs.map(\.rawValue).contains("code.sandbox"),
+      "Code sandbox smoke expected code.sandbox in the thin capability catalog."
+    )
+
+    let result = try await client.capabilities.describeCodeSandbox(
+      .init(
+        workingDirectory: rootDirectory.path,
+        requestedRuntime: .swift
+      )
+    )
+
+    try require(result.capabilityID.rawValue == "code.sandbox", "Code sandbox smoke expected code.sandbox capability ID.")
+    try require(result.profile == .workspaceWriteLimited, "Code sandbox smoke expected the workspace_write_limited profile.")
+    try require(result.writableRoots == [rootDirectory.path], "Code sandbox smoke expected the workspace root to remain the writable root.")
+    try require(result.readableRoots.contains(rootDirectory.path), "Code sandbox smoke expected the workspace root to remain readable.")
+    try require(result.allowsNetworkAccess == false, "Code sandbox smoke expected network access to stay disabled.")
+    try require(result.allowsSubprocesses == false, "Code sandbox smoke expected subprocess access to stay disabled.")
+
+    return "profile=\(result.profile.rawValue) enforcement=\(result.enforcementMode.rawValue) runtimes=\(result.allowedRuntimes.map(\.rawValue).joined(separator: ",")) writableRoots=\(result.writableRoots.count)"
+  }
+
+  private func codePatchSuite() async throws -> String {
+    let catalog = client.capabilities.catalog()
+    guard catalog.capabilityIDs.map(\.rawValue).contains("code.patch") else {
+      return "unavailable"
+    }
+
+    let patchTargetURL = rootDirectory.appendingPathComponent("code-patch-smoke.txt", isDirectory: false)
+    try "alpha\nbeta\n".write(to: patchTargetURL, atomically: true, encoding: .utf8)
+    let result = try await client.capabilities.patchCode(
+      .init(
+        summary: "Apply one bounded code patch smoke marker",
+        changes: [
+          .init(
+            path: "code-patch-smoke.txt",
+            patch: """
+            @@ -1,2 +1,2 @@
+             alpha
+            -beta
+            +patched
+            """
+          )
+        ]
+      )
+    )
+
+    try require(result.capabilityID.rawValue == "code.patch", "Code patch smoke expected code.patch capability ID.")
+    try require(result.appliedChangeCount == 1, "Code patch smoke expected exactly one applied change.")
+    try require(result.changedPaths == ["code-patch-smoke.txt"], "Code patch smoke expected the changed path to round-trip.")
+    try require(result.riskLabel == "risky", "Code patch smoke expected risky side-effect labeling.")
+    let patchedContents = try String(contentsOf: patchTargetURL, encoding: .utf8)
+    try require(
+      patchedContents == "alpha\npatched",
+      "Code patch smoke expected the bounded patch to update file contents."
+    )
+
+    return "count=\(result.appliedChangeCount) path=\(result.changedPaths.joined(separator: ",")) risk=\(result.riskLabel)"
   }
 
   private func shellSuite() async throws -> String {
@@ -710,7 +902,7 @@ private enum PraxisRuntimeKitSmokeArguments {
         rootDirectoryPath = arguments[index]
       case "--help", "-h":
         throw PraxisRuntimeKitSmokeFailure.invalidArguments(
-          "Usage: swift run PraxisRuntimeKitSmoke [--suite run|cmp-tap|provisioning|dispatch|recovery|mp|capabilities|shell|shell-approval|search|all] [--root /tmp/praxis-runtime-kit-smoke]"
+          "Usage: swift run PraxisRuntimeKitSmoke [--suite run|cmp-tap|provisioning|dispatch|recovery|mp|capabilities|code|code-patch|shell|shell-approval|search|all] [--root /tmp/praxis-runtime-kit-smoke]"
         )
       default:
         throw PraxisRuntimeKitSmokeFailure.invalidArguments("Unknown argument '\(arguments[index])'.")

@@ -38,6 +38,64 @@ struct PraxisToolingContractsTests {
   }
 
   @Test
+  func codeDoubleCapturesStructuredRequests() async throws {
+    let code = PraxisFakeCodeExecutor(
+      resultsBySource: [
+        "print(\"hello from code\")": .init(
+          runtime: .swift,
+          launcher: "xcrun swift",
+          stdout: "hello from code\n",
+          stderr: "",
+          exitCode: 0,
+          durationMilliseconds: 22
+        )
+      ]
+    )
+    let command = PraxisCodeCommand(
+      runtime: .swift,
+      source: "print(\"hello from code\")",
+      workingDirectory: "/tmp/praxis",
+      environment: ["LANG": "en_US.UTF-8"],
+      timeoutSeconds: 5
+    )
+    let result = try await code.run(command)
+
+    #expect(result.runtime == .swift)
+    #expect(result.stdout.contains("hello from code"))
+    #expect((await code.allExecutedCommands()).first?.workingDirectory == "/tmp/praxis")
+  }
+
+  @Test
+  func codeSandboxDoubleCapturesStructuredRequests() async throws {
+    let sandbox = PraxisFakeCodeSandboxDescriber(
+      descriptorFactory: {
+        PraxisCodeSandboxDescriptor(
+          profile: $0.profile,
+          enforcementMode: .declaredOnly,
+          allowedRuntimes: [$0.requestedRuntime],
+          readableRoots: ["/tmp/praxis"],
+          writableRoots: ["/tmp/praxis"],
+          allowsNetworkAccess: false,
+          allowsSubprocesses: false,
+          summary: "Fake sandbox descriptor for \($0.requestedRuntime.rawValue)."
+        )
+      }
+    )
+    let descriptor = try await sandbox.describe(
+      .init(
+        profile: .workspaceWriteLimited,
+        workingDirectory: "/tmp/praxis",
+        requestedRuntime: .swift
+      )
+    )
+
+    #expect(descriptor.profile == .workspaceWriteLimited)
+    #expect(descriptor.enforcementMode == .declaredOnly)
+    #expect(descriptor.allowedRuntimes == [.swift])
+    #expect((await sandbox.allRequests()).first?.workingDirectory == "/tmp/praxis")
+  }
+
+  @Test
   func browserGroundingAndProcessContractsExposeStructuredReceipts() async throws {
     let browser = PraxisSpyBrowserExecutor(
       receiptFactory: {

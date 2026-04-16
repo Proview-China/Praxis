@@ -6,6 +6,22 @@ public protocol PraxisShellExecutor: Sendable {
   func run(_ command: PraxisShellCommand) async throws -> PraxisShellResult
 }
 
+public protocol PraxisCodeExecutor: Sendable {
+  /// Executes a structured code command request.
+  ///
+  /// - Parameter command: Code command request to run.
+  /// - Returns: A normalized code execution result.
+  func run(_ command: PraxisCodeCommand) async throws -> PraxisCodeResult
+}
+
+public protocol PraxisCodeSandboxDescriber: Sendable {
+  /// Describes the currently available code sandbox contract for one request.
+  ///
+  /// - Parameter request: Sandbox request to project.
+  /// - Returns: A normalized sandbox descriptor.
+  func describe(_ request: PraxisCodeSandboxRequest) async throws -> PraxisCodeSandboxDescriptor
+}
+
 public protocol PraxisBrowserExecutor: Sendable {
   /// Navigates the host browser to the requested location.
   ///

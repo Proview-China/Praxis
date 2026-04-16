@@ -81,6 +81,10 @@ public actor PraxisSpyWorkspaceWriter: PraxisWorkspaceWriter {
 
   public init() {}
 
+  public nonisolated var supportedChangeKinds: Set<PraxisWorkspaceChangeKind> {
+    Set(PraxisWorkspaceChangeKind.allCases)
+  }
+
   public func apply(_ request: PraxisWorkspaceChangeRequest) async throws -> PraxisWorkspaceChangeReceipt {
     requests.append(request)
     let changedPaths = request.changes.map(\.path)

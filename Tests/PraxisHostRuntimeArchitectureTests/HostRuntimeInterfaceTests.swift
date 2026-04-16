@@ -4626,6 +4626,56 @@ struct HostRuntimeInterfaceTests {
   }
 
   @Test
+  func runtimeInterfaceCodecRoundTripsCodeSandboxRequestAsStableStrings() throws {
+    let codec = PraxisJSONRuntimeInterfaceCodec()
+    let request = PraxisRuntimeInterfaceRequest.describeCodeSandbox(
+      .init(
+        payloadSummary: "Describe bounded code sandbox",
+        profile: .workspaceWriteLimited,
+        workingDirectory: "/tmp/praxis",
+        requestedRuntime: .swift
+      )
+    )
+
+    let requestData = try codec.encode(request)
+    let requestJSON = String(decoding: requestData, as: UTF8.self)
+    let decodedRequest = try codec.decodeRequest(requestData)
+
+    #expect(
+      requestJSON ==
+        #"{"describeCodeSandbox":{"payloadSummary":"Describe bounded code sandbox","profile":"workspace_write_limited","requestedRuntime":"swift","workingDirectory":"\/tmp\/praxis"},"kind":"describeCodeSandbox"}"#
+    )
+    #expect(decodedRequest == request)
+  }
+
+  @Test
+  func runtimeInterfaceCodecRoundTripsProviderDiscoveryRequestsAsStableStrings() throws {
+    let codec = PraxisJSONRuntimeInterfaceCodec()
+    let skillRequest = PraxisRuntimeInterfaceRequest.listProviderSkills(
+      .init(payloadSummary: "List registered provider skills")
+    )
+    let toolRequest = PraxisRuntimeInterfaceRequest.listProviderMCPTools(
+      .init(payloadSummary: "List registered provider MCP tools")
+    )
+
+    let skillData = try codec.encode(skillRequest)
+    let toolData = try codec.encode(toolRequest)
+    let skillJSON = String(decoding: skillData, as: UTF8.self)
+    let toolJSON = String(decoding: toolData, as: UTF8.self)
+
+    #expect(
+      skillJSON ==
+        #"{"kind":"listProviderSkills","listProviderSkills":{"payloadSummary":"List registered provider skills"}}"#
+    )
+    #expect(
+      toolJSON ==
+        #"{"kind":"listProviderMCPTools","listProviderMCPTools":{"payloadSummary":"List registered provider MCP tools"}}"#
+    )
+    #expect(try codec.decodeRequest(skillData) == skillRequest)
+    #expect(try codec.decodeRequest(toolData) == toolRequest)
+  }
+
+  @Test
   func runtimeInterfaceMapsOpaqueReferencesIntoTypedCmpAndMpDomainIDs() async throws {
     let recoverSnapshotID = PraxisCmpSnapshotID(rawValue: "snapshot.runtime.recover")
     let materializeSnapshotID = PraxisCmpSnapshotID(rawValue: "snapshot.runtime.materialize")
@@ -5334,6 +5384,84 @@ struct HostRuntimeInterfaceTests {
     #expect(decodedApproval.snapshot?.tapMode == .restricted)
     #expect(decodedApproval.snapshot?.riskLevel == .risky)
     #expect(decodedApproval.snapshot?.humanGateState == .approved)
+  }
+
+  @Test
+  func runtimeInterfaceCodecRoundTripsTypedCodeSandboxSnapshotFieldsAsStableRawValues() throws {
+    let codec = PraxisJSONRuntimeInterfaceCodec()
+    let response = PraxisRuntimeInterfaceResponse.success(
+      snapshot: .init(
+        kind: .codeSandbox,
+        title: "Code Sandbox",
+        summary: "Structured code sandbox snapshot",
+        capabilityKey: capabilityID("code.sandbox"),
+        codeSandboxProfile: .workspaceWriteLimited,
+        codeSandboxEnforcementMode: .declaredOnly,
+        allowedCodeRuntimes: [.swift],
+        readableRoots: ["/tmp/praxis", "/tmp/praxis/examples"],
+        writableRoots: ["/tmp/praxis"],
+        allowsNetworkAccess: false,
+        allowsSubprocesses: false
+      )
+    )
+
+    let responseData = try codec.encode(response)
+    let responseJSON = String(decoding: responseData, as: UTF8.self)
+    let decodedResponse = try codec.decodeResponse(responseData)
+
+    #expect(responseJSON.contains(#""kind":"codeSandbox""#))
+    #expect(responseJSON.contains(#""capabilityKey":"code.sandbox""#))
+    #expect(responseJSON.contains(#""codeSandboxProfile":"workspace_write_limited""#))
+    #expect(responseJSON.contains(#""codeSandboxEnforcementMode":"declared_only""#))
+    #expect(responseJSON.contains(#""allowedCodeRuntimes":["swift"]"#))
+    #expect(responseJSON.contains(#""readableRoots":["\/tmp\/praxis","\/tmp\/praxis\/examples"]"#))
+    #expect(responseJSON.contains(#""writableRoots":["\/tmp\/praxis"]"#))
+    #expect(responseJSON.contains(#""allowsNetworkAccess":false"#))
+    #expect(responseJSON.contains(#""allowsSubprocesses":false"#))
+    #expect(decodedResponse.snapshot?.kind == .codeSandbox)
+    #expect(decodedResponse.snapshot?.capabilityKey == capabilityID("code.sandbox"))
+    #expect(decodedResponse.snapshot?.codeSandboxProfile == .workspaceWriteLimited)
+    #expect(decodedResponse.snapshot?.codeSandboxEnforcementMode == .declaredOnly)
+    #expect(decodedResponse.snapshot?.allowedCodeRuntimes == [.swift])
+    #expect(decodedResponse.snapshot?.writableRoots == ["/tmp/praxis"])
+    #expect(decodedResponse == response)
+  }
+
+  @Test
+  func runtimeInterfaceCodecRoundTripsProviderDiscoverySnapshotsAsStableStrings() throws {
+    let codec = PraxisJSONRuntimeInterfaceCodec()
+    let skillsResponse = PraxisRuntimeInterfaceResponse.success(
+      snapshot: .init(
+        kind: .providerSkills,
+        title: "Provider Skills",
+        summary: "Structured provider skill list snapshot",
+        capabilityKey: capabilityID("skill.list"),
+        providerSkillKeys: ["runtime.inspect", "tool.git"]
+      )
+    )
+    let toolsResponse = PraxisRuntimeInterfaceResponse.success(
+      snapshot: .init(
+        kind: .providerMCPTools,
+        title: "Provider MCP Tools",
+        summary: "Structured provider MCP tool list snapshot",
+        capabilityKey: capabilityID("tool.call"),
+        providerMCPToolNames: ["web.search"]
+      )
+    )
+
+    let skillsData = try codec.encode(skillsResponse)
+    let toolsData = try codec.encode(toolsResponse)
+    let skillsJSON = String(decoding: skillsData, as: UTF8.self)
+    let toolsJSON = String(decoding: toolsData, as: UTF8.self)
+
+    #expect(skillsJSON.contains(#""kind":"providerSkills""#))
+    #expect(skillsJSON.contains(#""capabilityKey":"skill.list""#))
+    #expect(skillsJSON.contains(#""providerSkillKeys":["runtime.inspect","tool.git"]"#))
+    #expect(toolsJSON.contains(#""kind":"providerMCPTools""#))
+    #expect(toolsJSON.contains(#""capabilityKey":"tool.call""#))
+    #expect(toolsJSON.contains(#""providerMCPToolNames":["web.search"]"#))
+    #expect(try codec.decodeResponse(skillsData) == skillsResponse)
+    #expect(try codec.decodeResponse(toolsData) == toolsResponse)
   }
 
   @Test
@@ -6152,6 +6280,84 @@ struct HostRuntimeInterfaceTests {
     #expect(response.snapshot?.projectID == "cmp.local-runtime")
     #expect(response.snapshot?.found == false)
     #expect(response.events.first?.name == .tapProvisioningReadback)
+  }
+
+  @Test
+  func runtimeInterfaceRoutesCodeSandboxDescription() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-runtime-interface-code-sandbox-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: rootDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let runtimeInterface = try PraxisRuntimeGatewayFactory.makeRuntimeInterface(
+      hostAdapters: PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory),
+      blueprint: PraxisRuntimeGatewayModule.bootstrap
+    )
+
+    let response = await runtimeInterface.handle(
+      .describeCodeSandbox(
+        .init(
+          payloadSummary: "Describe code sandbox contract",
+          profile: .workspaceWriteLimited,
+          workingDirectory: rootDirectory.path,
+          requestedRuntime: .swift
+        )
+      )
+    )
+
+    #expect(response.status == .success)
+    #expect(response.error == nil)
+    #expect(response.events.isEmpty)
+    #expect(response.snapshot?.kind == .codeSandbox)
+    #expect(response.snapshot?.capabilityKey == capabilityID("code.sandbox"))
+    #expect(response.snapshot?.codeSandboxProfile == .workspaceWriteLimited)
+    #expect(response.snapshot?.writableRoots == [rootDirectory.path])
+    #expect(response.snapshot?.readableRoots?.contains(rootDirectory.path) == true)
+    #expect(response.snapshot?.allowsNetworkAccess == false)
+    #expect(response.snapshot?.allowsSubprocesses == false)
+#if os(macOS)
+    if PraxisLocalHostPlatformSupport.supportsBoundedCodeExecution {
+      #expect(response.snapshot?.codeSandboxEnforcementMode == .declaredOnly)
+      #expect(response.snapshot?.allowedCodeRuntimes == [.swift])
+    } else {
+      #expect(response.snapshot?.codeSandboxEnforcementMode == .placeholder)
+      #expect(response.snapshot?.allowedCodeRuntimes?.isEmpty == true)
+    }
+#else
+    #expect(response.snapshot?.codeSandboxEnforcementMode == .placeholder)
+    #expect(response.snapshot?.allowedCodeRuntimes?.isEmpty == true)
+#endif
+  }
+
+  @Test
+  func runtimeInterfaceRoutesProviderDiscoveryReadbacks() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-runtime-interface-provider-discovery-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: rootDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let runtimeInterface = try PraxisRuntimeGatewayFactory.makeRuntimeInterface(
+      hostAdapters: PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory),
+      blueprint: PraxisRuntimeGatewayModule.bootstrap
+    )
+
+    let skillsResponse = await runtimeInterface.handle(
+      .listProviderSkills(.init(payloadSummary: "List provider skills"))
+    )
+    let toolsResponse = await runtimeInterface.handle(
+      .listProviderMCPTools(.init(payloadSummary: "List provider MCP tools"))
+    )
+
+    #expect(skillsResponse.status == .success)
+    #expect(skillsResponse.snapshot?.kind == .providerSkills)
+    #expect(skillsResponse.snapshot?.capabilityKey == capabilityID("skill.list"))
+    #expect(skillsResponse.snapshot?.providerSkillKeys?.contains("runtime.inspect") == true)
+    #expect(skillsResponse.snapshot?.providerSkillKeys?.contains("tool.git") == true)
+
+    #expect(toolsResponse.status == .success)
+    #expect(toolsResponse.snapshot?.kind == .providerMCPTools)
+    #expect(toolsResponse.snapshot?.capabilityKey == capabilityID("tool.call"))
+    #expect(toolsResponse.snapshot?.providerMCPToolNames == ["web.search"])
   }
 
   @Test

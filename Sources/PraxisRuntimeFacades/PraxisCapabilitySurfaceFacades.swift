@@ -3,11 +3,13 @@ import PraxisCapabilityCatalog
 import PraxisCapabilityContracts
 import PraxisCapabilityResults
 import PraxisCoreTypes
+import PraxisInfraContracts
 import PraxisProviderContracts
 import PraxisRuntimeComposition
 import PraxisSession
 import PraxisTapTypes
 import PraxisToolingContracts
+import PraxisWorkspaceContracts
 
 /// Structured generation command for the thin capability surface.
 public struct PraxisCapabilityGenerateCommand: Sendable, Equatable, Codable {
@@ -46,6 +48,83 @@ public struct PraxisCapabilityEmbedCommand: Sendable, Equatable, Codable {
   ) {
     self.content = content
     self.preferredModel = preferredModel
+  }
+}
+
+/// Structured code-run command for the bounded execution surface.
+public struct PraxisCapabilityCodeRunCommand: Sendable, Equatable, Codable {
+  public let summary: String
+  public let runtime: PraxisCodeRuntime
+  public let source: String
+  public let workingDirectory: String?
+  public let environment: [String: String]
+  public let timeoutSeconds: Double?
+  public let outputMode: PraxisToolingOutputMode
+
+  public init(
+    summary: String,
+    runtime: PraxisCodeRuntime = .swift,
+    source: String,
+    workingDirectory: String? = nil,
+    environment: [String: String] = [:],
+    timeoutSeconds: Double? = nil,
+    outputMode: PraxisToolingOutputMode = .buffered
+  ) {
+    self.summary = summary
+    self.runtime = runtime
+    self.source = source
+    self.workingDirectory = workingDirectory
+    self.environment = environment
+    self.timeoutSeconds = timeoutSeconds
+    self.outputMode = outputMode
+  }
+}
+
+/// One workspace patch change for the bounded code patch surface.
+public struct PraxisCapabilityCodePatchChange: Sendable, Equatable, Codable {
+  public let path: String
+  public let patch: String
+  public let expectedRevisionToken: String?
+
+  public init(
+    path: String,
+    patch: String,
+    expectedRevisionToken: String? = nil
+  ) {
+    self.path = path
+    self.patch = patch
+    self.expectedRevisionToken = expectedRevisionToken
+  }
+}
+
+/// Structured code-patch command for the bounded execution surface.
+public struct PraxisCapabilityCodePatchCommand: Sendable, Equatable, Codable {
+  public let summary: String
+  public let changes: [PraxisCapabilityCodePatchChange]
+
+  public init(
+    summary: String,
+    changes: [PraxisCapabilityCodePatchChange]
+  ) {
+    self.summary = summary
+    self.changes = changes
+  }
+}
+
+/// Structured code-sandbox command for the bounded execution surface.
+public struct PraxisCapabilityCodeSandboxCommand: Sendable, Equatable, Codable {
+  public let profile: PraxisCodeSandboxProfile
+  public let workingDirectory: String?
+  public let requestedRuntime: PraxisCodeRuntime
+
+  public init(
+    profile: PraxisCodeSandboxProfile = .workspaceWriteLimited,
+    workingDirectory: String? = nil,
+    requestedRuntime: PraxisCodeRuntime = .swift
+  ) {
+    self.profile = profile
+    self.workingDirectory = workingDirectory
+    self.requestedRuntime = requestedRuntime
   }
 }
 
@@ -115,6 +194,30 @@ public struct PraxisCapabilityShellApprovalReadbackCommand: Sendable, Equatable,
     self.projectID = projectID
     self.agentID = agentID
     self.targetAgentID = targetAgentID
+  }
+}
+
+/// Structured provider-skill list query for the thin capability surface.
+public struct PraxisCapabilitySkillListCommand: Sendable, Equatable, Codable {
+  public init() {}
+}
+
+/// Structured provider MCP-tool list query for the thin capability surface.
+public struct PraxisCapabilityProviderMCPToolListCommand: Sendable, Equatable, Codable {
+  public init() {}
+}
+
+/// Structured provider-skill activation command for the thin capability surface.
+public struct PraxisCapabilitySkillActivateCommand: Sendable, Equatable, Codable {
+  public let skillKey: String
+  public let reason: String?
+
+  public init(
+    skillKey: String,
+    reason: String? = nil
+  ) {
+    self.skillKey = skillKey
+    self.reason = reason
   }
 }
 
@@ -344,6 +447,114 @@ public struct PraxisCapabilityEmbeddingSnapshot: Sendable, Equatable, Codable {
   }
 }
 
+/// Result snapshot for one bounded code execution.
+public struct PraxisCapabilityCodeRunSnapshot: Sendable, Equatable, Codable {
+  public let capabilityID: PraxisCapabilityID
+  public let summary: String
+  public let runtime: PraxisCodeRuntime
+  public let launcher: String
+  public let workingDirectory: String?
+  public let environmentKeys: [String]
+  public let outputMode: PraxisToolingOutputMode
+  public let riskLabel: String
+  public let stdout: String
+  public let stderr: String
+  public let exitCode: Int32
+  public let durationMilliseconds: Int?
+  public let terminationReason: PraxisShellTerminationReason
+  public let outputWasTruncated: Bool
+
+  public init(
+    capabilityID: PraxisCapabilityID,
+    summary: String,
+    runtime: PraxisCodeRuntime,
+    launcher: String,
+    workingDirectory: String?,
+    environmentKeys: [String],
+    outputMode: PraxisToolingOutputMode,
+    riskLabel: String,
+    stdout: String,
+    stderr: String,
+    exitCode: Int32,
+    durationMilliseconds: Int? = nil,
+    terminationReason: PraxisShellTerminationReason,
+    outputWasTruncated: Bool = false
+  ) {
+    self.capabilityID = capabilityID
+    self.summary = summary
+    self.runtime = runtime
+    self.launcher = launcher
+    self.workingDirectory = workingDirectory
+    self.environmentKeys = environmentKeys
+    self.outputMode = outputMode
+    self.riskLabel = riskLabel
+    self.stdout = stdout
+    self.stderr = stderr
+    self.exitCode = exitCode
+    self.durationMilliseconds = durationMilliseconds
+    self.terminationReason = terminationReason
+    self.outputWasTruncated = outputWasTruncated
+  }
+}
+
+/// Result snapshot for one bounded workspace patch execution.
+public struct PraxisCapabilityCodePatchSnapshot: Sendable, Equatable, Codable {
+  public let capabilityID: PraxisCapabilityID
+  public let summary: String
+  public let changedPaths: [String]
+  public let appliedChangeCount: Int
+  public let riskLabel: String
+
+  public init(
+    capabilityID: PraxisCapabilityID,
+    summary: String,
+    changedPaths: [String],
+    appliedChangeCount: Int,
+    riskLabel: String
+  ) {
+    self.capabilityID = capabilityID
+    self.summary = summary
+    self.changedPaths = changedPaths
+    self.appliedChangeCount = appliedChangeCount
+    self.riskLabel = riskLabel
+  }
+}
+
+/// Result snapshot for one bounded code sandbox contract readback.
+public struct PraxisCapabilityCodeSandboxSnapshot: Sendable, Equatable, Codable {
+  public let capabilityID: PraxisCapabilityID
+  public let summary: String
+  public let profile: PraxisCodeSandboxProfile
+  public let enforcementMode: PraxisCodeSandboxEnforcementMode
+  public let allowedRuntimes: [PraxisCodeRuntime]
+  public let readableRoots: [String]
+  public let writableRoots: [String]
+  public let allowsNetworkAccess: Bool
+  public let allowsSubprocesses: Bool
+
+  public init(
+    capabilityID: PraxisCapabilityID,
+    summary: String,
+    profile: PraxisCodeSandboxProfile,
+    enforcementMode: PraxisCodeSandboxEnforcementMode,
+    allowedRuntimes: [PraxisCodeRuntime],
+    readableRoots: [String],
+    writableRoots: [String],
+    allowsNetworkAccess: Bool,
+    allowsSubprocesses: Bool
+  ) {
+    self.capabilityID = capabilityID
+    self.summary = summary
+    self.profile = profile
+    self.enforcementMode = enforcementMode
+    self.allowedRuntimes = allowedRuntimes
+    self.readableRoots = readableRoots
+    self.writableRoots = writableRoots
+    self.allowsNetworkAccess = allowsNetworkAccess
+    self.allowsSubprocesses = allowsSubprocesses
+  }
+}
+
 /// Result snapshot for one bounded shell execution.
 public struct PraxisCapabilityShellRunSnapshot: Sendable, Equatable, Codable {
   public let capabilityID: PraxisCapabilityID
@@ -494,6 +705,60 @@ public struct PraxisCapabilityShellApprovalReadbackSnapshot: Sendable, Equatable
     self.requestedAt = requestedAt
     self.decisionSummary = decisionSummary
     self.found = found
+  }
+}
+
+/// Result snapshot for one thin provider-skill list capability.
+public struct PraxisCapabilitySkillListSnapshot: Sendable, Equatable, Codable {
+  public let capabilityID: PraxisCapabilityID
+  public let summary: String
+  public let skillKeys: [String]
+
+  public init(
+    capabilityID: PraxisCapabilityID,
+    summary: String,
+    skillKeys: [String]
+  ) {
+    self.capabilityID = capabilityID
+    self.summary = summary
+    self.skillKeys = skillKeys
+  }
+}
+
+/// Result snapshot for one thin provider-skill activation capability.
+public struct PraxisCapabilitySkillActivateSnapshot: Sendable, Equatable, Codable {
+  public let capabilityID: PraxisCapabilityID
+  public let summary: String
+  public let skillKey: String
+  public let activated: Bool
+
+  public init(
+    capabilityID: PraxisCapabilityID,
+    summary: String,
+    skillKey: String,
+    activated: Bool
+  ) {
+    self.capabilityID = capabilityID
+    self.summary = summary
+    self.skillKey = skillKey
+    self.activated = activated
+  }
+}
+
+/// Result snapshot for one provider MCP-tool list readback.
+public struct PraxisCapabilityProviderMCPToolListSnapshot: Sendable, Equatable, Codable {
+  public let capabilityID: PraxisCapabilityID
+  public let summary: String
+  public let toolNames: [String]
+
+  public init(
+    capabilityID: PraxisCapabilityID,
+    summary: String,
+    toolNames: [String]
+  ) {
+    self.capabilityID = capabilityID
+    self.summary = summary
+    self.toolNames = toolNames
   }
 }
 
@@ -735,6 +1000,13 @@ private func normalizedCapabilityPath(_ rawValue: String?) -> String? {
   return trimmed
 }
 
+private func normalizedOptionalCapabilityText(_ rawValue: String?) -> String? {
+  guard let trimmed = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+    return nil
+  }
+  return trimmed
+}
+
 private func normalizedCapabilityEnvironment(
   _ environment: [String: String]
 ) throws -> [String: String] {
@@ -747,6 +1019,26 @@ private func normalizedCapabilityEnvironment(
     normalized[key] = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
   }
   return normalized
+}
+
+private func normalizedCapabilityRootPaths(_ paths: [String]) -> [String] {
+  paths.map { URL(fileURLWithPath: $0, isDirectory: true).standardizedFileURL.path }
+}
+
+private func capabilityPath(
+  _ rawValue: String
+) -> String {
+  URL(fileURLWithPath: rawValue, isDirectory: true).standardizedFileURL.path
+}
+
+private func capabilityPathIsContained(
+  _ candidatePath: String,
+  within allowedRoots: [String]
+) -> Bool {
+  let normalizedCandidate = capabilityPath(candidatePath)
+  return normalizedCapabilityRootPaths(allowedRoots).contains { rootPath in
+    normalizedCandidate == rootPath || normalizedCandidate.hasPrefix(rootPath + "/")
+  }
 }
 
 private func chunkedCapabilityText(_ text: String, chunkCharacterCount: Int) -> [PraxisCapabilityGenerationChunkSnapshot] {
@@ -774,11 +1066,16 @@ private func chunkedCapabilityText(_ text: String, chunkCharacterCount: Int) -> 
 }
 
 private let boundedShellExecutionCapabilityKey = PraxisThinCapabilityKey.shellRun.capabilityID
+private let localRuntimeAuditProjectID = "cmp.local-runtime"
+private let localRuntimeAuditAgentID = "runtime.local"
 
 private func thinCapabilityManifestIDs(
   providerSurface: (any PraxisProviderRequestSurfaceProtocol)?,
   supportsShellApproval: Bool,
   shellExecutor: (any PraxisShellExecutor)?,
+  codeExecutor: (any PraxisCodeExecutor)?,
+  codeSandboxDescriber: (any PraxisCodeSandboxDescriber)?,
+  supportsCodePatch: Bool,
   browserExecutor: (any PraxisBrowserExecutor)?,
   browserGroundingCollector: (any PraxisBrowserGroundingCollector)?,
   supportsSessionOpen: Bool
@@ -794,11 +1091,27 @@ private func thinCapabilityManifestIDs(
   if providerSurface?.supportsEmbedding == true {
     capabilityIDs.insert(PraxisThinCapabilityKey.embedCreate.capabilityID)
   }
+  if codeExecutor != nil && codeSandboxDescriber != nil {
+    capabilityIDs.insert(PraxisThinCapabilityKey.codeRun.capabilityID)
+  }
+  if supportsCodePatch {
+    capabilityIDs.insert(PraxisThinCapabilityKey.codePatch.capabilityID)
+  }
+  if codeSandboxDescriber != nil {
+    capabilityIDs.insert(PraxisThinCapabilityKey.codeSandbox.capabilityID)
+  }
   if supportsShellApproval {
     capabilityIDs.insert(PraxisThinCapabilityKey.shellApprove.capabilityID)
   }
   if shellExecutor != nil {
     capabilityIDs.insert(PraxisThinCapabilityKey.shellRun.capabilityID)
+  }
+  if providerSurface?.supportsSkillRegistry == true {
+    capabilityIDs.insert(PraxisThinCapabilityKey.skillList.capabilityID)
+  }
+  if providerSurface?.supportsSkillRegistry == true,
+     providerSurface?.supportsSkillActivation == true {
+    capabilityIDs.insert(PraxisThinCapabilityKey.skillActivate.capabilityID)
   }
   if providerSurface?.supportsToolCalls == true {
     capabilityIDs.insert(PraxisThinCapabilityKey.toolCall.capabilityID)
@@ -832,11 +1145,16 @@ public final class PraxisCapabilityFacade: Sendable {
   private let cmpReadbackFacade: PraxisCmpReadbackFacade?
   private let supportsShellApproval: Bool
   private let shellExecutor: (any PraxisShellExecutor)?
+  private let codeExecutor: (any PraxisCodeExecutor)?
+  private let codeSandboxDescriber: (any PraxisCodeSandboxDescriber)?
+  private let workspaceWriter: (any PraxisWorkspaceWriter)?
+  private let supportsCodePatch: Bool
   private let browserExecutor: (any PraxisBrowserExecutor)?
   private let browserGroundingCollector: (any PraxisBrowserGroundingCollector)?
   private let supportsSessionOpen: Bool
   private let sessionRegistry: PraxisSessionRegistry
   private let catalogBuilder: PraxisCapabilityCatalogBuilder
+  private let tapRuntimeEventStore: (any PraxisTapRuntimeEventStoreContract)?
 
   public init(
     dependencies: PraxisDependencyGraph,
@@ -848,11 +1166,16 @@ public final class PraxisCapabilityFacade: Sendable {
     self.cmpReadbackFacade = PraxisCmpReadbackFacade(dependencies: dependencies)
     self.supportsShellApproval = dependencies.hostAdapters.cmpPeerApprovalStore != nil
     self.shellExecutor = dependencies.hostAdapters.shellExecutor
+    self.codeExecutor = dependencies.hostAdapters.codeExecutor
+    self.codeSandboxDescriber = dependencies.hostAdapters.codeSandboxDescriber
+    self.workspaceWriter = dependencies.hostAdapters.workspaceWriter
+    self.supportsCodePatch = dependencies.hostAdapters.workspaceWriter?.supportedChangeKinds.contains(.applyPatch) == true
     self.browserExecutor = dependencies.hostAdapters.browserExecutor
     self.browserGroundingCollector = dependencies.hostAdapters.browserGroundingCollector
     self.supportsSessionOpen = true
     self.sessionRegistry = sessionRegistry
     self.catalogBuilder = catalogBuilder
+    self.tapRuntimeEventStore = dependencies.hostAdapters.tapRuntimeEventStore
   }
 
   public static func unsupported() -> PraxisCapabilityFacade {
@@ -862,6 +1185,10 @@ public final class PraxisCapabilityFacade: Sendable {
       cmpReadbackFacade: nil,
       supportsShellApproval: false,
       shellExecutor: nil,
+      codeExecutor: nil,
+      codeSandboxDescriber: nil,
+      workspaceWriter: nil,
+      supportsCodePatch: false,
       browserExecutor: nil,
       browserGroundingCollector: nil,
       supportsSessionOpen: false
@@ -874,29 +1201,39 @@ public final class PraxisCapabilityFacade: Sendable {
     cmpReadbackFacade: PraxisCmpReadbackFacade? = nil,
     supportsShellApproval: Bool,
     shellExecutor: (any PraxisShellExecutor)? = nil,
+    codeExecutor: (any PraxisCodeExecutor)? = nil,
+    codeSandboxDescriber: (any PraxisCodeSandboxDescriber)? = nil,
+    workspaceWriter: (any PraxisWorkspaceWriter)? = nil,
+    supportsCodePatch: Bool = false,
     browserExecutor: (any PraxisBrowserExecutor)? = nil,
     browserGroundingCollector: (any PraxisBrowserGroundingCollector)? = nil,
     supportsSessionOpen: Bool,
     sessionRegistry: PraxisSessionRegistry = .init(),
-    catalogBuilder: PraxisCapabilityCatalogBuilder = .init()
+    catalogBuilder: PraxisCapabilityCatalogBuilder = .init(),
+    tapRuntimeEventStore: (any PraxisTapRuntimeEventStoreContract)? = nil
   ) {
     self.providerSurface = providerSurface
     self.cmpRolesFacade = cmpRolesFacade
     self.cmpReadbackFacade = cmpReadbackFacade
     self.supportsShellApproval = supportsShellApproval
     self.shellExecutor = shellExecutor
+    self.codeExecutor = codeExecutor
+    self.codeSandboxDescriber = codeSandboxDescriber
+    self.workspaceWriter = workspaceWriter
+    self.supportsCodePatch = supportsCodePatch
     self.browserExecutor = browserExecutor
     self.browserGroundingCollector = browserGroundingCollector
     self.supportsSessionOpen = supportsSessionOpen
     self.sessionRegistry = sessionRegistry
     self.catalogBuilder = catalogBuilder
+    self.tapRuntimeEventStore = tapRuntimeEventStore
   }
 
   /// Reads the currently available thin-capability catalog snapshot.
   ///
   /// - Returns: Catalog entries currently wired for the active host profile.
   public func catalog() -> PraxisCapabilityCatalogSnapshot {
-    guard providerSurface != nil || supportsShellApproval || shellExecutor != nil || browserExecutor != nil || browserGroundingCollector != nil || supportsSessionOpen else {
+    guard providerSurface != nil || supportsShellApproval || shellExecutor != nil || codeExecutor != nil || codeSandboxDescriber != nil || browserExecutor != nil || browserGroundingCollector != nil || supportsSessionOpen else {
       return catalogBuilder.buildSnapshot(manifests: [])
     }
 
@@ -905,6 +1242,9 @@ public final class PraxisCapabilityFacade: Sendable {
       providerSurface: providerSurface,
       supportsShellApproval: supportsShellApproval,
       shellExecutor: shellExecutor,
+      codeExecutor: codeExecutor,
+      codeSandboxDescriber: codeSandboxDescriber,
+      supportsCodePatch: supportsCodePatch,
       browserExecutor: browserExecutor,
       browserGroundingCollector: browserGroundingCollector,
       supportsSessionOpen: supportsSessionOpen
@@ -998,6 +1338,143 @@ public final class PraxisCapabilityFacade: Sendable {
       summary: "Thin capability \(PraxisThinCapabilityKey.embedCreate.rawValue) created an embedding response with vector length \(response.vectorLength).",
       vectorLength: response.vectorLength,
       preferredModel: response.model ?? command.preferredModel
+    )
+  }
+
+  /// Executes one bounded code snippet through the current host code lane.
+  ///
+  /// - Parameter command: The caller-friendly code-run command.
+  /// - Returns: The normalized bounded code execution snapshot.
+  /// - Throws: Propagates code adapter or validation failures.
+  public func runCode(_ command: PraxisCapabilityCodeRunCommand) async throws -> PraxisCapabilityCodeRunSnapshot {
+    let summary = try normalizedCapabilityText(command.summary, fieldName: "summary")
+    let source = try normalizedCapabilityText(command.source, fieldName: "source")
+    let workingDirectory = normalizedCapabilityPath(command.workingDirectory)
+    let environment = try normalizedCapabilityEnvironment(command.environment)
+    if let timeoutSeconds = command.timeoutSeconds, timeoutSeconds <= 0 {
+      throw PraxisError.invalidInput("Thin capability code.run requires timeoutSeconds > 0 when provided.")
+    }
+    guard command.outputMode == .buffered else {
+      throw PraxisError.unsupportedOperation(
+        "Thin capability code.run currently supports buffered output only."
+      )
+    }
+
+    let sandbox = try await describeCodeSandbox(
+      .init(
+        profile: .workspaceWriteLimited,
+        workingDirectory: workingDirectory,
+        requestedRuntime: command.runtime
+      )
+    )
+    guard sandbox.allowedRuntimes.contains(command.runtime) else {
+      throw PraxisError.unsupportedOperation(
+        "Thin capability code.run does not allow runtime \(command.runtime.rawValue) under the current code sandbox contract."
+      )
+    }
+    if let workingDirectory,
+       !capabilityPathIsContained(workingDirectory, within: sandbox.writableRoots) {
+      throw PraxisError.invalidInput(
+        "Thin capability code.run requires workingDirectory to stay within the writable code sandbox roots."
+      )
+    }
+
+    let executor = try requireCodeExecutor()
+    let receipt = try await executor.run(
+      .init(
+        runtime: command.runtime,
+        source: source,
+        workingDirectory: workingDirectory,
+        environment: environment,
+        timeoutSeconds: command.timeoutSeconds,
+        outputMode: command.outputMode
+      )
+    )
+    let riskLabel = "risky"
+    let completionWord = receipt.exitCode == 0 && receipt.terminationReason == .exited
+      ? "completed"
+      : "finished"
+    return PraxisCapabilityCodeRunSnapshot(
+      capabilityID: PraxisThinCapabilityKey.codeRun.capabilityID,
+      summary: "Thin capability \(PraxisThinCapabilityKey.codeRun.rawValue) \(completionWord) bounded \(command.runtime.rawValue) execution for \(summary) with exit code \(receipt.exitCode) under \(riskLabel) side-effect labeling.",
+      runtime: receipt.runtime,
+      launcher: receipt.launcher,
+      workingDirectory: workingDirectory,
+      environmentKeys: environment.keys.sorted(),
+      outputMode: command.outputMode,
+      riskLabel: riskLabel,
+      stdout: receipt.stdout,
+      stderr: receipt.stderr,
+      exitCode: receipt.exitCode,
+      durationMilliseconds: receipt.durationMilliseconds,
+      terminationReason: receipt.terminationReason,
+      outputWasTruncated: receipt.outputWasTruncated
+    )
+  }
+
+  /// Applies one bounded workspace patch through the current host patch lane.
+  ///
+  /// - Parameter command: The caller-friendly code-patch command.
+  /// - Returns: The normalized bounded code patch snapshot.
+  /// - Throws: Propagates workspace writer or validation failures.
+  public func patchCode(_ command: PraxisCapabilityCodePatchCommand) async throws -> PraxisCapabilityCodePatchSnapshot {
+    let summary = try normalizedCapabilityText(command.summary, fieldName: "summary")
+    guard !command.changes.isEmpty else {
+      throw PraxisError.invalidInput("Thin capability code.patch requires at least one change.")
+    }
+
+    let writer = try requireCodePatchWriter()
+    let normalizedChanges = try command.changes.map { change in
+      PraxisWorkspaceFileChange(
+        kind: .applyPatch,
+        path: try normalizedCapabilityText(change.path, fieldName: "path"),
+        patch: try normalizedCapabilityText(change.patch, fieldName: "patch"),
+        expectedRevisionToken: normalizedOptionalCapabilityText(change.expectedRevisionToken)
+      )
+    }
+    let receipt = try await writer.apply(
+      .init(
+        changes: normalizedChanges,
+        changeSummary: summary
+      )
+    )
+
+    return PraxisCapabilityCodePatchSnapshot(
+      capabilityID: PraxisThinCapabilityKey.codePatch.capabilityID,
+      summary: "Thin capability \(PraxisThinCapabilityKey.codePatch.rawValue) applied \(receipt.appliedChangeCount) bounded workspace patch change(s) for \(summary) under risky side-effect labeling.",
+      changedPaths: receipt.changedPaths,
+      appliedChangeCount: receipt.appliedChangeCount,
+      riskLabel: "risky"
+    )
+  }
+
+  /// Describes the current bounded code sandbox contract.
+  ///
+  /// - Parameter command: The caller-friendly code-sandbox command.
+  /// - Returns: The normalized bounded code sandbox snapshot.
+  /// - Throws: Propagates sandbox-describer or validation failures.
+  public func describeCodeSandbox(
+    _ command: PraxisCapabilityCodeSandboxCommand = .init()
+  ) async throws -> PraxisCapabilityCodeSandboxSnapshot {
+    let describer = try requireCodeSandboxDescriber()
+    let descriptor = try await describer.describe(
+      .init(
+        profile: command.profile,
+        workingDirectory: normalizedCapabilityPath(command.workingDirectory),
+        requestedRuntime: command.requestedRuntime
+      )
+    )
+
+    return PraxisCapabilityCodeSandboxSnapshot(
+      capabilityID: PraxisThinCapabilityKey.codeSandbox.capabilityID,
+      summary: descriptor.summary,
+      profile: descriptor.profile,
+      enforcementMode: descriptor.enforcementMode,
+      allowedRuntimes: descriptor.allowedRuntimes,
+      readableRoots: descriptor.readableRoots,
+      writableRoots: descriptor.writableRoots,
+      allowsNetworkAccess: descriptor.allowsNetworkAccess,
+      allowsSubprocesses: descriptor.allowsSubprocesses
     )
   }
 
@@ -1104,6 +1581,99 @@ public final class PraxisCapabilityFacade: Sendable {
     )
   }
 
+  /// Lists stable provider skill keys through the aggregated provider skill surface.
+  ///
+  /// - Parameter command: The caller-friendly list query.
+  /// - Returns: The normalized provider-skill list snapshot.
+  /// - Throws: Propagates provider failures when the skill registry is unavailable.
+  public func listSkills(
+    _ command: PraxisCapabilitySkillListCommand = .init()
+  ) async throws -> PraxisCapabilitySkillListSnapshot {
+    _ = command
+    let providerSurface = try requireProviderSurface(
+      isSupported: { $0.supportsSkillRegistry },
+      errorMessage: "Thin capability skill.list requires a provider skill registry."
+    )
+    let skillKeys = try await providerSurface.listSkillKeys()
+    let normalizedSkillKeys = normalizedCapabilityKeys(skillKeys)
+    return PraxisCapabilitySkillListSnapshot(
+      capabilityID: PraxisThinCapabilityKey.skillList.capabilityID,
+      summary: "Thin capability \(PraxisThinCapabilityKey.skillList.rawValue) listed \(normalizedSkillKeys.count) registered provider skill key(s).",
+      skillKeys: normalizedSkillKeys
+    )
+  }
+
+  /// Activates one registered provider skill through the aggregated provider skill surface.
+  ///
+  /// - Parameter command: The caller-friendly skill activation command.
+  /// - Returns: The normalized provider-skill activation snapshot.
+  /// - Throws: Propagates provider or validation failures.
+  public func activateSkill(
+    _ command: PraxisCapabilitySkillActivateCommand
+  ) async throws -> PraxisCapabilitySkillActivateSnapshot {
+    let skillKey = try normalizedCapabilityText(command.skillKey, fieldName: "skillKey")
+    let providerSurface = try requireProviderSurface(
+      isSupported: { $0.supportsSkillRegistry && $0.supportsSkillActivation },
+      errorMessage: "Thin capability skill.activate requires a provider skill registry and activator."
+    )
+    let availableSkillKeys = Set(normalizedCapabilityKeys(try await providerSurface.listSkillKeys()))
+    guard availableSkillKeys.contains(skillKey) else {
+      throw PraxisError.unsupportedOperation(
+        "Thin capability skill.activate does not allow unregistered provider skill key \(skillKey)."
+      )
+    }
+    let receipt = try await providerSurface.activate(
+      .init(
+        skillKey: skillKey,
+        reason: command.reason?.trimmingCharacters(in: .whitespacesAndNewlines)
+      )
+    )
+    if receipt.activated {
+      try await appendCapabilityAuditEvent(
+        eventKind: .providerSkillActivated,
+        capabilityID: PraxisThinCapabilityKey.skillActivate.capabilityID,
+        summary: "Activated provider skill \(receipt.skillKey).",
+        detail: "Thin capability \(PraxisThinCapabilityKey.skillActivate.rawValue) activated provider skill \(receipt.skillKey).",
+        metadata: [
+          "capabilityKey": .string(PraxisThinCapabilityKey.skillActivate.rawValue),
+          "skillKey": .string(receipt.skillKey),
+          "requestedTier": .string(PraxisTapCapabilityTier.b0.rawValue),
+          "route": .string("autoApprove"),
+          "outcome": .string("baseline_approved"),
+          "humanGateState": .string(PraxisHumanGateState.notRequired.rawValue),
+          "decisionSummary": .string("Activated provider skill \(receipt.skillKey)."),
+        ]
+      )
+    }
+    return PraxisCapabilitySkillActivateSnapshot(
+      capabilityID: PraxisThinCapabilityKey.skillActivate.capabilityID,
+      summary: "Thin capability \(PraxisThinCapabilityKey.skillActivate.rawValue) attempted provider skill activation for \(receipt.skillKey).",
+      skillKey: receipt.skillKey,
+      activated: receipt.activated
+    )
+  }
+
+  /// Lists registered provider MCP tool names through the aggregated provider MCP-tool surface.
+  ///
+  /// - Parameter command: The caller-friendly list query.
+  /// - Returns: The normalized provider MCP-tool list snapshot.
+  /// - Throws: Propagates provider failures when the MCP tool registry is unavailable.
+  public func listProviderMCPTools(
+    _ command: PraxisCapabilityProviderMCPToolListCommand = .init()
+  ) async throws -> PraxisCapabilityProviderMCPToolListSnapshot {
+    _ = command
+    let providerSurface = try requireProviderSurface(
+      isSupported: { $0.supportsMCPToolRegistry },
+      errorMessage: "Thin capability provider.mcp.list requires a provider MCP tool registry."
+    )
+    let toolNames = normalizedCapabilityKeys(try await providerSurface.listToolNames())
+    return PraxisCapabilityProviderMCPToolListSnapshot(
+      capabilityID: PraxisThinCapabilityKey.toolCall.capabilityID,
+      summary: "Provider MCP tool registry listed \(toolNames.count) registered tool name(s).",
+      toolNames: toolNames
+    )
+  }
+
   /// Executes one tool call through the MCP-backed tool lane.
   ///
   /// - Parameter command: The caller-friendly tool-call command.
@@ -1113,9 +1683,15 @@ public final class PraxisCapabilityFacade: Sendable {
     let toolName = try normalizedCapabilityText(command.toolName, fieldName: "toolName")
     let summary = try normalizedCapabilityText(command.summary, fieldName: "summary")
     let providerSurface = try requireProviderSurface(
-      isSupported: { $0.supportsToolCalls },
-      errorMessage: "Thin capability tool.call requires a provider MCP executor."
+      isSupported: { $0.supportsToolCalls && $0.supportsMCPToolRegistry },
+      errorMessage: "Thin capability tool.call requires a provider MCP tool registry and executor."
     )
+    let registeredToolNames = Set(normalizedCapabilityKeys(try await providerSurface.listToolNames()))
+    guard registeredToolNames.contains(toolName) else {
+      throw PraxisError.unsupportedOperation(
+        "Thin capability tool.call does not allow unregistered provider MCP tool \(toolName)."
+      )
+    }
     let receipt = try await providerSurface.callTool(
       .init(
         toolName: toolName,
@@ -1123,6 +1699,23 @@ public final class PraxisCapabilityFacade: Sendable {
         serverName: command.serverName?.trimmingCharacters(in: .whitespacesAndNewlines)
       )
     )
+    if receipt.status == .succeeded {
+      try await appendCapabilityAuditEvent(
+        eventKind: .providerMCPToolCalled,
+        capabilityID: PraxisThinCapabilityKey.toolCall.capabilityID,
+        summary: "Called provider MCP tool \(receipt.toolName).",
+        detail: "Thin capability \(PraxisThinCapabilityKey.toolCall.rawValue) called provider MCP tool \(receipt.toolName).",
+        metadata: [
+          "capabilityKey": .string(PraxisThinCapabilityKey.toolCall.rawValue),
+          "toolName": .string(receipt.toolName),
+          "requestedTier": .string(PraxisTapCapabilityTier.b0.rawValue),
+          "route": .string("autoApprove"),
+          "outcome": .string("baseline_approved"),
+          "humanGateState": .string(PraxisHumanGateState.notRequired.rawValue),
+          "decisionSummary": .string("Called provider MCP tool \(receipt.toolName)."),
+        ]
+      )
+    }
     return PraxisCapabilityToolCallSnapshot(
       capabilityID: PraxisThinCapabilityKey.toolCall.capabilityID,
       toolName: receipt.toolName,
@@ -1329,6 +1922,41 @@ public final class PraxisCapabilityFacade: Sendable {
     return providerSurface
   }
 
+  private func normalizedCapabilityKeys(_ values: [String]) -> [String] {
+    Array(
+      Set(
+        values.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+          .filter { !$0.isEmpty }
+      )
+    ).sorted()
+  }
+
+  private func appendCapabilityAuditEvent(
+    eventKind: PraxisTapRuntimeEventKind,
+    capabilityID: PraxisCapabilityID,
+    summary: String,
+    detail: String,
+    metadata: [String: PraxisValue]
+  ) async throws {
+    guard let tapRuntimeEventStore else {
+      return
+    }
+    _ = try await tapRuntimeEventStore.append(
+      .init(
+        eventID: "tap.\(eventKind.rawValue).\(UUID().uuidString.lowercased())",
+        projectID: localRuntimeAuditProjectID,
+        agentID: localRuntimeAuditAgentID,
+        targetAgentID: localRuntimeAuditAgentID,
+        eventKind: eventKind,
+        capabilityKey: capabilityID.rawValue,
+        summary: summary,
+        detail: detail,
+        createdAt: ISO8601DateFormatter().string(from: Date()),
+        metadata: metadata
+      )
+    )
+  }
+
   private func requireCmpRolesFacade() throws -> PraxisCmpRolesFacade {
     guard let cmpRolesFacade, supportsShellApproval else {
       throw PraxisError.dependencyMissing("Thin capability shell.approve requires the CMP approval path.")
@@ -1348,6 +1976,27 @@ public final class PraxisCapabilityFacade: Sendable {
       throw PraxisError.dependencyMissing("Thin capability shell.run requires a shell executor.")
     }
     return shellExecutor
+  }
+
+  private func requireCodeExecutor() throws -> any PraxisCodeExecutor {
+    guard let codeExecutor else {
+      throw PraxisError.dependencyMissing("Thin capability code.run requires a code executor.")
+    }
+    return codeExecutor
+  }
+
+  private func requireCodePatchWriter() throws -> any PraxisWorkspaceWriter {
+    guard let workspaceWriter, supportsCodePatch else {
+      throw PraxisError.dependencyMissing("Thin capability code.patch requires a workspace writer with applyPatch support.")
+    }
+    return workspaceWriter
+  }
+
+  private func requireCodeSandboxDescriber() throws -> any PraxisCodeSandboxDescriber {
+    guard let codeSandboxDescriber else {
+      throw PraxisError.dependencyMissing("Thin capability code.sandbox requires a code sandbox describer.")
+    }
+    return codeSandboxDescriber
   }
 
   private func requireBrowserExecutor() throws -> any PraxisBrowserExecutor {

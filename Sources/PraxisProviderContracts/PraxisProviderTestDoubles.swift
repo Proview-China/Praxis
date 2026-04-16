@@ -127,6 +127,19 @@ public actor PraxisFakeProviderSkillActivator: PraxisProviderSkillActivator {
   }
 }
 
+/// Stub MCP tool registry for deterministic tool discovery.
+public struct PraxisStubProviderMCPToolRegistry: PraxisProviderMCPToolRegistry, Sendable {
+  public let toolNames: [String]
+
+  public init(toolNames: [String]) {
+    self.toolNames = toolNames
+  }
+
+  public func listToolNames() async throws -> [String] {
+    toolNames
+  }
+}
+
 /// Stub MCP executor that returns deterministic tool receipts.
 public struct PraxisStubProviderMCPExecutor: PraxisProviderMCPExecutor, Sendable {
   public let receiptFactory: @Sendable (PraxisProviderMCPToolCallRequest) -> PraxisProviderMCPToolCallReceipt

@@ -15,6 +15,9 @@ public protocol PraxisWorkspaceSearcher: Sendable {
 }
 
 public protocol PraxisWorkspaceWriter: Sendable {
+  /// Change kinds that the current writer can execute safely.
+  var supportedChangeKinds: Set<PraxisWorkspaceChangeKind> { get }
+
   /// Applies one or more workspace changes.
   ///
   /// - Parameter request: Structured workspace change request.

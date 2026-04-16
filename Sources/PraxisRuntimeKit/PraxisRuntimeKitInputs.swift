@@ -424,6 +424,83 @@ public struct PraxisRuntimeEmbeddingRequest: Sendable, Equatable {
   }
 }
 
+/// Caller-friendly request for one bounded code execution.
+public struct PraxisRuntimeCodeRunRequest: Sendable, Equatable {
+  public let summary: String
+  public let runtime: PraxisCodeRuntime
+  public let source: String
+  public let workingDirectory: String?
+  public let environment: [String: String]
+  public let timeoutSeconds: Double?
+  public let outputMode: PraxisToolingOutputMode
+
+  public init(
+    summary: String,
+    runtime: PraxisCodeRuntime = .swift,
+    source: String,
+    workingDirectory: String? = nil,
+    environment: [String: String] = [:],
+    timeoutSeconds: Double? = nil,
+    outputMode: PraxisToolingOutputMode = .buffered
+  ) {
+    self.summary = summary
+    self.runtime = runtime
+    self.source = source
+    self.workingDirectory = workingDirectory
+    self.environment = environment
+    self.timeoutSeconds = timeoutSeconds
+    self.outputMode = outputMode
+  }
+}
+
+/// One workspace patch change for the bounded code patch surface.
+public struct PraxisRuntimeCodePatchChange: Sendable, Equatable {
+  public let path: String
+  public let patch: String
+  public let expectedRevisionToken: String?
+
+  public init(
+    path: String,
+    patch: String,
+    expectedRevisionToken: String? = nil
+  ) {
+    self.path = path
+    self.patch = patch
+    self.expectedRevisionToken = expectedRevisionToken
+  }
+}
+
+/// Caller-friendly request for one bounded workspace patch execution.
+public struct PraxisRuntimeCodePatchRequest: Sendable, Equatable {
+  public let summary: String
+  public let changes: [PraxisRuntimeCodePatchChange]
+
+  public init(
+    summary: String,
+    changes: [PraxisRuntimeCodePatchChange]
+  ) {
+    self.summary = summary
+    self.changes = changes
+  }
+}
+
+/// Caller-friendly request for one bounded code sandbox contract readback.
+public struct PraxisRuntimeCodeSandboxRequest: Sendable, Equatable {
+  public let profile: PraxisCodeSandboxProfile
+  public let workingDirectory: String?
+  public let requestedRuntime: PraxisCodeRuntime
+
+  public init(
+    profile: PraxisCodeSandboxProfile = .workspaceWriteLimited,
+    workingDirectory: String? = nil,
+    requestedRuntime: PraxisCodeRuntime = .swift
+  ) {
+    self.profile = profile
+    self.workingDirectory = workingDirectory
+    self.requestedRuntime = requestedRuntime
+  }
+}
+
 /// Caller-friendly request for one bounded shell execution.
 public struct PraxisRuntimeShellRunRequest: Sendable, Equatable {
   public let summary: String
@@ -491,6 +568,30 @@ public struct PraxisRuntimeShellApprovalQuery: Sendable, Equatable {
     self.agentID = agentID
     self.targetAgentID = targetAgentID
   }
+}
+
+/// Caller-friendly query for registered provider skill keys.
+public struct PraxisRuntimeSkillListRequest: Sendable, Equatable {
+  public init() {}
+}
+
+/// Caller-friendly request for one provider-skill activation.
+public struct PraxisRuntimeSkillActivateRequest: Sendable, Equatable {
+  public let skillKey: String
+  public let reason: String?
+
+  public init(
+    skillKey: String,
+    reason: String? = nil
+  ) {
+    self.skillKey = skillKey
+    self.reason = reason
+  }
+}
+
+/// Caller-friendly query for registered provider MCP tool names.
+public struct PraxisRuntimeProviderMCPToolListRequest: Sendable, Equatable {
+  public init() {}
 }
 
 /// Caller-friendly request for one thin tool call.

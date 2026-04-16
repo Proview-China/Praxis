@@ -970,6 +970,18 @@ public actor PraxisLocalWorkspaceWriter: PraxisWorkspaceWriter {
     self.context = PraxisLocalWorkspaceContext(rootDirectory: rootDirectory)
   }
 
+  public nonisolated var supportedChangeKinds: Set<PraxisWorkspaceChangeKind> {
+    var changeKinds: Set<PraxisWorkspaceChangeKind> = [
+      .createFile,
+      .updateFile,
+      .deleteFile,
+    ]
+    if PraxisLocalHostPlatformSupport.nativePatchExecutablePath != nil {
+      changeKinds.insert(.applyPatch)
+    }
+    return changeKinds
+  }
+
   public func apply(_ request: PraxisWorkspaceChangeRequest) async throws -> PraxisWorkspaceChangeReceipt {
     var changedPaths: [String] = []
 
@@ -992,7 +1004,12 @@ public actor PraxisLocalWorkspaceWriter: PraxisWorkspaceWriter {
           try FileManager.default.removeItem(at: fileURL)
         }
       case .applyPatch:
-        throw PraxisError.unsupportedOperation("Local workspace patch application is not implemented yet.")
+        let patch = try normalizedWorkspacePatch(change.patch, path: change.path)
+        try await applyLocalWorkspacePatch(
+          patch,
+          to: fileURL,
+          path: change.path
+        )
       }
 
       changedPaths.append(change.path)
@@ -1013,6 +1030,89 @@ public actor PraxisLocalWorkspaceWriter: PraxisWorkspaceWriter {
     guard currentRevisionToken == expectedRevisionToken else {
       throw PraxisError.invariantViolation("Workspace revision token mismatch for \(fileURL.path).")
     }
+  }
+
+  private func normalizedWorkspacePatch(_ patch: String?, path: String) throws -> String {
+    guard let patch else {
+      throw PraxisError.invalidInput("Workspace patch change for \(path) requires patch content.")
+    }
+    let normalized = patch.replacingOccurrences(of: "\r\n", with: "\n")
+    guard !normalized.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+      throw PraxisError.invalidInput("Workspace patch change for \(path) must not be empty.")
+    }
+    return normalized
+  }
+
+  private func applyLocalWorkspacePatch(
+    _ patch: String,
+    to fileURL: URL,
+    path: String
+  ) async throws {
+    guard let patchExecutablePath = PraxisLocalHostPlatformSupport.nativePatchExecutablePath else {
+      throw PraxisError.unsupportedOperation(PraxisLocalHostPlatformSupport.unsupportedWorkspacePatchMessage)
+    }
+    guard FileManager.default.fileExists(atPath: fileURL.path) else {
+      throw PraxisError.invalidInput("Workspace patch target \(path) must already exist.")
+    }
+
+    let patchFileURL = try localWorkspacePatchFileURL(for: fileURL)
+    let workingFileURL = try localWorkspacePatchWorkingFileURL(for: fileURL)
+    defer { try? FileManager.default.removeItem(at: patchFileURL) }
+    defer { try? FileManager.default.removeItem(at: workingFileURL) }
+    try FileManager.default.createDirectory(
+      at: fileURL.deletingLastPathComponent(),
+      withIntermediateDirectories: true
+    )
+    try FileManager.default.copyItem(at: fileURL, to: workingFileURL)
+    try patch.write(to: patchFileURL, atomically: true, encoding: .utf8)
+
+    let result = try await PraxisLocalProcessRunner.run(
+      executableURL: URL(fileURLWithPath: patchExecutablePath, isDirectory: false),
+      arguments: [
+        "-u",
+        "-N",
+        "-r",
+        "/dev/null",
+        workingFileURL.path,
+        "-i",
+        patchFileURL.path,
+      ],
+      currentDirectoryURL: context.rootDirectory,
+      timeoutSeconds: 5
+    )
+
+    guard result.terminationReason == .exited, result.exitCode == 0 else {
+      let combinedOutput = [result.stdout, result.stderr]
+        .joined(separator: "\n")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+      let failureSummary = combinedOutput.isEmpty
+        ? "patch exited with code \(result.exitCode)."
+        : combinedOutput
+      throw PraxisError.invalidInput("Workspace patch change for \(path) could not be applied: \(failureSummary)")
+    }
+
+    guard let _ = try FileManager.default.replaceItemAt(fileURL, withItemAt: workingFileURL) else {
+      throw PraxisError.invariantViolation("Workspace patch change for \(path) did not return a replacement file.")
+    }
+  }
+
+  private func localWorkspacePatchFileURL(for fileURL: URL) throws -> URL {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-workspace-patches", isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let baseName = fileURL.lastPathComponent.isEmpty ? "workspace" : fileURL.lastPathComponent
+    return directory.appendingPathComponent(
+      "\(baseName)-\(UUID().uuidString.lowercased()).patch",
+      isDirectory: false
+    )
+  }
+
+  private func localWorkspacePatchWorkingFileURL(for fileURL: URL) throws -> URL {
+    let fileName = fileURL.lastPathComponent.isEmpty ? "workspace" : fileURL.lastPathComponent
+    return fileURL.deletingLastPathComponent().appendingPathComponent(
+      ".\(fileName).praxis-patch-\(UUID().uuidString.lowercased())",
+      isDirectory: false
+    )
   }
 }
 
@@ -2626,6 +2726,18 @@ public actor PraxisLocalProviderSkillActivator: PraxisProviderSkillActivator {
   }
 }
 
+public struct PraxisLocalProviderMCPToolRegistry: PraxisProviderMCPToolRegistry, Sendable {
+  public let toolNames: [String]
+
+  public init(toolNames: [String] = ["web.search"]) {
+    self.toolNames = toolNames
+  }
+
+  public func listToolNames() async throws -> [String] {
+    toolNames
+  }
+}
+
 public struct PraxisLocalBrowserGroundingCollector: PraxisBrowserGroundingCollector, Sendable {
   public let rootDirectory: URL
 
@@ -3009,6 +3121,142 @@ public struct PraxisSystemShellExecutor: PraxisShellExecutor, Sendable {
   }
 }
 
+public struct PraxisSystemCodeExecutor: PraxisCodeExecutor, Sendable {
+  public init() {}
+
+  public func run(_ command: PraxisCodeCommand) async throws -> PraxisCodeResult {
+    guard let xcrunExecutablePath = PraxisLocalHostPlatformSupport.nativeXcrunExecutablePath else {
+      throw PraxisError.unsupportedOperation(PraxisLocalHostPlatformSupport.unsupportedCodeExecutionMessage)
+    }
+
+    let sourceFileURL = try localCodeSourceFileURL(for: command.runtime)
+    defer { try? FileManager.default.removeItem(at: sourceFileURL) }
+    try command.source.write(to: sourceFileURL, atomically: true, encoding: .utf8)
+
+    let processResult = try await PraxisLocalProcessRunner.run(
+      executableURL: URL(fileURLWithPath: xcrunExecutablePath, isDirectory: false),
+      arguments: localCodeExecutionArguments(runtime: command.runtime, sourceFileURL: sourceFileURL),
+      currentDirectoryURL: command.workingDirectory.map { URL(fileURLWithPath: $0, isDirectory: true) },
+      environment: command.environment,
+      timeoutSeconds: command.timeoutSeconds
+    )
+
+    return PraxisCodeResult(
+      runtime: command.runtime,
+      launcher: localCodeExecutionLauncher(for: command.runtime),
+      stdout: processResult.stdout,
+      stderr: processResult.stderr,
+      exitCode: processResult.exitCode,
+      durationMilliseconds: processResult.durationMilliseconds,
+      terminationReason: processResult.terminationReason,
+      outputWasTruncated: processResult.outputWasTruncated
+    )
+  }
+
+  private func localCodeSourceFileURL(for runtime: PraxisCodeRuntime) throws -> URL {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-code-run", isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let fileName = "snippet-\(UUID().uuidString.lowercased()).\(localCodeFileExtension(for: runtime))"
+    return directory.appendingPathComponent(fileName, isDirectory: false)
+  }
+
+  private func localCodeFileExtension(for runtime: PraxisCodeRuntime) -> String {
+    switch runtime {
+    case .swift:
+      "swift"
+    }
+  }
+
+  private func localCodeExecutionArguments(runtime: PraxisCodeRuntime, sourceFileURL: URL) -> [String] {
+    switch runtime {
+    case .swift:
+      ["swift", sourceFileURL.path]
+    }
+  }
+
+  private func localCodeExecutionLauncher(for runtime: PraxisCodeRuntime) -> String {
+    switch runtime {
+    case .swift:
+      "xcrun swift"
+    }
+  }
+}
+
+private func normalizedLocalSandboxPath(_ path: String) -> String {
+  URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL.path
+}
+
+private func localSandboxContainsPath(rootPath: String, candidatePath: String) -> Bool {
+  candidatePath == rootPath || candidatePath.hasPrefix(rootPath + "/")
+}
+
+public struct PraxisLocalCodeSandboxDescriber: PraxisCodeSandboxDescriber, Sendable {
+  public let workspaceRootDirectory: URL
+
+  public init(workspaceRootDirectory: URL) {
+    self.workspaceRootDirectory = workspaceRootDirectory
+  }
+
+  public func describe(_ request: PraxisCodeSandboxRequest) async throws -> PraxisCodeSandboxDescriptor {
+    let workspaceRootPath = workspaceRootDirectory.standardizedFileURL.path
+    let normalizedWorkingDirectory = request.workingDirectory?
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    let workingDirectoryPath = normalizedWorkingDirectory.flatMap { path -> String? in
+      guard !path.isEmpty else {
+        return nil
+      }
+      return normalizedLocalSandboxPath(path)
+    }
+
+    var readableRoots = [workspaceRootPath]
+    if let workingDirectoryPath,
+       !localSandboxContainsPath(rootPath: workspaceRootPath, candidatePath: workingDirectoryPath) {
+      readableRoots.append(workingDirectoryPath)
+    }
+
+    let writableRoots = [workspaceRootPath]
+    let requestedRuntime = request.requestedRuntime
+
+#if os(macOS)
+    guard PraxisLocalHostPlatformSupport.supportsBoundedCodeExecution else {
+      return PraxisCodeSandboxDescriptor(
+        profile: request.profile,
+        enforcementMode: .placeholder,
+        allowedRuntimes: [],
+        readableRoots: readableRoots,
+        writableRoots: writableRoots,
+        allowsNetworkAccess: false,
+        allowsSubprocesses: false,
+        summary: "Code sandbox contract is projected for the macOS local runtime, but bounded Swift execution remains unavailable until Command Line Tools are active."
+      )
+    }
+
+    return PraxisCodeSandboxDescriptor(
+      profile: request.profile,
+      enforcementMode: .declaredOnly,
+      allowedRuntimes: [requestedRuntime],
+      readableRoots: readableRoots,
+      writableRoots: writableRoots,
+      allowsNetworkAccess: false,
+      allowsSubprocesses: false,
+      summary: "Code sandbox contract is declared for the macOS local runtime baseline. Writable roots are limited to the workspace contract, but this profile is not kernel-enforced yet."
+    )
+#else
+    return PraxisCodeSandboxDescriptor(
+      profile: request.profile,
+      enforcementMode: .placeholder,
+      allowedRuntimes: [],
+      readableRoots: readableRoots,
+      writableRoots: writableRoots,
+      allowsNetworkAccess: false,
+      allowsSubprocesses: false,
+      summary: "Code sandbox contract remains a placeholder on this local runtime platform until the platform-specific host adapter is implemented."
+    )
+#endif
+  }
+}
+
 public struct PraxisSystemGitExecutor: PraxisGitExecutor, Sendable {
   public init() {}
 
@@ -3230,6 +3478,21 @@ public struct PraxisSystemShellExecutor: PraxisShellExecutor, Sendable {
   }
 }
 
+public struct PraxisSystemCodeExecutor: PraxisCodeExecutor, Sendable {
+  public init() {}
+
+  public func run(_ command: PraxisCodeCommand) async throws -> PraxisCodeResult {
+    PraxisCodeResult(
+      runtime: command.runtime,
+      launcher: "unavailable",
+      stdout: "",
+      stderr: "\(PraxisLocalHostPlatformSupport.unsupportedCodeExecutionMessage) Runtime: \(command.runtime.rawValue)",
+      exitCode: 127,
+      terminationReason: .failedToLaunch
+    )
+  }
+}
+
 public struct PraxisSystemGitExecutor: PraxisGitExecutor, Sendable {
   public init() {}
 
@@ -3276,11 +3539,16 @@ public extension PraxisHostAdapterRegistry {
       providerBatchExecutor: PraxisLocalProviderBatchExecutor(),
       providerSkillRegistry: PraxisLocalProviderSkillRegistry(),
       providerSkillActivator: PraxisLocalProviderSkillActivator(),
+      providerMCPToolRegistry: PraxisLocalProviderMCPToolRegistry(),
       providerMCPExecutor: PraxisLocalProviderMCPExecutor(),
       workspaceReader: PraxisLocalWorkspaceReader(rootDirectory: workspaceRootDirectory),
       workspaceSearcher: PraxisLocalWorkspaceSearcher(rootDirectory: workspaceRootDirectory),
       workspaceWriter: PraxisLocalWorkspaceWriter(rootDirectory: workspaceRootDirectory),
       shellExecutor: PraxisSystemShellExecutor(),
+      codeExecutor: PraxisLocalHostPlatformSupport.supportsBoundedCodeExecution
+        ? PraxisSystemCodeExecutor()
+        : nil,
+      codeSandboxDescriber: PraxisLocalCodeSandboxDescriber(workspaceRootDirectory: workspaceRootDirectory),
       browserExecutor: PraxisLocalBrowserExecutor(rootDirectory: resolvedRootDirectory),
       browserGroundingCollector: PraxisLocalBrowserGroundingCollector(rootDirectory: resolvedRootDirectory),
       gitAvailabilityProbe: PraxisSystemGitAvailabilityProbe(),

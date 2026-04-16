@@ -1,3 +1,4 @@
+import Foundation
 import PraxisToolingContracts
 
 public enum PraxisLocalHostPlatformSupport {
@@ -42,6 +43,49 @@ public enum PraxisLocalHostPlatformSupport {
   public static var nativeShellExecutablePath: String? {
 #if os(macOS)
     "/bin/zsh"
+#else
+    nil
+#endif
+  }
+
+  public static var nativeXcrunExecutablePath: String? {
+#if os(macOS)
+    "/usr/bin/xcrun"
+#else
+    nil
+#endif
+  }
+
+  public static var nativeXcodeSelectExecutablePath: String? {
+#if os(macOS)
+    "/usr/bin/xcode-select"
+#else
+    nil
+#endif
+  }
+
+  public static var boundedCodeExecutionSwiftExecutablePath: String? {
+#if os(macOS)
+    guard let developerDirectoryPath = activeDeveloperDirectoryPath else {
+      return nil
+    }
+    let candidates = [
+      "\(developerDirectoryPath)/usr/bin/swift",
+      "\(developerDirectoryPath)/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift",
+    ]
+    return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+#else
+    return nil
+#endif
+  }
+
+  public static var supportsBoundedCodeExecution: Bool {
+    boundedCodeExecutionSwiftExecutablePath != nil
+  }
+
+  public static var nativePatchExecutablePath: String? {
+#if os(macOS)
+    "/usr/bin/patch"
 #else
     nil
 #endif
@@ -165,11 +209,55 @@ public enum PraxisLocalHostPlatformSupport {
     "Native shell execution is only wired for the macOS local runtime baseline today."
   }
 
+  public static var unsupportedCodeExecutionMessage: String {
+    "Bounded code execution is only wired for the macOS local runtime baseline today."
+  }
+
+  public static var unsupportedWorkspacePatchMessage: String {
+    "Bounded workspace patch execution is only wired for the macOS local runtime baseline today."
+  }
+
   public static var unsupportedGitExecutionMessage: String {
     "System git execution is only wired for the macOS local runtime baseline today."
   }
 
   public static var unsupportedProcessSupervisorMessage: String {
     "Process supervision is only wired for the macOS local runtime baseline today."
+  }
+
+  private static var activeDeveloperDirectoryPath: String? {
+#if os(macOS)
+    guard let xcodeSelectExecutablePath = nativeXcodeSelectExecutablePath else {
+      return nil
+    }
+
+    let process = Process()
+    let stdoutPipe = Pipe()
+    let stderrPipe = Pipe()
+    process.executableURL = URL(fileURLWithPath: xcodeSelectExecutablePath, isDirectory: false)
+    process.arguments = ["-p"]
+    process.standardOutput = stdoutPipe
+    process.standardError = stderrPipe
+
+    do {
+      try process.run()
+      process.waitUntilExit()
+    } catch {
+      return nil
+    }
+
+    guard process.terminationStatus == 0 else {
+      return nil
+    }
+
+    let output = String(decoding: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !output.isEmpty else {
+      return nil
+    }
+    return output
+#else
+    return nil
+#endif
   }
 }

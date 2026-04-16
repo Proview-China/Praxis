@@ -81,6 +81,9 @@ struct PraxisProviderContractsTests {
     #expect(activationReceipt.activated == true)
     #expect((await activator.allRequests()).first?.reason == "Run verification")
 
+    let mcpRegistry = PraxisStubProviderMCPToolRegistry(toolNames: ["web.search", "workspace.search"])
+    #expect(try await mcpRegistry.listToolNames() == ["web.search", "workspace.search"])
+
     let mcp = PraxisStubProviderMCPExecutor { request in
       PraxisProviderMCPToolCallReceipt(
         toolName: request.toolName,
@@ -130,6 +133,7 @@ struct PraxisProviderContractsTests {
     let batchExecutor = PraxisFakeProviderBatchExecutor(backend: "openai")
     let skillRegistry = PraxisStubProviderSkillRegistry(skills: ["swift.test", "workspace.search"])
     let skillActivator = PraxisFakeProviderSkillActivator()
+    let mcpToolRegistry = PraxisStubProviderMCPToolRegistry(toolNames: ["web.search", "workspace.search"])
     let mcpExecutor = PraxisStubProviderMCPExecutor { request in
       PraxisProviderMCPToolCallReceipt(
         toolName: request.toolName,
@@ -145,6 +149,7 @@ struct PraxisProviderContractsTests {
       batchExecutor: batchExecutor,
       skillRegistry: skillRegistry,
       skillActivator: skillActivator,
+      mcpToolRegistry: mcpToolRegistry,
       mcpExecutor: mcpExecutor
     )
 
@@ -155,6 +160,7 @@ struct PraxisProviderContractsTests {
     #expect(surface.supportsBatchSubmission == true)
     #expect(surface.supportsSkillRegistry == true)
     #expect(surface.supportsSkillActivation == true)
+    #expect(surface.supportsMCPToolRegistry == true)
     #expect(surface.supportsToolCalls == true)
 
     let inference = try await surface.infer(.init(prompt: "Summarize Phase 4"))
@@ -164,6 +170,7 @@ struct PraxisProviderContractsTests {
     let batchReceipt = try await surface.enqueue(.init(summary: "Nightly embedding batch", itemCount: 8))
     let skillKeys = try await surface.listSkillKeys()
     let activationReceipt = try await surface.activate(.init(skillKey: "swift.test", reason: "Run verification"))
+    let toolNames = try await surface.listToolNames()
     let mcpReceipt = try await surface.callTool(.init(toolName: "web.search", summary: "Find Swift docs", serverName: "openai"))
 
     #expect(inference.receipt.providerOperationID == "op-surface")
@@ -176,6 +183,7 @@ struct PraxisProviderContractsTests {
     #expect(skillKeys == ["swift.test", "workspace.search"])
     #expect(activationReceipt.activated == true)
     #expect((await skillActivator.allRequests()).first?.reason == "Run verification")
+    #expect(toolNames == ["web.search", "workspace.search"])
     #expect(mcpReceipt.toolName == "web.search")
     #expect(mcpReceipt.status == .succeeded)
   }
@@ -191,6 +199,7 @@ struct PraxisProviderContractsTests {
     #expect(surface.supportsBatchSubmission == false)
     #expect(surface.supportsSkillRegistry == false)
     #expect(surface.supportsSkillActivation == false)
+    #expect(surface.supportsMCPToolRegistry == false)
     #expect(surface.supportsToolCalls == false)
 
     do {

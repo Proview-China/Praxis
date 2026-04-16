@@ -93,7 +93,7 @@ public struct PraxisWorkspaceSearchMatch: Sendable, Equatable, Codable {
   }
 }
 
-public enum PraxisWorkspaceChangeKind: String, Sendable, Codable {
+public enum PraxisWorkspaceChangeKind: String, Sendable, Codable, CaseIterable {
   case createFile
   case updateFile
   case deleteFile

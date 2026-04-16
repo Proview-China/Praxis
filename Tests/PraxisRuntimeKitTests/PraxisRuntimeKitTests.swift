@@ -28,6 +28,8 @@ struct PraxisRuntimeKitTests {
     #expect(inspection.projectSummary.contains("cmp.local-runtime"))
     #expect(inspection.requestedAction.contains("reviewer context"))
     #expect(inspection.sections.isEmpty == false)
+    #expect(inspection.sections.contains { $0.sectionID == "provider-skills" && $0.summary.contains("runtime.inspect") })
+    #expect(inspection.sections.contains { $0.sectionID == "provider-mcp-tools" && $0.summary.contains("web.search") })
     #expect(inspection.advisorySummaries.isEmpty == false)
   }
 
@@ -124,6 +126,8 @@ struct PraxisRuntimeKitTests {
 
     #expect(cmpInspection.summary.isEmpty == false)
     #expect(cmpInspection.hostRuntimeSummary.isEmpty == false)
+    #expect(cmpInspection.hostRuntimeSummary.contains("provider skills"))
+    #expect(cmpInspection.hostRuntimeSummary.contains("provider mcp tools"))
   }
 
   @Test
@@ -182,6 +186,44 @@ struct PraxisRuntimeKitTests {
     #expect(reviewWorkbench.queueItems.isEmpty == false)
     #expect(reviewWorkbench.pendingItems.isEmpty)
     #expect(reviewWorkbench.summary.contains("registered capability surface"))
+  }
+
+  @Test
+  func capabilityClientAppendsProviderCapabilityAuditEventsIntoTapHistory() async throws {
+    let rootDirectory = try makeRuntimeKitTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let client = try PraxisRuntimeClient.makeDefault(rootDirectory: rootDirectory)
+    _ = try await client.capabilities.activateSkill(
+      .init(
+        skillKey: "runtime.inspect",
+        reason: "Audit coverage for provider skill activation"
+      )
+    )
+    _ = try await client.capabilities.callTool(
+      .init(
+        toolName: "web.search",
+        summary: "Audit coverage for provider MCP tool calls",
+        serverName: "local-test"
+      )
+    )
+
+    let tapProject = client.tap.project("cmp.local-runtime")
+    let overview = try await tapProject.overview(.init(agentID: "runtime.local", limit: 10))
+    let inspection = try await tapProject.inspect(historyLimit: 10)
+    let workbench = try await tapProject.reviewWorkbench(.init(agentID: "runtime.local", limit: 10))
+
+    #expect(overview.history.entries.contains { $0.capabilityKey.rawValue == "skill.activate" })
+    #expect(overview.history.entries.contains { $0.capabilityKey.rawValue == "tool.call" })
+    #expect(inspection.latestDecisionSummary?.contains("Called provider MCP tool web.search") == true)
+    #expect(workbench.latestDecisionSummary?.contains("Called provider MCP tool web.search") == true)
+    #expect(workbench.inspection.sections.contains {
+      $0.sectionID == "provider-activity" && $0.summary.contains("web.search")
+    })
+    #expect(workbench.inspection.advisorySummaries.contains {
+      $0.contains("Recent direct provider capability activity")
+    })
+    #expect(workbench.pendingItems.isEmpty)
   }
 
   @Test
@@ -670,6 +712,8 @@ struct PraxisRuntimeKitTests {
   func capabilityClientExposesThinCapabilityBaselineWithoutLeakingProviderContracts() async throws {
     let rootDirectory = try makeRuntimeKitTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: rootDirectory) }
+    let patchTargetFileURL = rootDirectory.appendingPathComponent("code-patch.txt", isDirectory: false)
+    try "before\nvalue\n".write(to: patchTargetFileURL, atomically: true, encoding: .utf8)
 
     let client = try PraxisRuntimeClient.makeDefault(rootDirectory: rootDirectory)
     let catalog = client.capabilities.catalog()
@@ -699,6 +743,40 @@ struct PraxisRuntimeKitTests {
         preferredModel: "local-embed-test"
       )
     )
+    let sandbox = try await client.capabilities.describeCodeSandbox(
+      .init(
+        workingDirectory: rootDirectory.path,
+        requestedRuntime: .swift
+      )
+    )
+    let codeCatalogAvailable = catalog.capabilityIDs.map(\.rawValue).contains("code.run")
+#if os(macOS)
+    let patch = try await client.capabilities.patchCode(
+      .init(
+        summary: "Apply one bounded runtime code patch",
+        changes: [
+          .init(
+            path: "code-patch.txt",
+            patch: """
+            @@ -1,2 +1,2 @@
+             before
+            -value
+            +after
+            """
+          )
+        ]
+      )
+    )
+#endif
+    let code = codeCatalogAvailable ? try await client.capabilities.runCode(
+      .init(
+        summary: "Emit a bounded runtime code marker",
+        runtime: .swift,
+        source: "print(\"runtime-kit-code-test\")",
+        workingDirectory: rootDirectory.path,
+        timeoutSeconds: 2
+      )
+    ) : nil
     let shell = try await client.capabilities.runShell(
       .init(
         summary: "Emit a bounded runtime shell marker",
@@ -723,6 +801,14 @@ struct PraxisRuntimeKitTests {
         targetAgentID: "checker.local"
       )
     )
+    let listedSkills = try await client.capabilities.listSkills()
+    let activatedSkill = try await client.capabilities.activateSkill(
+      .init(
+        skillKey: "runtime.inspect",
+        reason: "RuntimeKit capability coverage"
+      )
+    )
+    let listedProviderMCPTools = try await client.capabilities.listProviderMCPTools()
     let toolCall = try await client.capabilities.callTool(
       .init(
         toolName: "web.search",
@@ -768,9 +854,18 @@ struct PraxisRuntimeKitTests {
     )
 
     #expect(catalog.capabilityIDs.map(\.rawValue).contains("generate.create"))
+#if os(macOS)
+    #expect(catalog.capabilityIDs.map(\.rawValue).contains("code.patch"))
+#else
+    #expect(!catalog.capabilityIDs.map(\.rawValue).contains("code.patch"))
+#endif
+    #expect(catalog.capabilityIDs.map(\.rawValue).contains("code.sandbox"))
+    #expect(codeCatalogAvailable == PraxisLocalHostPlatformSupport.supportsBoundedCodeExecution)
     #expect(catalog.capabilityIDs.map(\.rawValue).contains("session.open"))
     #expect(catalog.capabilityIDs.map(\.rawValue).contains("shell.approve"))
     #expect(catalog.capabilityIDs.map(\.rawValue).contains("shell.run"))
+    #expect(catalog.capabilityIDs.map(\.rawValue).contains("skill.list"))
+    #expect(catalog.capabilityIDs.map(\.rawValue).contains("skill.activate"))
     #expect(catalog.capabilityIDs.map(\.rawValue).contains("search.web"))
     #expect(catalog.capabilityIDs.map(\.rawValue).contains("search.fetch"))
     #expect(catalog.capabilityIDs.map(\.rawValue).contains("search.ground"))
@@ -782,6 +877,46 @@ struct PraxisRuntimeKitTests {
     #expect(streamed.chunks.isEmpty == false)
     #expect(embedded.capabilityID.rawValue == "embed.create")
     #expect(embedded.vectorLength > 0)
+    #expect(sandbox.capabilityID.rawValue == "code.sandbox")
+    #expect(sandbox.profile == .workspaceWriteLimited)
+    #expect(sandbox.writableRoots == [rootDirectory.path])
+    #expect(sandbox.readableRoots.contains(rootDirectory.path))
+    #expect(sandbox.allowsNetworkAccess == false)
+    #expect(sandbox.allowsSubprocesses == false)
+#if os(macOS)
+    if PraxisLocalHostPlatformSupport.supportsBoundedCodeExecution {
+      #expect(sandbox.enforcementMode == .declaredOnly)
+      #expect(sandbox.allowedRuntimes == [.swift])
+    } else {
+      #expect(sandbox.enforcementMode == .placeholder)
+      #expect(sandbox.allowedRuntimes.isEmpty)
+    }
+#else
+    #expect(sandbox.enforcementMode == .placeholder)
+    #expect(sandbox.allowedRuntimes.isEmpty)
+#endif
+    if let code {
+      #expect(code.capabilityID.rawValue == "code.run")
+      #expect(code.runtime == .swift)
+      #expect(code.riskLabel == "risky")
+      #expect(code.outputMode == .buffered)
+#if os(macOS)
+      #expect(code.succeeded)
+      #expect(code.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "runtime-kit-code-test")
+#else
+      #expect(code.terminationReason == .failedToLaunch)
+      #expect(code.stderr.isEmpty == false)
+#endif
+    } else {
+      #expect(!PraxisLocalHostPlatformSupport.supportsBoundedCodeExecution)
+    }
+#if os(macOS)
+    #expect(patch.capabilityID.rawValue == "code.patch")
+    #expect(patch.appliedChangeCount == 1)
+    #expect(patch.changedPaths == ["code-patch.txt"])
+    #expect(patch.riskLabel == "risky")
+    #expect(try String(contentsOf: patchTargetFileURL, encoding: .utf8) == "before\nafter")
+#endif
     #expect(shellApproval.capabilityID.rawValue == "shell.approve")
     #expect(shellApproval.approvedCapabilityID.rawValue == "shell.run")
     #expect(shellApproval.riskLevel == "risky")
@@ -797,9 +932,16 @@ struct PraxisRuntimeKitTests {
     #expect(shell.succeeded)
     #expect(shell.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "runtime-kit-capability-test")
 #else
-    #expect(shell.terminationReason == .failedToLaunch)
-    #expect(shell.stderr.isEmpty == false)
+      #expect(shell.terminationReason == .failedToLaunch)
+      #expect(shell.stderr.isEmpty == false)
 #endif
+    #expect(listedSkills.capabilityID.rawValue == "skill.list")
+    #expect(listedSkills.skillKeys.contains("runtime.inspect"))
+    #expect(activatedSkill.capabilityID.rawValue == "skill.activate")
+    #expect(activatedSkill.skillKey == "runtime.inspect")
+    #expect(activatedSkill.activated)
+    #expect(listedProviderMCPTools.capabilityID.rawValue == "tool.call")
+    #expect(listedProviderMCPTools.toolNames == ["web.search"])
     #expect(toolCall.capabilityID.rawValue == "tool.call")
     #expect(toolCall.toolName == "web.search")
     #expect(fileUpload.capabilityID.rawValue == "file.upload")
@@ -816,6 +958,41 @@ struct PraxisRuntimeKitTests {
     #expect(grounded.capabilityID.rawValue == "search.ground")
     #expect(grounded.pages.isEmpty == false)
     #expect(grounded.facts.count == 3)
+  }
+
+  @Test
+  func capabilityClientRejectsUnregisteredProviderSkillActivation() async throws {
+    let rootDirectory = try makeRuntimeKitTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let client = try PraxisRuntimeClient.makeDefault(rootDirectory: rootDirectory)
+
+    await #expect(throws: PraxisError.self) {
+      _ = try await client.capabilities.activateSkill(
+        .init(
+          skillKey: "not.registered",
+          reason: "Negative capability coverage"
+        )
+      )
+    }
+  }
+
+  @Test
+  func capabilityClientRejectsUnregisteredProviderMCPToolCalls() async throws {
+    let rootDirectory = try makeRuntimeKitTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let client = try PraxisRuntimeClient.makeDefault(rootDirectory: rootDirectory)
+
+    await #expect(throws: PraxisError.self) {
+      _ = try await client.capabilities.callTool(
+        .init(
+          toolName: "not.registered",
+          summary: "Negative MCP capability coverage",
+          serverName: "local-test"
+        )
+      )
+    }
   }
 
   @Test
@@ -851,6 +1028,77 @@ struct PraxisRuntimeKitTests {
     #expect(recovered.riskLevel == "risky")
     #expect(recovered.outcome == requested.outcome)
     #expect(recovered.humanGateState == requested.humanGateState)
+  }
+
+  @Test
+  func capabilityClientRejectsUnsupportedCodeStreamingRequests() async throws {
+    let rootDirectory = try makeRuntimeKitTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let client = try PraxisRuntimeClient.makeDefault(rootDirectory: rootDirectory)
+
+    await #expect(throws: PraxisError.self) {
+      _ = try await client.capabilities.runCode(
+        .init(
+          summary: "Attempt unsupported RuntimeKit code streaming",
+          runtime: .swift,
+          source: "print(\"streaming\")",
+          workingDirectory: rootDirectory.path,
+          timeoutSeconds: 2,
+          outputMode: .streaming
+        )
+      )
+    }
+  }
+
+  @Test
+  func capabilityClientRejectsCodeExecutionOutsideSandboxWritableRoots() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-runtime-kit-code-sandbox-guard-\(UUID().uuidString)", isDirectory: true)
+    let outsideDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-runtime-kit-code-outside-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: rootDirectory, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: outsideDirectory, withIntermediateDirectories: true)
+    defer {
+      try? FileManager.default.removeItem(at: rootDirectory)
+      try? FileManager.default.removeItem(at: outsideDirectory)
+    }
+
+    let client = try PraxisRuntimeClient.makeDefault(rootDirectory: rootDirectory)
+    let catalog = client.capabilities.catalog()
+    guard catalog.capabilityIDs.map(\.rawValue).contains("code.run") else {
+      #expect(!PraxisLocalHostPlatformSupport.supportsBoundedCodeExecution)
+      return
+    }
+
+    await #expect(throws: PraxisError.self) {
+      _ = try await client.capabilities.runCode(
+        .init(
+          summary: "Attempt RuntimeKit code execution outside writable sandbox roots",
+          runtime: .swift,
+          source: "print(\"outside-sandbox\")",
+          workingDirectory: outsideDirectory.path,
+          timeoutSeconds: 2
+        )
+      )
+    }
+  }
+
+  @Test
+  func capabilityClientRejectsEmptyCodePatchRequests() async throws {
+    let rootDirectory = try makeRuntimeKitTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let client = try PraxisRuntimeClient.makeDefault(rootDirectory: rootDirectory)
+
+    await #expect(throws: PraxisError.self) {
+      _ = try await client.capabilities.patchCode(
+        .init(
+          summary: "Attempt empty RuntimeKit code patch",
+          changes: []
+        )
+      )
+    }
   }
 
   @Test

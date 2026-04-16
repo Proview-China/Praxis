@@ -10,6 +10,20 @@ public enum PraxisShellTerminationReason: String, Sendable, Codable {
   case failedToLaunch
 }
 
+public enum PraxisCodeRuntime: String, Sendable, Codable {
+  case swift
+}
+
+public enum PraxisCodeSandboxProfile: String, Sendable, Codable {
+  case workspaceWriteLimited = "workspace_write_limited"
+}
+
+public enum PraxisCodeSandboxEnforcementMode: String, Sendable, Codable {
+  case declaredOnly = "declared_only"
+  case enforced
+  case placeholder
+}
+
 public struct PraxisShellCommand: Sendable, Equatable, Codable {
   public let command: String
   public let workingDirectory: String?
@@ -57,6 +71,109 @@ public struct PraxisShellResult: Sendable, Equatable, Codable {
     self.durationMilliseconds = durationMilliseconds
     self.terminationReason = terminationReason
     self.outputWasTruncated = outputWasTruncated
+  }
+}
+
+public struct PraxisCodeCommand: Sendable, Equatable, Codable {
+  public let runtime: PraxisCodeRuntime
+  public let source: String
+  public let workingDirectory: String?
+  public let environment: [String: String]
+  public let timeoutSeconds: Double?
+  public let outputMode: PraxisToolingOutputMode
+
+  public init(
+    runtime: PraxisCodeRuntime = .swift,
+    source: String,
+    workingDirectory: String? = nil,
+    environment: [String: String] = [:],
+    timeoutSeconds: Double? = nil,
+    outputMode: PraxisToolingOutputMode = .buffered
+  ) {
+    self.runtime = runtime
+    self.source = source
+    self.workingDirectory = workingDirectory
+    self.environment = environment
+    self.timeoutSeconds = timeoutSeconds
+    self.outputMode = outputMode
+  }
+}
+
+public struct PraxisCodeResult: Sendable, Equatable, Codable {
+  public let runtime: PraxisCodeRuntime
+  public let launcher: String
+  public let stdout: String
+  public let stderr: String
+  public let exitCode: Int32
+  public let durationMilliseconds: Int?
+  public let terminationReason: PraxisShellTerminationReason
+  public let outputWasTruncated: Bool
+
+  public init(
+    runtime: PraxisCodeRuntime,
+    launcher: String,
+    stdout: String,
+    stderr: String,
+    exitCode: Int32,
+    durationMilliseconds: Int? = nil,
+    terminationReason: PraxisShellTerminationReason = .exited,
+    outputWasTruncated: Bool = false
+  ) {
+    self.runtime = runtime
+    self.launcher = launcher
+    self.stdout = stdout
+    self.stderr = stderr
+    self.exitCode = exitCode
+    self.durationMilliseconds = durationMilliseconds
+    self.terminationReason = terminationReason
+    self.outputWasTruncated = outputWasTruncated
+  }
+}
+
+public struct PraxisCodeSandboxRequest: Sendable, Equatable, Codable {
+  public let profile: PraxisCodeSandboxProfile
+  public let workingDirectory: String?
+  public let requestedRuntime: PraxisCodeRuntime
+
+  public init(
+    profile: PraxisCodeSandboxProfile = .workspaceWriteLimited,
+    workingDirectory: String? = nil,
+    requestedRuntime: PraxisCodeRuntime = .swift
+  ) {
+    self.profile = profile
+    self.workingDirectory = workingDirectory
+    self.requestedRuntime = requestedRuntime
+  }
+}
+
+public struct PraxisCodeSandboxDescriptor: Sendable, Equatable, Codable {
+  public let profile: PraxisCodeSandboxProfile
+  public let enforcementMode: PraxisCodeSandboxEnforcementMode
+  public let allowedRuntimes: [PraxisCodeRuntime]
+  public let readableRoots: [String]
+  public let writableRoots: [String]
+  public let allowsNetworkAccess: Bool
+  public let allowsSubprocesses: Bool
+  public let summary: String
+
+  public init(
+    profile: PraxisCodeSandboxProfile,
+    enforcementMode: PraxisCodeSandboxEnforcementMode,
+    allowedRuntimes: [PraxisCodeRuntime],
+    readableRoots: [String],
+    writableRoots: [String],
+    allowsNetworkAccess: Bool,
+    allowsSubprocesses: Bool,
+    summary: String
+  ) {
+    self.profile = profile
+    self.enforcementMode = enforcementMode
+    self.allowedRuntimes = allowedRuntimes
+    self.readableRoots = readableRoots
+    self.writableRoots = writableRoots
+    self.allowsNetworkAccess = allowsNetworkAccess
+    self.allowsSubprocesses = allowsSubprocesses
+    self.summary = summary
   }
 }
 

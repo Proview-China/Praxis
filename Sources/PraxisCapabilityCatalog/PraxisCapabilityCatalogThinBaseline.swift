@@ -6,8 +6,13 @@ public enum PraxisThinCapabilityKey: String, Sendable, Codable, CaseIterable {
   case generateCreate = "generate.create"
   case generateStream = "generate.stream"
   case embedCreate = "embed.create"
+  case codeRun = "code.run"
+  case codePatch = "code.patch"
+  case codeSandbox = "code.sandbox"
   case shellApprove = "shell.approve"
   case shellRun = "shell.run"
+  case skillList = "skill.list"
+  case skillActivate = "skill.activate"
   case toolCall = "tool.call"
   case fileUpload = "file.upload"
   case batchSubmit = "batch.submit"
@@ -84,6 +89,39 @@ public extension PraxisCapabilityCatalogBuilder {
         tags: ["phase3", "thin-baseline", "embedding"]
       ),
       .init(
+        id: PraxisThinCapabilityKey.codeRun.capabilityID,
+        name: "Code Run",
+        summary: "Run one bounded code snippet through the current host code lane with explicit side-effect labeling.",
+        kind: .tool,
+        supportsPrepare: false,
+        routeHints: [
+          .init(key: "backend", value: "host.code")
+        ],
+        tags: ["phase5", "bounded-execution", "code", "risky"]
+      ),
+      .init(
+        id: PraxisThinCapabilityKey.codePatch.capabilityID,
+        name: "Code Patch",
+        summary: "Apply one bounded workspace patch through the current host patch lane with explicit side-effect labeling.",
+        kind: .tool,
+        supportsPrepare: false,
+        routeHints: [
+          .init(key: "backend", value: "host.workspace.patch")
+        ],
+        tags: ["phase5", "bounded-execution", "code", "patch", "risky"]
+      ),
+      .init(
+        id: PraxisThinCapabilityKey.codeSandbox.capabilityID,
+        name: "Code Sandbox",
+        summary: "Describe the current bounded code sandbox contract, including enforcement mode and declared workspace roots.",
+        kind: .tool,
+        supportsPrepare: false,
+        routeHints: [
+          .init(key: "backend", value: "host.code.sandbox")
+        ],
+        tags: ["phase5", "bounded-execution", "code", "sandbox", "contract"]
+      ),
+      .init(
         id: PraxisThinCapabilityKey.shellApprove.capabilityID,
         name: "Shell Approve",
         summary: "Request bounded shell execution approval through the current CMP/TAP review path without leaking host approval internals.",
@@ -106,9 +144,31 @@ public extension PraxisCapabilityCatalogBuilder {
         tags: ["phase5", "bounded-execution", "shell", "risky"]
       ),
       .init(
+        id: PraxisThinCapabilityKey.skillList.capabilityID,
+        name: "Skill List",
+        summary: "List registered provider skill keys through the current provider skill registry lane.",
+        kind: .tool,
+        supportsPrepare: false,
+        routeHints: [
+          .init(key: "backend", value: "provider.skill-registry")
+        ],
+        tags: ["phase5", "provider-surface", "skill"]
+      ),
+      .init(
+        id: PraxisThinCapabilityKey.skillActivate.capabilityID,
+        name: "Skill Activate",
+        summary: "Activate one registered provider skill key through the current provider skill lane.",
+        kind: .tool,
+        supportsPrepare: false,
+        routeHints: [
+          .init(key: "backend", value: "provider.skill-activation")
+        ],
+        tags: ["phase5", "provider-surface", "skill"]
+      ),
+      .init(
         id: PraxisThinCapabilityKey.toolCall.capabilityID,
         name: "Tool Call",
-        summary: "Call one provider-hosted tool lane through the current MCP executor.",
+        summary: "Call one registered provider-hosted tool lane through the current MCP executor.",
         kind: .tool,
         supportsPrepare: false,
         routeHints: [
@@ -185,7 +245,7 @@ public extension PraxisCapabilityCatalogBuilder {
     ]
 
     return PraxisThinCapabilityBaseline(
-      summary: "Thin capability baseline covers generation, embeddings, bounded shell approval and execution, tool calls, file upload, batch submission, runtime session opening, and the first search chain.",
+      summary: "Thin capability baseline covers generation, embeddings, bounded code execution, patching, and sandbox contracts, bounded shell execution surfaces, tool calls, file upload, batch submission, runtime session opening, and the first search chain.",
       manifests: manifests
     )
   }

@@ -20,6 +20,7 @@ public struct PraxisHostAdapterRegistry: Sendable {
   public let providerBatchExecutor: (any PraxisProviderBatchExecutor)?
   public let providerSkillRegistry: (any PraxisProviderSkillRegistry)?
   public let providerSkillActivator: (any PraxisProviderSkillActivator)?
+  public let providerMCPToolRegistry: (any PraxisProviderMCPToolRegistry)?
   public let providerMCPExecutor: (any PraxisProviderMCPExecutor)?
 
   public let workspaceReader: (any PraxisWorkspaceReader)?
@@ -27,6 +28,8 @@ public struct PraxisHostAdapterRegistry: Sendable {
   public let workspaceWriter: (any PraxisWorkspaceWriter)?
 
   public let shellExecutor: (any PraxisShellExecutor)?
+  public let codeExecutor: (any PraxisCodeExecutor)?
+  public let codeSandboxDescriber: (any PraxisCodeSandboxDescriber)?
   public let browserExecutor: (any PraxisBrowserExecutor)?
   public let browserGroundingCollector: (any PraxisBrowserGroundingCollector)?
   public let gitAvailabilityProbe: (any PraxisGitAvailabilityProbe)?
@@ -71,11 +74,14 @@ public struct PraxisHostAdapterRegistry: Sendable {
     providerBatchExecutor: (any PraxisProviderBatchExecutor)? = nil,
     providerSkillRegistry: (any PraxisProviderSkillRegistry)? = nil,
     providerSkillActivator: (any PraxisProviderSkillActivator)? = nil,
+    providerMCPToolRegistry: (any PraxisProviderMCPToolRegistry)? = nil,
     providerMCPExecutor: (any PraxisProviderMCPExecutor)? = nil,
     workspaceReader: (any PraxisWorkspaceReader)? = nil,
     workspaceSearcher: (any PraxisWorkspaceSearcher)? = nil,
     workspaceWriter: (any PraxisWorkspaceWriter)? = nil,
     shellExecutor: (any PraxisShellExecutor)? = nil,
+    codeExecutor: (any PraxisCodeExecutor)? = nil,
+    codeSandboxDescriber: (any PraxisCodeSandboxDescriber)? = nil,
     browserExecutor: (any PraxisBrowserExecutor)? = nil,
     browserGroundingCollector: (any PraxisBrowserGroundingCollector)? = nil,
     gitAvailabilityProbe: (any PraxisGitAvailabilityProbe)? = nil,
@@ -117,11 +123,14 @@ public struct PraxisHostAdapterRegistry: Sendable {
     self.providerBatchExecutor = providerBatchExecutor
     self.providerSkillRegistry = providerSkillRegistry
     self.providerSkillActivator = providerSkillActivator
+    self.providerMCPToolRegistry = providerMCPToolRegistry
     self.providerMCPExecutor = providerMCPExecutor
     self.workspaceReader = workspaceReader
     self.workspaceSearcher = workspaceSearcher
     self.workspaceWriter = workspaceWriter
     self.shellExecutor = shellExecutor
+    self.codeExecutor = codeExecutor
+    self.codeSandboxDescriber = codeSandboxDescriber
     self.browserExecutor = browserExecutor
     self.browserGroundingCollector = browserGroundingCollector
     self.gitAvailabilityProbe = gitAvailabilityProbe
@@ -207,6 +216,7 @@ public struct PraxisHostAdapterRegistry: Sendable {
       providerBatchExecutor: PraxisFakeProviderBatchExecutor(backend: "scaffold-provider"),
       providerSkillRegistry: PraxisStubProviderSkillRegistry(skills: ["tap.inspect", "cmp.inspect"]),
       providerSkillActivator: PraxisFakeProviderSkillActivator(),
+      providerMCPToolRegistry: PraxisStubProviderMCPToolRegistry(toolNames: ["web.search"]),
       providerMCPExecutor: PraxisStubProviderMCPExecutor { request in
         PraxisProviderMCPToolCallReceipt(
           toolName: request.toolName,
@@ -218,6 +228,8 @@ public struct PraxisHostAdapterRegistry: Sendable {
       workspaceSearcher: PraxisStubWorkspaceSearcher(),
       workspaceWriter: PraxisSpyWorkspaceWriter(),
       shellExecutor: PraxisFakeShellExecutor(),
+      codeExecutor: PraxisFakeCodeExecutor(),
+      codeSandboxDescriber: PraxisFakeCodeSandboxDescriber(),
       browserExecutor: PraxisSpyBrowserExecutor(),
       browserGroundingCollector: PraxisStubBrowserGroundingCollector { request in
         PraxisBrowserGroundingEvidenceBundle(

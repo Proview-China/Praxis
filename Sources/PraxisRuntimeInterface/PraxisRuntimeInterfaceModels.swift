@@ -10,6 +10,7 @@ import PraxisSession
 import PraxisTapReview
 import PraxisTapRuntime
 import PraxisTapTypes
+import PraxisToolingContracts
 
 public enum PraxisRuntimeInterfaceResponseStatus: String, Sendable, Equatable, Codable {
   case success
@@ -73,6 +74,9 @@ public enum PraxisRuntimeInterfaceCommandKind: String, Sendable, Equatable, Coda
   case resolveMp
   case requestMpHistory
   case buildCapabilityCatalog
+  case describeCodeSandbox
+  case listProviderSkills
+  case listProviderMCPTools
 }
 
 /// Stable opaque handle used to address one runtime interface session inside a registry.
@@ -1101,6 +1105,41 @@ public struct PraxisRuntimeInterfaceRequestMpHistoryPayload: Sendable, Equatable
   }
 }
 
+public struct PraxisRuntimeInterfaceCodeSandboxRequestPayload: Sendable, Equatable, Codable {
+  public let payloadSummary: String
+  public let profile: PraxisCodeSandboxProfile
+  public let workingDirectory: String?
+  public let requestedRuntime: PraxisCodeRuntime
+
+  public init(
+    payloadSummary: String,
+    profile: PraxisCodeSandboxProfile = .workspaceWriteLimited,
+    workingDirectory: String? = nil,
+    requestedRuntime: PraxisCodeRuntime = .swift
+  ) {
+    self.payloadSummary = payloadSummary
+    self.profile = profile
+    self.workingDirectory = workingDirectory
+    self.requestedRuntime = requestedRuntime
+  }
+}
+
+public struct PraxisRuntimeInterfaceProviderSkillListRequestPayload: Sendable, Equatable, Codable {
+  public let payloadSummary: String
+
+  public init(payloadSummary: String) {
+    self.payloadSummary = payloadSummary
+  }
+}
+
+public struct PraxisRuntimeInterfaceProviderMCPToolListRequestPayload: Sendable, Equatable, Codable {
+  public let payloadSummary: String
+
+  public init(payloadSummary: String) {
+    self.payloadSummary = payloadSummary
+  }
+}
+
 public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
   case inspectArchitecture
   case runGoal(PraxisRuntimeInterfaceRunGoalRequestPayload)
@@ -1142,6 +1181,9 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
   case resolveMp(PraxisRuntimeInterfaceMpResolveRequestPayload)
   case requestMpHistory(PraxisRuntimeInterfaceRequestMpHistoryPayload)
   case buildCapabilityCatalog
+  case describeCodeSandbox(PraxisRuntimeInterfaceCodeSandboxRequestPayload)
+  case listProviderSkills(PraxisRuntimeInterfaceProviderSkillListRequestPayload)
+  case listProviderMCPTools(PraxisRuntimeInterfaceProviderMCPToolListRequestPayload)
 
   public var kind: PraxisRuntimeInterfaceCommandKind {
     switch self {
@@ -1225,6 +1267,12 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
       return .requestMpHistory
     case .buildCapabilityCatalog:
       return .buildCapabilityCatalog
+    case .describeCodeSandbox:
+      return .describeCodeSandbox
+    case .listProviderSkills:
+      return .listProviderSkills
+    case .listProviderMCPTools:
+      return .listProviderMCPTools
     }
   }
 
@@ -1300,6 +1348,12 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
       return payload.payloadSummary
     case .requestMpHistory(let payload):
       return payload.payloadSummary
+    case .describeCodeSandbox(let payload):
+      return payload.payloadSummary
+    case .listProviderSkills(let payload):
+      return payload.payloadSummary
+    case .listProviderMCPTools(let payload):
+      return payload.payloadSummary
     case .inspectArchitecture, .inspectTap, .inspectCmp, .inspectMp, .buildCapabilityCatalog:
       return ""
     }
@@ -1327,7 +1381,7 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
       return payload.sessionID
     case .requestMpHistory(let payload):
       return payload.sessionID
-    case .inspectArchitecture, .resumeRun, .inspectTap, .readbackTapProvisioning, .advanceTapReplay, .readbackTapStatus, .readbackTapHistory, .readbackCmpProject, .readbackCmpRoles, .readbackCmpControl, .updateCmpControl, .requestCmpPeerApproval, .decideCmpPeerApproval, .readbackCmpPeerApproval, .readbackCmpStatus, .bootstrapCmpProject, .recoverCmpProject, .resolveCmpFlow, .materializeCmpFlow, .dispatchCmpFlow, .dispatchStoredCmpPackage, .retryCmpDispatch, .requestCmpHistory, .smokeCmpProject, .inspectCmp, .inspectMp, .smokeMp, .alignMp, .archiveMp, .buildCapabilityCatalog:
+    case .inspectArchitecture, .resumeRun, .inspectTap, .readbackTapProvisioning, .advanceTapReplay, .readbackTapStatus, .readbackTapHistory, .readbackCmpProject, .readbackCmpRoles, .readbackCmpControl, .updateCmpControl, .requestCmpPeerApproval, .decideCmpPeerApproval, .readbackCmpPeerApproval, .readbackCmpStatus, .bootstrapCmpProject, .recoverCmpProject, .resolveCmpFlow, .materializeCmpFlow, .dispatchCmpFlow, .dispatchStoredCmpPackage, .retryCmpDispatch, .requestCmpHistory, .smokeCmpProject, .inspectCmp, .inspectMp, .smokeMp, .alignMp, .archiveMp, .buildCapabilityCatalog, .describeCodeSandbox, .listProviderSkills, .listProviderMCPTools:
       return nil
     }
   }
@@ -1340,7 +1394,7 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
       return payload.runID
     case .commitCmpFlow(let payload):
       return payload.runID
-    case .inspectArchitecture, .runGoal, .inspectTap, .openCmpSession, .readbackTapProvisioning, .advanceTapReplay, .readbackTapStatus, .readbackTapHistory, .readbackCmpProject, .readbackCmpRoles, .readbackCmpControl, .updateCmpControl, .requestCmpPeerApproval, .decideCmpPeerApproval, .readbackCmpPeerApproval, .readbackCmpStatus, .bootstrapCmpProject, .recoverCmpProject, .resolveCmpFlow, .materializeCmpFlow, .dispatchCmpFlow, .dispatchStoredCmpPackage, .retryCmpDispatch, .requestCmpHistory, .smokeCmpProject, .inspectCmp, .inspectMp, .searchMp, .readbackMp, .smokeMp, .ingestMp, .alignMp, .promoteMp, .archiveMp, .resolveMp, .requestMpHistory, .buildCapabilityCatalog:
+    case .inspectArchitecture, .runGoal, .inspectTap, .openCmpSession, .readbackTapProvisioning, .advanceTapReplay, .readbackTapStatus, .readbackTapHistory, .readbackCmpProject, .readbackCmpRoles, .readbackCmpControl, .updateCmpControl, .requestCmpPeerApproval, .decideCmpPeerApproval, .readbackCmpPeerApproval, .readbackCmpStatus, .bootstrapCmpProject, .recoverCmpProject, .resolveCmpFlow, .materializeCmpFlow, .dispatchCmpFlow, .dispatchStoredCmpPackage, .retryCmpDispatch, .requestCmpHistory, .smokeCmpProject, .inspectCmp, .inspectMp, .searchMp, .readbackMp, .smokeMp, .ingestMp, .alignMp, .promoteMp, .archiveMp, .resolveMp, .requestMpHistory, .buildCapabilityCatalog, .describeCodeSandbox, .listProviderSkills, .listProviderMCPTools:
       return nil
     }
   }
@@ -1413,7 +1467,7 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
       return payload.projectID
     case .requestMpHistory(let payload):
       return payload.projectID
-    case .inspectArchitecture, .runGoal, .resumeRun, .inspectTap, .inspectCmp, .inspectMp, .buildCapabilityCatalog:
+    case .inspectArchitecture, .runGoal, .resumeRun, .inspectTap, .inspectCmp, .inspectMp, .buildCapabilityCatalog, .describeCodeSandbox, .listProviderSkills, .listProviderMCPTools:
       return nil
     }
   }
@@ -1455,6 +1509,9 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
     case archiveMp
     case resolveMp
     case requestMpHistory
+    case describeCodeSandbox
+    case listProviderSkills
+    case listProviderMCPTools
     case payloadSummary
     case goalID
     case goalTitle
@@ -1735,6 +1792,27 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
       )
     case .buildCapabilityCatalog:
       self = .buildCapabilityCatalog
+    case .describeCodeSandbox:
+      self = .describeCodeSandbox(
+        try container.decode(
+          PraxisRuntimeInterfaceCodeSandboxRequestPayload.self,
+          forKey: .describeCodeSandbox
+        )
+      )
+    case .listProviderSkills:
+      self = .listProviderSkills(
+        try container.decode(
+          PraxisRuntimeInterfaceProviderSkillListRequestPayload.self,
+          forKey: .listProviderSkills
+        )
+      )
+    case .listProviderMCPTools:
+      self = .listProviderMCPTools(
+        try container.decode(
+          PraxisRuntimeInterfaceProviderMCPToolListRequestPayload.self,
+          forKey: .listProviderMCPTools
+        )
+      )
     }
   }
 
@@ -1813,6 +1891,12 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
       try container.encode(payload, forKey: .resolveMp)
     case .requestMpHistory(let payload):
       try container.encode(payload, forKey: .requestMpHistory)
+    case .describeCodeSandbox(let payload):
+      try container.encode(payload, forKey: .describeCodeSandbox)
+    case .listProviderSkills(let payload):
+      try container.encode(payload, forKey: .listProviderSkills)
+    case .listProviderMCPTools(let payload):
+      try container.encode(payload, forKey: .listProviderMCPTools)
     case .inspectArchitecture, .inspectTap, .inspectCmp, .inspectMp, .buildCapabilityCatalog:
       break
     }
@@ -1846,6 +1930,9 @@ public enum PraxisRuntimeInterfaceSnapshotKind: String, Sendable, Equatable, Cod
   case mpResolve
   case mpHistory
   case catalog
+  case codeSandbox
+  case providerSkills
+  case providerMCPTools
 }
 
 public struct PraxisRuntimeInterfaceSnapshot: Sendable, Equatable, Codable {
@@ -1895,6 +1982,15 @@ public struct PraxisRuntimeInterfaceSnapshot: Sendable, Equatable, Codable {
   public let found: Bool?
   public let tapHistoryTotalCount: Int?
   public let tapHistoryEntries: [PraxisTapHistoryEntrySnapshot]?
+  public let codeSandboxProfile: PraxisCodeSandboxProfile?
+  public let codeSandboxEnforcementMode: PraxisCodeSandboxEnforcementMode?
+  public let allowedCodeRuntimes: [PraxisCodeRuntime]?
+  public let readableRoots: [String]?
+  public let writableRoots: [String]?
+  public let allowsNetworkAccess: Bool?
+  public let allowsSubprocesses: Bool?
+  public let providerSkillKeys: [String]?
+  public let providerMCPToolNames: [String]?
 
   public init(
     kind: PraxisRuntimeInterfaceSnapshotKind,
@@ -1942,7 +2038,16 @@ public struct PraxisRuntimeInterfaceSnapshot: Sendable, Equatable, Codable {
     activeReplayCount: Int? = nil,
     found: Bool? = nil,
     tapHistoryTotalCount: Int? = nil,
-    tapHistoryEntries: [PraxisTapHistoryEntrySnapshot]? = nil
+    tapHistoryEntries: [PraxisTapHistoryEntrySnapshot]? = nil,
+    codeSandboxProfile: PraxisCodeSandboxProfile? = nil,
+    codeSandboxEnforcementMode: PraxisCodeSandboxEnforcementMode? = nil,
+    allowedCodeRuntimes: [PraxisCodeRuntime]? = nil,
+    readableRoots: [String]? = nil,
+    writableRoots: [String]? = nil,
+    allowsNetworkAccess: Bool? = nil,
+    allowsSubprocesses: Bool? = nil,
+    providerSkillKeys: [String]? = nil,
+    providerMCPToolNames: [String]? = nil
   ) {
     self.kind = kind
     self.title = title
@@ -1990,6 +2095,15 @@ public struct PraxisRuntimeInterfaceSnapshot: Sendable, Equatable, Codable {
     self.found = found
     self.tapHistoryTotalCount = tapHistoryTotalCount
     self.tapHistoryEntries = tapHistoryEntries
+    self.codeSandboxProfile = codeSandboxProfile
+    self.codeSandboxEnforcementMode = codeSandboxEnforcementMode
+    self.allowedCodeRuntimes = allowedCodeRuntimes
+    self.readableRoots = readableRoots
+    self.writableRoots = writableRoots
+    self.allowsNetworkAccess = allowsNetworkAccess
+    self.allowsSubprocesses = allowsSubprocesses
+    self.providerSkillKeys = providerSkillKeys
+    self.providerMCPToolNames = providerMCPToolNames
   }
 }
 

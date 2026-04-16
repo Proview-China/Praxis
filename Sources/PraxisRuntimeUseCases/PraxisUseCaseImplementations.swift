@@ -664,10 +664,19 @@ private func hostCapabilityIDs(from dependencies: PraxisDependencyGraph) -> [Pra
   }
   if adapters.workspaceWriter != nil {
     capabilityIDs.append(.init(rawValue: "workspace.write"))
+    if adapters.workspaceWriter?.supportedChangeKinds.contains(.applyPatch) == true {
+      capabilityIDs.append(.init(rawValue: "code.patch"))
+    }
   }
   if adapters.shellExecutor != nil {
     capabilityIDs.append(.init(rawValue: "tool.shell"))
     capabilityIDs.append(.init(rawValue: "shell.run"))
+  }
+  if adapters.codeExecutor != nil && adapters.codeSandboxDescriber != nil {
+    capabilityIDs.append(.init(rawValue: "code.run"))
+  }
+  if adapters.codeSandboxDescriber != nil {
+    capabilityIDs.append(.init(rawValue: "code.sandbox"))
   }
   if adapters.cmpPeerApprovalStore != nil {
     capabilityIDs.append(.init(rawValue: "shell.approve"))
@@ -678,7 +687,13 @@ private func hostCapabilityIDs(from dependencies: PraxisDependencyGraph) -> [Pra
   if adapters.providerInferenceExecutor != nil {
     capabilityIDs.append(.init(rawValue: "provider.infer"))
   }
-  if adapters.providerMCPExecutor != nil {
+  if adapters.providerSkillRegistry != nil {
+    capabilityIDs.append(.init(rawValue: "skill.list"))
+  }
+  if adapters.providerSkillRegistry != nil && adapters.providerSkillActivator != nil {
+    capabilityIDs.append(.init(rawValue: "skill.activate"))
+  }
+  if adapters.providerMCPToolRegistry != nil && adapters.providerMCPExecutor != nil {
     capabilityIDs.append(.init(rawValue: "provider.mcp"))
   }
   if adapters.semanticMemoryStore != nil {
@@ -703,6 +718,8 @@ private func tapStatusRiskLevel(from capabilityIDs: [PraxisCapabilityID]) -> Pra
   if capabilityIDs.contains(.init(rawValue: "workspace.write"))
     || capabilityIDs.contains(.init(rawValue: "tool.shell"))
     || capabilityIDs.contains(.init(rawValue: "shell.run"))
+    || capabilityIDs.contains(.init(rawValue: "code.run"))
+    || capabilityIDs.contains(.init(rawValue: "code.patch"))
   {
     return .risky
   }
@@ -764,6 +781,72 @@ private func cmpSemanticIndexSummary(
     return "Semantic search, semantic memory, and embedding metadata stores are all wired for local-first inspection."
   }
   return "Semantic memory/search remains partial until search index, memory store, and embedding store are all present."
+}
+
+private func providerSkillDiscoverySummary(
+  from dependencies: PraxisDependencyGraph
+) async -> (
+  summary: String,
+  status: PraxisContextSummaryStatus,
+  issue: String?,
+  inventoryLabel: String
+) {
+  guard let registry = dependencies.hostAdapters.providerSkillRegistry else {
+    return (
+      "Provider skill registry is not registered in HostRuntime composition.",
+      .pending,
+      nil,
+      "missing"
+    )
+  }
+
+  let skillKeys = Array(Set((try? await registry.listSkillKeys()) ?? [])).sorted()
+  let activationAvailable = dependencies.hostAdapters.providerSkillActivator != nil
+  let listedSkillSummary = skillKeys.isEmpty
+    ? "no registered skill keys"
+    : skillKeys.joined(separator: ", ")
+  let summary =
+    "Provider skill registry exposes \(skillKeys.count) registered skill key(s): \(listedSkillSummary). Activation lane is \(activationAvailable ? "ready" : "missing")."
+  let issue = activationAvailable
+    ? nil
+    : "Provider skill activation lane is still missing from HostRuntime composition."
+  let inventoryLabel = activationAvailable
+    ? "\(skillKeys.count) keys"
+    : "\(skillKeys.count) keys, activation missing"
+  return (summary, activationAvailable ? .ready : .pending, issue, inventoryLabel)
+}
+
+private func providerMCPToolDiscoverySummary(
+  from dependencies: PraxisDependencyGraph
+) async -> (
+  summary: String,
+  status: PraxisContextSummaryStatus,
+  issue: String?,
+  inventoryLabel: String
+) {
+  guard let registry = dependencies.hostAdapters.providerMCPToolRegistry else {
+    return (
+      "Provider MCP tool registry is not registered in HostRuntime composition.",
+      .pending,
+      nil,
+      "missing"
+    )
+  }
+
+  let toolNames = Array(Set((try? await registry.listToolNames()) ?? [])).sorted()
+  let executorAvailable = dependencies.hostAdapters.providerMCPExecutor != nil
+  let listedToolSummary = toolNames.isEmpty
+    ? "no registered MCP tool names"
+    : toolNames.joined(separator: ", ")
+  let summary =
+    "Provider MCP tool registry exposes \(toolNames.count) registered tool name(s): \(listedToolSummary). Tool call lane is \(executorAvailable ? "ready" : "missing")."
+  let issue = executorAvailable
+    ? nil
+    : "Provider MCP executor is still missing from HostRuntime composition."
+  let inventoryLabel = executorAvailable
+    ? "\(toolNames.count) tools"
+    : "\(toolNames.count) tools, executor missing"
+  return (summary, executorAvailable ? .ready : .pending, issue, inventoryLabel)
 }
 
 private func cmpWorkspaceSummary(
@@ -1104,6 +1187,8 @@ private func buildCmpProjectReadback(
   let semanticSearchAvailable = dependencies.hostAdapters.semanticSearchIndex != nil
   let semanticMemoryAvailable = dependencies.hostAdapters.semanticMemoryStore != nil
   let embeddingStoreAvailable = dependencies.hostAdapters.embeddingStore != nil
+  let providerSkillSummary = await providerSkillDiscoverySummary(from: dependencies)
+  let providerMCPToolSummary = await providerMCPToolDiscoverySummary(from: dependencies)
   let workspaceStatus = await cmpWorkspaceSummary(from: dependencies)
   let gitExecutorStatus = await cmpGitExecutorSummary(from: dependencies)
   let lineageStatus = await cmpLineageSummary(
@@ -1146,6 +1231,12 @@ private func buildCmpProjectReadback(
   if !semanticSearchAvailable || !semanticMemoryAvailable || !embeddingStoreAvailable {
     issues.append("Semantic memory/search still needs the full local-first adapter set.")
   }
+  if let providerSkillIssue = providerSkillSummary.issue {
+    issues.append(providerSkillIssue)
+  }
+  if let providerMCPToolIssue = providerMCPToolSummary.issue {
+    issues.append(providerMCPToolIssue)
+  }
 
   let componentStatuses = PraxisCmpProjectComponentStatusMap(statuses: [
     .workspace: try cmpProjectComponentStatus(from: workspaceStatus.statusWord),
@@ -1170,7 +1261,7 @@ private func buildCmpProjectReadback(
     .embeddingStore: embeddingStoreAvailable ? .ready : .missing,
   ])
 
-  let hostSummary = "\(PraxisLocalHostPlatformSupport.localRuntimeLabel) / workspace (\(workspaceStatus.statusWord)) / sqlite persistence (\(projectionDescriptors.count) projections, \(packageDescriptors.count) packages) / lineage store (\(lineageStatus.statusWord)) / sqlite delivery truth (\(deliveryTruthRecords.count) records) / actor message bus (\(messageBusAvailable ? "ready" : "missing")) / system git probe (\(gitStatus.statusWord)) / system git executor (\(gitExecutorStatus.statusWord)) / \(PraxisLocalHostPlatformSupport.semanticIndexLabel) (\(semanticSearchAvailable ? "ready" : "missing"))"
+  let hostSummary = "\(PraxisLocalHostPlatformSupport.localRuntimeLabel) / workspace (\(workspaceStatus.statusWord)) / sqlite persistence (\(projectionDescriptors.count) projections, \(packageDescriptors.count) packages) / lineage store (\(lineageStatus.statusWord)) / sqlite delivery truth (\(deliveryTruthRecords.count) records) / actor message bus (\(messageBusAvailable ? "ready" : "missing")) / system git probe (\(gitStatus.statusWord)) / system git executor (\(gitExecutorStatus.statusWord)) / \(PraxisLocalHostPlatformSupport.semanticIndexLabel) (\(semanticSearchAvailable ? "ready" : "missing")) / provider skills (\(providerSkillSummary.inventoryLabel)) / provider mcp tools (\(providerMCPToolSummary.inventoryLabel))"
   return PraxisCmpProjectReadback(
     projectID: projectID,
     summary: "CMP project readback now reads the current HostRuntime local profile, workspace, git, and lineage state through a host-neutral project surface.",
@@ -3152,9 +3243,11 @@ private func tapRuntimeEventPriority(for eventKind: PraxisTapRuntimeEventKind) -
     return 9
   case .dispatchRetryRequested, .dispatchBlocked, .peerApprovalWaiting:
     return 8
+  case .providerMCPToolCalled:
+    return 7
   case .activationReady:
     return 7
-  case .activationStaged, .provisionStaged:
+  case .activationStaged, .provisionStaged, .providerSkillActivated:
     return 6
   case .peerApprovalRequested:
     return 5
@@ -3205,7 +3298,7 @@ private func tapHistoryEntries(
 
 private func tapHistoryLegacyRequestedTier(for record: PraxisTapRuntimeEventRecord) -> PraxisTapCapabilityTier? {
   switch record.eventKind {
-  case .controlUpdated, .activationReady, .replayConsumed, .dispatchBlocked, .dispatchReleased, .dispatchRetryRequested:
+  case .controlUpdated, .activationReady, .replayConsumed, .dispatchBlocked, .dispatchReleased, .dispatchRetryRequested, .providerSkillActivated, .providerMCPToolCalled:
     return .b0
   default:
     return nil
@@ -3214,7 +3307,7 @@ private func tapHistoryLegacyRequestedTier(for record: PraxisTapRuntimeEventReco
 
 private func tapHistoryLegacyHumanGateState(for record: PraxisTapRuntimeEventRecord) -> PraxisHumanGateState? {
   switch record.eventKind {
-  case .controlUpdated, .activationReady, .replayConsumed, .dispatchReleased, .dispatchRetryRequested:
+  case .controlUpdated, .activationReady, .replayConsumed, .dispatchReleased, .dispatchRetryRequested, .providerSkillActivated, .providerMCPToolCalled:
     return .notRequired
   case .dispatchBlocked:
     let pendingApprovalCount = Int(record.metadata["pendingApprovalCount"]?.numberValue ?? 0)
@@ -3229,7 +3322,7 @@ private func tapHistoryLegacyRoute(
   humanGateState: PraxisHumanGateState
 ) -> PraxisReviewerRoute? {
   switch record.eventKind {
-  case .controlUpdated, .activationReady, .replayConsumed, .dispatchReleased:
+  case .controlUpdated, .activationReady, .replayConsumed, .dispatchReleased, .providerSkillActivated, .providerMCPToolCalled:
     return .autoApprove
   case .dispatchRetryRequested:
     return .toolReview
@@ -3245,7 +3338,7 @@ private func tapHistoryLegacyOutcome(
   humanGateState: PraxisHumanGateState
 ) -> PraxisCmpPeerApprovalOutcome? {
   switch record.eventKind {
-  case .controlUpdated:
+  case .controlUpdated, .providerSkillActivated, .providerMCPToolCalled:
     return .baselineApproved
   case .activationReady:
     return .activationReady
@@ -5461,6 +5554,7 @@ public final class PraxisInspectTapUseCase: PraxisInspectTapUseCaseProtocol {
     )
     let latestHistoryEntry = history.entries.first
     let pendingCapabilityIDs = tapInspectionPendingCapabilityIDs(from: history.entries)
+    let providerDiscoverySections = await tapInspectionProviderDiscoverySections(from: dependencies)
 
     let governance = PraxisTapGovernanceObject(
       mode: .standard,
@@ -5517,7 +5611,8 @@ public final class PraxisInspectTapUseCase: PraxisInspectTapUseCaseProtocol {
         pendingCapabilityIDs: pendingCapabilityIDs,
         persistenceSummary: persistenceSummary,
         replaySummary: replaySummary,
-        provisioningState: provisioningState
+        provisioningState: provisioningState,
+        providerDiscoverySections: providerDiscoverySections
       ),
       forbiddenObjects: [
         .init(kind: .runtimeHandle, summary: "Live runtime handles do not enter the TAP governance aperture."),
@@ -5674,7 +5769,8 @@ private func tapInspectionSections(
   pendingCapabilityIDs: [PraxisCapabilityID],
   persistenceSummary: String,
   replaySummary: String,
-  provisioningState: PraxisTapProvisioningCheckpointState
+  provisioningState: PraxisTapProvisioningCheckpointState,
+  providerDiscoverySections: [PraxisContextSectionRecord]
 ) -> [PraxisContextSectionRecord] {
   let latestDecisionSummary = status.latestDecisionSummary
     ?? history.entries.first?.decisionSummary
@@ -5682,6 +5778,7 @@ private func tapInspectionSections(
   let backlogSummary = pendingCapabilityIDs.isEmpty
     ? "No approvals are currently waiting for reviewer or human action."
     : "Pending reviewer backlog covers \(pendingCapabilityIDs.map(\.rawValue).joined(separator: ", "))."
+  let recentProviderActivity = tapInspectionRecentProviderActivity(from: history.entries)
 
   var sections: [PraxisContextSectionRecord] = [
     .init(
@@ -5710,6 +5807,10 @@ private func tapInspectionSections(
     )
   ]
 
+  if let providerActivitySection = tapInspectionProviderActivitySection(from: recentProviderActivity) {
+    sections.append(providerActivitySection)
+  }
+
   if provisioningState.hasRuntimeEvidence {
     let bundleSummary = provisioningState.bundleSummary ?? "Provision bundle assembly has not been staged yet."
     let activationSummary = provisioningState.activationSummary ?? "Activation staging has not been summarized yet."
@@ -5729,7 +5830,67 @@ private func tapInspectionSections(
     )
   }
 
+  sections.append(contentsOf: providerDiscoverySections)
+
   return sections
+}
+
+private func tapInspectionProviderDiscoverySections(
+  from dependencies: PraxisDependencyGraph
+) async -> [PraxisContextSectionRecord] {
+  let skillSummary = await providerSkillDiscoverySummary(from: dependencies)
+  let mcpToolSummary = await providerMCPToolDiscoverySummary(from: dependencies)
+  return [
+    .init(
+      sectionID: "provider-skills",
+      title: "Provider skills",
+      summary: skillSummary.summary,
+      status: skillSummary.status,
+      freshness: skillSummary.status == .ready ? .fresh : .stale,
+      trustLevel: .verified
+    ),
+    .init(
+      sectionID: "provider-mcp-tools",
+      title: "Provider MCP tools",
+      summary: mcpToolSummary.summary,
+      status: mcpToolSummary.status,
+      freshness: mcpToolSummary.status == .ready ? .fresh : .stale,
+      trustLevel: .verified
+    ),
+  ]
+}
+
+private func tapInspectionRecentProviderActivity(
+  from entries: [PraxisTapHistoryEntry]
+) -> [PraxisTapHistoryEntry] {
+  entries.filter { entry in
+    let capabilityKey = entry.capabilityKey.rawValue
+    return capabilityKey == "skill.activate" || capabilityKey == "tool.call"
+  }
+}
+
+private func tapInspectionProviderActivitySection(
+  from entries: [PraxisTapHistoryEntry]
+) -> PraxisContextSectionRecord? {
+  guard let latestEntry = entries.first else {
+    return nil
+  }
+
+  let capabilitySummary = Array(entries.prefix(2)).map { entry in
+    "\(entry.capabilityKey.rawValue): \(entry.decisionSummary)"
+  }.joined(separator: " ")
+  let activityCount = entries.count
+  let summary =
+    "Recent provider capability activity contains \(activityCount) persisted event(s). Latest provider decision: \(latestEntry.decisionSummary) \(capabilitySummary)"
+
+  return .init(
+    sectionID: "provider-activity",
+    title: "Provider activity",
+    summary: summary,
+    status: .ready,
+    freshness: .fresh,
+    trustLevel: .verified
+  )
 }
 
 private func checkpointStatus(
@@ -5794,22 +5955,31 @@ private func tapInspectionToolReviewActions(
 private func tapInspectionGovernanceKind(
   for entry: PraxisTapHistoryEntry
 ) -> PraxisToolReviewGovernanceKind {
+  if entry.outcome == .baselineApproved, tapInspectionIsDirectProviderCapability(entry.capabilityKey) {
+    return .lifecycle
+  }
+
   switch entry.outcome {
   case .redirectedToProvisioning:
-    .provisionRequest
+    return .provisionRequest
   case .provisionStaged:
-    .provisionRequest
+    return .provisionRequest
   case .activationStaged, .activationReady:
-    .activation
+    return .activation
   case .replayConsumed, .gateReleased:
-    .delivery
+    return .delivery
   case .escalatedToHuman:
-    .humanGate
+    return .humanGate
   case .approvedByHuman, .baselineApproved:
-    .activation
+    return .activation
   case .reviewRequired, .rejectedByHuman, .denied:
-    .lifecycle
+    return .lifecycle
   }
+}
+
+private func tapInspectionIsDirectProviderCapability(_ capabilityID: PraxisCapabilityID) -> Bool {
+  let rawValue = capabilityID.rawValue
+  return rawValue == "skill.activate" || rawValue == "tool.call"
 }
 
 private func tapInspectionActionStatus(
@@ -5878,6 +6048,7 @@ private func tapInspectionAdvisories(
   advisories.append(contentsOf: status.issues.map {
     .init(code: "status_issue", severity: .risky, summary: $0)
   })
+  let recentProviderActivity = tapInspectionRecentProviderActivity(from: history.entries)
 
   if status.pendingApprovalCount > 0 {
     advisories.append(
@@ -5885,6 +6056,16 @@ private func tapInspectionAdvisories(
         code: "review_backlog_present",
         severity: .risky,
         summary: "TAP currently has \(status.pendingApprovalCount) approval request(s) waiting for reviewer or human action."
+      )
+    )
+  }
+
+  if let latestProviderActivity = recentProviderActivity.first {
+    advisories.append(
+      .init(
+        code: "recent_provider_activity",
+        severity: .normal,
+        summary: "Recent direct provider capability activity is available: \(latestProviderActivity.decisionSummary)"
       )
     )
   }

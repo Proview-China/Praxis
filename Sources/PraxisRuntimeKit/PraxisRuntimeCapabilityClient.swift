@@ -84,6 +84,65 @@ public struct PraxisRuntimeCapabilityClient: Sendable {
     return PraxisRuntimeEmbeddingResult(snapshot: snapshot)
   }
 
+  /// Executes one bounded code snippet.
+  ///
+  /// - Parameter request: Caller-friendly bounded code execution request.
+  /// - Returns: A normalized code execution result.
+  /// - Throws: Any validation or code adapter failure raised by the underlying capability facade.
+  public func runCode(_ request: PraxisRuntimeCodeRunRequest) async throws -> PraxisRuntimeCodeRunResult {
+    let snapshot = try await capabilityFacade.runCode(
+      .init(
+        summary: request.summary,
+        runtime: request.runtime,
+        source: request.source,
+        workingDirectory: request.workingDirectory,
+        environment: request.environment,
+        timeoutSeconds: request.timeoutSeconds,
+        outputMode: request.outputMode
+      )
+    )
+    return PraxisRuntimeCodeRunResult(snapshot: snapshot)
+  }
+
+  /// Applies one bounded workspace patch.
+  ///
+  /// - Parameter request: Caller-friendly bounded workspace patch request.
+  /// - Returns: A normalized code patch result.
+  /// - Throws: Any validation or workspace writer failure raised by the underlying capability facade.
+  public func patchCode(_ request: PraxisRuntimeCodePatchRequest) async throws -> PraxisRuntimeCodePatchResult {
+    let snapshot = try await capabilityFacade.patchCode(
+      .init(
+        summary: request.summary,
+        changes: request.changes.map {
+          .init(
+            path: $0.path,
+            patch: $0.patch,
+            expectedRevisionToken: $0.expectedRevisionToken
+          )
+        }
+      )
+    )
+    return PraxisRuntimeCodePatchResult(snapshot: snapshot)
+  }
+
+  /// Reads the current bounded code sandbox contract.
+  ///
+  /// - Parameter request: Caller-friendly code sandbox request.
+  /// - Returns: A normalized code sandbox descriptor.
+  /// - Throws: Any validation or sandbox-describer failure raised by the underlying capability facade.
+  public func describeCodeSandbox(
+    _ request: PraxisRuntimeCodeSandboxRequest = .init()
+  ) async throws -> PraxisRuntimeCodeSandboxResult {
+    let snapshot = try await capabilityFacade.describeCodeSandbox(
+      .init(
+        profile: request.profile,
+        workingDirectory: request.workingDirectory,
+        requestedRuntime: request.requestedRuntime
+      )
+    )
+    return PraxisRuntimeCodeSandboxResult(snapshot: snapshot)
+  }
+
   /// Requests one bounded shell approval through the CMP/TAP review path.
   ///
   /// - Parameter request: Caller-friendly shell approval request.
@@ -120,6 +179,49 @@ public struct PraxisRuntimeCapabilityClient: Sendable {
       )
     )
     return PraxisRuntimeShellApprovalReadback(snapshot: snapshot)
+  }
+
+  /// Lists registered provider skill keys through the thin capability surface.
+  ///
+  /// - Parameter request: Caller-friendly skill-list request.
+  /// - Returns: A normalized provider-skill list result.
+  /// - Throws: Any validation or provider failure raised by the underlying capability facade.
+  public func listSkills(
+    _ request: PraxisRuntimeSkillListRequest = .init()
+  ) async throws -> PraxisRuntimeSkillListResult {
+    _ = request
+    let snapshot = try await capabilityFacade.listSkills(.init())
+    return PraxisRuntimeSkillListResult(snapshot: snapshot)
+  }
+
+  /// Activates one registered provider skill through the thin capability surface.
+  ///
+  /// - Parameter request: Caller-friendly skill activation request.
+  /// - Returns: A normalized provider-skill activation result.
+  /// - Throws: Any validation or provider failure raised by the underlying capability facade.
+  public func activateSkill(
+    _ request: PraxisRuntimeSkillActivateRequest
+  ) async throws -> PraxisRuntimeSkillActivateResult {
+    let snapshot = try await capabilityFacade.activateSkill(
+      .init(
+        skillKey: request.skillKey,
+        reason: request.reason
+      )
+    )
+    return PraxisRuntimeSkillActivateResult(snapshot: snapshot)
+  }
+
+  /// Lists registered provider MCP tool names through the thin capability surface.
+  ///
+  /// - Parameter request: Caller-friendly provider MCP-tool list request.
+  /// - Returns: A normalized provider MCP-tool list result.
+  /// - Throws: Any validation or provider failure raised by the underlying capability facade.
+  public func listProviderMCPTools(
+    _ request: PraxisRuntimeProviderMCPToolListRequest = .init()
+  ) async throws -> PraxisRuntimeProviderMCPToolListResult {
+    _ = request
+    let snapshot = try await capabilityFacade.listProviderMCPTools(.init())
+    return PraxisRuntimeProviderMCPToolListResult(snapshot: snapshot)
   }
 
   /// Executes one bounded shell command.
@@ -381,6 +483,88 @@ public struct PraxisRuntimeEmbeddingResult: Sendable, Equatable {
   }
 }
 
+/// Caller-friendly bounded code execution result.
+public struct PraxisRuntimeCodeRunResult: Sendable, Equatable {
+  public let capabilityID: PraxisRuntimeCapabilityRef
+  public let summary: String
+  public let runtime: PraxisCodeRuntime
+  public let launcher: String
+  public let workingDirectory: String?
+  public let environmentKeys: [String]
+  public let outputMode: PraxisToolingOutputMode
+  public let riskLabel: String
+  public let stdout: String
+  public let stderr: String
+  public let exitCode: Int32
+  public let durationMilliseconds: Int?
+  public let terminationReason: PraxisShellTerminationReason
+  public let outputWasTruncated: Bool
+
+  init(snapshot: PraxisCapabilityCodeRunSnapshot) {
+    capabilityID = .init(snapshot.capabilityID.rawValue)
+    summary = snapshot.summary
+    runtime = snapshot.runtime
+    launcher = snapshot.launcher
+    workingDirectory = snapshot.workingDirectory
+    environmentKeys = snapshot.environmentKeys
+    outputMode = snapshot.outputMode
+    riskLabel = snapshot.riskLabel
+    stdout = snapshot.stdout
+    stderr = snapshot.stderr
+    exitCode = snapshot.exitCode
+    durationMilliseconds = snapshot.durationMilliseconds
+    terminationReason = snapshot.terminationReason
+    outputWasTruncated = snapshot.outputWasTruncated
+  }
+
+  /// Whether the bounded code execution exited successfully.
+  public var succeeded: Bool {
+    exitCode == 0 && terminationReason == .exited
+  }
+}
+
+/// Caller-friendly bounded workspace patch result.
+public struct PraxisRuntimeCodePatchResult: Sendable, Equatable {
+  public let capabilityID: PraxisRuntimeCapabilityRef
+  public let summary: String
+  public let changedPaths: [String]
+  public let appliedChangeCount: Int
+  public let riskLabel: String
+
+  init(snapshot: PraxisCapabilityCodePatchSnapshot) {
+    capabilityID = .init(snapshot.capabilityID.rawValue)
+    summary = snapshot.summary
+    changedPaths = snapshot.changedPaths
+    appliedChangeCount = snapshot.appliedChangeCount
+    riskLabel = snapshot.riskLabel
+  }
+}
+
+/// Caller-friendly bounded code sandbox result.
+public struct PraxisRuntimeCodeSandboxResult: Sendable, Equatable {
+  public let capabilityID: PraxisRuntimeCapabilityRef
+  public let summary: String
+  public let profile: PraxisCodeSandboxProfile
+  public let enforcementMode: PraxisCodeSandboxEnforcementMode
+  public let allowedRuntimes: [PraxisCodeRuntime]
+  public let readableRoots: [String]
+  public let writableRoots: [String]
+  public let allowsNetworkAccess: Bool
+  public let allowsSubprocesses: Bool
+
+  init(snapshot: PraxisCapabilityCodeSandboxSnapshot) {
+    capabilityID = .init(snapshot.capabilityID.rawValue)
+    summary = snapshot.summary
+    profile = snapshot.profile
+    enforcementMode = snapshot.enforcementMode
+    allowedRuntimes = snapshot.allowedRuntimes
+    readableRoots = snapshot.readableRoots
+    writableRoots = snapshot.writableRoots
+    allowsNetworkAccess = snapshot.allowsNetworkAccess
+    allowsSubprocesses = snapshot.allowsSubprocesses
+  }
+}
+
 /// Caller-friendly bounded shell execution result.
 public struct PraxisRuntimeShellRunResult: Sendable, Equatable {
   public let capabilityID: PraxisRuntimeCapabilityRef
@@ -500,6 +684,47 @@ public struct PraxisRuntimeShellApprovalReadback: Sendable, Equatable {
   /// Whether the recovered shell approval is currently waiting on a human gate.
   public var isWaitingApproval: Bool {
     humanGateState == "waitingApproval"
+  }
+}
+
+/// Caller-friendly provider-skill list result.
+public struct PraxisRuntimeSkillListResult: Sendable, Equatable {
+  public let capabilityID: PraxisRuntimeCapabilityRef
+  public let summary: String
+  public let skillKeys: [String]
+
+  init(snapshot: PraxisCapabilitySkillListSnapshot) {
+    capabilityID = .init(snapshot.capabilityID.rawValue)
+    summary = snapshot.summary
+    skillKeys = snapshot.skillKeys
+  }
+}
+
+/// Caller-friendly provider-skill activation result.
+public struct PraxisRuntimeSkillActivateResult: Sendable, Equatable {
+  public let capabilityID: PraxisRuntimeCapabilityRef
+  public let summary: String
+  public let skillKey: String
+  public let activated: Bool
+
+  init(snapshot: PraxisCapabilitySkillActivateSnapshot) {
+    capabilityID = .init(snapshot.capabilityID.rawValue)
+    summary = snapshot.summary
+    skillKey = snapshot.skillKey
+    activated = snapshot.activated
+  }
+}
+
+/// Caller-friendly provider MCP-tool list result.
+public struct PraxisRuntimeProviderMCPToolListResult: Sendable, Equatable {
+  public let capabilityID: PraxisRuntimeCapabilityRef
+  public let summary: String
+  public let toolNames: [String]
+
+  init(snapshot: PraxisCapabilityProviderMCPToolListSnapshot) {
+    capabilityID = .init(snapshot.capabilityID.rawValue)
+    summary = snapshot.summary
+    toolNames = snapshot.toolNames
   }
 }
 

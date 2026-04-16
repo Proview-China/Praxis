@@ -3208,6 +3208,65 @@ struct PraxisRuntimeUseCasesTests {
   }
 
   @Test
+  func inspectTapUseCaseProjectsProviderCapabilityActivityIntoReviewSections() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-runtime-usecases-tap-provider-activity-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let registry = PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory)
+    let dependencies = try makeDependencies(hostAdapters: registry)
+    let useCase = PraxisInspectTapUseCase(dependencies: dependencies)
+
+    _ = try await registry.tapRuntimeEventStore?.append(
+      PraxisTapRuntimeEventRecord(
+        eventID: "tap.provider.skill",
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "runtime.local",
+        eventKind: .providerSkillActivated,
+        capabilityKey: "skill.activate",
+        summary: "Activated provider skill runtime.inspect.",
+        detail: "Activated provider skill runtime.inspect.",
+        createdAt: "2026-04-16T10:00:00Z",
+        metadata: [
+          "capabilityKey": .string("skill.activate"),
+          "skillKey": .string("runtime.inspect"),
+          "decisionSummary": .string("Activated provider skill runtime.inspect."),
+        ]
+      )
+    )
+    _ = try await registry.tapRuntimeEventStore?.append(
+      PraxisTapRuntimeEventRecord(
+        eventID: "tap.provider.tool",
+        projectID: "cmp.local-runtime",
+        agentID: "runtime.local",
+        targetAgentID: "runtime.local",
+        eventKind: .providerMCPToolCalled,
+        capabilityKey: "tool.call",
+        summary: "Called provider MCP tool web.search.",
+        detail: "Called provider MCP tool web.search.",
+        createdAt: "2026-04-16T10:01:00Z",
+        metadata: [
+          "capabilityKey": .string("tool.call"),
+          "toolName": .string("web.search"),
+          "decisionSummary": .string("Called provider MCP tool web.search."),
+        ]
+      )
+    )
+
+    let inspection = try await useCase.execute(.init(projectID: "cmp.local-runtime", historyLimit: 10))
+
+    #expect(inspection.reviewContext.sections.contains {
+      $0.sectionID == "provider-activity" && $0.summary.contains("web.search")
+    })
+    #expect(inspection.toolReviewReport.session.actions.first?.capabilityID == capabilityID("tool.call"))
+    #expect(inspection.toolReviewReport.session.actions.first?.governanceKind == .lifecycle)
+    #expect(inspection.toolReviewReport.advisories.contains {
+      $0.code == "recent_provider_activity" && $0.summary.contains("web.search")
+    })
+  }
+
+  @Test
   func inspectTapUseCaseHonorsScopedProjectIdentifiers() async throws {
     let rootDirectory = FileManager.default.temporaryDirectory
       .appendingPathComponent("praxis-runtime-usecases-tap-inspect-scoped-\(UUID().uuidString)", isDirectory: true)
@@ -4803,6 +4862,7 @@ struct PraxisRuntimeUseCasesTests {
       providerBatchExecutor: registry.providerBatchExecutor,
       providerSkillRegistry: registry.providerSkillRegistry,
       providerSkillActivator: registry.providerSkillActivator,
+      providerMCPToolRegistry: registry.providerMCPToolRegistry,
       providerMCPExecutor: registry.providerMCPExecutor,
       workspaceReader: registry.workspaceReader,
       workspaceSearcher: registry.workspaceSearcher,
@@ -4854,6 +4914,7 @@ struct PraxisRuntimeUseCasesTests {
       providerBatchExecutor: registry.providerBatchExecutor,
       providerSkillRegistry: registry.providerSkillRegistry,
       providerSkillActivator: registry.providerSkillActivator,
+      providerMCPToolRegistry: registry.providerMCPToolRegistry,
       providerMCPExecutor: registry.providerMCPExecutor,
       workspaceReader: registry.workspaceReader,
       workspaceSearcher: registry.workspaceSearcher,
@@ -4903,6 +4964,7 @@ struct PraxisRuntimeUseCasesTests {
       providerBatchExecutor: registry.providerBatchExecutor,
       providerSkillRegistry: registry.providerSkillRegistry,
       providerSkillActivator: registry.providerSkillActivator,
+      providerMCPToolRegistry: registry.providerMCPToolRegistry,
       providerMCPExecutor: registry.providerMCPExecutor,
       workspaceReader: registry.workspaceReader,
       workspaceSearcher: registry.workspaceSearcher,
@@ -4968,6 +5030,7 @@ struct PraxisRuntimeUseCasesTests {
       providerBatchExecutor: registry.providerBatchExecutor,
       providerSkillRegistry: registry.providerSkillRegistry,
       providerSkillActivator: registry.providerSkillActivator,
+      providerMCPToolRegistry: registry.providerMCPToolRegistry,
       providerMCPExecutor: registry.providerMCPExecutor,
       workspaceReader: registry.workspaceReader,
       workspaceSearcher: registry.workspaceSearcher,

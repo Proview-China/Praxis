@@ -20,6 +20,7 @@ import PraxisSession
 import PraxisTapReview
 import PraxisTapTypes
 import PraxisToolingContracts
+import PraxisWorkspaceContracts
 
 private func capabilityID(_ rawValue: String) -> PraxisCapabilityID {
   PraxisCapabilityID(rawValue: rawValue)
@@ -51,6 +52,12 @@ private struct StubSemanticMemoryStore: PraxisSemanticMemoryStoreContract {
 
   func bundle(_ request: PraxisSemanticMemoryBundleRequest) async throws -> PraxisSemanticMemoryBundle {
     bundleResult
+  }
+}
+
+private actor InactiveProviderSkillActivator: PraxisProviderSkillActivator {
+  func activate(_ request: PraxisProviderSkillActivationRequest) async throws -> PraxisProviderSkillActivationReceipt {
+    PraxisProviderSkillActivationReceipt(skillKey: request.skillKey, activated: false)
   }
 }
 
@@ -92,6 +99,366 @@ struct PraxisRuntimeFacadesTests {
     #expect(facade.cmpFacade.rolesFacade === facade.cmpRolesFacade)
     #expect(facade.cmpFacade.controlFacade === facade.cmpControlFacade)
     #expect(facade.cmpFacade.readbackFacade === facade.cmpReadbackFacade)
+  }
+
+  @Test
+  func capabilityFacadeProjectsBoundedCodeExecution() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-runtime-facades-code-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: rootDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let facade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(
+      hostAdapters: PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory),
+      blueprint: PraxisRuntimeGatewayModule.bootstrap
+    )
+
+    let catalog = facade.capabilityFacade.catalog()
+    if catalog.entries.map(\.manifest.id.rawValue).contains("code.run") {
+      let code = try await facade.capabilityFacade.runCode(
+        .init(
+          summary: "Emit one facade code marker",
+          runtime: .swift,
+          source: "print(\"runtime-facade-code-test\")",
+          workingDirectory: rootDirectory.path,
+          timeoutSeconds: 2
+        )
+      )
+
+      #expect(code.capabilityID == capabilityID("code.run"))
+      #expect(code.runtime == .swift)
+      #expect(code.launcher == "xcrun swift")
+      #expect(code.riskLabel == "risky")
+      #expect(code.outputMode == .buffered)
+#if os(macOS)
+      #expect(code.exitCode == 0)
+      #expect(code.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "runtime-facade-code-test")
+#else
+      #expect(code.terminationReason == .failedToLaunch)
+      #expect(code.stderr.isEmpty == false)
+#endif
+    } else {
+      #expect(!PraxisLocalHostPlatformSupport.supportsBoundedCodeExecution)
+    }
+  }
+
+  @Test
+  func capabilityFacadeProjectsBoundedCodePatchExecution() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-runtime-facades-code-patch-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: rootDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let targetFileURL = rootDirectory.appendingPathComponent("notes.txt", isDirectory: false)
+    try "alpha\nbeta\n".write(to: targetFileURL, atomically: true, encoding: .utf8)
+
+    let facade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(
+      hostAdapters: PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory),
+      blueprint: PraxisRuntimeGatewayModule.bootstrap
+    )
+
+    let catalog = facade.capabilityFacade.catalog()
+
+#if os(macOS)
+    let patch = try await facade.capabilityFacade.patchCode(
+      .init(
+        summary: "Update one facade workspace note",
+        changes: [
+          .init(
+            path: "notes.txt",
+            patch: """
+            @@ -1,2 +1,2 @@
+             alpha
+            -beta
+            +patched
+            """
+          )
+        ]
+      )
+    )
+    let updatedContents = try String(contentsOf: targetFileURL, encoding: .utf8)
+
+    #expect(catalog.entries.map(\.manifest.id.rawValue).contains("code.patch"))
+    #expect(patch.capabilityID == capabilityID("code.patch"))
+    #expect(patch.appliedChangeCount == 1)
+    #expect(patch.changedPaths == ["notes.txt"])
+    #expect(patch.riskLabel == "risky")
+    #expect(updatedContents == "alpha\npatched")
+#else
+    #expect(!catalog.entries.map(\.manifest.id.rawValue).contains("code.patch"))
+#endif
+  }
+
+  @Test
+  func capabilityFacadePreservesOpaqueRevisionTokensWhenForwardingCodePatchChanges() async throws {
+    let workspaceWriter = PraxisSpyWorkspaceWriter()
+    let facade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(
+      hostAdapters: PraxisHostAdapterRegistry(
+        workspaceWriter: workspaceWriter
+      ),
+      blueprint: PraxisRuntimeGatewayModule.bootstrap
+    )
+
+    _ = try await facade.capabilityFacade.patchCode(
+      .init(
+        summary: "Preserve one opaque revision token",
+        changes: [
+          .init(
+            path: "notes.txt",
+            patch: """
+            @@ -1 +1 @@
+            -before
+            +after
+            """,
+            expectedRevisionToken: "1710000000-12"
+          )
+        ]
+      )
+    )
+
+    let requests = await workspaceWriter.allRequests()
+    #expect(requests.count == 1)
+    #expect(requests.first?.changes.first?.expectedRevisionToken == "1710000000-12")
+  }
+
+  @Test
+  func capabilityFacadeProjectsBoundedCodeSandboxContract() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-runtime-facades-code-sandbox-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: rootDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let facade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(
+      hostAdapters: PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory),
+      blueprint: PraxisRuntimeGatewayModule.bootstrap
+    )
+
+    let catalog = facade.capabilityFacade.catalog()
+    let sandbox = try await facade.capabilityFacade.describeCodeSandbox(
+      .init(
+        workingDirectory: rootDirectory.path,
+        requestedRuntime: .swift
+      )
+    )
+
+    #expect(catalog.entries.map(\.manifest.id.rawValue).contains("code.sandbox"))
+    #expect(sandbox.capabilityID == capabilityID("code.sandbox"))
+    #expect(sandbox.profile == .workspaceWriteLimited)
+    #expect(sandbox.writableRoots == [rootDirectory.path])
+    #expect(sandbox.readableRoots.contains(rootDirectory.path))
+    #expect(sandbox.allowsNetworkAccess == false)
+    #expect(sandbox.allowsSubprocesses == false)
+#if os(macOS)
+    if PraxisLocalHostPlatformSupport.supportsBoundedCodeExecution {
+      #expect(sandbox.enforcementMode == .declaredOnly)
+      #expect(sandbox.allowedRuntimes == [.swift])
+    } else {
+      #expect(sandbox.enforcementMode == .placeholder)
+      #expect(sandbox.allowedRuntimes.isEmpty)
+    }
+#else
+    #expect(sandbox.enforcementMode == .placeholder)
+    #expect(sandbox.allowedRuntimes.isEmpty)
+#endif
+  }
+
+  @Test
+  func capabilityFacadeRejectsUnsupportedCodeStreamingRequests() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-runtime-facades-code-options-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: rootDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let facade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(
+      hostAdapters: PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory),
+      blueprint: PraxisRuntimeGatewayModule.bootstrap
+    )
+
+    await #expect(throws: PraxisError.self) {
+      _ = try await facade.capabilityFacade.runCode(
+        .init(
+          summary: "Attempt unsupported streaming code output",
+          runtime: .swift,
+          source: "print(\"streaming\")",
+          workingDirectory: rootDirectory.path,
+          timeoutSeconds: 2,
+          outputMode: .streaming
+        )
+      )
+    }
+  }
+
+  @Test
+  func capabilityFacadeRejectsCodeExecutionOutsideSandboxWritableRoots() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-runtime-facades-code-sandbox-guard-\(UUID().uuidString)", isDirectory: true)
+    let outsideDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-runtime-facades-code-outside-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: rootDirectory, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: outsideDirectory, withIntermediateDirectories: true)
+    defer {
+      try? FileManager.default.removeItem(at: rootDirectory)
+      try? FileManager.default.removeItem(at: outsideDirectory)
+    }
+
+    let facade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(
+      hostAdapters: PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory),
+      blueprint: PraxisRuntimeGatewayModule.bootstrap
+    )
+
+    let catalog = facade.capabilityFacade.catalog()
+    guard catalog.entries.map(\.manifest.id.rawValue).contains("code.run") else {
+      #expect(!PraxisLocalHostPlatformSupport.supportsBoundedCodeExecution)
+      return
+    }
+
+    await #expect(throws: PraxisError.self) {
+      _ = try await facade.capabilityFacade.runCode(
+        .init(
+          summary: "Attempt code execution outside writable sandbox roots",
+          runtime: .swift,
+          source: "print(\"outside-sandbox\")",
+          workingDirectory: outsideDirectory.path,
+          timeoutSeconds: 2
+        )
+      )
+    }
+  }
+
+  @Test
+  func capabilityFacadeListsAndActivatesRegisteredProviderSkills() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-runtime-facades-skills-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: rootDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let facade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(
+      hostAdapters: PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory),
+      blueprint: PraxisRuntimeGatewayModule.bootstrap
+    )
+
+    let catalog = facade.capabilityFacade.catalog()
+    let listedSkills = try await facade.capabilityFacade.listSkills()
+    let activatedSkill = try await facade.capabilityFacade.activateSkill(
+      .init(
+        skillKey: "runtime.inspect",
+        reason: "Facade capability coverage"
+      )
+    )
+
+    #expect(catalog.entries.map(\.manifest.id.rawValue).contains("skill.list"))
+    #expect(catalog.entries.map(\.manifest.id.rawValue).contains("skill.activate"))
+    #expect(listedSkills.capabilityID == capabilityID("skill.list"))
+    #expect(listedSkills.skillKeys.contains("runtime.inspect"))
+    #expect(activatedSkill.capabilityID == capabilityID("skill.activate"))
+    #expect(activatedSkill.skillKey == "runtime.inspect")
+    #expect(activatedSkill.activated)
+  }
+
+  @Test
+  func capabilityFacadeRejectsUnregisteredProviderSkillActivation() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-runtime-facades-skills-negative-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: rootDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let facade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(
+      hostAdapters: PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory),
+      blueprint: PraxisRuntimeGatewayModule.bootstrap
+    )
+
+    await #expect(throws: PraxisError.self) {
+      _ = try await facade.capabilityFacade.activateSkill(
+        .init(
+          skillKey: "not.registered",
+          reason: "Negative facade capability coverage"
+        )
+      )
+    }
+  }
+
+  @Test
+  func capabilityFacadeSkipsSkillActivationAuditWhenProviderDoesNotActivate() async throws {
+    let tapEventStore = PraxisFakeTapRuntimeEventStore()
+    let facade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(
+      hostAdapters: PraxisHostAdapterRegistry(
+        providerSkillRegistry: PraxisStubProviderSkillRegistry(skills: ["runtime.inspect"]),
+        providerSkillActivator: InactiveProviderSkillActivator(),
+        tapRuntimeEventStore: tapEventStore
+      ),
+      blueprint: PraxisRuntimeGatewayModule.bootstrap
+    )
+
+    let receipt = try await facade.capabilityFacade.activateSkill(
+      .init(
+        skillKey: "runtime.inspect",
+        reason: "Declined activation coverage"
+      )
+    )
+    let history = try await facade.inspectionFacade.readbackTapHistory(
+      .init(projectID: "cmp.local-runtime", agentID: "runtime.local", limit: 10)
+    )
+
+    #expect(receipt.activated == false)
+    #expect(history.entries.contains { $0.capabilityKey.rawValue == "skill.activate" } == false)
+  }
+
+  @Test
+  func capabilityFacadeRejectsUnregisteredProviderMCPToolCalls() async throws {
+    let rootDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("praxis-runtime-facades-tools-negative-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: rootDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let facade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(
+      hostAdapters: PraxisHostAdapterRegistry.localDefaults(rootDirectory: rootDirectory),
+      blueprint: PraxisRuntimeGatewayModule.bootstrap
+    )
+
+    await #expect(throws: PraxisError.self) {
+      _ = try await facade.capabilityFacade.callTool(
+        .init(
+          toolName: "not.registered",
+          summary: "Negative facade MCP coverage",
+          serverName: "local-test"
+        )
+      )
+    }
+  }
+
+  @Test
+  func capabilityFacadeSkipsMCPAuditWhenProviderToolCallDoesNotSucceed() async throws {
+    for status in [PraxisHostCapabilityExecutionStatus.queued, .failed] {
+      let tapEventStore = PraxisFakeTapRuntimeEventStore()
+      let facade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(
+        hostAdapters: PraxisHostAdapterRegistry(
+          providerMCPToolRegistry: PraxisStubProviderMCPToolRegistry(toolNames: ["web.search"]),
+          providerMCPExecutor: PraxisStubProviderMCPExecutor { request in
+            PraxisProviderMCPToolCallReceipt(
+              toolName: request.toolName,
+              status: status,
+              summary: "Provider tool call returned \(status.rawValue)."
+            )
+          },
+          tapRuntimeEventStore: tapEventStore
+        ),
+        blueprint: PraxisRuntimeGatewayModule.bootstrap
+      )
+
+      let receipt = try await facade.capabilityFacade.callTool(
+        .init(
+          toolName: "web.search",
+          summary: "Non-success MCP audit coverage",
+          serverName: "local-test"
+        )
+      )
+      let history = try await facade.inspectionFacade.readbackTapHistory(
+        .init(projectID: "cmp.local-runtime", agentID: "runtime.local", limit: 10)
+      )
+
+      #expect(receipt.status == status)
+      #expect(history.entries.contains { $0.capabilityKey.rawValue == "tool.call" } == false)
+    }
   }
 
   @Test

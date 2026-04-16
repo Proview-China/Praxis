@@ -17,6 +17,7 @@ swift run PraxisRuntimeKitCapabilitiesExample
 swift run PraxisRuntimeKitSearchExample
 swift run PraxisRuntimeKitSmoke --suite shell
 swift run PraxisRuntimeKitSmoke --suite shell-approval
+swift run PraxisRuntimeKitSmoke --suite code-sandbox
 swift run PraxisRuntimeKitSmoke --suite provisioning
 swift run PraxisRuntimeKitSmoke --suite all
 ```
@@ -30,9 +31,15 @@ swift run PraxisRuntimeKitSmoke --suite all
 - `PraxisRuntimeKitMpExample`
   展示 MP overview、search、resolve、history。
 - `PraxisRuntimeKitCapabilitiesExample`
-  展示当前 thin capability baseline：catalog、generate、stream、embed、bounded `shell.approve` / `shell.run`、tool、file、batch、session。
+  展示当前 thin capability baseline：catalog、generate、stream、embed、`code.sandbox` contract、bounded `code.run` / `code.patch` / `shell.approve` / `shell.run`、provider `skill.list` / `skill.activate` / MCP tool discovery、tool、file、batch、session。
 - `PraxisRuntimeKitSearchExample`
   展示 Phase 3 search chain：`search.web`、`search.fetch`、`search.ground`。
+- `PraxisRuntimeKitSmoke --suite code`
+  展示 Phase 5 第一条 bounded code 路径；macOS 当前执行 bounded Swift snippet，Linux 诚实返回 placeholder failed-to-launch 语义。
+- `PraxisRuntimeKitSmoke --suite code-sandbox`
+  展示 Phase 5 的 `code.sandbox` 合同读面；macOS 当前返回 declared-only workspace sandbox contract，非 macOS 或工具链未就绪时返回 placeholder。
+- `PraxisRuntimeKitSmoke --suite code-patch`
+  展示 Phase 5 的 bounded `code.patch` 路径；当前 macOS baseline 通过系统 `patch` 应用单文件 patch。
 - `PraxisRuntimeKitSmoke --suite shell`
   展示 Phase 5 第一条 bounded shell 路径；macOS 走真实本地 shell，Linux 诚实返回 placeholder failed-to-launch 语义。
 - `PraxisRuntimeKitSmoke --suite shell-approval`
@@ -182,6 +189,7 @@ print(run.phaseSummary)
 - `mp.project(...).resolve(...)`
 - `mp.project(...).history(...)`
 - `capabilities.catalog()` / `generate(...)` / `stream(...)`
+- `capabilities.describeCodeSandbox(...)`
 - `capabilities.embed(...)` / `callTool(...)` / `uploadFile(...)`
 - `capabilities.submitBatch(...)` / `openSession(...)`
 - `capabilities.searchWeb(...)` / `fetchSearchResult(...)` / `groundSearchResult(...)`
@@ -273,15 +281,20 @@ print(generated.outputText)
 | --- | --- | --- | --- |
 | `PraxisRuntimeClient.makeDefault(...)` | ready | compile-safe placeholder baseline | 两端都能装配 RuntimeKit；Linux 继续保持占位宿主面 |
 | `runs.run(...)` / `runs.resume(...)` | ready | ready | run lifecycle 主要依赖本地 SQLite / in-process runtime truth |
-| `capabilities.catalog()` | ready | ready | 当前返回的是 thin capability baseline registry，已包含 search 链和 bounded `shell.approve` / `shell.run` |
+| `capabilities.catalog()` | ready | ready | 当前返回的是 thin capability baseline registry，已包含 search 链、`code.sandbox` 合同读面、provider `skill.list` / `skill.activate`，以及 bounded `code.run` / `code.patch` / `shell.approve` / `shell.run` |
 | `capabilities.generate(...)` / `stream(...)` | ready | ready | 当前复用本地 provider inference lane；`stream` 是 bounded projected stream，不宣称 token transport |
 | `capabilities.embed(...)` | ready | ready | 当前复用本地 embedding baseline |
+| `capabilities.describeCodeSandbox(...)` | declared-only contract | placeholder contract | 当前先暴露结构化 sandbox contract；macOS baseline 说明 workspace write roots 与 enforcement mode，但还不宣称 kernel-enforced isolation |
+| `capabilities.patchCode(...)` | ready | unavailable | macOS 当前通过 bounded workspace patch lane 执行单文件 patch；Linux 暂不暴露该 capability，等待后续宿主实现补齐 |
+| `capabilities.runCode(...)` | ready | placeholder-backed bounded seam | macOS 当前执行 bounded Swift snippet；Linux 当前返回 compile-safe placeholder `failedToLaunch` 语义，同时保留 runtime / risk label / bounded result projection |
 | `capabilities.requestShellApproval(...)` / `readbackShellApproval(...)` | ready | ready | 当前通过 CMP/TAP durable approval path 请求和恢复 bounded shell approval，对外不暴露底层 `tool.shell.exec` |
 | `capabilities.runShell(...)` | ready | placeholder-backed bounded seam | macOS 走真实本地 shell；Linux 当前返回 compile-safe placeholder `failedToLaunch` 语义，同时保留 risk label / bounded result projection |
-| `capabilities.callTool(...)` / `uploadFile(...)` / `submitBatch(...)` | ready | ready | 当前复用本地 MCP / file store / batch baseline |
+| `capabilities.listSkills(...)` / `activateSkill(...)` | ready | ready | 当前通过 provider skill registry / activator 暴露稳定 skill 基线；`activateSkill` 只接受已注册 skill key，不再对任意字符串宣称成功 |
+| `capabilities.listProviderMCPTools(...)` | ready | ready | 当前通过 provider MCP tool registry 暴露可调用工具名读面，供 RuntimeKit 调用 `tool.call` 前做 discovery/readback |
+| `capabilities.callTool(...)` / `uploadFile(...)` / `submitBatch(...)` | ready | ready | 当前复用本地 MCP / file store / batch baseline；`tool.call` 只接受 provider MCP tool registry 已注册的工具名 |
 | `capabilities.openSession(...)` | ready | ready | 当前先提供 caller-scoped runtime session header，durable 恢复链后续再继续接深 |
 | `capabilities.searchWeb(...)` / `fetchSearchResult(...)` / `groundSearchResult(...)` | ready | placeholder-backed SDK seam | 当前 search 链先接 deterministic local baseline；Linux 仍未接真实 browser / search substrate |
-| `tap.inspect()` | ready | ready with degraded host summaries | 当前 inspection 会暴露 reviewer backlog、latest decision、section summaries 和 recovery hints；TAP approval request / decision 也会自动刷新 inspection checkpoint；Linux 仍会诚实反映 placeholder host truth |
+| `tap.inspect()` | ready | ready with degraded host summaries | 当前 inspection 会暴露 reviewer backlog、latest decision、section summaries、provider skill / MCP tool discovery 和 recovery hints；TAP approval request / decision 也会自动刷新 inspection checkpoint；Linux 仍会诚实反映 placeholder host truth |
 | `tap.project(...).overview(...)` | ready | ready | TAP 读取面可用，但其 capability 可见性仍受宿主 wiring 影响 |
 | `tap.project(...).reviewWorkbench(...)` | ready | ready with degraded host summaries | 当前 workbench 聚合 inspection / TAP history / CMP overview / reviewer queue，Linux 下仍会诚实暴露 placeholder host truth |
 | `cmp.project(...).overview(...)` / `approvalOverview(...)` | ready | ready with degraded host summaries | Linux 下 git / shell / process 仍会退化为占位语义 |
