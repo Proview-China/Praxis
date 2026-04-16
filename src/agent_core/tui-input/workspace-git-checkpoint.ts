@@ -126,7 +126,20 @@ async function ensureShadowRepo(repoPath: string): Promise<void> {
 }
 
 async function listRecursiveFiles(rootPath: string): Promise<string[]> {
-  const entries = await readdir(rootPath, { withFileTypes: true });
+  let entries;
+  try {
+    entries = await readdir(rootPath, { withFileTypes: true });
+  } catch (error) {
+    if (
+      error
+      && typeof error === "object"
+      && "code" in error
+      && ((error as { code?: unknown }).code === "EACCES" || (error as { code?: unknown }).code === "EPERM")
+    ) {
+      return [];
+    }
+    throw error;
+  }
   const nested = await Promise.all(entries.map(async (entry) => {
     if (entry.name === ".git") {
       return [];
@@ -155,7 +168,11 @@ async function listWorkspaceFiles(workspaceRoot: string): Promise<string[]> {
       cwd: workspaceRoot,
       args: ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
       encoding: "buffer",
+      allowFailure: true,
     });
+    if (listed.exitCode !== 0) {
+      return listRecursiveFiles(workspaceRoot);
+    }
     return (listed.stdout as Buffer)
       .toString("utf8")
       .split("\u0000")

@@ -8,6 +8,7 @@ import {
   createCapabilityFamilyTelemetry,
   createCoreContextSnapshot,
   decodeEscapedDisplayTextMaybe,
+  deriveQuestionnairePayloadFromReplyText,
   estimateContextTokens,
   extractReplyResponseTextFromPartialEnvelope,
   extractResponseTextMaybe,
@@ -24,6 +25,7 @@ import {
   shouldStopCoreCapabilityLoop,
   summarizeToolOutputForCore,
   trimStructuredValue,
+  updateLiveCliViewerSnapshots,
 } from "./shared.js";
 import {
   resolveCapabilityFamilyDefinition,
@@ -178,6 +180,50 @@ test("parseDirectQuestionAnswerEnvelope accepts structured answers and ignores p
       isFinal: true,
     },
   );
+});
+
+test("parseDirectQuestionAnswerEnvelope accepts freeform answers", () => {
+  assert.deepEqual(
+    parseDirectQuestionAnswerEnvelope(JSON.stringify({
+      type: "direct_question_answer",
+      requestId: "question-freeform-1",
+      answers: [
+        {
+          questionId: "city",
+          answerText: "Shanghai",
+        },
+      ],
+      currentIndex: 0,
+      isFinal: true,
+    })),
+    {
+      type: "direct_question_answer",
+      requestId: "question-freeform-1",
+      answers: [
+        {
+          questionId: "city",
+          answerText: "Shanghai",
+        },
+      ],
+      currentIndex: 0,
+      isFinal: true,
+    },
+  );
+});
+
+test("deriveQuestionnairePayloadFromReplyText extracts numbered freeform questions from reply text", () => {
+  const payload = deriveQuestionnairePayloadFromReplyText([
+    "已实际调用内置提问工具。工具结果不是失败，而是已进入“等待用户作答”的状态。",
+    "请用简短答案回复下面 3 个测试问题。",
+    "1. 你最喜欢的颜色是什么？",
+    "2. 你现在所在的城市是哪里？",
+    "3. 你今天想喝什么？",
+    "你可以直接按“1. … 2. … 3. …”的格式回答。",
+  ].join("\n"));
+  assert.equal(payload?.title, "/question");
+  assert.equal(payload?.questions.length, 3);
+  assert.equal(payload?.questions[0]?.kind, "freeform");
+  assert.equal(payload?.questions[0]?.prompt, "你最喜欢的颜色是什么？");
 });
 
 test("parseCoreActionEnvelope parses reply and capability_call envelopes", () => {
@@ -1139,4 +1185,29 @@ test("summarizeToolOutputForCore exposes search.ground partial status and error 
   assert.match(text, /"sourceCount": 0/u);
   assert.match(text, /"citationCount": 0/u);
   assert.match(text, /"code": "websearch_evidence_missing"/u);
+});
+
+test("updateLiveCliViewerSnapshots stores the latest cmp and mp snapshots on state", () => {
+  const state = {} as {
+    latestCmpViewerSnapshot?: unknown;
+    latestMpViewerSnapshot?: unknown;
+  };
+  const cmp = {
+    summaryLines: ["cmp"],
+    status: "ready" as const,
+    sourceKind: "cmp_readback" as const,
+    entries: [],
+  };
+  const mp = {
+    summaryLines: ["mp"],
+    status: "ready" as const,
+    sourceKind: "lancedb" as const,
+    sourceClass: "lancedb",
+    entries: [],
+  };
+
+  updateLiveCliViewerSnapshots(state, { cmp, mp });
+
+  assert.equal(state.latestCmpViewerSnapshot, cmp);
+  assert.equal(state.latestMpViewerSnapshot, mp);
 });

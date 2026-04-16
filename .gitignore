@@ -47,6 +47,7 @@ src/.cmp-worktrees/
 # Agent runtime scratch state
 .raxode/agents/*.json
 .raxode/rewind/
+.raxode/sessions/
 
 # Large local generated/runtime artifacts regenerated from source state
 memory/generated/

@@ -34,6 +34,7 @@ export type RaxcodeProviderSlot = "openai" | "anthropic" | "anthropicAlt" | "dee
 export type RaxcodeReasoningEffort = "low" | "medium" | "high" | "xhigh" | "none" | "minimal";
 export type RaxcodeBootstrapSource = "manual" | "import" | "oauth";
 export type RaxcodeAuthMode = "api_key" | "chatgpt_oauth";
+export type RaxcodeAnimationMode = "fresh" | "resume" | "off";
 
 export type RaxcodeRoleId =
   | "core.main"
@@ -150,6 +151,7 @@ export interface RaxcodeRoleBinding {
 
 export interface RaxcodeUiConfig {
   language: string;
+  animationMode: RaxcodeAnimationMode;
   startupView: string;
   defaultAgentsView: string;
   slashMenuStyle: string;
@@ -247,6 +249,7 @@ export function isRaxcodeRoleId(value: string): value is RaxcodeRoleId {
 
 const DEFAULT_UI_CONFIG: RaxcodeUiConfig = {
   language: "zh-CN",
+  animationMode: "fresh",
   startupView: "chat",
   defaultAgentsView: "list",
   slashMenuStyle: "ordered",
@@ -875,6 +878,7 @@ function loadConfigFile(filePath: string): RaxcodeConfigFile {
     },
     ui: {
       language: asOptionalString(ui.language) ?? DEFAULT_UI_CONFIG.language,
+      animationMode: (asOptionalString(ui.animationMode) ?? DEFAULT_UI_CONFIG.animationMode) as RaxcodeAnimationMode,
       startupView: asOptionalString(ui.startupView) ?? DEFAULT_UI_CONFIG.startupView,
       defaultAgentsView: asOptionalString(ui.defaultAgentsView) ?? DEFAULT_UI_CONFIG.defaultAgentsView,
       slashMenuStyle: asOptionalString(ui.slashMenuStyle) ?? DEFAULT_UI_CONFIG.slashMenuStyle,

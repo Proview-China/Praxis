@@ -3,9 +3,11 @@ import test from "node:test";
 
 import { createSurfaceMessage } from "../surface/types.js";
 import {
+  deriveDirectTuiCmpStatusDescriptor,
   hasDirectTuiFormalConversation,
   resolveDirectTuiAssistantTurnResultAction,
   resolveDirectTuiConversationPhase,
+  shouldBreakDirectTuiAssistantSegmentOnStageStart,
   shouldRenderDirectTuiConversationHeader,
 } from "./direct-tui-presentation.js";
 
@@ -122,5 +124,53 @@ test("turn_result is a noop when the final answer already matches streamed text"
     activeMessageId: "assistant:turn-2:1",
   }), {
     kind: "noop",
+  });
+});
+
+test("background cmp stages do not break an in-flight assistant segment", () => {
+  assert.equal(shouldBreakDirectTuiAssistantSegmentOnStageStart("cmp/icma"), false);
+  assert.equal(shouldBreakDirectTuiAssistantSegmentOnStageStart("cmp/dbagent"), false);
+  assert.equal(shouldBreakDirectTuiAssistantSegmentOnStageStart("core/run"), false);
+});
+
+test("foreground tool stages still break assistant segments by default", () => {
+  assert.equal(shouldBreakDirectTuiAssistantSegmentOnStageStart("core/capability_bridge"), true);
+  assert.equal(shouldBreakDirectTuiAssistantSegmentOnStageStart("workspace/readback"), true);
+  assert.equal(shouldBreakDirectTuiAssistantSegmentOnStageStart(undefined), true);
+});
+
+test("cmp status descriptor animates only for active cmp stages", () => {
+  assert.deepEqual(deriveDirectTuiCmpStatusDescriptor({
+    activeStage: "cmp/icma",
+  }), {
+    label: "CMP icma running",
+    animated: true,
+    tone: "active",
+  });
+});
+
+test("cmp status descriptor surfaces degraded readback without pretending it is running", () => {
+  assert.deepEqual(deriveDirectTuiCmpStatusDescriptor({
+    snapshot: {
+      status: "degraded",
+      readbackStatus: "degraded",
+    },
+  }), {
+    label: "CMP readback degraded",
+    animated: false,
+    tone: "warning",
+  });
+});
+
+test("cmp status descriptor distinguishes ready empty from active work", () => {
+  assert.deepEqual(deriveDirectTuiCmpStatusDescriptor({
+    snapshot: {
+      status: "empty",
+      readbackStatus: "ready",
+    },
+  }), {
+    label: "CMP ready but empty",
+    animated: false,
+    tone: "muted",
   });
 });

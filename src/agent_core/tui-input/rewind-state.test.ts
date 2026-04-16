@@ -32,6 +32,17 @@ test("rewind turn options list current-session user turns in reverse order and s
         text: "second turn",
         createdAt: "2026-04-14T00:00:03.000Z",
       }),
+      createSurfaceMessage({
+        messageId: "status:2:tool",
+        turnId: "2",
+        kind: "status",
+        text: "tool summary",
+        createdAt: "2026-04-14T00:00:04.000Z",
+        metadata: {
+          source: "tool_summary",
+          familyKey: "websearch",
+        },
+      }),
     ],
     checkpoints: [{
       sessionId: "session-1",
@@ -42,6 +53,8 @@ test("rewind turn options list current-session user turns in reverse order and s
       transcriptCutMessageId: "assistant:1:1",
       createdAt: "2026-04-14T00:00:02.000Z",
       userText: "first turn",
+      displayUserText: "first turn",
+      displayUserTextSource: "raw",
       workspaceRoot: "/tmp/workspace",
       workspaceCheckpointRef: "refs/checkpoints/1",
       workspaceCheckpointCommit: "abc123",
@@ -51,8 +64,11 @@ test("rewind turn options list current-session user turns in reverse order and s
   assert.deepEqual(options.map((entry) => entry.turnId), ["2", "1"]);
   assert.deepEqual(options.map((entry) => entry.turnIndex), [2, 1]);
   assert.equal(options[0]?.workspaceCheckpointRef, undefined);
+  assert.equal(options[0]?.displayUserText, "second turn");
+  assert.equal(options[0]?.checkpointLabel, "tool-used-no-checkpoint");
   assert.equal(options[1]?.workspaceCheckpointCommit, "abc123");
   assert.equal(options[1]?.transcriptCutMessageId, "assistant:1:1");
+  assert.equal(options[1]?.checkpointLabel, "workspace-ready");
 });
 
 test("rewind mode options disable workspace modes when no workspace checkpoint exists", () => {
@@ -64,10 +80,64 @@ test("rewind mode options disable workspace modes when no workspace checkpoint e
     messageId: "user:2",
     createdAt: "2026-04-14T00:00:03.000Z",
     userText: "second turn",
+    displayUserText: "second turn",
+    checkpointState: "conversation_only",
+    checkpointLabel: "conversation-only",
   });
   assert.equal(disabledModes[0]?.disabled, true);
   assert.equal(disabledModes[1]?.disabled, false);
   assert.equal(disabledModes[2]?.disabled, true);
+});
+
+test("rewind mode options surface normalized checkpoint reasons without raw prefixes", () => {
+  const modes = buildDirectTuiRewindModeOptions({
+    sessionId: "session-1",
+    agentId: "agent.core:main",
+    turnId: "2",
+    turnIndex: 2,
+    messageId: "user:2",
+    createdAt: "2026-04-14T00:00:03.000Z",
+    userText: "second turn",
+    displayUserText: "second turn",
+    workspaceCheckpointError: "ENOENT: no such file or directory, scandir '/home/proview/[I\ufffd\ufffdgb'",
+    workspaceCheckpointErrorCode: "workspace_unavailable",
+    checkpointState: "checkpoint_error",
+    checkpointLabel: "checkpoint-error",
+  });
+  assert.equal(modes[0]?.reason, "当前工作区路径不可用，所以这轮没有建立工作区快照。");
+  assert.equal(modes[2]?.reason, "当前工作区路径不可用，所以这轮没有建立工作区快照。");
+});
+
+test("rewind turn options prefer short labels for structured checkpoint failures", () => {
+  const options = buildDirectTuiRewindTurnOptions({
+    messages: [
+      createSurfaceMessage({
+        messageId: "user:turn-1",
+        turnId: "turn-1",
+        kind: "user",
+        text: "你好",
+        createdAt: "2026-04-14T00:00:01.000Z",
+      }),
+    ],
+    checkpoints: [{
+      sessionId: "session-1",
+      agentId: "agent.core:main",
+      turnId: "turn-1",
+      turnIndex: 1,
+      messageId: "user:turn-1",
+      createdAt: "2026-04-14T00:00:01.000Z",
+      userText: "你好",
+      displayUserText: "你好",
+      displayUserTextSource: "raw",
+      workspaceRoot: "/tmp/workspace",
+      workspaceCheckpointError: "workspace path unavailable",
+      workspaceCheckpointErrorCode: "workspace_unavailable",
+      workspaceCheckpointErrorOrigin: "workspace_root",
+      workspaceCheckpointErrorMessage: "ENOENT: no such file or directory",
+    }],
+  });
+
+  assert.equal(options[0]?.checkpointLabel, "workspace-unavailable");
 });
 
 test("rewindSurfaceStateToTurn trims transcript, turns, tasks, and session pointers", () => {
@@ -157,7 +227,7 @@ test("rewindSurfaceStateToTurn trims transcript, turns, tasks, and session point
     ],
   });
 
-  const rewound = rewindSurfaceStateToTurn(state, "1", "2026-04-14T00:00:06.000Z", "assistant:1:1");
+  const rewound = rewindSurfaceStateToTurn(state, "2", "2026-04-14T00:00:06.000Z", "assistant:1:1");
   assert.deepEqual(rewound.messages.map((message) => message.messageId), ["user:1", "assistant:1:1"]);
   assert.deepEqual(rewound.turns.map((turn) => turn.turnId), ["1"]);
   assert.deepEqual(rewound.tasks.map((task) => task.taskId), ["task:1"]);
@@ -190,4 +260,35 @@ test("buildDirectTuiRewindTurnOptions parses direct-tui turn ids like turn-12", 
   assert.deepEqual(options.map((entry) => entry.turnId), ["turn-12", "turn-9"]);
   assert.deepEqual(options.map((entry) => entry.turnIndex), [12, 9]);
   assert.deepEqual(options.map((entry) => entry.agentId), ["agent.core:main", "agent.core:main"]);
+  assert.deepEqual(options.map((entry) => entry.displayUserText), ["twelfth", "ninth"]);
+  assert.deepEqual(options.map((entry) => entry.checkpointLabel), ["conversation-only", "conversation-only"]);
+});
+
+test("rewind turn options prefer stored displayUserText over the raw prompt", () => {
+  const options = buildDirectTuiRewindTurnOptions({
+    messages: [
+      createSurfaceMessage({
+        messageId: "user:turn-20",
+        turnId: "turn-20",
+        kind: "user",
+        text: "这是一个非常长的原始提示词，需要在 rewind 面板里显示压缩摘要。",
+        createdAt: "2026-04-14T00:00:20.000Z",
+      }),
+    ],
+    checkpoints: [{
+      sessionId: "session-1",
+      agentId: "agent.core:main",
+      turnId: "turn-20",
+      turnIndex: 20,
+      messageId: "user:turn-20",
+      createdAt: "2026-04-14T00:00:20.000Z",
+      userText: "这是一个非常长的原始提示词，需要在 rewind 面板里显示压缩摘要。",
+      displayUserText: "长提示词摘要",
+      displayUserTextSource: "mini_summary",
+      workspaceRoot: "/tmp/workspace",
+    }],
+  });
+
+  assert.equal(options[0]?.displayUserText, "长提示词摘要");
+  assert.equal(options[0]?.userText, "这是一个非常长的原始提示词，需要在 rewind 面板里显示压缩摘要。");
 });

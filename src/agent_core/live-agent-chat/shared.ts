@@ -81,6 +81,8 @@ export interface CoreTurnArtifacts {
   usage?: {
     inputTokens?: number;
     outputTokens?: number;
+    thinkingTokens?: number;
+    estimated?: boolean;
   };
   eventTypes: string[];
   plannerRawAnswer?: string;
@@ -216,6 +218,54 @@ export interface LiveCliWorkspaceInitContext {
   freshness: "fresh" | "changed";
 }
 
+export interface CmpPanelSnapshotEntry {
+  sectionId: string;
+  lifecycle: string;
+  kind: string;
+  agentId: string;
+  ref: string;
+  updatedAt: string;
+}
+
+export interface CmpPanelSnapshotPayload {
+  summaryLines: string[];
+  status: "booting" | "ready" | "empty" | "degraded";
+  sourceKind: "warming_up" | "cmp_readback" | "runtime_fallback";
+  emptyReason?: string;
+  truthStatus?: string;
+  readbackStatus?: string;
+  detailLines?: string[];
+  roleLines?: string[];
+  requestLines?: string[];
+  issueLines?: string[];
+  entries: CmpPanelSnapshotEntry[];
+}
+
+export interface MpPanelSnapshotEntry {
+  memoryId: string;
+  label: string;
+  summary: string;
+  agentId?: string;
+  scopeLevel?: string;
+  updatedAt?: string;
+  bodyRef?: string;
+}
+
+export interface MpPanelSnapshotPayload {
+  summaryLines: string[];
+  status: "booting" | "ready" | "empty" | "degraded";
+  sourceKind: "warming_up" | "lancedb" | "mp_overlay" | "repo_memory_fallback";
+  emptyReason?: string;
+  sourceClass: string;
+  rootPath?: string;
+  recordCount?: number;
+  detailLines?: string[];
+  roleLines?: string[];
+  flowLines?: string[];
+  issueLines?: string[];
+  entries: MpPanelSnapshotEntry[];
+}
+
 export interface LiveCliState {
   runtime: LiveCliRuntime;
   sessionId: string;
@@ -228,6 +278,8 @@ export interface LiveCliState {
   mpRoutedPackage?: import("../core-prompt/types.js").CoreMpRoutedPackageV1;
   workspaceInitContext?: LiveCliWorkspaceInitContext;
   latestCmp?: CmpTurnArtifacts;
+  latestCmpViewerSnapshot?: CmpPanelSnapshotPayload;
+  latestMpViewerSnapshot?: MpPanelSnapshotPayload;
   pendingCmpSync?: Promise<void>;
   cmpInfraReady?: Promise<void>;
   skillOverlayReady?: Promise<void>;
@@ -267,6 +319,21 @@ export interface LiveCliState {
     sourceKind: "init" | "core";
     resumeSeedText?: string;
   };
+}
+
+export function updateLiveCliViewerSnapshots(
+  state: Pick<LiveCliState, "latestCmpViewerSnapshot" | "latestMpViewerSnapshot">,
+  snapshots: {
+    cmp?: CmpPanelSnapshotPayload;
+    mp?: MpPanelSnapshotPayload;
+  },
+): void {
+  if (snapshots.cmp) {
+    state.latestCmpViewerSnapshot = snapshots.cmp;
+  }
+  if (snapshots.mp) {
+    state.latestMpViewerSnapshot = snapshots.mp;
+  }
 }
 
 export interface DirectFallbackReader {
@@ -323,14 +390,29 @@ export interface QuestionAskOption {
   description: string;
 }
 
-export interface QuestionAskQuestion {
+export interface QuestionAskChoiceQuestion {
   id: string;
   prompt: string;
   options: QuestionAskOption[];
   notePrompt?: string;
   allowAnnotation?: boolean;
   required?: boolean;
+  kind?: "choice";
 }
+
+export interface QuestionAskFreeformQuestion {
+  id: string;
+  prompt: string;
+  kind: "freeform";
+  placeholder?: string;
+  notePrompt?: string;
+  allowAnnotation?: boolean;
+  required?: boolean;
+}
+
+export type QuestionAskQuestion =
+  | QuestionAskChoiceQuestion
+  | QuestionAskFreeformQuestion;
 
 export interface QuestionAskPayload {
   requestId: string;
@@ -343,8 +425,9 @@ export interface QuestionAskPayload {
 
 export interface DirectQuestionAnswer {
   questionId: string;
-  selectedOptionId: string;
-  selectedOptionLabel: string;
+  selectedOptionId?: string;
+  selectedOptionLabel?: string;
+  answerText?: string;
   annotation?: string;
 }
 
@@ -354,6 +437,62 @@ export interface DirectQuestionAnswerEnvelope {
   answers: DirectQuestionAnswer[];
   currentIndex?: number;
   isFinal?: boolean;
+}
+
+export function deriveQuestionnairePayloadFromReplyText(text: string): QuestionAskPayload | undefined {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const lines = trimmed
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const questions: QuestionAskPayload["questions"] = [];
+  for (const line of lines) {
+    const match = line.match(/^(\d{1,2})[.)、]\s*(.+)$/u);
+    if (!match) {
+      continue;
+    }
+    questions.push({
+      kind: "freeform",
+      id: `reply_question_${match[1]}`,
+      prompt: match[2].trim(),
+      placeholder: "Type your answer for the current question.",
+      required: true,
+      allowAnnotation: false,
+    });
+  }
+  if (questions.length === 0) {
+    return undefined;
+  }
+  const normalized = trimmed.toLowerCase();
+  const looksLikeQuestionnaire =
+    normalized.includes("questionnaire")
+    || normalized.includes("structured answers")
+    || normalized.includes("please answer")
+    || trimmed.includes("请回答")
+    || trimmed.includes("回答下面")
+    || trimmed.includes("测试问题")
+    || trimmed.includes("你可以直接按");
+  if (!looksLikeQuestionnaire && questions.length < 2) {
+    return undefined;
+  }
+  const instructionLine = lines.find((line) =>
+    !/^(\d{1,2})[.)、]\s*/u.test(line)
+    && !line.startsWith("UserAct")
+    && !line.startsWith("Requesting structured answers")
+    && !line.startsWith("Request:")
+    && !line.startsWith("Reason:")
+    && !line.startsWith("Items:"));
+  return {
+    requestId: "reply-questionnaire-fallback",
+    title: "/question",
+    instruction: instructionLine ?? "Please answer Raxode’s questions so it can continue safely.",
+    sourceKind: "core",
+    questions,
+    submitLabel: "Submit answers",
+  };
 }
 
 export function parseDirectUserInputEnvelope(raw: string): DirectUserInputEnvelope | undefined {
@@ -473,17 +612,22 @@ export function parseDirectQuestionAnswerEnvelope(raw: string): DirectQuestionAn
         return [];
       }
       const record = entry as Record<string, unknown>;
-      if (
-        typeof record.questionId !== "string"
-        || typeof record.selectedOptionId !== "string"
-        || typeof record.selectedOptionLabel !== "string"
-      ) {
+      if (typeof record.questionId !== "string") {
+        return [];
+      }
+      const selectedOptionId = typeof record.selectedOptionId === "string" ? record.selectedOptionId : undefined;
+      const selectedOptionLabel = typeof record.selectedOptionLabel === "string" ? record.selectedOptionLabel : undefined;
+      const answerText = typeof record.answerText === "string" && record.answerText.trim().length > 0
+        ? record.answerText
+        : undefined;
+      if ((!selectedOptionId || !selectedOptionLabel) && !answerText) {
         return [];
       }
       return [{
         questionId: record.questionId,
-        selectedOptionId: record.selectedOptionId,
-        selectedOptionLabel: record.selectedOptionLabel,
+        ...(selectedOptionId ? { selectedOptionId } : {}),
+        ...(selectedOptionLabel ? { selectedOptionLabel } : {}),
+        ...(answerText ? { answerText } : {}),
         ...(typeof record.annotation === "string" && record.annotation.trim().length > 0
           ? { annotation: record.annotation }
           : {}),

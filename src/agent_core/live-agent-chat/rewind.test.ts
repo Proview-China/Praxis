@@ -24,6 +24,11 @@ test("rewindDialogueTranscript trims transcript to the selected turn boundary", 
 });
 
 test("rewindDialogueTranscript rejects invalid targets", () => {
-  assert.throws(() => rewindDialogueTranscript([], 3, 0), /positive turn index/u);
+  assert.deepEqual(rewindDialogueTranscript([], 3, 0), {
+    transcript: [],
+    nextTurnIndex: 0,
+    removedTurns: 3,
+  });
+  assert.throws(() => rewindDialogueTranscript([], 3, -1), /non-negative turn index/u);
   assert.throws(() => rewindDialogueTranscript([], 3, 4), /current turn is 3/u);
 });

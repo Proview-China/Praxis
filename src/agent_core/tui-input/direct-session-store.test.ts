@@ -1,16 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import {
+  buildDirectTuiResumeSelector,
   listDirectTuiAgents,
   listDirectTuiSessions,
   loadDirectTuiSessionSnapshot,
   renameDirectTuiAgent,
   saveDirectTuiAgent,
   renameDirectTuiSession,
+  resolveDirectTuiSessionSelection,
   resolveDirectTuiSnapshotTurnIndex,
   restoreDirectTuiDialogueTurnsFromSnapshot,
   saveDirectTuiSessionSnapshot,
@@ -18,6 +20,7 @@ import {
 
 test("direct session store saves, lists, loads, and renames snapshots", () => {
   const home = mkdtempSync(join(tmpdir(), "praxis-direct-session-store-"));
+  const workspace = mkdtempSync(join(tmpdir(), "praxis-direct-session-workspace-"));
   const oldHome = process.env.RAXCODE_HOME;
   process.env.RAXCODE_HOME = home;
 
@@ -27,13 +30,13 @@ test("direct session store saves, lists, loads, and renames snapshots", () => {
       sessionId: "session-1",
       agentId: "agent.core:main",
       name: "session one",
-      workspace: "/tmp/workspace",
+      workspace,
       route: "https://example.test",
       model: "gpt-5.4",
       createdAt: "2026-04-14T00:00:00.000Z",
       updatedAt: "2026-04-14T00:00:01.000Z",
       compiledInitPreamble: "Project initialization context",
-      initArtifactPath: "/tmp/workspace/memory/generated/init-context.md",
+      initArtifactPath: `${workspace}/memory/generated/init-context.md`,
       agents: [],
       messages: [
         {
@@ -50,14 +53,15 @@ test("direct session store saves, lists, loads, and renames snapshots", () => {
           },
         },
       ],
-    }, home);
+    }, workspace);
 
-    const listed = listDirectTuiSessions(home);
+    const listed = listDirectTuiSessions(workspace);
     assert.equal(listed.length, 1);
     assert.equal(listed[0]?.name, "session one");
     assert.equal(listed[0]?.lastAssistantText, "hello");
+    assert.equal(existsSync(join(workspace, ".raxode", "sessions", "index.json")), true);
 
-    const loaded = loadDirectTuiSessionSnapshot("session-1", home);
+    const loaded = loadDirectTuiSessionSnapshot("session-1", workspace);
     assert.equal(loaded?.sessionId, "session-1");
     assert.equal(loaded?.agentId, "agent.core:main");
     assert.equal(loaded?.messages.length, 1);
@@ -66,11 +70,11 @@ test("direct session store saves, lists, loads, and renames snapshots", () => {
     assert.deepEqual(loaded?.messages[0]?.metadata, { source: "tool_summary" });
     assert.deepEqual(loaded?.agents, []);
     assert.equal(loaded?.compiledInitPreamble, "Project initialization context");
-    assert.equal(loaded?.initArtifactPath, "/tmp/workspace/memory/generated/init-context.md");
+    assert.equal(loaded?.initArtifactPath, `${workspace}/memory/generated/init-context.md`);
 
-    renameDirectTuiSession("session-1", "renamed session", home);
-    assert.equal(listDirectTuiSessions(home)[0]?.name, "renamed session");
-    assert.equal(loadDirectTuiSessionSnapshot("session-1", home)?.name, "renamed session");
+    renameDirectTuiSession("session-1", "renamed session", workspace);
+    assert.equal(listDirectTuiSessions(workspace)[0]?.name, "renamed session");
+    assert.equal(loadDirectTuiSessionSnapshot("session-1", workspace)?.name, "renamed session");
   } finally {
     if (oldHome === undefined) {
       delete process.env.RAXCODE_HOME;
@@ -78,11 +82,13 @@ test("direct session store saves, lists, loads, and renames snapshots", () => {
       process.env.RAXCODE_HOME = oldHome;
     }
     rmSync(home, { recursive: true, force: true });
+    rmSync(workspace, { recursive: true, force: true });
   }
 });
 
 test("direct session store reads legacy snapshots with agentLabels and no agents", () => {
   const home = mkdtempSync(join(tmpdir(), "praxis-direct-session-store-legacy-"));
+  const workspace = mkdtempSync(join(tmpdir(), "praxis-direct-session-legacy-workspace-"));
   const oldHome = process.env.RAXCODE_HOME;
   process.env.RAXCODE_HOME = home;
 
@@ -90,12 +96,12 @@ test("direct session store reads legacy snapshots with agentLabels and no agents
     const sessionsDir = join(home, "sessions");
     mkdirSync(sessionsDir, { recursive: true });
     writeFileSync(join(sessionsDir, "direct-tui-index.json"), `${JSON.stringify({
-      schemaVersion: 1,
-      sessions: [{
-        sessionId: "legacy-session",
-        name: "legacy",
-        workspace: "/tmp/workspace",
-        route: "https://example.test",
+        schemaVersion: 1,
+        sessions: [{
+          sessionId: "legacy-session",
+          name: "legacy",
+          workspace,
+          route: "https://example.test",
         model: "gpt-5.4",
         createdAt: "2026-04-14T00:00:00.000Z",
         updatedAt: "2026-04-14T00:00:01.000Z",
@@ -107,7 +113,7 @@ test("direct session store reads legacy snapshots with agentLabels and no agents
       sessionId: "legacy-session",
       agentId: "agent.core:legacy-session",
       name: "legacy",
-      workspace: "/tmp/workspace",
+      workspace,
       route: "https://example.test",
       model: "gpt-5.4",
       createdAt: "2026-04-14T00:00:00.000Z",
@@ -119,7 +125,7 @@ test("direct session store reads legacy snapshots with agentLabels and no agents
       messages: [],
     }, null, 2)}\n`, "utf8");
 
-    const loaded = loadDirectTuiSessionSnapshot("legacy-session", home);
+    const loaded = loadDirectTuiSessionSnapshot("legacy-session", workspace);
     assert.equal(loaded?.agentId, "agent.core:legacy-session");
     assert.equal(loaded?.selectedAgentId, "agent.core:legacy-session");
     assert.deepEqual(loaded?.agents, []);
@@ -133,11 +139,124 @@ test("direct session store reads legacy snapshots with agentLabels and no agents
       process.env.RAXCODE_HOME = oldHome;
     }
     rmSync(home, { recursive: true, force: true });
+    rmSync(workspace, { recursive: true, force: true });
   }
+});
+
+test("direct session store falls back to the current workspace when snapshot workspace is invalid", () => {
+  const home = mkdtempSync(join(tmpdir(), "praxis-direct-session-store-invalid-"));
+  const workspace = mkdtempSync(join(tmpdir(), "praxis-direct-session-invalid-workspace-"));
+  const oldHome = process.env.RAXCODE_HOME;
+  process.env.RAXCODE_HOME = home;
+
+  try {
+    saveDirectTuiSessionSnapshot({
+      schemaVersion: 1,
+      sessionId: "session-invalid-workspace",
+      agentId: "agent.core:main",
+      name: "invalid workspace",
+      workspace,
+      route: "https://example.test",
+      model: "gpt-5.4",
+      createdAt: "2026-04-14T00:00:00.000Z",
+      updatedAt: "2026-04-14T00:00:01.000Z",
+      agents: [],
+      messages: [],
+    }, workspace);
+
+    const snapshotPath = join(workspace, ".raxode", "sessions", "session-invalid-workspace.json");
+    writeFileSync(snapshotPath, `${JSON.stringify({
+      schemaVersion: 1,
+      sessionId: "session-invalid-workspace",
+      agentId: "agent.core:main",
+      name: "invalid workspace",
+      workspace: "/home/proview/[I\ufffd\ufffdgb",
+      route: "https://example.test",
+      model: "gpt-5.4",
+      createdAt: "2026-04-14T00:00:00.000Z",
+      updatedAt: "2026-04-14T00:00:01.000Z",
+      agents: [],
+      messages: [],
+    }, null, 2)}\n`, "utf8");
+
+    const loaded = loadDirectTuiSessionSnapshot("session-invalid-workspace", workspace);
+    assert.equal(loaded?.workspace, workspace);
+  } finally {
+    if (oldHome === undefined) {
+      delete process.env.RAXCODE_HOME;
+    } else {
+      process.env.RAXCODE_HOME = oldHome;
+    }
+    rmSync(home, { recursive: true, force: true });
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("direct session selector resolves exact ids, names, and unique prefixes", () => {
+  const home = mkdtempSync(join(tmpdir(), "praxis-direct-session-select-"));
+  const workspace = mkdtempSync(join(tmpdir(), "praxis-direct-session-select-workspace-"));
+  const oldHome = process.env.RAXCODE_HOME;
+  process.env.RAXCODE_HOME = home;
+
+  try {
+    saveDirectTuiSessionSnapshot({
+      schemaVersion: 1,
+      sessionId: "direct-100",
+      agentId: "agent.core:main",
+      name: "alpha",
+      workspace,
+      route: "https://example.test",
+      model: "gpt-5.4",
+      createdAt: "2026-04-14T00:00:00.000Z",
+      updatedAt: "2026-04-14T00:00:01.000Z",
+      agents: [],
+      messages: [],
+    }, workspace);
+    saveDirectTuiSessionSnapshot({
+      schemaVersion: 1,
+      sessionId: "direct-200",
+      agentId: "agent.core:main",
+      name: "beta",
+      workspace,
+      route: "https://example.test",
+      model: "gpt-5.4",
+      createdAt: "2026-04-14T00:00:00.000Z",
+      updatedAt: "2026-04-14T00:00:02.000Z",
+      agents: [],
+      messages: [],
+    }, workspace);
+
+    assert.equal(resolveDirectTuiSessionSelection("direct-100", workspace).session?.sessionId, "direct-100");
+    assert.equal(resolveDirectTuiSessionSelection("alpha", workspace).session?.sessionId, "direct-100");
+    assert.equal(resolveDirectTuiSessionSelection("direct-2", workspace).session?.sessionId, "direct-200");
+    assert.equal(resolveDirectTuiSessionSelection("bet", workspace).session?.sessionId, "direct-200");
+    assert.equal(resolveDirectTuiSessionSelection("missing", workspace).status, "not_found");
+  } finally {
+    if (oldHome === undefined) {
+      delete process.env.RAXCODE_HOME;
+    } else {
+      process.env.RAXCODE_HOME = oldHome;
+    }
+    rmSync(home, { recursive: true, force: true });
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("resume selector prefers unique simple names and falls back to session id", () => {
+  const sessions = [
+    { sessionId: "direct-100", name: "alpha" },
+    { sessionId: "direct-200", name: "needs spaces" },
+    { sessionId: "direct-300", name: "alpha" },
+  ];
+
+  assert.equal(buildDirectTuiResumeSelector(sessions[0], [sessions[0]]), "alpha");
+  assert.equal(buildDirectTuiResumeSelector(sessions[1], sessions), "direct-200");
+  assert.equal(buildDirectTuiResumeSelector(sessions[0], sessions), "direct-100");
 });
 
 test("direct agent registry saves, lists, and renames agents", () => {
   const home = mkdtempSync(join(tmpdir(), "praxis-direct-agent-store-"));
+  const workspace = mkdtempSync(join(tmpdir(), "praxis-direct-agent-workspace-"));
   const oldHome = process.env.RAXCODE_HOME;
   process.env.RAXCODE_HOME = home;
 
@@ -148,15 +267,16 @@ test("direct agent registry saves, lists, and renames agents", () => {
       kind: "core",
       status: "idle",
       summary: "current direct shell agent",
-      workspace: "/tmp/workspace",
+      workspace,
       createdAt: "2026-04-14T00:00:00.000Z",
       updatedAt: "2026-04-14T00:00:01.000Z",
       lastSessionId: "session-1",
-    }, home);
+    }, workspace);
 
-    assert.equal(listDirectTuiAgents(home)[0]?.name, "core");
-    renameDirectTuiAgent("agent.core:main", "renamed core", home);
-    assert.equal(listDirectTuiAgents(home)[0]?.name, "renamed core");
+    assert.equal(listDirectTuiAgents(workspace)[0]?.name, "core");
+    renameDirectTuiAgent("agent.core:main", "renamed core", workspace);
+    assert.equal(listDirectTuiAgents(workspace)[0]?.name, "renamed core");
+    assert.equal(existsSync(join(workspace, ".raxode", "sessions", "direct-tui-agents.json")), true);
   } finally {
     if (oldHome === undefined) {
       delete process.env.RAXCODE_HOME;
@@ -164,6 +284,7 @@ test("direct agent registry saves, lists, and renames agents", () => {
       process.env.RAXCODE_HOME = oldHome;
     }
     rmSync(home, { recursive: true, force: true });
+    rmSync(workspace, { recursive: true, force: true });
   }
 });
 

@@ -110,6 +110,7 @@ import {
   formatTranscript,
   inferStreamLabel,
   extractResponseTextFromPartialEnvelope,
+  type CmpPanelSnapshotPayload,
   type CmpTurnArtifacts,
   type CoreActionEnvelope,
   type CoreCapabilityRequest,
@@ -117,6 +118,7 @@ import {
   LIVE_CHAT_MODEL_PLAN,
   LiveChatLogger,
   type LiveCliState,
+  type MpPanelSnapshotPayload,
   LIVE_CHAT_TAP_OVERRIDE,
   normalizeCoreTaskStatus,
   type ParsedTapRequest,
@@ -126,6 +128,7 @@ import {
   parseDirectQuestionAnswerEnvelope,
   parseDirectUserInputEnvelope,
   parseTapRequest,
+  deriveQuestionnairePayloadFromReplyText,
   type QuestionAskPayload,
   readPositiveInteger,
   readString,
@@ -137,6 +140,7 @@ import {
   trimStructuredValue,
   toTapAgentModelRoute,
   truncate,
+  updateLiveCliViewerSnapshots,
   withStopwatch,
 } from "./live-agent-chat/shared.js";
 import {
@@ -145,12 +149,13 @@ import {
   printCoreArtifacts,
   printDirectAnswer,
   printAgentsViewPlaceholder,
+  printCmpViewerSnapshot,
   printDirectBullet,
   printDirectCapabilities,
   printInitViewPlaceholder,
   printLanguageViewPlaceholder,
   printModelView,
-  printMpViewPlaceholder,
+  printMpViewerSnapshot,
   printPermissionsView,
   printDirectStatus,
   printResumeViewPlaceholder,
@@ -177,6 +182,7 @@ import {
 import {
   createRaxCmpConfig,
   createRaxCmpFacade,
+  createRaxMpFacade,
   rax,
   type RaxCmpPort,
 } from "../rax/index.js";
@@ -206,46 +212,6 @@ import {
 
 let CURRENT_UI_MODE: "full" | "direct" = "full";
 const execFile = promisify(execFileCallback);
-
-interface CmpPanelSnapshotEntry {
-  sectionId: string;
-  lifecycle: string;
-  kind: string;
-  agentId: string;
-  ref: string;
-  updatedAt: string;
-}
-
-interface CmpPanelSnapshotPayload {
-  summaryLines: string[];
-  status: "booting" | "ready" | "empty" | "degraded";
-  sourceKind: "warming_up" | "cmp_readback" | "runtime_fallback";
-  emptyReason?: string;
-  truthStatus?: string;
-  readbackStatus?: string;
-  entries: CmpPanelSnapshotEntry[];
-}
-
-interface MpPanelSnapshotEntry {
-  memoryId: string;
-  label: string;
-  summary: string;
-  agentId?: string;
-  scopeLevel?: string;
-  updatedAt?: string;
-  bodyRef?: string;
-}
-
-interface MpPanelSnapshotPayload {
-  summaryLines: string[];
-  status: "booting" | "ready" | "empty" | "degraded";
-  sourceKind: "warming_up" | "lancedb" | "mp_overlay" | "repo_memory_fallback";
-  emptyReason?: string;
-  sourceClass: string;
-  rootPath?: string;
-  recordCount?: number;
-  entries: MpPanelSnapshotEntry[];
-}
 
 interface CapabilityPanelSnapshotEntry {
   capabilityKey: string;
@@ -321,6 +287,84 @@ interface WorkspaceInitStateRecord {
   artifactPath?: string;
 }
 
+interface CliUsageCounts {
+  inputTokens?: number;
+  outputTokens?: number;
+  thinkingTokens?: number;
+  estimated?: boolean;
+}
+
+function mergeCliUsageCounts(
+  left: CliUsageCounts | undefined,
+  right: CliUsageCounts | undefined,
+): CliUsageCounts | undefined {
+  if (!left && !right) {
+    return undefined;
+  }
+  return {
+    inputTokens: (left?.inputTokens ?? 0) + (right?.inputTokens ?? 0) || undefined,
+    outputTokens: (left?.outputTokens ?? 0) + (right?.outputTokens ?? 0) || undefined,
+    thinkingTokens: (left?.thinkingTokens ?? 0) + (right?.thinkingTokens ?? 0) || undefined,
+    estimated: left?.estimated === true || right?.estimated === true || undefined,
+  };
+}
+
+function readCliUsageCounts(raw: unknown): CliUsageCounts | undefined {
+  if (!raw || typeof raw !== "object") {
+    return undefined;
+  }
+  const record = raw as Record<string, unknown>;
+  const usage = record.usage && typeof record.usage === "object"
+    ? record.usage as Record<string, unknown>
+    : record;
+  const inputTokens = typeof usage.input_tokens === "number"
+    ? usage.input_tokens
+    : typeof usage.prompt_tokens === "number"
+      ? usage.prompt_tokens
+      : typeof usage.inputTokens === "number"
+        ? usage.inputTokens
+        : typeof usage.promptTokenCount === "number"
+          ? usage.promptTokenCount
+          : undefined;
+  const outputTokens = typeof usage.output_tokens === "number"
+    ? usage.output_tokens
+    : typeof usage.completion_tokens === "number"
+      ? usage.completion_tokens
+      : typeof usage.outputTokens === "number"
+        ? usage.outputTokens
+        : typeof usage.candidatesTokenCount === "number"
+          ? usage.candidatesTokenCount
+          : undefined;
+  const outputDetails = usage.output_tokens_details && typeof usage.output_tokens_details === "object"
+    ? usage.output_tokens_details as Record<string, unknown>
+    : undefined;
+  const thinkingTokens = typeof usage.reasoning_tokens === "number"
+    ? usage.reasoning_tokens
+    : typeof usage.thinking_tokens === "number"
+      ? usage.thinking_tokens
+      : typeof usage.thoughtsTokenCount === "number"
+        ? usage.thoughtsTokenCount
+        : typeof outputDetails?.reasoning_tokens === "number"
+          ? outputDetails.reasoning_tokens
+          : undefined;
+  if (inputTokens === undefined && outputTokens === undefined && thinkingTokens === undefined) {
+    return undefined;
+  }
+  return {
+    inputTokens,
+    outputTokens,
+    thinkingTokens,
+  };
+}
+
+function readCliUsageCountsFromMetadata(metadata: unknown): CliUsageCounts | undefined {
+  if (!metadata || typeof metadata !== "object") {
+    return undefined;
+  }
+  const usage = readCliUsageCounts((metadata as Record<string, unknown>).usage);
+  return usage ?? readCliUsageCounts(metadata);
+}
+
 async function executeCliModelInference(
   params: ModelInferenceExecutionParams,
 ): Promise<ModelInferenceExecutionResult> {
@@ -367,7 +411,7 @@ async function executeCliModelInference(
   let printedHeader = false;
   let text = "";
   let emittedAssistantText = "";
-  let capturedUsage: { inputTokens?: number; outputTokens?: number } | undefined;
+  let capturedUsage: CliUsageCounts | undefined;
 
   if (printStream) {
     console.log(`\n[stream ${label}] start ${startStamp}`);
@@ -445,32 +489,6 @@ async function executeCliModelInference(
     });
   };
 
-  const readUsageCounts = (raw: unknown): { inputTokens?: number; outputTokens?: number } | undefined => {
-    if (!raw || typeof raw !== "object") {
-      return undefined;
-    }
-    const record = raw as Record<string, unknown>;
-    const usage = record.usage;
-    if (!usage || typeof usage !== "object") {
-      return undefined;
-    }
-    const usageRecord = usage as Record<string, unknown>;
-    const inputTokens = typeof usageRecord.input_tokens === "number"
-      ? usageRecord.input_tokens
-      : typeof usageRecord.prompt_tokens === "number"
-        ? usageRecord.prompt_tokens
-        : undefined;
-    const outputTokens = typeof usageRecord.output_tokens === "number"
-      ? usageRecord.output_tokens
-      : typeof usageRecord.completion_tokens === "number"
-        ? usageRecord.completion_tokens
-        : undefined;
-    if (inputTokens === undefined && outputTokens === undefined) {
-      return undefined;
-    }
-    return { inputTokens, outputTokens };
-  };
-
   const finishBuffered = async (status: "success" | "buffered_success" | "stream_failed_fallback_buffered" = "success"): Promise<ModelInferenceExecutionResult> => {
     let bufferedText = "";
     let bufferedRaw: Record<string, unknown> | undefined;
@@ -495,7 +513,7 @@ async function executeCliModelInference(
       } as never);
       bufferedRaw = response as unknown as Record<string, unknown>;
       bufferedText = extractTextFromResponseLike(bufferedRaw);
-      capturedUsage = readUsageCounts(bufferedRaw);
+      capturedUsage = readCliUsageCounts(bufferedRaw);
     } else {
       const completion = await client.chat.completions.create({
         model,
@@ -515,7 +533,7 @@ async function executeCliModelInference(
         : undefined;
       bufferedText = typeof message?.content === "string" ? message.content : "";
       bufferedRaw = completion as unknown as Record<string, unknown>;
-      capturedUsage = readUsageCounts(bufferedRaw);
+      capturedUsage = readCliUsageCounts(bufferedRaw);
     }
 
     if (!bufferedText.trim()) {
@@ -639,7 +657,7 @@ async function executeCliModelInference(
             await emitAssistantDeltaFromEnvelopeBuffer(true);
           }
         } else if (event.type === "response.completed" && event.response && typeof event.response === "object") {
-          capturedUsage = readUsageCounts(event.response);
+          capturedUsage = readCliUsageCounts(event.response);
         }
       }
     } else {
@@ -657,7 +675,7 @@ async function executeCliModelInference(
       } as never);
 
       for await (const chunk of stream as unknown as AsyncIterable<Record<string, unknown>>) {
-        capturedUsage = readUsageCounts(chunk) ?? capturedUsage;
+        capturedUsage = readCliUsageCounts(chunk) ?? capturedUsage;
         const choices = Array.isArray(chunk.choices) ? chunk.choices : [];
         const firstChoice = choices[0];
         if (!firstChoice || typeof firstChoice !== "object") {
@@ -1056,10 +1074,7 @@ async function runCoreModelPass(input: {
   dispatchStatus: string;
   capabilityKey?: string;
   capabilityResultStatus?: string;
-  usage?: {
-    inputTokens?: number;
-    outputTokens?: number;
-  };
+  usage?: CliUsageCounts;
   eventTypes: string[];
 }> {
   const readKernelOutputText = (value: unknown): string | undefined => {
@@ -1142,6 +1157,7 @@ async function runCoreModelPass(input: {
     dispatchStatus: result.capabilityDispatch?.status ?? "none",
     capabilityKey: result.capabilityDispatch?.dispatch?.prepared.capabilityKey,
     capabilityResultStatus,
+    usage: readCliUsageCountsFromMetadata(kernelResult?.metadata),
     eventTypes,
   };
 }
@@ -1225,7 +1241,10 @@ async function runCoreActionPlanner(
   userMessage: string,
   cmp?: CmpTurnArtifacts,
   inputImageUrls?: string[],
-): Promise<CoreActionEnvelope> {
+): Promise<{
+  envelope: CoreActionEnvelope;
+  usage?: CliUsageCounts;
+}> {
   const assembly = createCoreActionPlannerAssembly(state, userMessage, cmp);
   const instructionText = assembly.promptText;
   const intent = {
@@ -1263,7 +1282,10 @@ async function runCoreActionPlanner(
 
   const result = await executeCliModelInference({ intent });
   const text = ((result.result.output as { text?: unknown }).text as string | undefined) ?? "";
-  return parseCoreActionEnvelope(text);
+  return {
+    envelope: parseCoreActionEnvelope(text),
+    usage: readCliUsageCountsFromMetadata(result.result.metadata),
+  };
 }
 
 async function runCmpTurn(state: LiveCliState, userMessage: string): Promise<CmpTurnArtifacts> {
@@ -1655,32 +1677,50 @@ async function buildCmpPanelSnapshot(state: LiveCliState): Promise<CmpPanelSnaps
   const dbTruth = summary?.truthLayers.find((layer) => layer.layer === "db")?.status ?? "unknown";
   const readbackStatus = summary?.statusPanel?.health.readbackStatus ?? summary?.status ?? "unknown";
   const objectModelSectionCount = summary?.objectModel?.sectionCount;
+  const truthLines = summary?.truthLayers.map((layer) => `${layer.layer}:${layer.status}`) ?? [];
   const lifecycleSummary = summary?.objectModel?.sectionLifecycleCounts
     ? Object.entries(summary.objectModel.sectionLifecycleCounts)
       .map(([lifecycle, count]) => `${lifecycle}:${count}`)
       .join(", ")
     : "";
+  const detailLines = summary?.statusPanel
+    ? [
+      `truth: ${truthLines.join(", ") || "unknown"}`,
+      `health: infra=${summary.statusPanel.health.liveInfraReady ? "ready" : "degraded"} liveReady=${summary.statusPanel.health.liveLlmReadyCount} fallback=${summary.statusPanel.health.liveLlmFallbackCount} failed=${summary.statusPanel.health.liveLlmFailedCount} drift=${summary.statusPanel.health.deliveryDriftCount} expired=${summary.statusPanel.health.expiredDeliveryCount}`,
+      `readiness: object=${summary.statusPanel.readiness.objectModel} loop=${summary.statusPanel.readiness.fiveAgentLoop} llm=${summary.statusPanel.readiness.liveLlm} infra=${summary.statusPanel.readiness.liveInfra} final=${summary.statusPanel.readiness.finalAcceptance}`,
+    ]
+    : (truthLines.length > 0 ? [`truth: ${truthLines.join(", ")}`] : []);
+  const roleLines = summary?.statusPanel
+    ? Object.entries(summary.statusPanel.roles).map(([role, roleSummary]) =>
+      `${role}: count=${roleSummary.count} stage=${roleSummary.latestStage ?? "idle"} live=${roleSummary.liveStatus ?? "unknown"}${roleSummary.semanticSummary ? ` · ${roleSummary.semanticSummary}` : ""}`)
+    : [];
+  const requestLines = summary?.statusPanel
+    ? [
+      `requests: peerPending=${summary.statusPanel.requests.pendingPeerApprovalCount} peerApproved=${summary.statusPanel.requests.approvedPeerApprovalCount} reinterventionPending=${summary.statusPanel.requests.reinterventionPendingCount} reinterventionServed=${summary.statusPanel.requests.reinterventionServedCount}`,
+    ]
+    : [];
+  const issueLines = summary?.issues?.slice(0, 3) ?? [];
   const sourceKind = (dbTruth !== "unknown" || readbackStatus !== "unknown")
     ? "cmp_readback"
     : "runtime_fallback";
-  const status = entries.length > 0
-    ? "ready"
-    : sourceKind === "cmp_readback" && readbackStatus === "ready"
-      ? "empty"
+  const status = sourceKind !== "cmp_readback"
+    ? "degraded"
+    : readbackStatus === "ready"
+      ? (entries.length > 0 ? "ready" : "empty")
       : "degraded";
   const emptyReason = entries.length > 0
     ? undefined
     : sourceKind === "cmp_readback" && readbackStatus === "ready"
       ? "CMP DB truth is healthy but there are no materialized section records to show yet."
       : sourceKind === "cmp_readback"
-        ? "CMP DB truth is reachable, but CMP readback is not fully healthy yet."
+        ? (issueLines[0] ?? "CMP DB truth is reachable, but CMP readback is not fully healthy yet.")
       : "CMP DB truth is not available in the current runtime yet.";
   return {
     summaryLines: [
       objectModelSectionCount !== undefined
         ? `${objectModelSectionCount} DB-backed sections tracked`
         : `${entries.length} sections tracked`,
-      lifecycleSummary || "No section lifecycle data yet",
+      lifecycleSummary || issueLines[0] || "No section lifecycle data yet",
       `db=${dbTruth} readback=${readbackStatus}`,
     ],
     status,
@@ -1688,6 +1728,10 @@ async function buildCmpPanelSnapshot(state: LiveCliState): Promise<CmpPanelSnaps
     emptyReason,
     truthStatus: dbTruth,
     readbackStatus,
+    detailLines,
+    roleLines,
+    requestLines,
+    issueLines,
     entries,
   };
 }
@@ -1769,12 +1813,57 @@ async function buildMpPanelSnapshot(state: LiveCliState): Promise<MpPanelSnapsho
   const rootPath = resolve(cwd, "memory", "generated", "mp-overlay-cache");
   const projectId = createMpViewerProjectId(cwd);
   const agentId = "main";
+  const mpFacade = createRaxMpFacade();
+  const mpSession = mpFacade.create({
+    config: {
+      projectId,
+      defaultAgentId: agentId,
+      lance: {
+        rootPath,
+      },
+    },
+  });
+  let mpReadbackSummary: Awaited<ReturnType<typeof mpFacade.readback>>["summary"] | undefined;
+  try {
+    await mpFacade.bootstrap({
+      session: mpSession,
+      payload: {
+        projectId,
+        rootPath,
+        agentIds: [agentId],
+      },
+    });
+    const readback = await mpFacade.readback({
+      session: mpSession,
+      projectId,
+    });
+    mpReadbackSummary = readback.summary;
+  } catch {
+    // fall through to LanceDB / overlay truth only
+  }
+  const roleLines = mpReadbackSummary
+    ? Object.entries(mpReadbackSummary.statusPanel.roles).map(([role, roleSummary]) =>
+      `${role}: count=${roleSummary.count} stage=${roleSummary.latestStage ?? "idle"}`)
+    : [];
+  const flowLines = mpReadbackSummary
+    ? [
+      `flow: pendingAlignment=${mpReadbackSummary.statusPanel.flow.pendingAlignmentCount} pendingSupersede=${mpReadbackSummary.statusPanel.flow.pendingSupersedeCount} staleCandidates=${mpReadbackSummary.statusPanel.flow.staleMemoryCandidateCount} passiveReturns=${mpReadbackSummary.statusPanel.flow.passiveReturnCount}`,
+      `readiness: lance=${mpReadbackSummary.statusPanel.readiness.lanceTruth} align=${mpReadbackSummary.statusPanel.readiness.freshnessAlignment} quality=${mpReadbackSummary.statusPanel.readiness.memoryQuality} retrieval=${mpReadbackSummary.statusPanel.readiness.retrievalBundle} final=${mpReadbackSummary.statusPanel.readiness.finalAcceptance}`,
+    ]
+    : ["workflow: mp five-agent readback not observed in the current runtime"];
+  const issueLines = mpReadbackSummary?.issues?.slice(0, 3) ?? [];
   try {
     const lancedbSnapshot = await loadMpLanceViewerEntries({
       rootPath,
       projectId,
       agentId,
     });
+    const sectionRefCount = lancedbSnapshot.entries.filter((entry) => typeof entry.bodyRef === "string" && entry.bodyRef.length > 0).length;
+    const detailLines = [
+      `workflow: ${mpReadbackSummary?.status ?? "unknown"} receipt=${mpReadbackSummary?.receiptAvailable ? "ready" : "missing"} tables=${mpReadbackSummary?.tableCount ?? 0}`,
+      `records: viewer=${lancedbSnapshot.entries.length} storedSectionRefs=${sectionRefCount}`,
+      ...flowLines,
+    ];
     if (lancedbSnapshot.openedTableCount > 0) {
       return {
         summaryLines: [
@@ -1784,7 +1873,9 @@ async function buildMpPanelSnapshot(state: LiveCliState): Promise<MpPanelSnapsho
           `source=lancedb · ${rootPath}`,
           `${lancedbSnapshot.entries.length} memory records`,
         ],
-        status: lancedbSnapshot.entries.length > 0 ? "ready" : "empty",
+        status: lancedbSnapshot.entries.length > 0
+          ? (mpReadbackSummary?.status === "ready" ? "ready" : "degraded")
+          : "empty",
         sourceKind: "lancedb",
         sourceClass: "lancedb",
         emptyReason: lancedbSnapshot.entries.length > 0
@@ -1792,6 +1883,10 @@ async function buildMpPanelSnapshot(state: LiveCliState): Promise<MpPanelSnapsho
           : "No LanceDB memory records were found for the current project.",
         rootPath,
         recordCount: lancedbSnapshot.entries.length,
+        detailLines,
+        roleLines,
+        flowLines,
+        issueLines,
         entries: lancedbSnapshot.entries,
       };
     }
@@ -1813,7 +1908,7 @@ async function buildMpPanelSnapshot(state: LiveCliState): Promise<MpPanelSnapsho
     : fallbackEntries;
   const sourceClass = state.mpRoutedPackage?.sourceClass ?? "repo_memory_fallback";
   const sourceKind = sourceClass === "repo_memory_fallback" ? "repo_memory_fallback" : "mp_overlay";
-  const status = entries.length > 0 ? "ready" : "empty";
+  const status = entries.length > 0 ? "degraded" : "empty";
   return {
     summaryLines: [
       state.mpRoutedPackage?.summary ?? (entries.length > 0 ? "MP memory overlay is available." : "MP snapshot unavailable"),
@@ -1826,6 +1921,14 @@ async function buildMpPanelSnapshot(state: LiveCliState): Promise<MpPanelSnapsho
     sourceClass,
     rootPath,
     recordCount: entries.length,
+    detailLines: [
+      `workflow: ${mpReadbackSummary?.status ?? "unknown"} receipt=${mpReadbackSummary?.receiptAvailable ? "ready" : "missing"} tables=${mpReadbackSummary?.tableCount ?? 0}`,
+      `records: viewer=${entries.length} source=${sourceClass}`,
+      ...flowLines,
+    ],
+    roleLines,
+    flowLines,
+    issueLines: issueLines.length > 0 ? issueLines : ["viewer is showing overlay/fallback records, not live LanceDB-backed runtime truth"],
     entries: entries.map((entry) => ({
       memoryId: entry.id.replace(/^memory:/u, ""),
       label: entry.label,
@@ -2424,7 +2527,8 @@ function formatQuestionAnswersAsClarifications(input: {
   prompt?: QuestionAskPayload;
   answers: Array<{
     questionId: string;
-    selectedOptionLabel: string;
+    selectedOptionLabel?: string;
+    answerText?: string;
     annotation?: string;
   }>;
 }): string[] {
@@ -2432,7 +2536,7 @@ function formatQuestionAnswersAsClarifications(input: {
     const prompt = input.prompt?.questions.find((question) => question.id === answer.questionId);
     return [
       prompt?.prompt ?? answer.questionId,
-      `选择: ${answer.selectedOptionLabel}`,
+      answer.answerText ? `回答: ${answer.answerText}` : `选择: ${answer.selectedOptionLabel ?? "(missing)"}`,
       answer.annotation ? `备注: ${answer.annotation}` : undefined,
     ].filter((part): part is string => Boolean(part)).join(" | ");
   });
@@ -2442,7 +2546,8 @@ function formatQuestionAnswersAsUserMessage(input: {
   prompt?: QuestionAskPayload;
   answers: Array<{
     questionId: string;
-    selectedOptionLabel: string;
+    selectedOptionLabel?: string;
+    answerText?: string;
     annotation?: string;
   }>;
 }): string {
@@ -2453,7 +2558,7 @@ function formatQuestionAnswersAsUserMessage(input: {
       const prompt = input.prompt?.questions.find((question) => question.id === answer.questionId);
       return [
         `- ${prompt?.prompt ?? answer.questionId}`,
-        `  answer: ${answer.selectedOptionLabel}`,
+        `  answer: ${answer.answerText ?? answer.selectedOptionLabel ?? "(missing)"}`,
         ...(answer.annotation ? [`  note: ${answer.annotation}`] : []),
       ];
     }),
@@ -2476,6 +2581,7 @@ function normalizeQuestionAskPayload(input: unknown): QuestionAskPayload | undef
     const prompt = typeof item.prompt === "string"
       ? item.prompt.trim()
       : (typeof item.question === "string" ? item.question.trim() : "");
+    const questionKind = item.kind === "freeform" ? "freeform" : "choice";
     const options = Array.isArray(item.options)
       ? item.options.flatMap((candidate) => {
         if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
@@ -2496,7 +2602,23 @@ function normalizeQuestionAskPayload(input: unknown): QuestionAskPayload | undef
         }];
       })
       : [];
-    if (typeof item.id !== "string" || !prompt || options.length === 0) {
+    if (typeof item.id !== "string" || !prompt) {
+      return [];
+    }
+    if (questionKind === "freeform") {
+      return [{
+        kind: "freeform",
+        id: item.id,
+        prompt,
+        ...(typeof item.placeholder === "string" && item.placeholder.trim().length > 0
+          ? { placeholder: item.placeholder }
+          : {}),
+        ...(typeof item.notePrompt === "string" && item.notePrompt.trim().length > 0 ? { notePrompt: item.notePrompt } : {}),
+        ...(typeof item.allowAnnotation === "boolean" ? { allowAnnotation: item.allowAnnotation } : {}),
+        ...(typeof item.required === "boolean" ? { required: item.required } : {}),
+      }];
+    }
+    if (options.length === 0) {
       return [];
     }
     return [{
@@ -2545,6 +2667,7 @@ function normalizeRequestUserInputPayload(input: unknown): QuestionAskPayload | 
     const prompt = typeof item.question === "string"
       ? item.question.trim()
       : (typeof item.prompt === "string" ? item.prompt.trim() : "");
+    const questionKind = item.kind === "freeform" ? "freeform" : "choice";
     const options = Array.isArray(item.options)
       ? item.options.flatMap((candidate, optionIndex) => {
         if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
@@ -2569,7 +2692,25 @@ function normalizeRequestUserInputPayload(input: unknown): QuestionAskPayload | 
     const questionId = typeof item.id === "string" && item.id.trim().length > 0
       ? item.id
       : `request_user_input_${questionIndex + 1}`;
-    if (!prompt || options.length === 0) {
+    if (!prompt) {
+      return [];
+    }
+    if (questionKind === "freeform") {
+      return [{
+        kind: "freeform",
+        id: questionId,
+        prompt,
+        ...(typeof item.placeholder === "string" && item.placeholder.trim().length > 0
+          ? { placeholder: item.placeholder }
+          : {}),
+        ...(typeof item.notePrompt === "string" && item.notePrompt.trim().length > 0
+          ? { notePrompt: item.notePrompt }
+          : {}),
+        allowAnnotation: typeof item.allowAnnotation === "boolean" ? item.allowAnnotation : false,
+        ...(typeof item.required === "boolean" ? { required: item.required } : {}),
+      }];
+    }
+    if (options.length === 0) {
       return [];
     }
     return [{
@@ -2638,16 +2779,57 @@ function createBootingMpPanelSnapshot(cwd: string): MpPanelSnapshotPayload {
   };
 }
 
+function createUnavailableCmpPanelSnapshot(error: unknown): CmpPanelSnapshotPayload {
+  const message = error instanceof Error ? error.message : String(error);
+  return {
+    summaryLines: [
+      "CMP snapshot unavailable",
+      message,
+      "db=unknown readback=unknown",
+    ],
+    status: "degraded",
+    sourceKind: "runtime_fallback",
+    emptyReason: message,
+    truthStatus: "unknown",
+    readbackStatus: "unknown",
+    entries: [],
+  };
+}
+
+function createUnavailableMpPanelSnapshot(cwd: string, error: unknown): MpPanelSnapshotPayload {
+  const message = error instanceof Error ? error.message : String(error);
+  return {
+    summaryLines: [
+      "MP snapshot unavailable",
+      message,
+      "0 memory records",
+    ],
+    status: "degraded",
+    sourceKind: "repo_memory_fallback",
+    emptyReason: message,
+    sourceClass: "runtime_error",
+    rootPath: resolve(cwd, "memory", "generated", "mp-overlay-cache"),
+    recordCount: 0,
+    entries: [],
+  };
+}
+
 async function emitInitialViewerPanelSnapshots(state: LiveCliState): Promise<void> {
   const cwd = process.cwd();
+  const cmpSnapshot = createBootingCmpPanelSnapshot();
+  const mpSnapshot = createBootingMpPanelSnapshot(cwd);
+  updateLiveCliViewerSnapshots(state, {
+    cmp: cmpSnapshot,
+    mp: mpSnapshot,
+  });
   await Promise.all([
     state.logger.log("panel_snapshot", {
       panel: "cmp",
-      snapshot: createBootingCmpPanelSnapshot(),
+      snapshot: cmpSnapshot,
     }),
     state.logger.log("panel_snapshot", {
       panel: "mp",
-      snapshot: createBootingMpPanelSnapshot(cwd),
+      snapshot: mpSnapshot,
     }),
     state.logger.log("panel_snapshot", {
       panel: "capabilities",
@@ -2664,44 +2846,80 @@ async function emitInitialViewerPanelSnapshots(state: LiveCliState): Promise<voi
   ]);
 }
 
-async function emitViewerPanelSnapshots(state: LiveCliState): Promise<void> {
-  const emitOne = async (
-    panel: "cmp" | "mp" | "capabilities" | "init" | "question",
-    build: () => Promise<unknown> | unknown,
-  ) => {
+async function emitViewerPanelSnapshots(state: LiveCliState): Promise<{
+  cmp: CmpPanelSnapshotPayload;
+  mp: MpPanelSnapshotPayload;
+}> {
+  const cwd = process.cwd();
+  const emitSnapshot = async <T>(params: {
+    panel: "cmp" | "mp" | "capabilities" | "init" | "question";
+    build: () => Promise<T> | T;
+    fallback: (error: unknown) => T;
+  }): Promise<T> => {
+    let snapshot: T;
     try {
-      await state.logger.log("panel_snapshot", {
-        panel,
-        snapshot: await build(),
-      });
+      snapshot = await params.build();
     } catch (error) {
-      await state.logger.log("panel_snapshot", {
-        panel,
-        snapshot: {
-          summaryLines: [
-            `${panel} snapshot unavailable`,
-            error instanceof Error ? error.message : String(error),
-          ],
-          status: "degraded",
-          sourceKind: `${panel}_error`,
-          emptyReason: error instanceof Error ? error.message : String(error),
-          ...(panel === "capabilities"
-            ? { groups: [] }
-            : panel === "question"
-              ? { questions: [] }
-              : { entries: [] }),
-        },
-      });
+      snapshot = params.fallback(error);
     }
+    await state.logger.log("panel_snapshot", {
+      panel: params.panel,
+      snapshot,
+    });
+    return snapshot;
   };
 
-  await Promise.all([
-    emitOne("cmp", () => buildCmpPanelSnapshot(state)),
-    emitOne("mp", () => buildMpPanelSnapshot(state)),
-    emitOne("capabilities", () => buildCapabilitiesPanelSnapshot(state)),
-    emitOne("init", () => buildInitPanelSnapshot(state)),
-    emitOne("question", () => buildQuestionPanelSnapshot(state)),
+  const [cmp, mp] = await Promise.all([
+    emitSnapshot({
+      panel: "cmp",
+      build: () => buildCmpPanelSnapshot(state),
+      fallback: (error) => createUnavailableCmpPanelSnapshot(error),
+    }),
+    emitSnapshot({
+      panel: "mp",
+      build: () => buildMpPanelSnapshot(state),
+      fallback: (error) => createUnavailableMpPanelSnapshot(cwd, error),
+    }),
+    emitSnapshot({
+      panel: "capabilities",
+      build: () => buildCapabilitiesPanelSnapshot(state),
+      fallback: (error) => ({
+        summaryLines: [
+          "capabilities snapshot unavailable",
+          error instanceof Error ? error.message : String(error),
+        ],
+        status: "degraded",
+        sourceKind: "capabilities_error",
+        emptyReason: error instanceof Error ? error.message : String(error),
+        groups: [],
+      }),
+    }),
+    emitSnapshot({
+      panel: "init",
+      build: () => buildInitPanelSnapshot(state),
+      fallback: (error) => ({
+        summaryLines: [],
+        status: "failed",
+        sourceKind: "init_error",
+        errorMessage: error instanceof Error ? error.message : String(error),
+      }),
+    }),
+    emitSnapshot({
+      panel: "question",
+      build: () => buildQuestionPanelSnapshot(state),
+      fallback: () => ({
+        status: "idle",
+      }),
+    }),
   ]);
+  updateLiveCliViewerSnapshots(state, {
+    cmp,
+    mp,
+  });
+  return {
+    cmp,
+    mp,
+  };
 }
 
 async function executeCoreCapabilityRequest(
@@ -3721,9 +3939,10 @@ async function runCoreTurn(
     eventTypes: string[];
     taskStatus?: CoreTaskStatus;
   }): CoreTurnArtifacts => {
-    latestUsage = {
+    latestUsage = latestUsage ?? {
       inputTokens: latestContext.promptTokens,
       outputTokens: estimateContextTokens(params.answer),
+      estimated: true,
     };
     return {
       runId: params.runId,
@@ -3778,7 +3997,9 @@ async function runCoreTurn(
         promptKind: "core_action",
         promptText: buildCoreActionPlannerInstructionText(state, userMessage),
       });
-      actionEnvelope = await runCoreActionPlanner(state, userMessage, cmp, pendingInputImageUrls);
+      const actionPlannerResult = await runCoreActionPlanner(state, userMessage, cmp, pendingInputImageUrls);
+      actionEnvelope = actionPlannerResult.envelope;
+      latestUsage = mergeCliUsageCounts(latestUsage, actionPlannerResult.usage);
       rawAnswer = JSON.stringify(actionEnvelope);
     } catch {
       actionEnvelope = deterministicFirstStep;
@@ -3823,7 +4044,7 @@ async function runCoreTurn(
       });
       latestRunId = fallback.runId;
       latestEventTypes = fallback.eventTypes;
-      latestUsage = fallback.usage;
+      latestUsage = mergeCliUsageCounts(latestUsage, fallback.usage);
       rawAnswer = fallback.answer;
       actionEnvelope = deriveActionEnvelopeFromRaw(rawAnswer)
         ?? inferDeterministicCoreActionEnvelope(state, userMessage)
@@ -3831,6 +4052,32 @@ async function runCoreTurn(
 
       if (actionEnvelope?.action === "reply") {
         latestTaskStatus = normalizeCoreTaskStatus(actionEnvelope);
+        if (actionEnvelope.responseText) {
+          const replyQuestionnaire = deriveQuestionnairePayloadFromReplyText(actionEnvelope.responseText);
+          if (replyQuestionnaire) {
+            state.pendingQuestion = {
+              ...replyQuestionnaire,
+              requestId: `reply-questionnaire:${randomUUID()}`,
+              sourceKind: "core",
+            };
+            await emitQuestionPanelSnapshot(state);
+            return {
+              runId: fallback.runId,
+              answer: replyQuestionnaire.instruction,
+              dispatchStatus: "reply_only",
+              taskStatus: "blocked",
+              capabilityResultStatus: latestToolExecution?.status ?? "blocked",
+              context: latestContext,
+              usage: latestUsage,
+              plannerRawAnswer: rawAnswer,
+              toolExecution: latestToolExecution,
+              eventTypes: [
+                ...fallback.eventTypes,
+                "core.reply_questionnaire_salvaged",
+              ],
+            };
+          }
+        }
         if (
           latestTaskStatus === "incomplete"
           && pendingToolResultText
@@ -4101,7 +4348,7 @@ async function runCoreTurn(
       reasoningEffortOverride: undefined,
     });
       latestRunId = followup.runId;
-      latestUsage = followup.usage;
+      latestUsage = mergeCliUsageCounts(latestUsage, followup.usage);
       latestEventTypes = [
         ...followup.eventTypes,
         "core.action_planner.capability_call",
@@ -4264,6 +4511,7 @@ async function handleUserTurn(
   config: ReturnType<typeof loadOpenAILiveConfig>,
   options: {
     enableCmpSync?: boolean;
+    inputSource?: "question_answer";
   } = {},
 ): Promise<void> {
   const userMessage = (inputPayload.pastedContents ?? []).reduce((value, entry) =>
@@ -4274,6 +4522,7 @@ async function handleUserTurn(
   await state.logger.log("turn_start", {
     turnIndex: state.turnIndex,
     userMessage,
+    ...(options.inputSource ? { inputSource: options.inputSource } : {}),
     transcriptTail: state.transcript.slice(-6),
   });
   const backgroundCmpLabel = `[turn ${state.turnIndex}] CMP sidecar sync elapsed`;
@@ -4417,8 +4666,8 @@ async function applyTranscriptRewind(
   removedTurns?: number;
   error?: string;
 }> {
-  if (!Number.isFinite(targetTurnIndex) || targetTurnIndex <= 0) {
-    const error = "rewind target must be a positive turn index";
+  if (!Number.isFinite(targetTurnIndex) || targetTurnIndex < 0) {
+    const error = "rewind target must be a non-negative turn index";
     await state.logger.log("rewind_failed", {
       sessionId: state.sessionId,
       targetTurnId: String(targetTurnIndex),
@@ -4971,6 +5220,7 @@ async function main(): Promise<void> {
             }),
           }, config, {
             enableCmpSync: options.once === undefined,
+            inputSource: "question_answer",
           });
           continue;
         }
@@ -4997,8 +5247,9 @@ async function main(): Promise<void> {
           continue;
         }
         if (line === "/mp") {
-          await emitViewerPanelSnapshots(state);
-          printMpViewPlaceholder();
+          await state.mpOverlayReady?.catch(() => undefined);
+          const snapshots = await emitViewerPanelSnapshots(state);
+          printMpViewerSnapshot(snapshots.mp);
           continue;
         }
         if (line === "/capabilities") {
@@ -5055,12 +5306,9 @@ async function main(): Promise<void> {
           continue;
         }
         if (line === "/cmp") {
-          await emitViewerPanelSnapshots(state);
-          if (!state.lastTurn) {
-            console.log("还没有 CMP 结果。");
-            continue;
-          }
-          printCmpArtifacts(state.lastTurn.cmp);
+          await state.cmpInfraReady?.catch(() => undefined);
+          const snapshots = await emitViewerPanelSnapshots(state);
+          printCmpViewerSnapshot(snapshots.cmp, state.latestCmp ?? state.lastTurn?.cmp);
           continue;
         }
         if (line === "/tap") {

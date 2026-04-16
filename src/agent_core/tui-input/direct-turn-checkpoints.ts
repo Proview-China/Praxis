@@ -1,4 +1,5 @@
 import {
+  appendFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -14,14 +15,32 @@ export interface DirectTuiTurnCheckpointRecord {
   turnId: string;
   turnIndex?: number;
   messageId: string;
-  transcriptCutMessageId: string;
+  transcriptCutMessageId?: string;
   createdAt: string;
   userText: string;
+  displayUserText?: string;
+  displayUserTextSource?: "raw" | "mini_summary" | "fallback_excerpt";
   workspaceRoot: string;
   git?: WorkspaceRaxodeGitReadback;
   workspaceCheckpointRef?: string;
   workspaceCheckpointCommit?: string;
   workspaceCheckpointError?: string;
+  workspaceCheckpointErrorCode?: string;
+  workspaceCheckpointErrorOrigin?: string;
+  workspaceCheckpointErrorMessage?: string;
+}
+
+export interface DirectTuiCheckpointEventRecord {
+  sessionId: string;
+  turnId: string;
+  workspaceRoot: string;
+  createdAt: string;
+  status: "checkpoint_written" | "checkpoint_failed";
+  checkpointRef?: string;
+  checkpointCommit?: string;
+  errorCode?: string;
+  errorOrigin?: string;
+  errorMessage?: string;
 }
 
 interface DirectTuiTurnCheckpointFile {
@@ -39,6 +58,10 @@ function ensureCheckpointDir(workspaceRoot: string): string {
 
 function checkpointFilePath(sessionId: string, workspaceRoot: string): string {
   return join(ensureCheckpointDir(workspaceRoot), `${encodeURIComponent(sessionId)}.json`);
+}
+
+function checkpointEventLogPath(workspaceRoot: string): string {
+  return join(ensureWorkspaceRewindDir(workspaceRoot), "checkpoint-events.jsonl");
 }
 
 function loadCheckpointFile(sessionId: string, workspaceRoot: string): DirectTuiTurnCheckpointFile {
@@ -64,10 +87,33 @@ function loadCheckpointFile(sessionId: string, workspaceRoot: string): DirectTui
         && typeof (entry as DirectTuiTurnCheckpointRecord).agentId === "string"
         && typeof (entry as DirectTuiTurnCheckpointRecord).turnId === "string"
         && typeof (entry as DirectTuiTurnCheckpointRecord).messageId === "string"
-        && typeof (entry as DirectTuiTurnCheckpointRecord).transcriptCutMessageId === "string"
         && typeof (entry as DirectTuiTurnCheckpointRecord).createdAt === "string"
         && typeof (entry as DirectTuiTurnCheckpointRecord).userText === "string"
-        && typeof (entry as DirectTuiTurnCheckpointRecord).workspaceRoot === "string")
+        && typeof (entry as DirectTuiTurnCheckpointRecord).workspaceRoot === "string"
+        && (
+          typeof (entry as DirectTuiTurnCheckpointRecord).transcriptCutMessageId === "undefined"
+          || typeof (entry as DirectTuiTurnCheckpointRecord).transcriptCutMessageId === "string"
+        )
+        && (
+          typeof (entry as DirectTuiTurnCheckpointRecord).displayUserText === "undefined"
+          || typeof (entry as DirectTuiTurnCheckpointRecord).displayUserText === "string"
+        )
+        && (
+          typeof (entry as DirectTuiTurnCheckpointRecord).displayUserTextSource === "undefined"
+          || typeof (entry as DirectTuiTurnCheckpointRecord).displayUserTextSource === "string"
+        )
+        && (
+          typeof (entry as DirectTuiTurnCheckpointRecord).workspaceCheckpointErrorCode === "undefined"
+          || typeof (entry as DirectTuiTurnCheckpointRecord).workspaceCheckpointErrorCode === "string"
+        )
+        && (
+          typeof (entry as DirectTuiTurnCheckpointRecord).workspaceCheckpointErrorOrigin === "undefined"
+          || typeof (entry as DirectTuiTurnCheckpointRecord).workspaceCheckpointErrorOrigin === "string"
+        )
+        && (
+          typeof (entry as DirectTuiTurnCheckpointRecord).workspaceCheckpointErrorMessage === "undefined"
+          || typeof (entry as DirectTuiTurnCheckpointRecord).workspaceCheckpointErrorMessage === "string"
+        ))
       : [],
   };
 }
@@ -107,4 +153,15 @@ export function upsertDirectTuiTurnCheckpoint(
     sessionId,
     checkpoints: nextCheckpoints,
   });
+}
+
+export function appendDirectTuiCheckpointEvent(
+  event: DirectTuiCheckpointEventRecord,
+): void {
+  ensureWorkspaceRewindDir(event.workspaceRoot);
+  appendFileSync(
+    checkpointEventLogPath(event.workspaceRoot),
+    `${JSON.stringify(event)}\n`,
+    "utf8",
+  );
 }

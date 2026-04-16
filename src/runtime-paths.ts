@@ -45,6 +45,10 @@ export function resolveWorkspaceRaxodeRewindDir(workspaceRoot = process.cwd()): 
   return resolve(resolveWorkspaceRaxodeRoot(workspaceRoot), "rewind");
 }
 
+export function resolveWorkspaceRaxodeSessionsDir(workspaceRoot = process.cwd()): string {
+  return resolve(resolveWorkspaceRaxodeRoot(workspaceRoot), "sessions");
+}
+
 export function resolveConfiguredLiveEnvPath(fallbackDir = process.cwd()): string {
   return resolve(process.env.PRAXIS_LIVE_ENV_FILE ?? join(resolveConfigRoot(fallbackDir), ".env"));
 }

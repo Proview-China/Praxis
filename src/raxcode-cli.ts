@@ -12,7 +12,19 @@ import {
 } from "./raxcode-openai-auth.js";
 import { loadOpenAILiveConfig } from "./rax/live-config.js";
 import { runRaxodeLoginTui } from "./raxode-login-tui.js";
-import { ensureRaxcodeHomeScaffold, loadResolvedRoleConfig, resolveConfiguredWorkspaceRoot } from "./raxcode-config.js";
+import { runRaxodeTuiWithStartupSplash } from "./raxode-startup-splash.js";
+import {
+  ensureRaxcodeHomeScaffold,
+  loadRaxcodeUiConfig,
+  loadResolvedRoleConfig,
+  resolveConfiguredWorkspaceRoot,
+  type RaxcodeAnimationMode,
+} from "./raxcode-config.js";
+import {
+  listDirectTuiSessions,
+  resolveDirectTuiSessionSelection,
+} from "./agent_core/tui-input/direct-session-store.js";
+import { loadWorkspaceRaxodeAgent } from "./agent_core/tui-input/workspace-raxode-store.js";
 
 const PRIMARY_CLI_COMMAND = "raxode";
 const CLI_DISPLAY_NAME = "Raxode";
@@ -28,7 +40,7 @@ export interface RaxodeLaunchPlan {
 }
 
 export function resolveRaxodeCliCommand(argv: string[]): {
-  command: RaxodeUiCommand | "login" | "logout" | "status" | "help";
+  command: RaxodeUiCommand | "login" | "logout" | "status" | "help" | "resume";
   rest: string[];
 } {
   const [rawCommand, ...rest] = argv;
@@ -45,7 +57,7 @@ export function resolveRaxodeCliCommand(argv: string[]): {
     };
   }
   return {
-    command: rawCommand as RaxodeUiCommand | "login" | "logout" | "status",
+    command: rawCommand as RaxodeUiCommand | "login" | "logout" | "status" | "resume",
     rest,
   };
 }
@@ -58,6 +70,7 @@ function printUsage(): void {
       "Usage:",
       `  ${PRIMARY_CLI_COMMAND} tui`,
       `  ${PRIMARY_CLI_COMMAND} chat [--ui=terminal|direct] [--once \"...\"]`,
+      `  ${PRIMARY_CLI_COMMAND} resume [<session-name-or-id>]`,
       `  ${PRIMARY_CLI_COMMAND} login`,
       `  ${PRIMARY_CLI_COMMAND} login --device-auth`,
       `  ${PRIMARY_CLI_COMMAND} login --with-api-key`,
@@ -125,8 +138,15 @@ export function resolveRaxodeLaunchPlan(
   };
 }
 
-async function runUiCommand(command: RaxodeUiCommand, args: string[]): Promise<number> {
-  const launchPlan = resolveRaxodeLaunchPlan(command, args);
+async function runUiCommand(
+  command: RaxodeUiCommand,
+  args: string[],
+  options: {
+    cwd?: string;
+    env?: NodeJS.ProcessEnv;
+  } = {},
+): Promise<number> {
+  const launchPlan = resolveRaxodeLaunchPlan(command, args, options);
   return await new Promise<number>((resolveExitCode, reject) => {
     const child = spawn(launchPlan.command, launchPlan.args, {
       cwd: launchPlan.cwd,
@@ -141,6 +161,110 @@ async function runUiCommand(command: RaxodeUiCommand, args: string[]): Promise<n
       }
       resolveExitCode(code ?? 0);
     });
+  });
+}
+
+function resolveRaxodeAnimationMode(input: {
+  cliCommand: RaxodeUiCommand | "resume";
+  fallbackDir?: string;
+}): RaxcodeAnimationMode {
+  const configuredMode = loadRaxcodeUiConfig(input.fallbackDir).animationMode;
+  if (configuredMode === "off" || configuredMode === "resume") {
+    return configuredMode;
+  }
+  if (input.cliCommand === "resume") {
+    return "resume";
+  }
+  return "fresh";
+}
+
+function shouldUseRaxodeTuiWrapper(command: RaxodeUiCommand): boolean {
+  return command === "tui"
+    && process.env.PRAXIS_BOOTSTRAP_PARENT_ACTIVE !== "1"
+    && Boolean(process.stdin.isTTY && process.stdout.isTTY);
+}
+
+async function runUiCommandWithBootstrap(
+  command: RaxodeUiCommand,
+  args: string[],
+  options: {
+    cwd?: string;
+    env?: NodeJS.ProcessEnv;
+    animationMode?: RaxcodeAnimationMode;
+  } = {},
+): Promise<number> {
+  const animationMode = options.animationMode ?? resolveRaxodeAnimationMode({
+    cliCommand: command,
+    fallbackDir: options.cwd,
+  });
+  const nextEnv = {
+    ...options.env,
+    PRAXIS_BOOTSTRAP_MODE: animationMode,
+  };
+  if (!shouldUseRaxodeTuiWrapper(command)) {
+    return await runUiCommand(command, args, {
+      ...options,
+      env: nextEnv,
+    });
+  }
+  const launchPlan = resolveRaxodeLaunchPlan(command, args, options);
+  try {
+    return await runRaxodeTuiWithStartupSplash({
+      ...launchPlan,
+      env: {
+        ...launchPlan.env,
+        ...nextEnv,
+      },
+      animationMode,
+    });
+  } catch {
+    return await runUiCommand(command, args, {
+      ...options,
+      env: nextEnv,
+    });
+  }
+}
+
+function printResumeCandidates(candidates: ReturnType<typeof listDirectTuiSessions>): void {
+  process.stdout.write("Multiple matching sessions were found:\n");
+  for (const candidate of candidates) {
+    process.stdout.write(`  - ${candidate.sessionId}  ${candidate.name}\n`);
+  }
+}
+
+async function runResume(args: string[]): Promise<number> {
+  const workspaceRoot = resolveConfiguredWorkspaceRoot(process.cwd());
+  const defaultSessionId = loadWorkspaceRaxodeAgent(workspaceRoot, "agent.core:main")?.currentSessionId;
+  const latestSession = listDirectTuiSessions(workspaceRoot)[0];
+  const selector = args[0] ?? defaultSessionId ?? latestSession?.sessionId;
+  const selection = resolveDirectTuiSessionSelection(selector, workspaceRoot);
+
+  if (selection.status === "empty") {
+    process.stdout.write("No resumable session was found in the current workspace.\n");
+    return 1;
+  }
+  if (selection.status === "not_found") {
+    process.stdout.write(`No session matched ${selector} in ${workspaceRoot}.\n`);
+    return 1;
+  }
+  if (selection.status === "ambiguous") {
+    printResumeCandidates(selection.candidates ?? []);
+    return 1;
+  }
+  if (!selection.session) {
+    process.stdout.write("The selected session could not be resolved.\n");
+    return 1;
+  }
+
+  return await runUiCommandWithBootstrap("tui", [], {
+    cwd: selection.session.workspace,
+    env: {
+      PRAXIS_DIRECT_SESSION_ID: selection.session.sessionId,
+    },
+    animationMode: resolveRaxodeAnimationMode({
+      cliCommand: "resume",
+      fallbackDir: selection.session.workspace,
+    }),
   });
 }
 
@@ -239,7 +363,7 @@ export async function runRaxcodeCli(argv: string[]): Promise<number> {
   if (command === "login") {
     return await runLogin(rest);
   }
-  if ((command === "tui" || command === "chat") && !hasConfiguredPrimaryModelAuth()) {
+  if ((command === "tui" || command === "chat" || command === "resume") && !hasConfiguredPrimaryModelAuth()) {
     if (process.stdin.isTTY && process.stdout.isTTY) {
       await runRaxodeLoginTui();
       return 0;
@@ -247,10 +371,13 @@ export async function runRaxcodeCli(argv: string[]): Promise<number> {
     throw new Error("Raxode requires a primary model login or API configuration. Run `raxode login` in an interactive terminal first.");
   }
   if (command === "tui") {
-    return await runUiCommand("tui", rest);
+    return await runUiCommandWithBootstrap("tui", rest);
   }
   if (command === "chat") {
     return await runUiCommand("chat", rest);
+  }
+  if (command === "resume") {
+    return await runResume(rest);
   }
   if (command === "logout") {
     const status = logoutOpenAIAuth();

@@ -28,8 +28,10 @@ test("ensureRaxcodeHomeScaffold creates auth/config templates and state director
   const configRaw = await readFile(result.configPath, "utf8");
   const auth = JSON.parse(authRaw) as { authProfiles: unknown[] };
   const config = JSON.parse(configRaw) as { roleBindings: Record<string, unknown> };
+  const parsedConfig = JSON.parse(configRaw) as { ui?: { animationMode?: string } };
   assert.equal(auth.authProfiles.length, 4);
   assert.equal(Object.keys(config.roleBindings).length, 15);
+  assert.equal(parsedConfig.ui?.animationMode, "fresh");
 
   delete process.env.RAXCODE_HOME;
   delete process.env.PRAXIS_WORKSPACE_ROOT;
@@ -105,6 +107,22 @@ test("loadRaxcodeTapOverride reads persistent capability overrides and matrix", 
   assert.equal(override.requestedMode, "standard");
   assert.equal(override.toolPolicyOverrides?.[0]?.capabilitySelector, "git.push");
   assert.equal(config.permissions.shared15ViewMatrix.length, 15);
+
+  delete process.env.RAXCODE_HOME;
+});
+
+test("loadRaxcodeConfigFile resolves ui.animationMode from config", async () => {
+  const rootDir = await mkdtemp(path.join(os.tmpdir(), "praxis-raxcode-ui-animation-"));
+  process.env.RAXCODE_HOME = path.join(rootDir, ".raxcode");
+  ensureRaxcodeHomeScaffold(rootDir);
+
+  const configPath = path.join(process.env.RAXCODE_HOME!, "config.json");
+  const config = loadRaxcodeConfigFile(rootDir);
+  config.ui.animationMode = "off";
+  await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+
+  const reloaded = loadRaxcodeConfigFile(rootDir);
+  assert.equal(reloaded.ui.animationMode, "off");
 
   delete process.env.RAXCODE_HOME;
 });

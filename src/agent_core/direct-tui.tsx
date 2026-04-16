@@ -1,9 +1,9 @@
 import { execFile as execFileCallback, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, statSync, writeSync } from "node:fs";
 import { mkdir, open, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { extname, resolve } from "node:path";
-import { Box, render, Text, useApp, useInput } from "ink";
+import { Box, render, Text, useInput, type Instance as InkInstance } from "ink";
 import React, { memo, useEffect, useMemo, useRef, useState } from "react";
 import stringWidth from "string-width";
 import { promisify } from "node:util";
@@ -14,6 +14,7 @@ import {
   loadRaxcodeRuntimeConfigSnapshot as loadRaxodeRuntimeConfigSnapshot,
   loadResolvedEmbeddingConfig,
   resolveConfiguredWorkspaceRoot,
+  type RaxcodeAnimationMode as RaxodeAnimationMode,
   type RaxcodeConfigFile as RaxodeConfigFile,
   type RaxcodeRoleId,
   type RaxcodeReasoningEffort as RaxodeReasoningEffort,
@@ -97,10 +98,19 @@ import {
   saveDirectTuiSessionSnapshot,
   type DirectTuiAgentRegistryRecord,
   type DirectTuiAgentSnapshot,
+  type DirectTuiSessionExitSummary,
   type DirectTuiSessionMessageRecord,
   type DirectTuiSessionSnapshot,
+  type DirectTuiSessionUsageEntry,
 } from "./tui-input/direct-session-store.js";
 import {
+  buildDirectTuiSessionExitSummary,
+  formatDirectTuiPercent,
+  formatDirectTuiTokenCount,
+  formatDirectTuiUsd,
+} from "./tui-input/direct-session-summary.js";
+import {
+  appendDirectTuiCheckpointEvent,
   listDirectTuiTurnCheckpoints,
   upsertDirectTuiTurnCheckpoint,
   type DirectTuiTurnCheckpointRecord,
@@ -136,9 +146,23 @@ import {
   formatHumanGateDecisionEnvelope,
 } from "./live-agent-chat/human-gate-envelope.js";
 import {
+  deriveDirectTuiCmpStatusDescriptor,
   resolveDirectTuiAssistantTurnResultAction,
+  shouldBreakDirectTuiAssistantSegmentOnStageStart,
   shouldRenderDirectTuiConversationHeader,
 } from "./tui-input/direct-tui-presentation.js";
+import {
+  buildTerminalTableBodyLines,
+  type TerminalTableRow,
+} from "./tui-input/viewer-table-layout.js";
+import {
+  buildViewerStatusBlockLines,
+  isViewerStatusTextAbnormal,
+  parseViewerAssignmentEntries,
+  parseViewerRoleEntries,
+  type ViewerStatusEntry,
+} from "./tui-input/viewer-status-blocks.js";
+import { buildCapabilityViewerBodyLines } from "./tui-input/capability-viewer-panel.js";
 import {
   resolveCapabilityFamilyDefinition,
   resolveFamilyOutcomeKind,
@@ -158,7 +182,10 @@ import {
   decodeEscapedDisplayTextMaybe,
   extractResponseTextMaybe,
 } from "./live-agent-chat/shared.js";
-import { refineWebSearchToolSummary } from "./tui-mini-summary.js";
+import {
+  refineWebSearchToolSummary,
+  summarizePendingComposerText,
+} from "./tui-mini-summary.js";
 import { TUI_THEME } from "./tui-theme.js";
 import {
   resolveConfigRoot,
@@ -202,6 +229,7 @@ interface LiveLogRecord {
   label?: string;
   elapsedMs?: number;
   userMessage?: string;
+  inputSource?: string;
   capabilityKey?: string | null;
   reason?: string;
   inputSummary?: string;
@@ -265,6 +293,8 @@ interface LiveLogRecord {
     usage?: {
       inputTokens?: number;
       outputTokens?: number;
+      thinkingTokens?: number;
+      estimated?: boolean;
     };
     elapsedMs?: number;
     context?: LiveContextRecord;
@@ -326,7 +356,7 @@ const PASTE_AGGREGATION_WINDOW_MS = 60;
 const PERMISSIONS_PANEL_AUTO_RETURN_MS = 1_000;
 const SESSION_SWITCH_TIMEOUT_MS = 5_000;
 const VIEWER_PAGE_SIZE = 12;
-const CAPABILITY_VIEWER_PAGE_SIZE = 6;
+const CAPABILITY_VIEWER_PAGE_SIZE = 1;
 
 function normalizeClipboardText(text: string): string {
   return text.replace(/\r\n/gu, "\n");
@@ -597,6 +627,7 @@ async function readClipboardImageAttachment(params: {
 function formatTurnUsageDetail(input?: {
   inputTokens?: number;
   outputTokens?: number;
+  thinkingTokens?: number;
   elapsedMs?: number;
 }): string | null {
   if (!input) {
@@ -608,6 +639,9 @@ function formatTurnUsageDetail(input?: {
   }
   if (typeof input.outputTokens === "number" && Number.isFinite(input.outputTokens)) {
     parts.push(`output ${input.outputTokens} tokens`);
+  }
+  if (typeof input.thinkingTokens === "number" && Number.isFinite(input.thinkingTokens)) {
+    parts.push(`thinking ${input.thinkingTokens} tokens`);
   }
   if (typeof input.elapsedMs === "number" && Number.isFinite(input.elapsedMs)) {
     const totalSeconds = Math.max(0, Math.floor(input.elapsedMs / 1000));
@@ -625,6 +659,84 @@ function formatTurnUsageDetail(input?: {
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
+function revealTextFromLeft(value: string, visibleWidth: number): string {
+  if (visibleWidth <= 0) {
+    return " ".repeat(stringWidth(value));
+  }
+  let output = "";
+  let width = 0;
+  for (const char of [...value]) {
+    const charWidth = Math.max(1, stringWidth(char));
+    if (width + charWidth > visibleWidth) {
+      break;
+    }
+    output += char;
+    width += charWidth;
+  }
+  return padTextToWidth(output, stringWidth(value));
+}
+
+function buildExitSummaryPanelLines(
+  summary: DirectTuiSessionExitSummary,
+  animationStep: number,
+  terminalWidth: number,
+): string[] {
+  const resumeCommand = `Resume to RUN:  raxode resume ${summary.resumeSelector}`;
+  const statsLines = [
+    `Input Tokens:`,
+    `Output Tokens:`,
+    `Thinking Budget:`,
+    `Total Price:`,
+    `Success Rate:`,
+    resumeCommand,
+  ];
+  const statsValues = [
+    formatDirectTuiTokenCount(summary.inputTokens),
+    formatDirectTuiTokenCount(summary.outputTokens),
+    formatDirectTuiTokenCount(summary.thinkingTokens),
+    formatDirectTuiUsd(summary.totalPriceUsd),
+    formatDirectTuiPercent(summary.successRate),
+    "",
+  ];
+  const availableInnerWidth = Math.max(88, Math.min(terminalWidth - 2, 118));
+  const maxArtWidth = EXIT_SUMMARY_ART_LINES.reduce((max, line) => Math.max(max, stringWidth(line)), 0);
+  const statsLabelWidth = Math.max(
+    ...statsLines.slice(0, 5).map((line) => stringWidth(line)),
+    stringWidth(resumeCommand),
+  );
+  const statsValueWidth = Math.max(
+    12,
+    ...statsValues.slice(0, 5).map((line) => stringWidth(line)),
+  );
+  const gapWidth = 2;
+  const minStatsWidth = statsLabelWidth + 2 + statsValueWidth;
+  const artWidth = Math.min(maxArtWidth, Math.max(36, availableInnerWidth - minStatsWidth - gapWidth));
+  const statsWidth = Math.max(
+    minStatsWidth,
+    availableInnerWidth - artWidth - gapWidth,
+  );
+  const innerWidth = artWidth + gapWidth + statsWidth;
+  const visibleArtWidth = Math.max(0, animationStep * EXIT_SUMMARY_REVEAL_WIDTH_PER_STEP);
+  const totalRows = EXIT_SUMMARY_ART_LINES.length;
+  const rows = Array.from({ length: totalRows }, (_, index) => {
+    const art = EXIT_SUMMARY_ART_LINES[index] ?? "";
+    const stats = index < 5
+      ? `${padTextToWidth(statsLines[index] ?? "", statsLabelWidth)}  ${padTextToWidth(statsValues[index] ?? "", statsValueWidth)}`
+      : padTextToWidth(statsLines[index] ?? "", statsWidth);
+    const revealedArt = index < EXIT_SUMMARY_ART_LINES.length ? revealTextFromLeft(art, visibleArtWidth) : "";
+    return `│${padTextToWidth(revealedArt, artWidth)}${" ".repeat(gapWidth)}${padTextToWidth(stats, statsWidth)}│`;
+  });
+  return [
+    `┌${"─".repeat(innerWidth)}┐`,
+    ...rows,
+    `└${"─".repeat(innerWidth)}┘`,
+  ];
+}
+
+function isRaxodeAnimationMode(value: string | undefined): value is RaxodeAnimationMode {
+  return value === "fresh" || value === "resume" || value === "off";
+}
+
 const DEFAULT_CONTEXT_WINDOW = 1_050_000;
 const CONTEXT_BAR_WIDTH = 10;
 const STATUS_CONTEXT_BAR_WIDTH = 20;
@@ -635,6 +747,11 @@ const COMPOSER_PLACEHOLDER =
   "Hold Shift to select, Ctrl+V to paste images, @ to choose files, / to choose commands";
 const INIT_COMPOSER_PLACEHOLDER =
   "Ctrl+V to paste images, @ to choose files, ENTER to send for initialization";
+const QUESTION_COMPOSER_PLACEHOLDER =
+  "Type note for the current question, then press TAB to switch modes";
+const QUESTION_WAITING_DOT_FRAMES = ["●○○", "○●○", "○○●", "○●○"] as const;
+const LOG_TAIL_READ_CHUNK_BYTES = 32 * 1024;
+const LOG_TAIL_PROCESS_BATCH_SIZE = 40;
 const STARTUP_RAINBOW_BASE_COLORS = [
   "redBright",
   "yellow",
@@ -699,6 +816,112 @@ const ACTIVE_TASK_GUARD_TEXT = "A task is currently running. Please stop the cur
 const WORKSPACE_DIRECTORY_MISSING_TEXT = "The directory does not exist. Please check the input.";
 const WORKSPACE_NOT_DIRECTORY_TEXT = "The target path is not a directory. Please check the input.";
 const REWIND_ESC_WINDOW_MS = 500;
+const EXIT_SUMMARY_ART_LINES = [
+  "  ██████╗   █████╗  ██╗  ██╗  ██████╗  ██████╗  ███████╗",
+  "  ██╔══██╗ ██╔══██╗ ╚██╗██╔╝ ██╔═══██╗ ██╔══██╗ ██╔════╝",
+  "  ██████╔╝ ███████║  ╚███╔╝  ██║   ██║ ██║  ██║ █████╗  ",
+  "  ██╔══██╗ ██╔══██║  ██╔██╗  ██║   ██║ ██║  ██║ ██╔══╝  ",
+  "  ██║  ██║ ██║  ██║ ██╔╝ ██╗ ╚██████╔╝ ██████╔╝ ███████╗",
+  "  ╚═╝  ╚═╝ ╚═╝  ╚═╝ ╚═╝  ╚═╝  ╚═════╝  ╚═════╝  ╚══════╝",
+] as const;
+const EXIT_SUMMARY_FRAME_MS = 42;
+const EXIT_SUMMARY_REVEAL_WIDTH_PER_STEP = 6;
+const EXIT_SUMMARY_TOTAL_STEPS = Math.ceil(
+  Math.max(...EXIT_SUMMARY_ART_LINES.map((line) => stringWidth(line))) / EXIT_SUMMARY_REVEAL_WIDTH_PER_STEP,
+);
+const EXIT_SUMMARY_DISPLAY_MS = EXIT_SUMMARY_TOTAL_STEPS * EXIT_SUMMARY_FRAME_MS + EXIT_SUMMARY_FRAME_MS;
+
+type ExitPanelAction =
+  | "close"
+  | "force_exit"
+  | "wait_then_exit"
+  | "switch_to_running_task";
+
+interface ExitSummaryDisplayState {
+  summary: DirectTuiSessionExitSummary;
+  animationStep: number;
+  animated: boolean;
+  startedAtMs: number;
+  exitAtMs: number;
+  finalLines: string[];
+}
+
+let directTuiInkInstance: InkInstance | null = null;
+let persistedDirectTuiExitInFlight = false;
+const DIRECT_TUI_EXIT_SUMMARY_FILE = process.env.PRAXIS_EXIT_SUMMARY_FILE;
+
+async function persistDirectTuiExitSummaryFile(lines: string[]): Promise<boolean> {
+  if (!DIRECT_TUI_EXIT_SUMMARY_FILE) {
+    return false;
+  }
+  try {
+    await writeFile(
+      DIRECT_TUI_EXIT_SUMMARY_FILE,
+      `${JSON.stringify({ lines })}\n`,
+      "utf8",
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function persistDirectTuiExitSummaryAndExit(input: {
+  lines: string[];
+  exitCode: number;
+}): Promise<never> {
+  if (persistedDirectTuiExitInFlight) {
+    return await new Promise<never>(() => {});
+  }
+  persistedDirectTuiExitInFlight = true;
+
+  const instance = directTuiInkInstance;
+  if (instance) {
+    try {
+      composerCursorParking.active = false;
+      terminalOverlaySnapshot = null;
+      instance.unmount();
+      await instance.waitUntilExit();
+    } finally {
+      instance.clear();
+      instance.cleanup();
+      directTuiInkInstance = null;
+    }
+  }
+
+  if (process.stdin.isTTY && typeof process.stdin.setRawMode === "function" && process.stdin.isRaw) {
+    try {
+      process.stdin.setRawMode(false);
+    } catch {
+      // ignore raw-mode teardown races during process shutdown
+    }
+  }
+  process.stdin.pause();
+  const persistedToWrapper = await persistDirectTuiExitSummaryFile(input.lines);
+  if (persistedToWrapper) {
+    process.exit(input.exitCode);
+  }
+  const lineBreak = process.stdout.isTTY ? "\r\n" : "\n";
+  const clearAndHome = process.stdout.isTTY
+    ? [
+        SYNC_OUTPUT_END,
+        "\u001B[?25h",
+        "\u001B[0m",
+        "\u001B[2K",
+        "\r",
+        "\u001B[2J",
+        "\u001B[3J",
+        "\u001B[H",
+      ].join("")
+    : "";
+  const summaryText = `${clearAndHome}${input.lines.join(lineBreak)}${lineBreak}${lineBreak}`;
+  if (typeof process.stdout.fd === "number") {
+    writeSync(process.stdout.fd, summaryText);
+  } else {
+    process.stdout.write(summaryText);
+  }
+  process.exit(input.exitCode);
+}
 
 type SlashPanelNoticeTone = "info" | "warning" | "danger" | "success";
 
@@ -768,6 +991,10 @@ interface SlashPanelContext {
   pendingHumanGates: HumanGatePanelEntry[];
   initViewerSnapshot: InitViewerSnapshot | null;
   questionViewerSnapshot: QuestionViewerSnapshot | null;
+  questionPanelState: QuestionPanelState;
+  questionComposerText: string;
+  questionAnimationFrame: number;
+  cmpStatusLabel: string;
 }
 
 type DirectSlashPanelId = PraxisSlashPanelId | "question";
@@ -806,6 +1033,10 @@ interface CmpViewerSnapshot {
   emptyReason?: string;
   truthStatus?: string;
   readbackStatus?: string;
+  detailLines?: string[];
+  roleLines?: string[];
+  requestLines?: string[];
+  issueLines?: string[];
   entries: CmpViewerEntry[];
 }
 
@@ -827,6 +1058,10 @@ interface MpViewerSnapshot {
   sourceClass?: string;
   rootPath?: string;
   recordCount?: number;
+  detailLines?: string[];
+  roleLines?: string[];
+  flowLines?: string[];
+  issueLines?: string[];
   entries: MpViewerEntry[];
 }
 
@@ -860,19 +1095,259 @@ interface InitViewerSnapshot {
   sourceKind?: string;
 }
 
-interface QuestionViewerPrompt {
-  prompt: string;
-  allowAnnotation?: boolean;
-  notePrompt?: string;
+interface QuestionViewerOption {
+  id: string;
+  label: string;
+  description: string;
 }
 
+interface QuestionViewerChoicePrompt {
+  id: string;
+  kind?: "choice";
+  prompt: string;
+  options: QuestionViewerOption[];
+  allowAnnotation?: boolean;
+  notePrompt?: string;
+  required?: boolean;
+}
+
+interface QuestionViewerFreeformPrompt {
+  id: string;
+  kind: "freeform";
+  prompt: string;
+  placeholder?: string;
+  allowAnnotation?: boolean;
+  notePrompt?: string;
+  required?: boolean;
+}
+
+type QuestionViewerPrompt =
+  | QuestionViewerChoicePrompt
+  | QuestionViewerFreeformPrompt;
+
 interface QuestionViewerSnapshot {
+  requestId?: string;
+  title?: string;
+  instruction?: string;
+  submitLabel?: string;
   status?: string;
   sourceKind?: string;
   questionIndex: number;
   noteMode: boolean;
   noteValue: string;
   questions: QuestionViewerPrompt[];
+}
+
+interface QuestionAnswerDraft {
+  selectedOptionId?: string;
+  selectedOptionLabel?: string;
+  answerText?: string;
+  annotation?: string;
+}
+
+interface QuestionPanelState {
+  requestId?: string;
+  currentQuestionIndex: number;
+  activeOptionIndexByQuestionId: Record<string, number>;
+  answersByQuestionId: Record<string, QuestionAnswerDraft>;
+  noteModeByQuestionId: Record<string, boolean>;
+}
+
+function clampQuestionIndex(index: number, totalCount: number): number {
+  if (totalCount <= 0) {
+    return 0;
+  }
+  if (!Number.isFinite(index)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(Math.floor(index), totalCount - 1));
+}
+
+function createEmptyQuestionPanelState(): QuestionPanelState {
+  return {
+    requestId: undefined,
+    currentQuestionIndex: 0,
+    activeOptionIndexByQuestionId: {},
+    answersByQuestionId: {},
+    noteModeByQuestionId: {},
+  };
+}
+
+function buildQuestionPanelState(
+  snapshot: QuestionViewerSnapshot,
+  previous?: QuestionPanelState,
+): QuestionPanelState {
+  const previousAnswers = previous?.requestId === snapshot.requestId
+    ? (previous?.answersByQuestionId ?? {})
+    : {};
+  const previousOptionIndices = previous?.requestId === snapshot.requestId
+    ? (previous?.activeOptionIndexByQuestionId ?? {})
+    : {};
+  const previousNoteModes = previous?.requestId === snapshot.requestId
+    ? (previous?.noteModeByQuestionId ?? {})
+    : {};
+  const activeOptionIndexByQuestionId = Object.fromEntries(
+    snapshot.questions.map((question) => {
+      if (question.kind === "freeform") {
+        return [question.id, 0];
+      }
+      const selectedOptionId = previousAnswers[question.id]?.selectedOptionId;
+      const selectedOptionIndex = selectedOptionId
+        ? question.options.findIndex((option) => option.id === selectedOptionId)
+        : -1;
+      const fallbackIndex = selectedOptionIndex >= 0
+        ? selectedOptionIndex
+        : (previousOptionIndices[question.id] ?? 0);
+      return [question.id, clampQuestionIndex(fallbackIndex, question.options.length)];
+    }),
+  ) as Record<string, number>;
+  const currentQuestionIndex = previous?.requestId === snapshot.requestId
+    ? (previous?.currentQuestionIndex ?? snapshot.questionIndex)
+    : snapshot.questionIndex;
+  return {
+    requestId: snapshot.requestId,
+    currentQuestionIndex: clampQuestionIndex(currentQuestionIndex, snapshot.questions.length),
+    activeOptionIndexByQuestionId,
+    answersByQuestionId: previousAnswers,
+    noteModeByQuestionId: Object.fromEntries(
+      snapshot.questions.map((question) => [question.id, Boolean(previousNoteModes[question.id])]),
+    ) as Record<string, boolean>,
+  };
+}
+
+function isQuestionNoteModeActive(
+  state: QuestionPanelState,
+  question: QuestionViewerPrompt | undefined,
+): boolean {
+  if (!question) {
+    return false;
+  }
+  return Boolean(state.noteModeByQuestionId[question.id]);
+}
+
+function resolveQuestionDraftText(
+  input: {
+    snapshot: QuestionViewerSnapshot | null;
+    state: QuestionPanelState;
+    composerValue: string;
+  },
+): string {
+  if (!input.snapshot || input.snapshot.status !== "active") {
+    return "";
+  }
+  const trimmedComposerValue = input.composerValue.trim();
+  const question = input.snapshot.questions[clampQuestionIndex(
+    input.state.currentQuestionIndex,
+    input.snapshot.questions.length,
+  )];
+  if (!question) {
+    return "";
+  }
+  const noteMode = isQuestionNoteModeActive(input.state, question);
+  if (question.kind === "freeform" && !noteMode) {
+    if (trimmedComposerValue.length > 0) {
+      return trimmedComposerValue;
+    }
+    return input.state.answersByQuestionId[question.id]?.answerText ?? "";
+  }
+  if (trimmedComposerValue.length > 0) {
+    return trimmedComposerValue;
+  }
+  return input.state.answersByQuestionId[question.id]?.annotation ?? "";
+}
+
+function buildNextQuestionAnswersByQuestionId(params: {
+  state: QuestionPanelState;
+  question: QuestionViewerPrompt;
+  composerValue: string;
+  noteMode: boolean;
+}): Record<string, QuestionAnswerDraft> {
+  const { state, question, composerValue, noteMode } = params;
+  const existingEntry = state.answersByQuestionId[question.id] ?? {};
+  if (question.kind === "freeform") {
+    return {
+      ...state.answersByQuestionId,
+      [question.id]: {
+        ...existingEntry,
+        ...(noteMode
+          ? (composerValue.length > 0 ? { annotation: composerValue } : {})
+          : { answerText: composerValue }),
+      },
+    };
+  }
+  const activeOptionIndex = state.activeOptionIndexByQuestionId[question.id] ?? 0;
+  const selectedOption = question.options[activeOptionIndex];
+  return {
+    ...state.answersByQuestionId,
+    [question.id]: {
+      ...existingEntry,
+      ...(selectedOption
+        ? {
+            selectedOptionId: selectedOption.id,
+            selectedOptionLabel: selectedOption.label,
+          }
+        : {}),
+      ...(composerValue.length > 0 ? { annotation: composerValue } : {}),
+    },
+  };
+}
+
+function buildQuestionReceiptText(input: {
+  snapshot: QuestionViewerSnapshot;
+  answers: Array<{
+    questionId: string;
+    selectedOptionLabel?: string;
+    answerText?: string;
+    annotation?: string;
+  }>;
+}): string {
+  const totalCount = input.snapshot.questions.length;
+  return [
+    `Questions ${input.answers.length}/${totalCount} answered`,
+    ...input.answers.flatMap((answer) => {
+      const prompt = input.snapshot.questions.find((question) => question.id === answer.questionId);
+      return [
+        `    • ${prompt?.prompt ?? answer.questionId}`,
+        `          answer: ${answer.answerText ?? answer.selectedOptionLabel ?? "(missing)"}`,
+        ...(answer.annotation ? [`          note: ${answer.annotation}`] : []),
+      ];
+    }),
+  ].join("\n");
+}
+
+interface QuestionReceiptEntry {
+  prompt: string;
+  answer: string;
+  note?: string;
+}
+
+interface QuestionReceiptPayload {
+  answeredCount: number;
+  totalCount: number;
+  entries: QuestionReceiptEntry[];
+}
+
+function buildQuestionReceiptPayload(input: {
+  snapshot: QuestionViewerSnapshot;
+  answers: Array<{
+    questionId: string;
+    selectedOptionLabel?: string;
+    answerText?: string;
+    annotation?: string;
+  }>;
+}): QuestionReceiptPayload {
+  return {
+    answeredCount: input.answers.length,
+    totalCount: input.snapshot.questions.length,
+    entries: input.answers.map((answer) => {
+      const prompt = input.snapshot.questions.find((question) => question.id === answer.questionId);
+      return {
+        prompt: prompt?.prompt ?? answer.questionId,
+        answer: answer.answerText ?? answer.selectedOptionLabel ?? "(missing)",
+        ...(answer.annotation ? { note: answer.annotation } : {}),
+      };
+    }),
+  };
 }
 
 interface PendingOutboundTurn {
@@ -915,8 +1390,9 @@ interface RewindOverlayState {
 
 interface PendingTranscriptRewind {
   agentId: string;
-  targetTurnId: string;
-  targetTurnIndex: number;
+  selectedTurnId: string;
+  selectedTurnIndex: number;
+  rewindRequestTurnIndex: number;
   mode: DirectTuiRewindMode;
   transcriptCutMessageId?: string;
   workspaceCheckpointRef?: string;
@@ -989,6 +1465,14 @@ function panelToneColor(tone: SlashPanelNoticeTone | PraxisSlashPanelField["tone
       return TUI_THEME.yellow;
     case "success":
       return TUI_THEME.mint;
+    case "green":
+      return "greenBright";
+    case "pink":
+      return TUI_THEME.violet;
+    case "brown":
+      return "yellow";
+    case "orange":
+      return "red";
     case "info":
       return TUI_THEME.mintSoft;
     case "fast":
@@ -1291,13 +1775,6 @@ function createStatusRateLimitLine(
 
 type ViewerPanelId = "cmp" | "mp" | "capabilities";
 
-interface CapabilityViewerItem {
-  groupTitle: string;
-  count: number;
-  entry: CapabilityViewerEntry;
-  showGroupTitle: boolean;
-}
-
 function viewerPageDraftKey(panelId: ViewerPanelId): string {
   return `${panelId}:page`;
 }
@@ -1337,6 +1814,73 @@ function formatViewerPageLine(label: string, meta: { pageIndex: number; pageCoun
   return `    ${label} · page ${meta.pageIndex + 1}/${meta.pageCount} · ${totalItems} total`;
 }
 
+function findSnapshotDetailValue(lines: string[] | undefined, label: string): string | undefined {
+  const prefix = `${label.toLowerCase()}:`;
+  const line = lines?.find((entry) => entry.toLowerCase().startsWith(prefix));
+  if (!line) {
+    return undefined;
+  }
+  return line.slice(prefix.length).trim();
+}
+
+function buildOverviewEntries(params: {
+  lines: string[] | undefined;
+  excludedLines?: string[];
+}): ViewerStatusEntry[] {
+  const excluded = new Set((params.excludedLines ?? []).map((line) => line.trim()).filter(Boolean));
+  return (params.lines ?? [])
+    .map((line) => compactRuntimeText(line))
+    .filter((line) => line.trim().length > 0 && !excluded.has(line.trim()))
+    .slice(0, 2)
+    .map((line) => ({
+      value: line,
+      abnormal: isViewerStatusTextAbnormal(line),
+    }));
+}
+
+function buildIssueEntries(lines: string[] | undefined, fallback?: string): ViewerStatusEntry[] {
+  const values = (lines && lines.length > 0 ? lines : (fallback ? [fallback] : []))
+    .map((line) => compactRuntimeText(line))
+    .filter((line) => line.trim().length > 0);
+  if (values.length === 0) {
+    return [{
+      value: "none",
+      abnormal: false,
+    }];
+  }
+  return values.slice(0, 3).map((line) => ({
+    value: line,
+    abnormal: true,
+  }));
+}
+
+function buildWorkflowEntries(detailValue: string | undefined): ViewerStatusEntry[] {
+  if (!detailValue) {
+    return [];
+  }
+  const normalized = detailValue.trim();
+  if (!normalized) {
+    return [];
+  }
+  const tokens = normalized.split(/\s+/u);
+  const entries: ViewerStatusEntry[] = [];
+  const firstToken = tokens[0] ?? "";
+  if (firstToken && !/[=:]/u.test(firstToken)) {
+    entries.push({
+      key: "status",
+      value: firstToken,
+      abnormal: isViewerStatusTextAbnormal(firstToken),
+    });
+  }
+  const remaining = firstToken && !/[=:]/u.test(firstToken)
+    ? tokens.slice(1).join(" ")
+    : normalized;
+  return [
+    ...entries,
+    ...parseViewerAssignmentEntries(remaining),
+  ];
+}
+
 function buildCmpViewerBodyLines(
   snapshot: CmpViewerSnapshot | null,
   pageIndex: number,
@@ -1345,27 +1889,93 @@ function buildCmpViewerBodyLines(
   const entries = snapshot?.entries ?? [];
   const meta = buildViewerPageMeta(pageIndex, entries.length);
   const visibleEntries = entries.slice(meta.start, meta.end);
-  const refWidth = Math.max(20, lineWidth - 56);
+  const issueEntries = buildIssueEntries(snapshot?.issueLines, snapshot?.emptyReason);
   const lines: PraxisSlashPanelBodyLine[] = [
     { text: formatViewerPageLine("CMP sections", meta, entries.length), tone: "info" },
-    { text: "    Lifecycle     Kind                  Agent         Section Ref", tone: "info" },
+    ...buildViewerStatusBlockLines({
+      label: "Overview",
+      labelTone: "green",
+      entries: buildOverviewEntries({
+        lines: snapshot?.summaryLines,
+        excludedLines: issueEntries.map((entry) => entry.value),
+      }),
+      lineWidth,
+      emptyValue: "CMP summary is not available yet.",
+    }),
+    ...buildViewerStatusBlockLines({
+      label: "Truth",
+      labelTone: "warning",
+      entries: parseViewerAssignmentEntries(findSnapshotDetailValue(snapshot?.detailLines, "truth") ?? ""),
+      lineWidth,
+      emptyValue: "truth unavailable",
+    }),
+    ...buildViewerStatusBlockLines({
+      label: "Ready",
+      labelTone: "pink",
+      entries: parseViewerAssignmentEntries(findSnapshotDetailValue(snapshot?.detailLines, "readiness") ?? ""),
+      lineWidth,
+      emptyValue: "readiness unavailable",
+    }),
+    ...buildViewerStatusBlockLines({
+      label: "Roles",
+      labelTone: "brown",
+      entries: parseViewerRoleEntries(snapshot?.roleLines),
+      lineWidth,
+      emptyValue: "no role telemetry yet",
+    }),
+    ...buildViewerStatusBlockLines({
+      label: "Issue",
+      labelTone: "orange",
+      entries: issueEntries,
+      lineWidth,
+    }),
+    ...buildTerminalTableBodyLines({
+      columns: [
+        {
+          key: "lifecycle",
+          title: "Lifecycle",
+          minWidth: 9,
+          maxWidth: 12,
+          shrinkPriority: 4,
+          growPriority: 4,
+          value: (entry: CmpViewerEntry) => entry.lifecycle,
+        },
+        {
+          key: "kind",
+          title: "Kind",
+          minWidth: 12,
+          maxWidth: 20,
+          shrinkPriority: 3,
+          growPriority: 3,
+          value: (entry: CmpViewerEntry) => entry.kind,
+        },
+        {
+          key: "agent",
+          title: "Agent",
+          minWidth: 8,
+          maxWidth: 12,
+          shrinkPriority: 5,
+          growPriority: 5,
+          value: (entry: CmpViewerEntry) => entry.agentId,
+        },
+        {
+          key: "ref",
+          title: "Section Ref",
+          minWidth: 18,
+          shrinkPriority: 1,
+          growPriority: 1,
+          value: (entry: CmpViewerEntry) => compactRuntimeText(entry.ref),
+        },
+      ],
+      rows: visibleEntries.map<TerminalTableRow<CmpViewerEntry>>((entry) => ({
+        key: entry.sectionId,
+        data: entry,
+      })),
+      lineWidth,
+      emptyText: snapshot?.emptyReason ?? "No CMP section records yet.",
+      emptyTone: snapshot?.status === "degraded" ? "warning" : undefined,
+    }),
   ];
-  if (visibleEntries.length === 0) {
-    lines.push({
-      text: `    ${snapshot?.emptyReason ?? "No CMP section records yet."}`,
-      tone: snapshot?.status === "degraded" ? "warning" : undefined,
-    });
-  } else {
-    for (const entry of visibleEntries) {
-      lines.push({
-        text:
-          `    ${padTextToWidth(entry.lifecycle, 12)}  `
-          + `${padTextToWidth(entry.kind, 20)}  `
-          + `${padTextToWidth(entry.agentId, 12)}  `
-          + truncateTextToWidth(compactRuntimeText(entry.ref), refWidth),
-      });
-    }
-  }
   return {
     lines,
     meta: {
@@ -1383,95 +1993,113 @@ function buildMpViewerBodyLines(
   const entries = snapshot?.entries ?? [];
   const meta = buildViewerPageMeta(pageIndex, entries.length);
   const visibleEntries = entries.slice(meta.start, meta.end);
-  const lines: PraxisSlashPanelBodyLine[] = [
-    { text: formatViewerPageLine("Memory records", meta, entries.length), tone: "info" },
+  const issueEntries = buildIssueEntries(snapshot?.issueLines, snapshot?.emptyReason);
+  const sourceEntries: ViewerStatusEntry[] = [
     ...(snapshot?.sourceKind || snapshot?.sourceClass
       ? [{
-          text: `    source: ${snapshot.sourceKind ?? snapshot.sourceClass}${snapshot?.rootPath ? ` · ${shortenPath(snapshot.rootPath)}` : ""}`,
-          tone: "info" as const,
+          key: "kind",
+          value: snapshot.sourceKind ?? snapshot.sourceClass ?? "unknown",
+          abnormal: false,
         }]
       : []),
-    { text: "    Memory Ref                Scope        Summary", tone: "info" },
+    ...(snapshot?.rootPath
+      ? [{
+          key: "path",
+          value: shortenPath(snapshot.rootPath),
+          abnormal: false,
+        }]
+      : []),
   ];
-  if (visibleEntries.length === 0) {
-    lines.push({
-      text: `    ${snapshot?.emptyReason ?? "No MP memory records yet."}`,
-      tone: snapshot?.status === "degraded" ? "warning" : undefined,
-    });
-  } else {
-    for (const entry of visibleEntries) {
-      const summaryWidth = Math.max(20, lineWidth - 47);
-      const memoryRef = `${entry.memoryId}${entry.bodyRef ? " *" : ""}`;
-      const scopeText = [entry.scopeLevel, entry.agentId].filter(Boolean).join(":") || "-";
-      lines.push({
-        text:
-          `    ${padTextToWidth(memoryRef, 24)}  `
-          + `${padTextToWidth(scopeText, 10)}  `
-          + truncateTextToWidth(compactRuntimeText(entry.summary || entry.label), summaryWidth),
-      });
-    }
-  }
-  return {
-    lines,
-    meta: {
-      pageIndex: meta.pageIndex,
-      pageCount: meta.pageCount,
-    },
-  };
-}
-
-function flattenCapabilityViewerItems(groups: CapabilityViewerGroup[]): CapabilityViewerItem[] {
-  const items: CapabilityViewerItem[] = [];
-  for (const group of groups) {
-    group.entries.forEach((entry, index) => {
-      items.push({
-        groupTitle: group.title,
-        count: group.count,
-        entry,
-        showGroupTitle: index === 0,
-      });
-    });
-  }
-  return items;
-}
-
-function buildCapabilityViewerBodyLines(
-  snapshot: CapabilityViewerSnapshot | null,
-  pageIndex: number,
-  lineWidth: number,
-): { lines: PraxisSlashPanelBodyLine[]; meta: { pageIndex: number; pageCount: number } } {
-  const items = flattenCapabilityViewerItems(snapshot?.groups ?? []);
-  const meta = buildViewerPageMeta(pageIndex, items.length, CAPABILITY_VIEWER_PAGE_SIZE);
-  const visibleItems = items.slice(meta.start, meta.end);
   const lines: PraxisSlashPanelBodyLine[] = [
-    { text: formatViewerPageLine("Registered capabilities", meta, items.length), tone: "info" },
+    { text: formatViewerPageLine("Memory records", meta, entries.length), tone: "info" },
+    ...buildViewerStatusBlockLines({
+      label: "Overview",
+      labelTone: "green",
+      entries: buildOverviewEntries({
+        lines: snapshot?.summaryLines,
+        excludedLines: issueEntries.map((entry) => entry.value),
+      }),
+      lineWidth,
+      emptyValue: "MP summary is not available yet.",
+    }),
+    ...buildViewerStatusBlockLines({
+      label: "Source",
+      labelTone: "warning",
+      entries: sourceEntries,
+      lineWidth,
+      emptyValue: "source unavailable",
+    }),
+    ...buildViewerStatusBlockLines({
+      label: "Flow",
+      labelTone: "pink",
+      entries: [
+        ...buildWorkflowEntries(findSnapshotDetailValue(snapshot?.detailLines, "workflow")),
+        ...parseViewerAssignmentEntries(findSnapshotDetailValue(snapshot?.flowLines, "readiness") ?? ""),
+        ...parseViewerAssignmentEntries(findSnapshotDetailValue(snapshot?.flowLines, "flow") ?? ""),
+      ],
+      lineWidth,
+      emptyValue: "workflow unavailable",
+    }),
+    ...buildViewerStatusBlockLines({
+      label: "Roles",
+      labelTone: "brown",
+      entries: parseViewerRoleEntries(snapshot?.roleLines),
+      lineWidth,
+      emptyValue: "no role telemetry yet",
+    }),
+    ...buildViewerStatusBlockLines({
+      label: "Issue",
+      labelTone: "orange",
+      entries: issueEntries,
+      lineWidth,
+    }),
+    ...buildTerminalTableBodyLines({
+      columns: [
+        {
+          key: "memory",
+          title: "Memory Ref",
+          minWidth: 14,
+          maxWidth: 24,
+          shrinkPriority: 4,
+          growPriority: 4,
+          value: (entry: MpViewerEntry) => `${entry.memoryId}${entry.bodyRef ? " *" : ""}`,
+        },
+        {
+          key: "scope",
+          title: "Scope",
+          minWidth: 8,
+          maxWidth: 12,
+          shrinkPriority: 3,
+          growPriority: 3,
+          value: (entry: MpViewerEntry) => entry.scopeLevel ?? "-",
+        },
+        {
+          key: "agent",
+          title: "Agent",
+          minWidth: 8,
+          maxWidth: 12,
+          shrinkPriority: 5,
+          growPriority: 5,
+          value: (entry: MpViewerEntry) => entry.agentId ?? "-",
+        },
+        {
+          key: "summary",
+          title: "Summary",
+          minWidth: 18,
+          shrinkPriority: 1,
+          growPriority: 1,
+          value: (entry: MpViewerEntry) => compactRuntimeText(entry.summary || entry.label),
+        },
+      ],
+      rows: visibleEntries.map<TerminalTableRow<MpViewerEntry>>((entry) => ({
+        key: entry.memoryId,
+        data: entry,
+      })),
+      lineWidth,
+      emptyText: snapshot?.emptyReason ?? "No MP memory records yet.",
+      emptyTone: snapshot?.status === "degraded" ? "warning" : undefined,
+    }),
   ];
-  if (visibleItems.length === 0) {
-    lines.push({
-      text: `    ${snapshot?.summaryLines[0] ?? "No registered capabilities yet."}`,
-      tone: snapshot?.status === "degraded" ? "warning" : undefined,
-    });
-  } else {
-    const stateWidth = 10;
-    const keyWidth = Math.max(18, Math.min(34, lineWidth - 24));
-    const descriptionWidth = Math.max(20, lineWidth - 12);
-    for (const item of visibleItems) {
-      if (item.showGroupTitle) {
-        lines.push({
-          text: `    ${item.groupTitle} (${item.count})`,
-          tone: "info",
-        });
-      }
-      lines.push({
-        text:
-          `      ${padTextToWidth(item.entry.capabilityKey, keyWidth)}  `
-          + truncateTextToWidth(item.entry.bindingState, stateWidth),
-      });
-      lines.push({
-        text: `        ${truncateTextToWidth(compactRuntimeText(item.entry.description), descriptionWidth)}`,
-      });
-    }
-  }
   return {
     lines,
     meta: {
@@ -1572,6 +2200,7 @@ function buildEmptySessionSnapshot(input: {
     selectedAgentId: string;
     agents: DirectTuiAgentSnapshot[];
     messages: DirectTuiSessionMessageRecord[];
+    usageLedger: DirectTuiSessionUsageEntry[];
   };
 } {
   const now = new Date().toISOString();
@@ -1593,6 +2222,7 @@ function buildEmptySessionSnapshot(input: {
       selectedAgentId: input.agentId,
       agents: [],
       messages: [],
+      usageLedger: [],
     },
   };
 }
@@ -1636,6 +2266,61 @@ function buildSurfaceStateFromSessionSnapshot(snapshot: DirectTuiSessionSnapshot
     } as never);
   }
   return nextState;
+}
+
+function resolveInitialDirectTuiBootState(): {
+  currentCwd: string;
+  sessionId: string;
+  sessionName: string;
+  selectedAgentId: string;
+  surfaceState: SurfaceAppState;
+  conversationActivated: boolean;
+  usageLedger: DirectTuiSessionUsageEntry[];
+  exitSummary?: DirectTuiSessionExitSummary;
+} {
+  const currentCwd = (() => {
+    try {
+      return resolveConfiguredWorkspaceRoot(process.cwd());
+    } catch {
+      return process.cwd();
+    }
+  })();
+  const requestedSessionId = typeof process.env.PRAXIS_DIRECT_SESSION_ID === "string"
+    && process.env.PRAXIS_DIRECT_SESSION_ID.trim().length > 0
+    ? process.env.PRAXIS_DIRECT_SESSION_ID.trim()
+    : undefined;
+  const restoredSnapshot = requestedSessionId
+    ? loadDirectTuiSessionSnapshot(requestedSessionId, currentCwd)
+    : null;
+  if (!restoredSnapshot) {
+    const sessionId = requestedSessionId ?? `direct-${Date.now()}`;
+    return {
+      currentCwd,
+      sessionId,
+      sessionName: `session-${Date.now().toString(36)}`,
+      selectedAgentId: "",
+      surfaceState: createInitialSurfaceState(),
+      conversationActivated: false,
+      usageLedger: [],
+    };
+  }
+  const safeWorkspace = resolveValidWorkspacePath(restoredSnapshot.workspace, currentCwd);
+  const normalizedSnapshot = safeWorkspace === restoredSnapshot.workspace
+    ? restoredSnapshot
+    : {
+      ...restoredSnapshot,
+      workspace: safeWorkspace,
+    };
+  return {
+    currentCwd: safeWorkspace,
+    sessionId: normalizedSnapshot.sessionId,
+    sessionName: normalizedSnapshot.name,
+    selectedAgentId: normalizedSnapshot.agentId ?? normalizedSnapshot.selectedAgentId ?? "",
+    surfaceState: buildSurfaceStateFromSessionSnapshot(normalizedSnapshot),
+    conversationActivated: normalizedSnapshot.messages.some((message) => message.kind === "user"),
+    usageLedger: normalizedSnapshot.usageLedger ?? [],
+    exitSummary: normalizedSnapshot.exitSummary,
+  };
 }
 
 function buildSlashPanelView(
@@ -2071,7 +2756,32 @@ function buildSlashPanelView(
         showStatus: false,
         showFields: false,
         showHints: true,
-        bodyLines: [],
+        bodyLines: [
+          ...(context.activeTaskCount > 0
+            ? [{
+                text: "    Current tasks are still running. How would you like to proceed?",
+                tone: "warning" as const,
+              }]
+            : []),
+          {
+            text: "     Close this panel for now and wait a moment.",
+            fieldKey: "exit:close",
+          },
+          {
+            text: "     Force stop and exit.",
+            fieldKey: "exit:force",
+          },
+          {
+            text: "     Wait for the tasks to stop, then exit.",
+            fieldKey: "exit:wait",
+          },
+          {
+            text: context.activeTaskCount > 0
+              ? "     Switch to the running task and view it without exiting."
+              : "     Switch to the current task view without exiting.",
+            fieldKey: "exit:switch",
+          },
+        ],
         fields: [
           {
             kind: "value",
@@ -2088,15 +2798,35 @@ function buildSlashPanelView(
           },
           {
             kind: "action",
-            key: "quitNow",
-            label: "Quit now",
-            value: context.activeTaskCount > 0 ? "Blocked while work is running" : "Close the direct shell",
+            key: "exit:close",
+            label: "Close this panel for now and wait a moment",
+            value: "Return to the current session",
             primary: true,
-            tone: context.activeTaskCount > 0 ? "warning" : "danger",
+          },
+          {
+            kind: "action",
+            key: "exit:force",
+            label: "Force stop and exit",
+            value: "Stop now and show the exit summary",
+            tone: "danger",
+          },
+          {
+            kind: "action",
+            key: "exit:wait",
+            label: "Wait for the tasks to stop, then exit",
+            value: context.activeTaskCount > 0 ? "Auto-exit after the current work settles" : "Exit as soon as possible",
+            tone: context.activeTaskCount > 0 ? "warning" : "success",
+          },
+          {
+            kind: "action",
+            key: "exit:switch",
+            label: "Switch to the running task and view it without exiting",
+            value: context.activeTaskCount > 0 ? "Stay in the current session and follow the task" : "Keep working in this session",
           },
         ],
         hints: [
-          "press ENTER to exit the current session",
+          "press ↑ to select up • press ↓ to select down",
+          "press ENTER to apply the selected exit method",
           "press ESC to return to previous page",
         ],
       };
@@ -2104,7 +2834,6 @@ function buildSlashPanelView(
       {
         const cmpPageIndex = resolveViewerPageIndex("cmp", draft, context.cmpViewerSnapshot?.entries.length ?? 0);
         const cmpViewer = buildCmpViewerBodyLines(context.cmpViewerSnapshot, cmpPageIndex, lineWidth);
-        const cmpSummaryLines = context.cmpViewerSnapshot?.summaryLines ?? context.cmpSummaryLines;
       return {
         id,
         title: "/cmp",
@@ -2119,9 +2848,7 @@ function buildSlashPanelView(
         showFields: false,
         showHints: true,
         bodyLines: [
-          { text: `    ${cmpSummaryLines[0] ?? "CMP summary is not available yet"}` },
-          { text: `    ${cmpSummaryLines[1] ?? "CMP route detail will appear here"}` },
-          { text: `    ${cmpSummaryLines[2] ?? "CMP package detail will appear here"}` },
+          { text: `    ${context.cmpStatusLabel}` },
           ...cmpViewer.lines,
         ],
         fields: [
@@ -2144,7 +2871,6 @@ function buildSlashPanelView(
       {
         const mpPageIndex = resolveViewerPageIndex("mp", draft, context.mpViewerSnapshot?.entries.length ?? 0);
         const mpViewer = buildMpViewerBodyLines(context.mpViewerSnapshot, mpPageIndex, lineWidth);
-        const mpSummaryLines = context.mpViewerSnapshot?.summaryLines ?? context.mpSummaryLines;
       return {
         id,
         title: "/mp",
@@ -2158,12 +2884,7 @@ function buildSlashPanelView(
         showStatus: false,
         showFields: false,
         showHints: true,
-        bodyLines: [
-          { text: `    ${mpSummaryLines[0] ?? "MP summary is not available yet"}` },
-          { text: `    ${mpSummaryLines[1] ?? "Memory browser detail will appear here"}` },
-          { text: `    ${mpSummaryLines[2] ?? "Overlay and memory cards will appear here"}` },
-          ...mpViewer.lines,
-        ],
+        bodyLines: mpViewer.lines,
         fields: [
           {
             kind: "action",
@@ -2182,10 +2903,13 @@ function buildSlashPanelView(
       }
     case "capabilities":
       {
-        const capabilityItems = flattenCapabilityViewerItems(context.capabilityViewerSnapshot?.groups ?? []);
-        const capabilitiesPageIndex = resolveViewerPageIndex("capabilities", draft, capabilityItems.length, CAPABILITY_VIEWER_PAGE_SIZE);
-        const capabilityViewer = buildCapabilityViewerBodyLines(context.capabilityViewerSnapshot, capabilitiesPageIndex, lineWidth);
-        const capabilitySummaryLines = context.capabilityViewerSnapshot?.summaryLines ?? context.tapSummaryLines;
+        const capabilityGroupCount = context.capabilityViewerSnapshot?.groups.length ?? 0;
+        const capabilitiesPageIndex = resolveViewerPageIndex("capabilities", draft, capabilityGroupCount, CAPABILITY_VIEWER_PAGE_SIZE);
+        const capabilityViewer = buildCapabilityViewerBodyLines({
+          snapshot: context.capabilityViewerSnapshot,
+          pageIndex: capabilitiesPageIndex,
+          lineWidth,
+        });
       return {
         id,
         title: "/capabilities",
@@ -2194,17 +2918,12 @@ function buildSlashPanelView(
         viewerPage: {
           pageIndex: capabilityViewer.meta.pageIndex,
           pageCount: capabilityViewer.meta.pageCount,
-          totalItems: capabilityItems.length,
+          totalItems: capabilityGroupCount,
         },
         showStatus: false,
         showFields: false,
         showHints: true,
-        bodyLines: [
-          { text: `    ${capabilitySummaryLines[0] ?? "Capability summary is not available yet"}` },
-          { text: `    ${capabilitySummaryLines[1] ?? "Capability list detail will appear here"}` },
-          { text: `    ${capabilitySummaryLines[2] ?? "Blocking capability keys will appear here"}` },
-          ...capabilityViewer.lines,
-        ],
+        bodyLines: capabilityViewer.lines,
         fields: [
           {
             kind: "action",
@@ -2290,26 +3009,62 @@ function buildSlashPanelView(
       const questions = snapshot?.questions ?? [];
       const normalizedIndex = questions.length === 0
         ? 0
-        : Math.max(0, Math.min(snapshot?.questionIndex ?? 0, questions.length - 1));
+        : clampQuestionIndex(context.questionPanelState.currentQuestionIndex, questions.length);
       const currentQuestion = questions[normalizedIndex];
       const questionBodyLines: PraxisSlashPanelBodyLine[] = [];
       if (currentQuestion) {
+        const waitingDots = QUESTION_WAITING_DOT_FRAMES[
+          context.questionAnimationFrame % QUESTION_WAITING_DOT_FRAMES.length
+        ] ?? QUESTION_WAITING_DOT_FRAMES[0];
+        const selectedOptionId = context.questionPanelState.answersByQuestionId[currentQuestion.id]?.selectedOptionId;
+        const noteMode = isQuestionNoteModeActive(context.questionPanelState, currentQuestion);
+        const currentAnswerText = currentQuestion.kind === "freeform" && !noteMode
+          ? context.questionComposerText
+          : (context.questionPanelState.answersByQuestionId[currentQuestion.id]?.answerText ?? "");
         questionBodyLines.push(
-          { text: "" },
           {
             text: "",
             segments: [
-              { text: "    ●○○ ", tone: "info" },
-              { text: "Raxode is waiting for your answers...", tone: "info" },
+              { text: "    " },
+              { text: waitingDots, tone: "info" },
+              { text: " " },
+              ...buildShimmerSegments("Raxode is waiting for your answers...", context.questionAnimationFrame).map((segment) => ({
+                text: segment.text,
+                tone: segment.color === TUI_THEME.textMuted ? "info" as const : undefined,
+              })),
             ],
           },
           { text: `    Questions ${String(normalizedIndex + 1).padStart(2, "0")}/${String(questions.length).padStart(2, "0")}`, tone: "info" },
-          { text: `    ${currentQuestion.prompt}`, tone: "success" },
+          { text: `    ${String(normalizedIndex + 1).padStart(2, "0")}.${currentQuestion.prompt}`, tone: "success" },
         );
-        if (currentQuestion.allowAnnotation) {
-          questionBodyLines.push({
-            text: `    ${currentQuestion.notePrompt ?? "Please enter your thoughts or suggestions here"}`,
-            tone: "info",
+        if (currentQuestion.kind === "freeform") {
+          questionBodyLines.push(
+            {
+              text: `    Answer: ${currentAnswerText.length > 0 ? currentAnswerText : (currentQuestion.placeholder ?? "Type your answer in the main composer below.")}`,
+              tone: currentAnswerText.length > 0 ? "success" : "info",
+            },
+          );
+        } else {
+          currentQuestion.options.forEach((option, optionIndex) => {
+            const active = (context.questionPanelState.activeOptionIndexByQuestionId[currentQuestion.id] ?? 0) === optionIndex;
+            const selected = selectedOptionId === option.id;
+            const selectedHasNote = selected
+              && Boolean(context.questionComposerText.trim());
+            questionBodyLines.push(
+              {
+                text: "",
+                segments: [
+                  { text: active ? "    → " : "      ", tone: active ? "info" : undefined },
+                  { text: option.label, tone: "fast" },
+                  ...(selected ? [{ text: " ✔", tone: "success" as const }] : []),
+                  ...(selectedHasNote ? [{ text: " [Note]", tone: "info" as const }] : []),
+                ],
+              },
+              {
+                text: `        ${option.description}`,
+                tone: active ? "info" : undefined,
+              },
+            );
           });
         }
       } else {
@@ -2320,8 +3075,11 @@ function buildSlashPanelView(
       }
       return {
         id,
-        title: "/question",
-        description: "Answer the current structured follow-up questions",
+        title: snapshot?.title ?? "/question",
+        description: snapshot?.instruction
+          ?? (snapshot?.sourceKind === "init"
+            ? "Answer the current initialization follow-up questions"
+            : "Answer the current structured follow-up questions"),
         status: statusText,
         showStatus: false,
         showFields: false,
@@ -2329,8 +3087,9 @@ function buildSlashPanelView(
         bodyLines: questionBodyLines,
         fields: [],
         hints: [
-          "type your answer in the main composer and press ENTER to submit",
-          "press ESC to return to previous page",
+          "TAB to append annotations • ESC to interrupt",
+          "press ↑ to select up • press ↓ to select down",
+          "press ← to go previous • press → to go next",
         ],
       };
     }
@@ -2892,12 +3651,63 @@ function compactRuntimeText(text: string): string {
   return `${normalized.slice(0, MAX_DEBUG_LINE_CHARS - 1).trimEnd()}…`;
 }
 
-function summarizeWorkspaceCheckpointError(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  if (/EISDIR/u.test(message) || /illegal operation on a directory, copyfile/u.test(message)) {
-    return "workspace checkpoint skipped nested worktree directory";
+function resolveWorkspaceCheckpointFailure(input: {
+  error: unknown;
+  workspaceRoot: string;
+}): {
+  code: string;
+  origin: string;
+  uiError: string;
+  rawMessage: string;
+} {
+  const rawMessage = input.error instanceof Error ? (input.error.message || input.error.name) : String(input.error);
+  const normalized = compactRuntimeText(rawMessage);
+  if (!isUsableWorkspaceDirectory(input.workspaceRoot)) {
+    return {
+      code: "workspace_unavailable",
+      origin: "workspace_root",
+      uiError: "workspace path unavailable",
+      rawMessage: normalized,
+    };
   }
-  return compactRuntimeText(message);
+  if (/EISDIR/u.test(rawMessage) || /illegal operation on a directory, copyfile/u.test(rawMessage)) {
+    return {
+      code: "nested_worktree_skipped",
+      origin: "workspace_scan",
+      uiError: "workspace checkpoint skipped nested worktree directory",
+      rawMessage: normalized,
+    };
+  }
+  if (/EACCES/u.test(rawMessage) || /permission denied/u.test(rawMessage)) {
+    return {
+      code: "workspace_unreadable",
+      origin: "workspace_scan",
+      uiError: "workspace checkpoint skipped unreadable path",
+      rawMessage: normalized,
+    };
+  }
+  if (/scandir/u.test(rawMessage) || /readdir/u.test(rawMessage) || /ls-files/u.test(rawMessage)) {
+    return {
+      code: "workspace_scan_failed",
+      origin: "workspace_scan",
+      uiError: "workspace checkpoint could not scan the workspace",
+      rawMessage: normalized,
+    };
+  }
+  if (/ENOENT/u.test(rawMessage) || /no such file or directory/u.test(rawMessage)) {
+    return {
+      code: "workspace_unavailable",
+      origin: "workspace_scan",
+      uiError: "workspace path unavailable",
+      rawMessage: normalized,
+    };
+  }
+  return {
+    code: "checkpoint_failed",
+    origin: "unknown",
+    uiError: "workspace checkpoint failed",
+    rawMessage: normalized,
+  };
 }
 
 function estimateTerminalWidth(text: string): number {
@@ -2965,7 +3775,7 @@ function summarizeNonPrimaryMessage(message: SurfaceMessage): SurfaceMessage {
   if (message.kind === "assistant" || message.kind === "user") {
     return message;
   }
-  if (message.metadata?.source === "tool_summary") {
+  if (message.metadata?.source === "tool_summary" || message.metadata?.source === "question_receipt") {
     return message;
   }
   return {
@@ -2991,6 +3801,12 @@ const graphemeSegmenter = new Intl.Segmenter("zh", { granularity: "grapheme" });
 
 function splitGraphemes(text: string): string[] {
   return Array.from(graphemeSegmenter.segment(text), (segment) => segment.segment);
+}
+
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
 }
 
 function wrapRenderText(text: string, maxWidth: number): string[] {
@@ -3271,6 +4087,51 @@ function renderMarkdownSegments(line: string, baseColor: string): Array<{ text: 
     : [{ text: line, color: baseColor }];
 }
 
+function renderQuestionReceiptLines(payload: QuestionReceiptPayload): RenderLine[] {
+  return [
+    {
+      kind: "detail",
+      text: `Questions ${payload.answeredCount}/${payload.totalCount} answered`,
+      segments: [
+        {
+          text: `Questions ${payload.answeredCount}/${payload.totalCount} answered`,
+          color: "greenBright",
+        },
+      ],
+    },
+    ...payload.entries.flatMap((entry) => ([
+      {
+        kind: "detail" as const,
+        text: `    • ${entry.prompt}`,
+        segments: [
+          { text: "    • ", color: TUI_THEME.textMuted },
+          { text: entry.prompt, color: TUI_THEME.violet },
+        ],
+      },
+      {
+        kind: "detail" as const,
+        text: `          answer: ${entry.answer}`,
+        segments: [
+          { text: "          ", color: TUI_THEME.text },
+          { text: "answer:", color: TUI_THEME.mintSoft },
+          { text: ` ${entry.answer}`, color: TUI_THEME.text },
+        ],
+      },
+      ...(entry.note
+        ? [{
+            kind: "detail" as const,
+            text: `          note: ${entry.note}`,
+            segments: [
+              { text: "          ", color: TUI_THEME.text },
+              { text: "note:", color: TUI_THEME.mintSoft },
+              { text: ` ${entry.note}`, color: TUI_THEME.text },
+            ],
+          }]
+        : []),
+    ])),
+  ];
+}
+
 function flattenTranscript(messages: SurfaceMessage[], toolSummaryAnimationFrame = 0): RenderLine[] {
   return flattenTranscriptBlocks(messages, toolSummaryAnimationFrame).flatMap((block) => block.lines);
 }
@@ -3319,6 +4180,7 @@ function flattenTranscriptBlocks(messages: SurfaceMessage[], toolSummaryAnimatio
     const lines: RenderLine[] = [];
     const isTurnStats = displayMessage.kind === "status" && displayMessage.metadata?.source === "turn_stats";
     const isToolSummary = displayMessage.kind === "status" && displayMessage.metadata?.source === "tool_summary";
+    const isQuestionReceipt = displayMessage.metadata?.source === "question_receipt";
     const toolSummaryActive = displayMessage.metadata?.summaryState === "active";
     const toolSummaryColor = toolSummaryTitleColor(displayMessage.metadata?.familyKey);
 
@@ -3402,6 +4264,22 @@ function flattenTranscriptBlocks(messages: SurfaceMessage[], toolSummaryAnimatio
           ],
         });
       });
+    } else if (isQuestionReceipt) {
+      const payloadRecord = displayMessage.metadata?.receipt;
+      const payload = payloadRecord && typeof payloadRecord === "object"
+        ? payloadRecord as QuestionReceiptPayload
+        : null;
+      if (payload) {
+        lines.push(...renderQuestionReceiptLines(payload));
+      } else {
+        chunks.forEach((chunk) => {
+          lines.push({
+            kind: "detail",
+            text: chunk,
+            segments: [{ text: chunk, color: TUI_THEME.text }],
+          });
+        });
+      }
     } else {
       chunks.forEach((chunk, index) => {
         const prefix = index === 0
@@ -4491,6 +5369,18 @@ function normalizeCmpViewerSnapshot(input: unknown): CmpViewerSnapshot | null {
     emptyReason: typeof record.emptyReason === "string" ? record.emptyReason : undefined,
     truthStatus: typeof record.truthStatus === "string" ? record.truthStatus : undefined,
     readbackStatus: typeof record.readbackStatus === "string" ? record.readbackStatus : undefined,
+    detailLines: Array.isArray(record.detailLines)
+      ? record.detailLines.filter((line): line is string => typeof line === "string" && line.trim().length > 0)
+      : undefined,
+    roleLines: Array.isArray(record.roleLines)
+      ? record.roleLines.filter((line): line is string => typeof line === "string" && line.trim().length > 0)
+      : undefined,
+    requestLines: Array.isArray(record.requestLines)
+      ? record.requestLines.filter((line): line is string => typeof line === "string" && line.trim().length > 0)
+      : undefined,
+    issueLines: Array.isArray(record.issueLines)
+      ? record.issueLines.filter((line): line is string => typeof line === "string" && line.trim().length > 0)
+      : undefined,
     entries,
   };
 }
@@ -4536,6 +5426,18 @@ function normalizeMpViewerSnapshot(input: unknown): MpViewerSnapshot | null {
     rootPath: typeof record.rootPath === "string" ? record.rootPath : undefined,
     recordCount: typeof record.recordCount === "number" && Number.isFinite(record.recordCount)
       ? record.recordCount
+      : undefined,
+    detailLines: Array.isArray(record.detailLines)
+      ? record.detailLines.filter((line): line is string => typeof line === "string" && line.trim().length > 0)
+      : undefined,
+    roleLines: Array.isArray(record.roleLines)
+      ? record.roleLines.filter((line): line is string => typeof line === "string" && line.trim().length > 0)
+      : undefined,
+    flowLines: Array.isArray(record.flowLines)
+      ? record.flowLines.filter((line): line is string => typeof line === "string" && line.trim().length > 0)
+      : undefined,
+    issueLines: Array.isArray(record.issueLines)
+      ? record.issueLines.filter((line): line is string => typeof line === "string" && line.trim().length > 0)
       : undefined,
     entries,
   };
@@ -4706,6 +5608,31 @@ function normalizeInitViewerSnapshot(input: unknown): InitViewerSnapshot | null 
   };
 }
 
+const QUESTION_NONE_OF_ABOVE_LABEL = "None options is what I want.";
+const QUESTION_NONE_OF_ABOVE_DESCRIPTION = "I have opinions and insights that differ from the options above.";
+
+function appendQuestionFallbackOption(
+  questionId: string,
+  options: QuestionViewerOption[],
+): QuestionViewerOption[] {
+  const fallbackId = `${questionId}::none_of_above`;
+  const hasExistingFallback = options.some((option) =>
+    option.id === fallbackId
+    || option.label === QUESTION_NONE_OF_ABOVE_LABEL,
+  );
+  if (hasExistingFallback) {
+    return options;
+  }
+  return [
+    ...options,
+    {
+      id: fallbackId,
+      label: QUESTION_NONE_OF_ABOVE_LABEL,
+      description: QUESTION_NONE_OF_ABOVE_DESCRIPTION,
+    },
+  ];
+}
+
 function normalizeQuestionViewerSnapshot(input: unknown): QuestionViewerSnapshot | null {
   if (!input || typeof input !== "object") {
     return null;
@@ -4720,13 +5647,54 @@ function normalizeQuestionViewerSnapshot(input: unknown): QuestionViewerSnapshot
       const prompt = typeof item.prompt === "string"
         ? item.prompt
         : (typeof item.question === "string" ? item.question : null);
-      if (!prompt) {
+      const questionId = typeof item.id === "string" && item.id.trim().length > 0
+        ? item.id
+        : null;
+      const questionKind = item.kind === "freeform" ? "freeform" : "choice";
+      const options = Array.isArray(item.options)
+        ? item.options.flatMap((candidate): QuestionViewerOption[] => {
+          if (!candidate || typeof candidate !== "object") {
+            return [];
+          }
+          const option = candidate as Record<string, unknown>;
+          if (
+            typeof option.id !== "string"
+            || typeof option.label !== "string"
+            || typeof option.description !== "string"
+          ) {
+            return [];
+          }
+          return [{
+            id: option.id,
+            label: option.label,
+            description: option.description,
+          }];
+        })
+        : [];
+      if (!prompt || !questionId) {
+        return [];
+      }
+      if (questionKind === "freeform") {
+        return [{
+          kind: "freeform",
+          id: questionId,
+          prompt,
+          ...(typeof item.placeholder === "string" ? { placeholder: item.placeholder } : {}),
+          allowAnnotation: typeof item.allowAnnotation === "boolean" ? item.allowAnnotation : undefined,
+          notePrompt: typeof item.notePrompt === "string" ? item.notePrompt : undefined,
+          required: typeof item.required === "boolean" ? item.required : undefined,
+        }];
+      }
+      if (options.length === 0) {
         return [];
       }
       return [{
+        id: questionId,
         prompt,
+        options: appendQuestionFallbackOption(questionId, options),
         allowAnnotation: typeof item.allowAnnotation === "boolean" ? item.allowAnnotation : undefined,
         notePrompt: typeof item.notePrompt === "string" ? item.notePrompt : undefined,
+        required: typeof item.required === "boolean" ? item.required : undefined,
       }];
     })
     : [];
@@ -4736,6 +5704,10 @@ function normalizeQuestionViewerSnapshot(input: unknown): QuestionViewerSnapshot
       ? record.activeQuestionIndex
       : 0);
   return {
+    requestId: typeof record.requestId === "string" ? record.requestId : undefined,
+    title: typeof record.title === "string" ? record.title : undefined,
+    instruction: typeof record.instruction === "string" ? record.instruction : undefined,
+    submitLabel: typeof record.submitLabel === "string" ? record.submitLabel : undefined,
     status: typeof record.status === "string" ? record.status : undefined,
     sourceKind: typeof record.sourceKind === "string" ? record.sourceKind : undefined,
     questionIndex: Math.max(0, Math.floor(rawIndex)),
@@ -4785,10 +5757,17 @@ function shouldShowSelectedBodyLineArrow(panelId: DirectSlashPanelId, fieldKey?:
   if (!fieldKey || fieldKey !== activeFieldKey) {
     return false;
   }
-  return panelId === "agents" || panelId === "resume" || panelId === "model" || panelId === "permissions";
+  return panelId === "agents"
+    || panelId === "resume"
+    || panelId === "model"
+    || panelId === "permissions"
+    || panelId === "exit";
 }
 
 function withSelectedBodyLineArrow(text: string): string {
+  if (text.startsWith("     ")) {
+    return `   →   ${text.slice(5)}`;
+  }
   return text.startsWith("  ") ? `→ ${text.slice(2)}` : `→ ${text}`;
 }
 
@@ -4885,6 +5864,36 @@ function expandWorkspaceInputPath(input: string, currentCwd: string): string {
   return resolve(currentCwd, trimmed);
 }
 
+function hasSuspiciousPathGlyphs(value: string): boolean {
+  return /[\u0000-\u001f\u007f-\u009f\uFFFD]/u.test(value);
+}
+
+function isUsableWorkspaceDirectory(value: string): boolean {
+  if (!value || hasSuspiciousPathGlyphs(value)) {
+    return false;
+  }
+  try {
+    return statSync(value).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function resolveValidWorkspacePath(value: string | undefined, fallback: string): string {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed.length > 0) {
+      const absoluteCandidate = trimmed.startsWith("~")
+        ? expandWorkspaceInputPath(trimmed, fallback)
+        : resolve(trimmed);
+      if (isUsableWorkspaceDirectory(absoluteCandidate)) {
+        return absoluteCandidate;
+      }
+    }
+  }
+  return fallback;
+}
+
 function parseMouseScrollDelta(inputText: string): number | null {
   // Ink strips the first ESC byte for some unhandled sequences, so mouse
   // reports can arrive as "[<64;..M", "<64;..M", or multiple reports glued
@@ -4912,6 +5921,59 @@ function excerptRewindUserText(value: string, max = 72): string {
     return normalized;
   }
   return `${normalized.slice(0, max - 1)}…`;
+}
+
+function formatRewindTurnOrdinal(turnIndex: number): string {
+  if (!Number.isFinite(turnIndex) || turnIndex < 0) {
+    return "???";
+  }
+  return String(Math.floor(turnIndex)).padStart(3, "0");
+}
+
+function shouldSummarizeRewindUserText(value: string, maxWidth = 72): boolean {
+  return estimateTerminalWidth(value.replace(/\s+/gu, " ").trim()) > maxWidth;
+}
+
+async function buildRewindDisplayUserText(params: {
+  sessionId: string;
+  turnId: string;
+  userText: string;
+}): Promise<{
+  displayUserText: string;
+  displayUserTextSource: "raw" | "mini_summary" | "fallback_excerpt";
+}> {
+  const normalized = params.userText.replace(/\s+/gu, " ").trim();
+  if (!normalized) {
+    return {
+      displayUserText: "",
+      displayUserTextSource: "raw",
+    };
+  }
+  if (!shouldSummarizeRewindUserText(normalized)) {
+    return {
+      displayUserText: normalized,
+      displayUserTextSource: "raw",
+    };
+  }
+  try {
+    const summary = await summarizePendingComposerText({
+      sessionId: params.sessionId,
+      runId: params.turnId,
+      text: normalized,
+    });
+    if (summary && summary.trim()) {
+      return {
+        displayUserText: summary.trim(),
+        displayUserTextSource: "mini_summary",
+      };
+    }
+  } catch {
+    // fall through to excerpt
+  }
+  return {
+    displayUserText: excerptRewindUserText(normalized),
+    displayUserTextSource: "fallback_excerpt",
+  };
 }
 
 function sliceOverlayWindow<T>(items: readonly T[], selectedIndex: number, maxItems: number): {
@@ -5030,13 +6092,19 @@ const RewindOverlayPane = memo(function RewindOverlayPane({
       visibleItems.forEach((option, index) => {
         const absoluteIndex = startIndex + index;
         const active = absoluteIndex === selectedTurnIndex;
-        const checkpointLabel = option.workspaceCheckpointRef ? "workspace checkpoint ready" : "conversation-only";
+        const checkpointColor = option.checkpointState === "workspace_ready"
+          ? TUI_THEME.cyan
+          : option.checkpointState === "tool_used_no_checkpoint"
+            ? TUI_THEME.yellow
+            : option.checkpointState === "checkpoint_error"
+              ? TUI_THEME.red
+              : TUI_THEME.textMuted;
         lines.push(
           <Text key={`rewind:turn:${option.turnId}`}>
             <Text color={active ? TUI_THEME.violet : TUI_THEME.textMuted}>{active ? "› " : "  "}</Text>
-            <Text color={active ? TUI_THEME.violet : TUI_THEME.text}>{`turn ${option.turnId}`.padEnd(10, " ")}</Text>
-            <Text color={TUI_THEME.text}> {excerptRewindUserText(option.userText)}</Text>
-            <Text color={TUI_THEME.textMuted}>  · {checkpointLabel}</Text>
+            <Text color={active ? TUI_THEME.violet : TUI_THEME.text}>{formatRewindTurnOrdinal(option.turnIndex).padEnd(5, " ")}</Text>
+            <Text color={TUI_THEME.text}> {excerptRewindUserText(option.displayUserText)}</Text>
+            <Text color={checkpointColor}>  · {option.checkpointLabel}</Text>
           </Text>,
         );
       });
@@ -5050,7 +6118,7 @@ const RewindOverlayPane = memo(function RewindOverlayPane({
     lines.push(
       <Text key="rewind:selected" color={TUI_THEME.textMuted}>
         {selectedTurn
-          ? `target turn ${selectedTurn.turnId} · ${excerptRewindUserText(selectedTurn.userText, 88)}`
+          ? `target ${formatRewindTurnOrdinal(selectedTurn.turnIndex)} · ${excerptRewindUserText(selectedTurn.displayUserText, 88)}`
           : "target turn unavailable"}
       </Text>,
     );
@@ -5061,7 +6129,7 @@ const RewindOverlayPane = memo(function RewindOverlayPane({
         <Text key={`rewind:mode:${option.mode}`}>
           <Text color={active ? TUI_THEME.violet : TUI_THEME.textMuted}>{active ? "› " : "  "}</Text>
           <Text color={color}>{option.label}</Text>
-          <Text color={TUI_THEME.textMuted}>  · {option.description}</Text>
+          <Text color={TUI_THEME.cyan}>  · {option.description}</Text>
           {option.disabled && option.reason ? (
             <Text color={TUI_THEME.red}>{`  (${option.reason})`}</Text>
           ) : null}
@@ -5088,6 +6156,22 @@ const RewindOverlayPane = memo(function RewindOverlayPane({
   );
 });
 
+const ExitSummaryPane = memo(function ExitSummaryPane({
+  lines,
+}: {
+  lines: string[];
+}): JSX.Element {
+  return (
+    <Box marginTop={1} flexDirection="column">
+      {lines.map((line, index) => (
+        <Text key={`exit-summary:${index}`} color={TUI_THEME.text}>
+          {line}
+        </Text>
+      ))}
+    </Box>
+  );
+});
+
 
 const ComposerPane = memo(function ComposerPane({
   showSlashMenu,
@@ -5105,6 +6189,7 @@ const ComposerPane = memo(function ComposerPane({
   contextPercent,
   contextWindowLabel,
   lineWidth,
+  cmpStatusLabel,
   cmpContextActive,
   cmpContextColor,
   cmpSpinnerFrame,
@@ -5124,6 +6209,7 @@ const ComposerPane = memo(function ComposerPane({
   contextPercent: string;
   contextWindowLabel: string;
   lineWidth: number;
+  cmpStatusLabel: string;
   cmpContextActive: boolean;
   cmpContextColor?: string;
   cmpSpinnerFrame: string;
@@ -5138,7 +6224,8 @@ const ComposerPane = memo(function ComposerPane({
       {slashPanel ? (
         <Box marginBottom={1} flexDirection="column">
           {(() => {
-            const activeFieldKey = slashPanel.fields[slashPanelFocusIndex]?.key;
+            const activeFieldKey = slashPanel.fields[slashPanelFocusIndex]?.key
+              ?? (slashPanel.id === "exit" ? findPrimaryActionField(slashPanel.fields)?.key : undefined);
             return (
               <>
           {slashPanel.showChrome !== false ? (
@@ -5159,20 +6246,32 @@ const ComposerPane = memo(function ComposerPane({
             </>
           ) : null}
           {slashPanel.bodyLines?.map((line, index) => (
+            slashPanel.id === "exit" && line.fieldKey ? (
+              <Text
+                key={`${slashPanel.id}:body:${index}`}
+                color={line.fieldKey === activeFieldKey ? TUI_THEME.red : TUI_THEME.text}
+              >
+                {line.fieldKey === activeFieldKey ? withSelectedBodyLineArrow(line.text) : line.text}
+              </Text>
+            ) : (
             <Text
               key={`${slashPanel.id}:body:${index}`}
               color={line.fieldKey && line.fieldKey === activeFieldKey
                 ? (isCreateEntryFieldKey(line.fieldKey)
                   ? TUI_THEME.red
-                  : (slashPanel.id === "model" ? TUI_THEME.yellow : TUI_THEME.mint))
-                : (isCreateEntryFieldKey(line.fieldKey) ? TUI_THEME.violet : panelToneColor(line.tone))}
+                  : (slashPanel.id === "exit"
+                      ? TUI_THEME.red
+                      : (slashPanel.id === "model" ? TUI_THEME.yellow : TUI_THEME.mint)))
+                : (slashPanel.id === "exit"
+                    ? TUI_THEME.text
+                    : (isCreateEntryFieldKey(line.fieldKey) ? TUI_THEME.violet : panelToneColor(line.tone)))}
             >
               {line.segments?.length
                 ? (
                   <>
                     {shouldShowSelectedBodyLineArrow(slashPanel.id, line.fieldKey, activeFieldKey)
                     && !shouldReplaceSelectedBodyLineArrowInline(slashPanel.id) ? (
-                      <Text color={slashPanel.id === "model" ? TUI_THEME.yellow : TUI_THEME.mint}>→ </Text>
+                      <Text color={slashPanel.id === "exit" ? TUI_THEME.red : (slashPanel.id === "model" ? TUI_THEME.yellow : TUI_THEME.mint)}>→ </Text>
                     ) : null}
                     {line.segments.map((segment, segmentIndex) => {
                       const selectedWithInlineArrow =
@@ -5185,10 +6284,14 @@ const ComposerPane = memo(function ComposerPane({
                         color={line.fieldKey && line.fieldKey === activeFieldKey
                           ? (isCreateEntryFieldKey(line.fieldKey)
                             ? TUI_THEME.red
+                            : (slashPanel.id === "exit"
+                                ? TUI_THEME.red
                             : (segment.tone === "fast"
                               ? TUI_THEME.violet
-                              : (slashPanel.id === "model" ? TUI_THEME.yellow : TUI_THEME.mint)))
-                          : (isCreateEntryFieldKey(line.fieldKey) ? TUI_THEME.violet : panelToneColor(segment.tone))}
+                              : (slashPanel.id === "model" ? TUI_THEME.yellow : TUI_THEME.mint))))
+                          : (slashPanel.id === "exit"
+                              ? TUI_THEME.text
+                              : (isCreateEntryFieldKey(line.fieldKey) ? TUI_THEME.violet : panelToneColor(segment.tone)))}
                       >
                         {selectedWithInlineArrow ? withSelectedBodyLineArrow(segment.text) : segment.text}
                       </Text>
@@ -5200,6 +6303,7 @@ const ComposerPane = memo(function ComposerPane({
                   ? withSelectedBodyLineArrow(line.text)
                   : line.text)}
             </Text>
+            )
           ))}
           {slashPanel.showFields !== false ? slashPanel.fields.map((field, index) => {
             const active = index === slashPanelFocusIndex;
@@ -5323,7 +6427,7 @@ const ComposerPane = memo(function ComposerPane({
         <Text color={TUI_THEME.text}>{workspaceLabel}</Text>
         <Text color={TUI_THEME.text}>    </Text>
         <Text color={TUI_THEME.text}>{cmpContextActive ? `${cmpSpinnerFrame} ` : "  "}</Text>
-        <Text color={cmpContextActive ? cmpContextColor : TUI_THEME.textMuted}>Context </Text>
+        <Text color={cmpContextColor}>Context </Text>
         <Text color={TUI_THEME.text}>{contextBar} </Text>
         <Text color={TUI_THEME.text}>{contextPercent} </Text>
         <Text color={TUI_THEME.textMuted}>of </Text>
@@ -5334,8 +6438,8 @@ const ComposerPane = memo(function ComposerPane({
 });
 
 function PraxisDirectTuiApp(): JSX.Element {
-  const { exit } = useApp();
   const appRoot = useMemo(() => resolveAppRoot(process.cwd()), []);
+  const initialBootState = useMemo(() => resolveInitialDirectTuiBootState(), []);
   const [configRevision, setConfigRevision] = useState(0);
   const [activeSlashPanelId, setActiveSlashPanelId] = useState<DirectSlashPanelId | null>(null);
   const [slashPanelFocusIndex, setSlashPanelFocusIndex] = useState(0);
@@ -5344,9 +6448,10 @@ function PraxisDirectTuiApp(): JSX.Element {
   const [slashPanelNotice, setSlashPanelNotice] = useState<SlashPanelNotice | null>(null);
   const [dismissedHumanGateSignature, setDismissedHumanGateSignature] = useState<string | null>(null);
   const [sessionIndexRevision, setSessionIndexRevision] = useState(0);
+  const [sessionUsageRevision, setSessionUsageRevision] = useState(0);
   const [checkpointRevision, setCheckpointRevision] = useState(0);
-  const [sessionName, setSessionName] = useState(() => `session-${Date.now().toString(36)}`);
-  const [selectedAgentId, setSelectedAgentId] = useState("");
+  const [sessionName, setSessionName] = useState(initialBootState.sessionName);
+  const [selectedAgentId, setSelectedAgentId] = useState(initialBootState.selectedAgentId);
   const [pendingInitNote, setPendingInitNote] = useState<string | null>(null);
   const [panelRenameTarget, setPanelRenameTarget] = useState<{ kind: "session" | "agent"; id: string } | null>(null);
   const [modelPicker, setModelPicker] = useState<ModelPickerOverlayState | null>(null);
@@ -5389,13 +6494,7 @@ function PraxisDirectTuiApp(): JSX.Element {
     }
   }, [appRoot, configRevision]);
   const supportsRawInput = Boolean(process.stdin.isTTY && typeof process.stdin.setRawMode === "function");
-  const [currentCwd, setCurrentCwd] = useState(() => {
-    try {
-      return resolveConfiguredWorkspaceRoot(process.cwd());
-    } catch {
-      return process.cwd();
-    }
-  });
+  const [currentCwd, setCurrentCwd] = useState(initialBootState.currentCwd);
   const [backendStatus, setBackendStatus] = useState<BackendStatus>("starting");
   const [agentRegistryRevision, setAgentRegistryRevision] = useState(0);
   const [composerState, setComposerState] = useState(() => createTuiTextInputState());
@@ -5409,21 +6508,24 @@ function PraxisDirectTuiApp(): JSX.Element {
   const [logPath, setLogPath] = useState<string | null>(null);
   const [scrollOffset, setScrollOffset] = useState(0);
   const [animationTick, setAnimationTick] = useState(0);
-  const [surfaceState, setSurfaceState] = useState<SurfaceAppState>(() => createInitialSurfaceState());
+  const [surfaceState, setSurfaceState] = useState<SurfaceAppState>(initialBootState.surfaceState);
   const [backendContextSnapshot, setBackendContextSnapshot] = useState<ReturnType<typeof normalizeContextSnapshot>>(null);
   const [cmpViewerSnapshot, setCmpViewerSnapshot] = useState<CmpViewerSnapshot | null>(null);
   const [mpViewerSnapshot, setMpViewerSnapshot] = useState<MpViewerSnapshot | null>(null);
   const [capabilityViewerSnapshot, setCapabilityViewerSnapshot] = useState<CapabilityViewerSnapshot | null>(null);
   const [initViewerSnapshot, setInitViewerSnapshot] = useState<InitViewerSnapshot | null>(null);
   const [questionViewerSnapshot, setQuestionViewerSnapshot] = useState<QuestionViewerSnapshot | null>(null);
+  const [questionPanelState, setQuestionPanelState] = useState<QuestionPanelState>(() => createEmptyQuestionPanelState());
   const [runIndicator, setRunIndicator] = useState<{ startedAt: string; label: string } | null>(null);
   const [workspaceIndexSnapshot, setWorkspaceIndexSnapshot] = useState<WorkspaceIndexSnapshot | null>(null);
   const [workspaceIndexStatus, setWorkspaceIndexStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [workspaceIndexError, setWorkspaceIndexError] = useState<string | null>(null);
   const [workspacePickerInputState, setWorkspacePickerInputState] = useState<TuiTextInputState | null>(null);
   const [pendingSessionSwitch, setPendingSessionSwitch] = useState<PendingSessionSwitch | null>(null);
+  const [pendingExitAction, setPendingExitAction] = useState<ExitPanelAction | null>(null);
+  const [exitSummaryDisplay, setExitSummaryDisplay] = useState<ExitSummaryDisplayState | null>(null);
   const [rewindOverlayState, setRewindOverlayState] = useState<RewindOverlayState | null>(null);
-  const [conversationActivated, setConversationActivated] = useState(false);
+  const [conversationActivated, setConversationActivated] = useState(initialBootState.conversationActivated);
   const [terminalSize, setTerminalSize] = useState(() => ({
     rows: process.stdout.rows ?? 24,
     columns: process.stdout.columns ?? 80,
@@ -5432,7 +6534,9 @@ function PraxisDirectTuiApp(): JSX.Element {
   const stdoutRemainderRef = useRef("");
   const stderrRemainderRef = useRef("");
   const processedLogByteOffsetRef = useRef(0);
-  const sessionIdRef = useRef(`direct-${Date.now()}`);
+  const logFileRemainderRef = useRef("");
+  const logTickInFlightRef = useRef(false);
+  const sessionIdRef = useRef(initialBootState.sessionId);
   const previousTranscriptLineCountRef = useRef(0);
   const assistantSegmentIndexRef = useRef(new Map<string, number>());
   const activeAssistantMessageIdRef = useRef(new Map<string, string>());
@@ -5465,9 +6569,12 @@ function PraxisDirectTuiApp(): JSX.Element {
   const rewindPrimedAtRef = useRef(0);
   const pendingTranscriptRewindRef = useRef<PendingTranscriptRewind | null>(null);
   const turnUserTextRef = useRef(new Map<string, string>());
+  const transcriptMessagesRef = useRef<SurfaceMessage[]>([]);
   const pendingOutboundTurnsRef = useRef<PendingOutboundTurn[]>([]);
   const initCompletedAutoCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingInitCompletedPanelRef = useRef(false);
+  const sessionUsageLedgerRef = useRef<DirectTuiSessionUsageEntry[]>(initialBootState.usageLedger);
+  const exitSummaryPersistRequestedRef = useRef(false);
 
   const dispatchSurfaceEvent = (event: Record<string, unknown>) => {
     setSurfaceState((previous) => applySurfaceEvent(previous, event as never));
@@ -5499,6 +6606,78 @@ function PraxisDirectTuiApp(): JSX.Element {
         kind,
         text,
         createdAt: at,
+      }),
+    });
+  };
+
+  const recordSessionUsage = (entry: DirectTuiSessionUsageEntry) => {
+    const existingIndex = sessionUsageLedgerRef.current.findIndex((candidate) => candidate.requestId === entry.requestId);
+    if (existingIndex >= 0) {
+      const nextLedger = sessionUsageLedgerRef.current.slice();
+      nextLedger[existingIndex] = entry;
+      sessionUsageLedgerRef.current = nextLedger;
+    } else {
+      sessionUsageLedgerRef.current = [...sessionUsageLedgerRef.current, entry];
+    }
+    setSessionUsageRevision((previous) => previous + 1);
+  };
+
+  const buildCurrentExitSummary = (generatedAt = new Date().toISOString()): DirectTuiSessionExitSummary => {
+    const knownSessions = listDirectTuiSessions(currentCwd)
+      .filter((session) => session.sessionId !== sessionIdRef.current);
+    return buildDirectTuiSessionExitSummary({
+      snapshot: {
+        sessionId: sessionIdRef.current,
+        name: sessionName,
+        usageLedger: sessionUsageLedgerRef.current,
+      },
+      sessions: [
+        ...knownSessions,
+        {
+          sessionId: sessionIdRef.current,
+          name: sessionName,
+        },
+      ],
+      generatedAt,
+    });
+  };
+
+  const beginExitSummarySequence = (generatedAt = new Date().toISOString()) => {
+    closeSlashPanel();
+    setPendingExitAction(null);
+    const animated = directTuiAnimationMode !== "off";
+    const startedAtMs = Date.now();
+    const summary = buildCurrentExitSummary(generatedAt);
+    exitSummaryPersistRequestedRef.current = false;
+    setExitSummaryDisplay({
+      summary,
+      animationStep: animated ? 0 : EXIT_SUMMARY_TOTAL_STEPS,
+      animated,
+      startedAtMs,
+      exitAtMs: startedAtMs + EXIT_SUMMARY_DISPLAY_MS,
+      finalLines: buildExitSummaryPanelLines(
+        summary,
+        EXIT_SUMMARY_TOTAL_STEPS,
+        terminalSize.columns,
+      ),
+    });
+  };
+
+  const appendQuestionReceipt = (payload: QuestionReceiptPayload, text: string) => {
+    const at = new Date().toISOString();
+    dispatchSurfaceEvent({
+      type: "message.appended",
+      at,
+      message: createSurfaceMessage({
+        messageId: `question-receipt:${at}`,
+        sessionId: sessionIdRef.current,
+        kind: "status",
+        text,
+        createdAt: at,
+        metadata: {
+          source: "question_receipt",
+          receipt: payload,
+        },
       }),
     });
   };
@@ -5919,6 +7098,336 @@ function PraxisDirectTuiApp(): JSX.Element {
     setComposerPastedContents([]);
   };
 
+  const resolveActiveQuestionSnapshot = () =>
+    questionViewerSnapshot && questionViewerSnapshot.status === "active"
+      ? questionViewerSnapshot
+      : null;
+
+  const resolveCurrentQuestionPrompt = (snapshot = resolveActiveQuestionSnapshot()) => {
+    if (!snapshot) {
+      return undefined;
+    }
+    return snapshot.questions[clampQuestionIndex(
+      questionPanelState.currentQuestionIndex,
+      snapshot.questions.length,
+    )];
+  };
+
+  const resolveCurrentQuestionComposerText = () => restorePastedContentTokens(
+    composerState.value,
+    composerPastedContents.filter((entry) => composerState.value.includes(entry.tokenText)),
+  ).trim();
+
+  const persistCurrentQuestionDraft = () => {
+    const snapshot = resolveActiveQuestionSnapshot();
+    const currentQuestion = resolveCurrentQuestionPrompt(snapshot);
+    if (!snapshot || !currentQuestion) {
+      return;
+    }
+    const value = resolveCurrentQuestionComposerText();
+    const noteMode = isQuestionNoteModeActive(questionPanelState, currentQuestion);
+    setQuestionPanelState((previous) => {
+      const existing = previous.answersByQuestionId[currentQuestion.id];
+      if (!existing && value.length === 0) {
+        return previous;
+      }
+      const nextAnswers = {
+        ...previous.answersByQuestionId,
+      };
+      const shouldDeleteEntry = value.length === 0
+        && !existing?.selectedOptionId
+        && !existing?.selectedOptionLabel
+        && !existing?.answerText
+        && !existing?.annotation;
+      if (shouldDeleteEntry) {
+        delete nextAnswers[currentQuestion.id];
+      } else {
+        const nextEntry: QuestionAnswerDraft = {
+          ...(existing ?? {}),
+        };
+        if (currentQuestion.kind === "freeform" && !noteMode) {
+          if (value.length > 0) {
+            nextEntry.answerText = value;
+          } else {
+            delete nextEntry.answerText;
+          }
+        } else {
+          if (value.length > 0) {
+            nextEntry.annotation = value;
+          } else {
+            delete nextEntry.annotation;
+          }
+        }
+        nextAnswers[currentQuestion.id] = nextEntry;
+      }
+      return {
+        ...previous,
+        answersByQuestionId: nextAnswers,
+      };
+    });
+  };
+
+  const moveQuestionPrompt = (delta: -1 | 1) => {
+    const snapshot = resolveActiveQuestionSnapshot();
+    if (!snapshot || snapshot.questions.length === 0) {
+      return;
+    }
+    persistCurrentQuestionDraft();
+    setQuestionPanelState((previous) => ({
+      ...previous,
+      currentQuestionIndex: clampQuestionIndex(previous.currentQuestionIndex + delta, snapshot.questions.length),
+    }));
+    setSlashPanelNotice(null);
+  };
+
+  const moveQuestionOption = (delta: -1 | 1) => {
+    const snapshot = resolveActiveQuestionSnapshot();
+    const currentQuestion = resolveCurrentQuestionPrompt(snapshot);
+    if (!snapshot || !currentQuestion || currentQuestion.kind === "freeform" || currentQuestion.options.length === 0) {
+      return;
+    }
+    setQuestionPanelState((previous) => {
+      const currentIndex = previous.activeOptionIndexByQuestionId[currentQuestion.id] ?? 0;
+      const nextIndex = (currentIndex + delta + currentQuestion.options.length) % currentQuestion.options.length;
+      return {
+        ...previous,
+        activeOptionIndexByQuestionId: {
+          ...previous.activeOptionIndexByQuestionId,
+          [currentQuestion.id]: nextIndex,
+        },
+      };
+    });
+    setSlashPanelNotice(null);
+  };
+
+  const toggleCurrentQuestionNoteMode = () => {
+    const snapshot = resolveActiveQuestionSnapshot();
+    const currentQuestion = resolveCurrentQuestionPrompt(snapshot);
+    if (!snapshot || !currentQuestion) {
+      return;
+    }
+    const currentValue = resolveCurrentQuestionComposerText();
+    const currentlyNoteMode = isQuestionNoteModeActive(questionPanelState, currentQuestion);
+    const nextNoteMode = !currentlyNoteMode;
+    const nextAnswersByQuestionId = currentlyNoteMode
+      ? buildNextQuestionAnswersByQuestionId({
+          state: questionPanelState,
+          question: currentQuestion,
+          composerValue: currentValue,
+          noteMode: true,
+        })
+      : questionPanelState.answersByQuestionId;
+    setQuestionPanelState((previous) => ({
+      ...previous,
+      answersByQuestionId: currentlyNoteMode ? nextAnswersByQuestionId : previous.answersByQuestionId,
+      noteModeByQuestionId: {
+        ...previous.noteModeByQuestionId,
+        [currentQuestion.id]: nextNoteMode,
+      },
+    }));
+    setSlashPanelNotice(null);
+  };
+
+  const findFirstUnansweredQuestionIndex = (
+    snapshot: QuestionViewerSnapshot,
+    answersByQuestionId: Record<string, QuestionAnswerDraft>,
+    currentQuestionId?: string,
+    currentAnswerText = "",
+  ): number => snapshot.questions.findIndex((question) => {
+    const entry = answersByQuestionId[question.id];
+    if (question.kind === "freeform") {
+      if (question.id === currentQuestionId && currentAnswerText.trim().length > 0) {
+        return false;
+      }
+      return !(entry?.answerText && entry.answerText.trim().length > 0);
+    }
+    return !entry?.selectedOptionId || !entry.selectedOptionLabel;
+  });
+
+  const submitAllQuestionAnswers = (
+    snapshot: QuestionViewerSnapshot,
+    answersByQuestionId: Record<string, QuestionAnswerDraft> = questionPanelState.answersByQuestionId,
+  ) => {
+    if (!snapshot.requestId) {
+      setSlashPanelNotice({
+        tone: "warning",
+        text: "Question prompt is not ready yet.",
+      });
+      return;
+    }
+    const answers: Array<{
+      questionId: string;
+      selectedOptionId?: string;
+      selectedOptionLabel?: string;
+      answerText?: string;
+      annotation?: string;
+    }> = [];
+    snapshot.questions.forEach((question) => {
+      const existing = answersByQuestionId[question.id];
+      if (question.kind === "freeform") {
+        const answerText = existing?.answerText;
+        if (!answerText) {
+          return;
+        }
+        answers.push({
+          questionId: question.id,
+          answerText,
+          ...(existing?.annotation ? { annotation: existing.annotation } : {}),
+        });
+        return;
+      }
+      if (!existing?.selectedOptionId || !existing.selectedOptionLabel) {
+        return;
+      }
+      answers.push({
+        questionId: question.id,
+        selectedOptionId: existing.selectedOptionId,
+        selectedOptionLabel: existing.selectedOptionLabel,
+        ...(existing.annotation ? { annotation: existing.annotation } : {}),
+      });
+    });
+    if (answers.length !== snapshot.questions.length) {
+      const firstMissingIndex = findFirstUnansweredQuestionIndex(snapshot, answersByQuestionId);
+      if (firstMissingIndex >= 0) {
+        setQuestionPanelState((previous) => ({
+          ...previous,
+          currentQuestionIndex: firstMissingIndex,
+        }));
+      }
+      setSlashPanelNotice({
+        tone: "danger",
+        text: "You still have unanswered questions.",
+      });
+      return;
+    }
+    const child = childRef.current;
+    if (!child || child.killed || backendStatus === "failed") {
+      appendInlineError("backend unavailable, cannot submit question answers");
+      setSlashPanelNotice({
+        tone: "danger",
+        text: "Backend unavailable, cannot submit answers",
+      });
+      return;
+    }
+    const requestedAt = new Date().toISOString();
+    try {
+      child.stdin.write(`${JSON.stringify({
+        type: "direct_question_answer",
+        requestId: snapshot.requestId,
+        answers,
+        currentIndex: questionPanelState.currentQuestionIndex,
+        isFinal: true,
+      })}\u0000`);
+    } catch (error) {
+      appendInlineError(`Failed to submit answers: ${error instanceof Error ? error.message : String(error)}`);
+      setSlashPanelNotice({
+        tone: "danger",
+        text: "Question answer submission failed",
+      });
+      return;
+    }
+    setConversationActivated(true);
+    setRunIndicator({
+      startedAt: requestedAt,
+      label: "submitting answers",
+    });
+    const receiptPayload = buildQuestionReceiptPayload({
+      snapshot,
+      answers,
+    });
+    appendQuestionReceipt(
+      receiptPayload,
+      buildQuestionReceiptText({
+        snapshot,
+        answers,
+      }),
+    );
+    setComposerState(createTuiTextInputState());
+    setComposerAttachments([]);
+    setComposerPastedContents([]);
+    setComposerFileReferences([]);
+    setQuestionPanelState(createEmptyQuestionPanelState());
+    setSlashPanelNotice(null);
+    setActiveSlashPanelId(null);
+  };
+
+  const confirmCurrentQuestionAnswer = () => {
+    const snapshot = resolveActiveQuestionSnapshot();
+    const currentQuestion = resolveCurrentQuestionPrompt(snapshot);
+    if (!snapshot || !currentQuestion) {
+      return;
+    }
+    const noteMode = isQuestionNoteModeActive(questionPanelState, currentQuestion);
+    const currentValue = resolveCurrentQuestionComposerText();
+    if (currentQuestion.kind === "freeform" && !noteMode) {
+      if (currentValue.length === 0) {
+        setSlashPanelNotice({
+          tone: "danger",
+          text: "You still have unanswered questions.",
+        });
+        return;
+      }
+    } else if (currentQuestion.kind === "choice") {
+      const activeOptionIndex = questionPanelState.activeOptionIndexByQuestionId[currentQuestion.id] ?? 0;
+      const selectedOption = currentQuestion.options[activeOptionIndex];
+      if (!selectedOption) {
+        setSlashPanelNotice({
+          tone: "danger",
+          text: "You still have unanswered questions.",
+        });
+        return;
+      }
+    }
+
+    const nextAnswersByQuestionId = buildNextQuestionAnswersByQuestionId({
+      state: questionPanelState,
+      question: currentQuestion,
+      composerValue: currentValue,
+      noteMode,
+    });
+    const isLastQuestion = questionPanelState.currentQuestionIndex >= snapshot.questions.length - 1;
+    if (!isLastQuestion) {
+      setQuestionPanelState((previous) => ({
+        ...previous,
+        answersByQuestionId: nextAnswersByQuestionId,
+        noteModeByQuestionId: noteMode
+          ? {
+              ...previous.noteModeByQuestionId,
+              [currentQuestion.id]: false,
+            }
+          : previous.noteModeByQuestionId,
+        currentQuestionIndex: clampQuestionIndex(previous.currentQuestionIndex + 1, snapshot.questions.length),
+      }));
+      setSlashPanelNotice(null);
+      return;
+    }
+    const firstMissingIndex = findFirstUnansweredQuestionIndex(
+      snapshot,
+      nextAnswersByQuestionId,
+      currentQuestion.kind === "freeform" && !noteMode ? currentQuestion.id : undefined,
+      currentQuestion.kind === "freeform" && !noteMode ? currentValue : "",
+    );
+    if (firstMissingIndex >= 0) {
+      setQuestionPanelState((previous) => ({
+        ...previous,
+        answersByQuestionId: nextAnswersByQuestionId,
+        noteModeByQuestionId: noteMode
+          ? {
+              ...previous.noteModeByQuestionId,
+              [currentQuestion.id]: false,
+            }
+          : previous.noteModeByQuestionId,
+        currentQuestionIndex: firstMissingIndex,
+      }));
+      setSlashPanelNotice({
+        tone: "danger",
+        text: "You still have unanswered questions.",
+      });
+      return;
+    }
+    submitAllQuestionAnswers(snapshot, nextAnswersByQuestionId);
+  };
+
   const openWorkspacePicker = (initialQuery = "") => {
     closeModelPicker();
     clearPermissionsPanelReturnTimer();
@@ -6099,6 +7608,9 @@ function PraxisDirectTuiApp(): JSX.Element {
   };
 
   useEffect(() => {
+    if (initialBootState.surfaceState.session) {
+      return;
+    }
     const startedAt = new Date().toISOString();
     dispatchSurfaceEvent({
       type: "session.started",
@@ -6114,7 +7626,7 @@ function PraxisDirectTuiApp(): JSX.Element {
         taskIds: [],
       }),
     });
-  }, []);
+  }, [initialBootState.surfaceState.session]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -6133,6 +7645,16 @@ function PraxisDirectTuiApp(): JSX.Element {
     () => selectActiveTasks(surfaceState),
     [surfaceState],
   );
+  const activeCmpTask = useMemo(
+    () => activeTasks.find((task) => task.kind === "cmp_sync"),
+    [activeTasks],
+  );
+  const activeCmpStage = useMemo(() => {
+    const candidate = activeCmpTask?.title ?? activeCmpTask?.summary;
+    return typeof candidate === "string" && candidate.startsWith("cmp/")
+      ? candidate
+      : undefined;
+  }, [activeCmpTask?.summary, activeCmpTask?.title]);
   const transcriptMessages = useMemo(
     () => selectTranscriptMessages(surfaceState),
     [surfaceState],
@@ -6159,17 +7681,20 @@ function PraxisDirectTuiApp(): JSX.Element {
       setConversationActivated(true);
     }
   }, [transcriptMessages]);
+  useEffect(() => {
+    transcriptMessagesRef.current = transcriptMessages;
+  }, [transcriptMessages]);
   const allSessionRecords = useMemo(
-    () => listDirectTuiSessions(appRoot),
-    [appRoot, sessionIndexRevision],
+    () => listDirectTuiSessions(currentCwd),
+    [currentCwd, sessionIndexRevision],
   );
   const persistedAgentRegistry = useMemo(
-    () => listDirectTuiAgents(appRoot),
-    [appRoot, agentRegistryRevision],
+    () => listDirectTuiAgents(currentCwd),
+    [agentRegistryRevision, currentCwd],
   );
   const persistedSessionSnapshot = useMemo(
-    () => loadDirectTuiSessionSnapshot(sessionIdRef.current, appRoot),
-    [appRoot, currentCwd, selectedAgentId, sessionIndexRevision, sessionName],
+    () => loadDirectTuiSessionSnapshot(sessionIdRef.current, currentCwd),
+    [currentCwd, selectedAgentId, sessionIndexRevision, sessionName],
   );
   const mergedAgentRegistry = useMemo(() => persistedAgentRegistry, [persistedAgentRegistry]);
   const agentEntries = useMemo(
@@ -6249,7 +7774,10 @@ function PraxisDirectTuiApp(): JSX.Element {
   };
 
   const restoreWorkspaceFromCheckpoint = async (
-    option: DirectTuiRewindTurnOption,
+    option: Pick<
+      DirectTuiRewindTurnOption,
+      "agentId" | "turnId" | "turnIndex" | "messageId" | "createdAt" | "userText" | "workspaceCheckpointRef"
+    >,
   ): Promise<void> => {
     if (!option.workspaceCheckpointRef) {
       throw new Error("No workspace checkpoint is available for the selected turn.");
@@ -6270,16 +7798,17 @@ function PraxisDirectTuiApp(): JSX.Element {
     pending: PendingTranscriptRewind,
     at: string,
   ): Promise<void> => {
-    setSurfaceState((previous) => rewindSurfaceStateToTurn(
-      previous,
-      pending.targetTurnId,
+    const rewoundSurfaceState = rewindSurfaceStateToTurn(
+      surfaceState,
+      pending.selectedTurnId,
       at,
       pending.transcriptCutMessageId,
-    ));
+    );
+    setSurfaceState(rewoundSurfaceState);
     completedTurnIdsRef.current = new Set([...completedTurnIdsRef.current]
-      .filter((turnId) => parseDirectTuiTurnIndex(turnId) <= pending.targetTurnIndex));
+      .filter((turnId) => parseDirectTuiTurnIndex(turnId) < pending.selectedTurnIndex));
     interruptedTurnIdsRef.current = new Set([...interruptedTurnIdsRef.current]
-      .filter((turnId) => parseDirectTuiTurnIndex(turnId) <= pending.targetTurnIndex));
+      .filter((turnId) => parseDirectTuiTurnIndex(turnId) < pending.selectedTurnIndex));
     activeTasksRef.current = [];
     activeTurnIdsRef.current.clear();
     toolFamilyStateRef.current.clear();
@@ -6290,21 +7819,29 @@ function PraxisDirectTuiApp(): JSX.Element {
     rawAssistantDeltaTextRef.current.clear();
     turnUserTextRef.current = new Map(
       [...turnUserTextRef.current.entries()]
-        .filter(([turnId]) => parseDirectTuiTurnIndex(turnId) <= pending.targetTurnIndex),
+        .filter(([turnId]) => parseDirectTuiTurnIndex(turnId) < pending.selectedTurnIndex),
     );
     setRunIndicator(null);
-    appendInlineStatus(`Conversation rewound to turn ${pending.targetTurnId}.`, "notice");
+    const rewoundMessages = Array.isArray((rewoundSurfaceState as { messages?: SurfaceMessage[] }).messages)
+      ? (rewoundSurfaceState as { messages: SurfaceMessage[] }).messages
+      : [];
+    setConversationActivated(rewoundMessages.some((message) => message.kind === "user"));
+    setComposerState(createTuiTextInputState(pending.userText));
+    setComposerAttachments([]);
+    setComposerPastedContents([]);
+    setComposerFileReferences([]);
+    setScrollOffset(0);
+    appendInlineStatus(`Conversation rewound to before ${pending.selectedTurnId}.`, "notice");
     if (
       pending.mode === "rewind_turn_and_workspace"
       && pending.workspaceCheckpointRef
     ) {
       try {
         await restoreWorkspaceFromCheckpoint({
-          sessionId: sessionIdRef.current,
           agentId: pending.agentId,
-          turnId: pending.targetTurnId,
-          turnIndex: pending.targetTurnIndex,
-          messageId: `user:${pending.targetTurnId}`,
+          turnId: pending.selectedTurnId,
+          turnIndex: pending.selectedTurnIndex,
+          messageId: `user:${pending.selectedTurnId}`,
           createdAt: at,
           userText: pending.userText,
           workspaceCheckpointRef: pending.workspaceCheckpointRef,
@@ -6326,26 +7863,33 @@ function PraxisDirectTuiApp(): JSX.Element {
       appendInlineError("Backend unavailable, cannot rewind conversation right now.");
       return;
     }
+    const rewindRequestTurnIndex = Math.max(0, option.turnIndex - 1);
     pendingTranscriptRewindRef.current = {
       agentId: option.agentId,
-      targetTurnId: option.turnId,
-      targetTurnIndex: option.turnIndex,
+      selectedTurnId: option.turnId,
+      selectedTurnIndex: option.turnIndex,
+      rewindRequestTurnIndex,
       mode,
       transcriptCutMessageId: option.transcriptCutMessageId,
       workspaceCheckpointRef: option.workspaceCheckpointRef,
       userText: option.userText,
     };
-    child.stdin.write(`/rewind ${option.turnIndex}\u0000`);
+    child.stdin.write(`/rewind ${rewindRequestTurnIndex}\u0000`);
     closeRewindOverlay();
-    appendInlineStatus(`Rewinding conversation to turn ${option.turnId}...`, "notice");
+    appendInlineStatus(`Rewinding conversation to before ${option.turnId}...`, "notice");
   };
 
-  const persistCompletedTurnCheckpoint = async (params: {
+  const persistPreTurnCheckpoint = async (params: {
     turnId: string;
     createdAt: string;
     userText: string;
-    transcriptCutMessageId: string;
+    transcriptCutMessageId?: string;
   }): Promise<void> => {
+    const displayUser = await buildRewindDisplayUserText({
+      sessionId: sessionIdRef.current,
+      turnId: params.turnId,
+      userText: params.userText,
+    });
     const gitReadback = await readWorkspaceRaxodeGitReadback({
       workspaceRoot: currentCwd,
       agentId: selectedAgentId || "agent.core:main",
@@ -6366,12 +7910,27 @@ function PraxisDirectTuiApp(): JSX.Element {
         transcriptCutMessageId: params.transcriptCutMessageId,
         createdAt: params.createdAt,
         userText: params.userText,
+        displayUserText: displayUser.displayUserText,
+        displayUserTextSource: displayUser.displayUserTextSource,
         workspaceRoot: currentCwd,
         git: gitReadback,
         workspaceCheckpointRef: checkpoint.checkpointRef,
         workspaceCheckpointCommit: checkpoint.commitSha,
       }, currentCwd);
+      appendDirectTuiCheckpointEvent({
+        sessionId: sessionIdRef.current,
+        turnId: params.turnId,
+        workspaceRoot: currentCwd,
+        createdAt: params.createdAt,
+        status: "checkpoint_written",
+        checkpointRef: checkpoint.checkpointRef,
+        checkpointCommit: checkpoint.commitSha,
+      });
     } catch (error) {
+      const failure = resolveWorkspaceCheckpointFailure({
+        error,
+        workspaceRoot: currentCwd,
+      });
       upsertDirectTuiTurnCheckpoint(sessionIdRef.current, {
         sessionId: sessionIdRef.current,
         agentId: selectedAgentId || "agent.core:main",
@@ -6381,10 +7940,25 @@ function PraxisDirectTuiApp(): JSX.Element {
         transcriptCutMessageId: params.transcriptCutMessageId,
         createdAt: params.createdAt,
         userText: params.userText,
+        displayUserText: displayUser.displayUserText,
+        displayUserTextSource: displayUser.displayUserTextSource,
         workspaceRoot: currentCwd,
         git: gitReadback,
-        workspaceCheckpointError: summarizeWorkspaceCheckpointError(error),
+        workspaceCheckpointError: failure.uiError,
+        workspaceCheckpointErrorCode: failure.code,
+        workspaceCheckpointErrorOrigin: failure.origin,
+        workspaceCheckpointErrorMessage: failure.rawMessage,
       }, currentCwd);
+      appendDirectTuiCheckpointEvent({
+        sessionId: sessionIdRef.current,
+        turnId: params.turnId,
+        workspaceRoot: currentCwd,
+        createdAt: params.createdAt,
+        status: "checkpoint_failed",
+        errorCode: failure.code,
+        errorOrigin: failure.origin,
+        errorMessage: failure.rawMessage,
+      });
     } finally {
       setCheckpointRevision((previous) => previous + 1);
     }
@@ -6408,12 +7982,30 @@ function PraxisDirectTuiApp(): JSX.Element {
       workspace: currentCwd,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-    }, appRoot);
+    }, currentCwd);
     setAgentRegistryRevision((previous) => previous + 1);
-  }, [appRoot, currentCwd, persistedAgentRegistry]);
+  }, [currentCwd, persistedAgentRegistry]);
   useEffect(() => {
     const now = new Date().toISOString();
-    const existing = loadDirectTuiSessionSnapshot(sessionIdRef.current, appRoot);
+    const existing = loadDirectTuiSessionSnapshot(sessionIdRef.current, currentCwd);
+    const usageLedger = sessionUsageLedgerRef.current.slice();
+    const resumeSessions = listDirectTuiSessions(currentCwd)
+      .filter((session) => session.sessionId !== sessionIdRef.current);
+    const exitSummary = buildDirectTuiSessionExitSummary({
+      snapshot: {
+        sessionId: sessionIdRef.current,
+        name: sessionName,
+        usageLedger,
+      },
+      sessions: [
+        ...resumeSessions,
+        {
+          sessionId: sessionIdRef.current,
+          name: sessionName,
+        },
+      ],
+      generatedAt: now,
+    });
     saveDirectTuiSessionSnapshot({
       schemaVersion: 1,
       sessionId: sessionIdRef.current,
@@ -6427,8 +8019,10 @@ function PraxisDirectTuiApp(): JSX.Element {
       selectedAgentId,
       agents: existing?.agents ?? [],
       messages: transcriptMessagesToSessionRecords(transcriptMessages),
-    }, appRoot);
-  }, [appRoot, config?.baseURL, currentCwd, runtimeConfig?.modelPlan.core.main.model, selectedAgentId, sessionName, transcriptMessages]);
+      usageLedger,
+      exitSummary,
+    }, currentCwd);
+  }, [config?.baseURL, currentCwd, runtimeConfig?.modelPlan.core.main.model, selectedAgentId, sessionName, sessionUsageRevision, transcriptMessages]);
   useEffect(() => {
     if (!selectedAgentId) {
       return;
@@ -6460,9 +8054,9 @@ function PraxisDirectTuiApp(): JSX.Element {
       createdAt: existing?.createdAt ?? new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       lastSessionId: sessionIdRef.current,
-    }, appRoot);
+    }, currentCwd);
     setAgentRegistryRevision((previous) => previous + 1);
-  }, [activeTasks.length, appRoot, currentCwd, persistedAgentRegistry, selectedAgentId, transcriptMessages]);
+  }, [activeTasks.length, currentCwd, persistedAgentRegistry, selectedAgentId, transcriptMessages]);
   useEffect(() => {
     if (!selectedAgentId) {
       return;
@@ -6492,15 +8086,35 @@ function PraxisDirectTuiApp(): JSX.Element {
       cancelled = true;
     };
   }, [currentCwd, selectedAgentId]);
-  const cmpContextActive = useMemo(
-    () => activeTasks.some((task) => task.kind === "cmp_sync"),
-    [activeTasks],
+  const cmpStatusDescriptor = useMemo(
+    () => deriveDirectTuiCmpStatusDescriptor({
+      activeStage: activeCmpStage,
+      snapshot: cmpViewerSnapshot,
+    }),
+    [activeCmpStage, cmpViewerSnapshot],
   );
+  const directTuiAnimationMode = useMemo<RaxodeAnimationMode>(() => {
+    const envMode = process.env.PRAXIS_BOOTSTRAP_MODE;
+    if (isRaxodeAnimationMode(envMode)) {
+      return envMode;
+    }
+    if (isRaxodeAnimationMode(configFile?.ui.animationMode)) {
+      return configFile.ui.animationMode;
+    }
+    if (isRaxodeAnimationMode(runtimeConfig?.ui.animationMode)) {
+      return runtimeConfig.ui.animationMode;
+    }
+    return "fresh";
+  }, [configFile?.ui.animationMode, runtimeConfig?.ui.animationMode]);
+  const cmpContextActive = cmpStatusDescriptor.animated;
   const startupAnimationStep = useMemo(() => {
     const maxStep = STARTUP_WORD.length + STARTUP_RAINBOW_COLORS.length;
+    if (directTuiAnimationMode !== "fresh") {
+      return maxStep;
+    }
     const step = Math.floor((animationTick * ANIMATION_TICK_MS) / STARTUP_ANIMATION_INTERVAL_MS);
     return Math.min(maxStep, step);
-  }, [animationTick]);
+  }, [animationTick, directTuiAnimationMode]);
   const cmpContextAnimationFrame = cmpContextActive
     ? Math.floor(animationTick / 8)
     : 0;
@@ -6508,9 +8122,10 @@ function PraxisDirectTuiApp(): JSX.Element {
     ? Math.floor(animationTick / 8)
     : 0;
   const questionPanelActive = activeSlashPanelId === "question" && questionViewerSnapshot?.status === "active";
+  const questionAnimationFrame = Math.floor(animationTick / 6);
   const toolSummaryAnimationFrame = Math.floor(animationTick / 5);
   const shouldAnimate =
-    startupAnimationStep < STARTUP_WORD.length + STARTUP_RAINBOW_COLORS.length
+    (directTuiAnimationMode === "fresh" && startupAnimationStep < STARTUP_WORD.length + STARTUP_RAINBOW_COLORS.length)
     || cmpContextActive
     || Boolean(runIndicator)
     || questionPanelActive;
@@ -6717,6 +8332,8 @@ function PraxisDirectTuiApp(): JSX.Element {
       stdoutRemainderRef.current = "";
       stderrRemainderRef.current = "";
       processedLogByteOffsetRef.current = 0;
+      logFileRemainderRef.current = "";
+      logTickInFlightRef.current = false;
       setLogPath(null);
       if (stderrTail) {
         const at = new Date().toISOString();
@@ -6763,27 +8380,47 @@ function PraxisDirectTuiApp(): JSX.Element {
 
     let cancelled = false;
     const tick = async () => {
+      if (logTickInFlightRef.current) {
+        return;
+      }
+      logTickInFlightRef.current = true;
       try {
-        const handle = await open(logPath, "r");
-        const stats = await handle.stat();
-        const nextSize = stats.size;
-        const currentOffset = processedLogByteOffsetRef.current;
-        if (nextSize <= currentOffset) {
-          await handle.close();
-          return;
-        }
-        const chunkLength = nextSize - currentOffset;
-        const buffer = Buffer.alloc(chunkLength);
-        await handle.read(buffer, 0, chunkLength, currentOffset);
-        await handle.close();
-        if (cancelled) {
-          return;
-        }
-        processedLogByteOffsetRef.current = nextSize;
-        const raw = buffer.toString("utf8");
-        const rows = raw.split("\n").filter((entry) => entry.trim().length > 0);
+        while (!cancelled) {
+          const handle = await open(logPath, "r");
+          let nextSize = 0;
+          let nextOffset = processedLogByteOffsetRef.current;
+          let bytesRead = 0;
+          let chunkText = "";
+          try {
+            const stats = await handle.stat();
+            nextSize = stats.size;
+            const currentOffset = processedLogByteOffsetRef.current;
+            if (nextSize <= currentOffset) {
+              break;
+            }
+            const chunkLength = Math.min(nextSize - currentOffset, LOG_TAIL_READ_CHUNK_BYTES);
+            const buffer = Buffer.alloc(chunkLength);
+            const readResult = await handle.read(buffer, 0, chunkLength, currentOffset);
+            bytesRead = readResult.bytesRead;
+            if (bytesRead <= 0) {
+              break;
+            }
+            nextOffset = currentOffset + bytesRead;
+            chunkText = buffer.toString("utf8", 0, bytesRead);
+          } finally {
+            await handle.close();
+          }
+          if (cancelled) {
+            return;
+          }
+          processedLogByteOffsetRef.current = nextOffset;
+          const raw = `${logFileRemainderRef.current}${chunkText}`;
+          const splitRows = raw.split("\n");
+          logFileRemainderRef.current = splitRows.pop() ?? "";
+          const rows = splitRows.filter((entry) => entry.trim().length > 0);
+          let processedRowCount = 0;
 
-        for (const row of rows) {
+          for (const row of rows) {
           let record: LiveLogRecord;
           try {
             record = JSON.parse(row) as LiveLogRecord;
@@ -6899,18 +8536,26 @@ function PraxisDirectTuiApp(): JSX.Element {
           if (record.event === "rewind_applied" && typeof record.targetTurnId === "string") {
             const pending = pendingTranscriptRewindRef.current;
             pendingTranscriptRewindRef.current = null;
-            const targetTurnIndex = Number.parseInt(record.targetTurnId, 10);
-            const targetTurnId = Number.isFinite(targetTurnIndex)
-              ? createTurnId(targetTurnIndex)
-              : record.targetTurnId;
-            const rewindMode = pending?.targetTurnIndex === targetTurnIndex
+            const rewindRequestTurnIndex = Number.parseInt(record.targetTurnId, 10);
+            const rewindMode = pending?.rewindRequestTurnIndex === rewindRequestTurnIndex
               ? pending
               : {
                 agentId: selectedAgentId || "agent.core:main",
-                targetTurnId,
-                targetTurnIndex: Number.isFinite(targetTurnIndex) ? targetTurnIndex : parseDirectTuiTurnIndex(targetTurnId),
+                selectedTurnId: Number.isFinite(rewindRequestTurnIndex)
+                  ? createTurnId(rewindRequestTurnIndex)
+                  : record.targetTurnId,
+                selectedTurnIndex: Number.isFinite(rewindRequestTurnIndex)
+                  ? rewindRequestTurnIndex
+                  : parseDirectTuiTurnIndex(record.targetTurnId),
+                rewindRequestTurnIndex: Number.isFinite(rewindRequestTurnIndex)
+                  ? rewindRequestTurnIndex
+                  : Math.max(0, parseDirectTuiTurnIndex(record.targetTurnId) - 1),
                 mode: "rewind_turn_only" as const,
-                userText: turnUserTextRef.current.get(targetTurnId) ?? "",
+                userText: turnUserTextRef.current.get(
+                  Number.isFinite(rewindRequestTurnIndex)
+                    ? createTurnId(rewindRequestTurnIndex)
+                    : record.targetTurnId,
+                ) ?? "",
               };
             void applyConfirmedTranscriptRewind(rewindMode, at);
             continue;
@@ -6951,7 +8596,7 @@ function PraxisDirectTuiApp(): JSX.Element {
                 taskIds: [],
               }),
             });
-            if (normalizedUserMessage) {
+            if (normalizedUserMessage && record.inputSource !== "question_answer") {
               dispatchSurfaceEvent({
                 type: "message.appended",
                 at,
@@ -6981,7 +8626,9 @@ function PraxisDirectTuiApp(): JSX.Element {
           }
 
           if (record.event === "stage_start") {
-            closeAssistantSegment(turnId);
+            if (shouldBreakDirectTuiAssistantSegmentOnStageStart(record.stage)) {
+              closeAssistantSegment(turnId);
+            }
             dispatchSurfaceEvent({
               type: "task.upserted",
               at,
@@ -7407,7 +9054,27 @@ function PraxisDirectTuiApp(): JSX.Element {
             const usageDetail = formatTurnUsageDetail({
               inputTokens: record.core?.usage?.inputTokens ?? turnContext?.promptTokens,
               outputTokens: record.core?.usage?.outputTokens ?? (answer ? estimateContextUnits(answer) : undefined),
+              thinkingTokens: record.core?.usage?.thinkingTokens,
               elapsedMs: record.core?.elapsedMs ?? record.elapsedMs,
+            });
+            recordSessionUsage({
+              requestId: `turn:${sessionIdRef.current}:${turnId}`,
+              turnId,
+              kind: "core_turn",
+              provider: turnContext?.provider,
+              model: turnContext?.model,
+              status: record.core?.taskStatus === "completed"
+                ? "success"
+                : record.core?.taskStatus === "blocked"
+                  ? "blocked"
+                  : "failed",
+              inputTokens: record.core?.usage?.inputTokens ?? turnContext?.promptTokens,
+              outputTokens: record.core?.usage?.outputTokens ?? (answer ? estimateContextUnits(answer) : undefined),
+              thinkingTokens: record.core?.usage?.thinkingTokens,
+              estimated: record.core?.usage?.estimated === true,
+              startedAt: at,
+              endedAt: at,
+              errorCode: typeof record.resultMetadata?.errorCode === "string" ? record.resultMetadata.errorCode : undefined,
             });
             if (usageDetail) {
               dispatchSurfaceEvent({
@@ -7460,16 +9127,6 @@ function PraxisDirectTuiApp(): JSX.Element {
             });
             setRunIndicator(null);
             completedTurnIdsRef.current.add(turnId);
-            if (mapCoreTaskStatusToSurfaceTurnStatus(record.core?.taskStatus) === "completed") {
-              const transcriptCutMessageId = activeAssistantMessageIdRef.current.get(turnId) ?? `user:${turnId}`;
-              const userText = turnUserTextRef.current.get(turnId) ?? "";
-              void persistCompletedTurnCheckpoint({
-                turnId,
-                createdAt: at,
-                userText,
-                transcriptCutMessageId,
-              });
-            }
             for (const key of [...toolFamilyStateRef.current.keys()]) {
               if (key.startsWith(`${turnId}:`)) {
                 toolFamilyStateRef.current.delete(key);
@@ -7558,9 +9215,24 @@ function PraxisDirectTuiApp(): JSX.Element {
               }),
             });
           }
+            processedRowCount += 1;
+            if (processedRowCount % LOG_TAIL_PROCESS_BATCH_SIZE === 0) {
+              await yieldToEventLoop();
+              if (cancelled) {
+                return;
+              }
+            }
+          }
+          if (processedLogByteOffsetRef.current < nextSize) {
+            await yieldToEventLoop();
+            continue;
+          }
+          break;
         }
       } catch {
         // startup races are expected
+      } finally {
+        logTickInFlightRef.current = false;
       }
     };
 
@@ -7571,6 +9243,7 @@ function PraxisDirectTuiApp(): JSX.Element {
 
     return () => {
       cancelled = true;
+      logTickInFlightRef.current = false;
       clearInterval(timer);
     };
   }, [logPath]);
@@ -7584,11 +9257,15 @@ function PraxisDirectTuiApp(): JSX.Element {
     sessionContext?: ReturnType<typeof normalizeContextSnapshot>,
   ) => {
     clearPendingSessionSwitchTimeout();
+    const safeWorkspace = resolveValidWorkspacePath(nextSwitch.targetWorkspace, currentCwd);
     sessionIdRef.current = nextSwitch.targetSessionId;
     setSessionName(nextSwitch.targetSessionName);
     setSelectedAgentId(nextSwitch.targetAgentId);
-    setCurrentCwd(nextSwitch.targetWorkspace);
+    setCurrentCwd(safeWorkspace);
     setSurfaceState(nextSwitch.targetSurfaceState);
+    const restoredSnapshot = loadDirectTuiSessionSnapshot(nextSwitch.targetSessionId, safeWorkspace);
+    sessionUsageLedgerRef.current = restoredSnapshot?.usageLedger ?? [];
+    setSessionUsageRevision((previous) => previous + 1);
     setScrollOffset(0);
     setConversationActivated(nextSwitch.targetSurfaceState.messages.some((message) => message.kind === "user"));
     if (sessionContext) {
@@ -7596,8 +9273,10 @@ function PraxisDirectTuiApp(): JSX.Element {
     }
     if (nextSwitch.successNotice) {
       setSlashPanelNotice({
-        tone: "success",
-        text: nextSwitch.successNotice,
+        tone: safeWorkspace === nextSwitch.targetWorkspace ? "success" : "warning",
+        text: safeWorkspace === nextSwitch.targetWorkspace
+          ? nextSwitch.successNotice
+          : `${nextSwitch.successNotice} (workspace path was reset to the current valid directory)`,
       });
     }
     if (nextSwitch.autoClose) {
@@ -7800,9 +9479,9 @@ function PraxisDirectTuiApp(): JSX.Element {
 
   const restoreSessionSnapshot = (sessionId: string) => {
     const indexedSession = allSessionRecords.find((session) => session.sessionId === sessionId);
-    const snapshot = loadDirectTuiSessionSnapshot(sessionId, appRoot);
+    const snapshot = loadDirectTuiSessionSnapshot(sessionId, currentCwd);
     if (!snapshot) {
-      const snapshotPath = resolveDirectTuiSessionSnapshotPath(sessionId, appRoot);
+      const snapshotPath = resolveDirectTuiSessionSnapshotPath(sessionId, currentCwd);
       const detailText = !indexedSession
         ? `Session ${sessionId} is not in the local resume index.`
         : !existsSync(snapshotPath)
@@ -7814,6 +9493,7 @@ function PraxisDirectTuiApp(): JSX.Element {
       });
       return;
     }
+    const effectiveWorkspace = resolveValidWorkspacePath(snapshot.workspace, currentCwd);
     if (!persistedAgentRegistry.some((agent) => agent.agentId === snapshot.agentId)) {
       saveDirectTuiAgent({
         agentId: snapshot.agentId,
@@ -7821,30 +9501,38 @@ function PraxisDirectTuiApp(): JSX.Element {
         kind: snapshot.agentId.startsWith("agent.core:") ? "core" : "task",
         status: "idle",
         summary: "restored session agent",
-        workspace: snapshot.workspace,
+        workspace: effectiveWorkspace,
         createdAt: snapshot.createdAt,
         updatedAt: snapshot.updatedAt,
         lastSessionId: snapshot.sessionId,
-      }, appRoot);
+      }, currentCwd);
       setAgentRegistryRevision((previous) => previous + 1);
     }
+    const normalizedSnapshot = effectiveWorkspace === snapshot.workspace
+      ? snapshot
+      : {
+        ...snapshot,
+        workspace: effectiveWorkspace,
+      };
     resetSwitchRuntimeState();
-    setConversationActivated(buildSurfaceStateFromSessionSnapshot(snapshot).messages.some((message) => message.kind === "user"));
+    setConversationActivated(buildSurfaceStateFromSessionSnapshot(normalizedSnapshot).messages.some((message) => message.kind === "user"));
     setSlashPanelNotice({
-      tone: "info",
-      text: `Resuming ${snapshot.name}...`,
+      tone: effectiveWorkspace === snapshot.workspace ? "info" : "warning",
+      text: effectiveWorkspace === snapshot.workspace
+        ? `Resuming ${snapshot.name}...`
+        : `Resuming ${snapshot.name} with the current valid workspace...`,
     });
     setPendingSessionSwitch({
       targetSessionId: snapshot.sessionId,
       targetAgentId: snapshot.agentId ?? snapshot.selectedAgentId ?? "agent.core:main",
-      targetWorkspace: snapshot.workspace,
+      targetWorkspace: effectiveWorkspace,
       targetSessionName: snapshot.name,
-      targetSurfaceState: buildSurfaceStateFromSessionSnapshot(snapshot),
+      targetSurfaceState: buildSurfaceStateFromSessionSnapshot(normalizedSnapshot),
       successNotice: `Resumed ${snapshot.name}`,
       autoClose: true,
     });
     restartBackendInPlace({
-      nextWorkspace: snapshot.workspace,
+      nextWorkspace: effectiveWorkspace,
       nextSessionId: snapshot.sessionId,
     });
   };
@@ -7852,7 +9540,7 @@ function PraxisDirectTuiApp(): JSX.Element {
   const persistAgentRename = (agentId: string, nextName: string) => {
     const existing = persistedAgentRegistry.find((agent) => agent.agentId === agentId);
     if (existing) {
-      renameDirectTuiAgent(agentId, nextName, appRoot);
+      renameDirectTuiAgent(agentId, nextName, currentCwd);
     } else {
       saveDirectTuiAgent({
         agentId,
@@ -7863,14 +9551,14 @@ function PraxisDirectTuiApp(): JSX.Element {
         workspace: currentCwd,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-      }, appRoot);
+      }, currentCwd);
     }
     setAgentRegistryRevision((previous) => previous + 1);
   };
 
   const createWorkspaceAgent = () => {
     const nextAgent = createWorkspaceAgentSnapshot(currentCwd);
-    saveDirectTuiAgent(nextAgent, appRoot);
+    saveDirectTuiAgent(nextAgent, currentCwd);
     setAgentRegistryRevision((previous) => previous + 1);
     createSessionWithCurrentAgent(nextAgent.agentId, false, null);
     setPanelRenameTarget({
@@ -7899,8 +9587,10 @@ function PraxisDirectTuiApp(): JSX.Element {
       route: config?.baseURL ?? "(unconfigured)",
       model: runtimeConfig?.modelPlan.core.main.model ?? "gpt-5.4",
     });
-    saveDirectTuiSessionSnapshot(snapshot, appRoot);
+    saveDirectTuiSessionSnapshot(snapshot, currentCwd);
     resetSwitchRuntimeState();
+    sessionUsageLedgerRef.current = [];
+    setSessionUsageRevision((previous) => previous + 1);
     setConversationActivated(false);
     setSessionIndexRevision((previous) => previous + 1);
     setPanelRenameTarget(enterRename
@@ -7950,21 +9640,108 @@ function PraxisDirectTuiApp(): JSX.Element {
     createSessionWithCurrentAgent(agentId, false);
   };
 
-  const requestImmediateQuit = () => {
-    if (runIndicator || activeTasksRef.current.length > 0) {
-      appendInlineError(ACTIVE_TASK_GUARD_TEXT);
+  const requestImmediateQuit = (options?: { force?: boolean }) => {
+    if (!options?.force && (runIndicator || activeTasksRef.current.length > 0)) {
+      openSlashPanel("exit");
       setSlashPanelNotice({
-        tone: "danger",
+        tone: "warning",
         text: ACTIVE_TASK_GUARD_TEXT,
       });
       return false;
     }
-    if (childRef.current && !childRef.current.killed) {
-      childRef.current.stdin.write("/exit\u0000");
+    const generatedAt = new Date().toISOString();
+    if (options?.force) {
+      const syntheticCancelledEntries = activeTasksRef.current.map((task, index) => ({
+        requestId: `forced-exit:${sessionIdRef.current}:${index}:${generatedAt}`,
+        turnId: task.turnId,
+        kind: "session" as const,
+        status: "cancelled" as const,
+        startedAt: task.startedAt,
+        endedAt: generatedAt,
+        errorCode: "forced_exit",
+      }));
+      if (syntheticCancelledEntries.length > 0) {
+        sessionUsageLedgerRef.current = [
+          ...sessionUsageLedgerRef.current,
+          ...syntheticCancelledEntries,
+        ];
+        setSessionUsageRevision((previous) => previous + 1);
+      }
     }
-    exit();
+    const child = childRef.current;
+    if (child && !child.killed) {
+      try {
+        child.stdin.write("/exit\u0000");
+      } catch {
+        // ignore write races during shutdown
+      }
+      if (options?.force) {
+        setTimeout(() => {
+          if (!child.killed) {
+            child.kill("SIGTERM");
+          }
+        }, 120);
+      }
+    }
+    beginExitSummarySequence(generatedAt);
     return true;
   };
+
+  useEffect(() => {
+    if (!pendingExitAction || activeTasks.length > 0) {
+      return;
+    }
+    requestImmediateQuit({
+      force: pendingExitAction === "force_exit",
+    });
+  }, [activeTasks.length, pendingExitAction]);
+
+  useEffect(() => {
+    if (!exitSummaryDisplay?.animated) {
+      return;
+    }
+    const animationTimer = setInterval(() => {
+      setExitSummaryDisplay((current) => {
+        if (!current || !current.animated || current.animationStep >= EXIT_SUMMARY_TOTAL_STEPS) {
+          return current;
+        }
+        return {
+          ...current,
+          animationStep: current.animationStep + 1,
+        };
+      });
+    }, EXIT_SUMMARY_FRAME_MS);
+    return () => {
+      clearInterval(animationTimer);
+    };
+  }, [exitSummaryDisplay?.animated, exitSummaryDisplay?.startedAtMs]);
+
+  useEffect(() => {
+    if (!exitSummaryDisplay) {
+      return;
+    }
+    const closeTimer = setTimeout(() => {
+      if (exitSummaryPersistRequestedRef.current) {
+        return;
+      }
+      exitSummaryPersistRequestedRef.current = true;
+      const child = childRef.current;
+      if (child && !child.killed) {
+        try {
+          child.kill("SIGTERM");
+        } catch {
+          // ignore backend shutdown races while the direct TUI exits
+        }
+      }
+      void persistDirectTuiExitSummaryAndExit({
+        lines: exitSummaryDisplay.finalLines,
+        exitCode: 0,
+      });
+    }, Math.max(0, exitSummaryDisplay.exitAtMs - Date.now()));
+    return () => {
+      clearTimeout(closeTimer);
+    };
+  }, [exitSummaryDisplay?.exitAtMs, exitSummaryDisplay?.finalLines, exitSummaryDisplay?.startedAtMs]);
 
   const requestViewerRefresh = (command: "/cmp" | "/mp" | "/capabilities") => {
     const child = childRef.current;
@@ -8188,6 +9965,36 @@ function PraxisDirectTuiApp(): JSX.Element {
     }
     if (actionKey.startsWith("resume:")) {
       restoreSessionSnapshot(actionKey.replace(/^resume:/u, ""));
+      return;
+    }
+    if (actionKey === "exit:close") {
+      closeSlashPanel();
+      return;
+    }
+    if (actionKey === "exit:force") {
+      setPendingExitAction("force_exit");
+      requestImmediateQuit({ force: true });
+      return;
+    }
+    if (actionKey === "exit:wait") {
+      if (activeTasksRef.current.length === 0) {
+        requestImmediateQuit();
+        return;
+      }
+      setPendingExitAction("wait_then_exit");
+      setSlashPanelNotice({
+        tone: "warning",
+        text: "Raxode will exit once the current tasks stop.",
+      });
+      return;
+    }
+    if (actionKey === "exit:switch") {
+      setPendingExitAction(null);
+      closeSlashPanel();
+      setScrollOffset(0);
+      appendInlineStatus(activeTasksRef.current.length > 0
+        ? "Switched back to the running task view."
+        : "Stayed in the current session.");
       return;
     }
     if (actionKey === "agent:create") {
@@ -8548,7 +10355,7 @@ function PraxisDirectTuiApp(): JSX.Element {
     const isExitCommand = normalizedMessage === "/exit" || normalizedMessage === "/quit";
     const isWorkspaceCommand = normalizedMessage === "/workspace" || normalizedMessage.startsWith("/workspace ");
 
-    if ((isExitCommand || isWorkspaceCommand) && (runIndicator || activeTasksRef.current.length > 0)) {
+    if (isWorkspaceCommand && (runIndicator || activeTasksRef.current.length > 0)) {
       appendInlineError(ACTIVE_TASK_GUARD_TEXT);
       return;
     }
@@ -8618,6 +10425,7 @@ function PraxisDirectTuiApp(): JSX.Element {
     const optimisticMessageId = `user:${optimisticTurnId}`;
     const queuedAt = new Date().toISOString();
     const submissionId = createPendingOutboundSubmissionId();
+    const preTurnTranscriptCutMessageId = transcriptMessagesRef.current[transcriptMessagesRef.current.length - 1]?.messageId;
     const payload = attachments.length > 0
       ? JSON.stringify({
         type: "direct_user_input",
@@ -8681,6 +10489,12 @@ function PraxisDirectTuiApp(): JSX.Element {
         })
         : outboundMessage;
     turnUserTextRef.current.set(optimisticTurnId, outboundMessage.trim());
+    void persistPreTurnCheckpoint({
+      turnId: optimisticTurnId,
+      createdAt: queuedAt,
+      userText: outboundMessage.trim(),
+      transcriptCutMessageId: preTurnTranscriptCutMessageId,
+    });
     dispatchSurfaceEvent({
       type: "turn.started",
       at: queuedAt,
@@ -8914,11 +10728,7 @@ function PraxisDirectTuiApp(): JSX.Element {
 
     if (key.ctrl && inputText === "c") {
       flushPendingPasteText();
-      const child = childRef.current;
-      if (child && !child.killed) {
-        child.stdin.write("/exit\u0000");
-      }
-      exit();
+      requestImmediateQuit({ force: true });
       return;
     }
 
@@ -9078,6 +10888,14 @@ function PraxisDirectTuiApp(): JSX.Element {
             return;
           }
           closeHumanGatePanel(true);
+          return;
+        }
+        if (activeSlashPanelId === "question") {
+          closeSlashPanel();
+          setComposerState(createTuiTextInputState());
+          setComposerAttachments([]);
+          setComposerPastedContents([]);
+          setComposerFileReferences([]);
           return;
         }
         returnToSlashMenu();
@@ -9311,6 +11129,33 @@ function PraxisDirectTuiApp(): JSX.Element {
       return;
     }
 
+    if (activeSlashPanelId === "question" && questionViewerSnapshot?.status === "active") {
+      if (key.leftArrow) {
+        moveQuestionPrompt(-1);
+        return;
+      }
+      if (key.rightArrow) {
+        moveQuestionPrompt(1);
+        return;
+      }
+      if (key.upArrow) {
+        moveQuestionOption(-1);
+        return;
+      }
+      if (key.downArrow) {
+        moveQuestionOption(1);
+        return;
+      }
+      if (key.tab) {
+        toggleCurrentQuestionNoteMode();
+        return;
+      }
+      if (key.return) {
+        confirmCurrentQuestionAnswer();
+        return;
+      }
+    }
+
     if (
       activeSlashPanelId
       && slashPanelView?.viewerPage
@@ -9459,7 +11304,7 @@ function PraxisDirectTuiApp(): JSX.Element {
               return;
             }
             if (panelRenameTarget.kind === "session") {
-              renameDirectTuiSession(panelRenameTarget.id, nextName, appRoot);
+              renameDirectTuiSession(panelRenameTarget.id, nextName, currentCwd);
               if (panelRenameTarget.id === sessionIdRef.current) {
                 setSessionName(nextName);
               }
@@ -9733,11 +11578,14 @@ function PraxisDirectTuiApp(): JSX.Element {
     [estimatedContextUsed, contextWindowSize],
   );
   const contextWindowLabel = formatContextWindowLabel(contextWindowSize);
-  const shouldShowConversationHeader = shouldRenderDirectTuiConversationHeader({
+  const baseShouldShowConversationHeader = shouldRenderDirectTuiConversationHeader({
     conversationActivated,
     messages: transcriptMessages,
     pendingSessionSwitch: Boolean(pendingSessionSwitch),
   });
+  const shouldShowConversationHeader = directTuiAnimationMode === "resume"
+    ? false
+    : baseShouldShowConversationHeader;
   const slashPanelContext = useMemo<SlashPanelContext>(() => ({
     backendStatus,
     currentCwd,
@@ -9775,6 +11623,14 @@ function PraxisDirectTuiApp(): JSX.Element {
     pendingHumanGates,
     initViewerSnapshot,
     questionViewerSnapshot,
+    questionPanelState,
+    questionComposerText: resolveQuestionDraftText({
+      snapshot: questionViewerSnapshot,
+      state: questionPanelState,
+      composerValue: composerState.value,
+    }),
+    questionAnimationFrame,
+    cmpStatusLabel: cmpStatusDescriptor.label,
   }), [
     activeTasks.length,
     agentEntries,
@@ -9801,6 +11657,8 @@ function PraxisDirectTuiApp(): JSX.Element {
     statusRateLimitRefreshState,
     statusRateLimitRecord,
     initViewerSnapshot,
+    questionAnimationFrame,
+    questionPanelState,
     questionViewerSnapshot,
     runIndicator?.label,
     runtimeConfig,
@@ -9810,6 +11668,8 @@ function PraxisDirectTuiApp(): JSX.Element {
     tapSummaryLines,
     mpViewerSnapshot,
     pendingHumanGates,
+    composerState.value,
+    cmpStatusDescriptor.label,
   ]);
   const slashPanelView = useMemo(
     () => activeSlashPanelId
@@ -9846,6 +11706,42 @@ function PraxisDirectTuiApp(): JSX.Element {
     dismissedHumanGateSignature,
     pendingHumanGateSignature,
     pendingHumanGates.length,
+  ]);
+  useEffect(() => {
+    if (!questionViewerSnapshot || questionViewerSnapshot.status !== "active") {
+      setQuestionPanelState((previous) =>
+        previous.requestId
+          ? createEmptyQuestionPanelState()
+          : previous);
+      return;
+    }
+    setQuestionPanelState((previous) => buildQuestionPanelState(questionViewerSnapshot, previous));
+  }, [questionViewerSnapshot]);
+  useEffect(() => {
+    if (activeSlashPanelId !== "question" || questionViewerSnapshot?.status !== "active") {
+      return;
+    }
+    const currentQuestion = questionViewerSnapshot.questions[clampQuestionIndex(
+      questionPanelState.currentQuestionIndex,
+      questionViewerSnapshot.questions.length,
+    )];
+    const noteMode = isQuestionNoteModeActive(questionPanelState, currentQuestion);
+    const nextDraft = currentQuestion?.kind === "freeform" && !noteMode
+      ? (questionPanelState.answersByQuestionId[currentQuestion.id]?.answerText ?? "")
+      : (questionPanelState.answersByQuestionId[currentQuestion?.id ?? ""]?.annotation ?? "");
+    setComposerState((previous) =>
+      previous.value === nextDraft
+        ? previous
+        : createTuiTextInputState(nextDraft));
+    setComposerAttachments([]);
+    setComposerPastedContents([]);
+    setComposerFileReferences([]);
+  }, [
+    activeSlashPanelId,
+    questionPanelState.answersByQuestionId,
+    questionPanelState.currentQuestionIndex,
+    questionPanelState.noteModeByQuestionId,
+    questionViewerSnapshot,
   ]);
   useEffect(() => {
     if (activeSlashPanelId === "init" && initViewerSnapshot?.status === "completed") {
@@ -10078,6 +11974,17 @@ function PraxisDirectTuiApp(): JSX.Element {
     });
   }, [configFile?.permissions.requestedMode, runtimeConfig?.permissions.requestedMode, slashPanelView]);
   const showSlashMenu = !activeSlashPanelId && slashState.active && slashState.suggestions.length > 0;
+  const exitSummaryLines = useMemo(
+    () => exitSummaryDisplay
+      ? buildExitSummaryPanelLines(
+        exitSummaryDisplay.summary,
+        exitSummaryDisplay.animationStep,
+        terminalColumns,
+      )
+      : [],
+    [exitSummaryDisplay, terminalColumns],
+  );
+  const exitSummaryLineCount = exitSummaryDisplay ? exitSummaryLines.length + 1 : 0;
   const slashPanelLineCount = slashPanelView
     ? (slashPanelView.bodyLines?.length ?? 0)
       + (slashPanelView.showChrome === false ? 0 : 1)
@@ -10095,16 +12002,18 @@ function PraxisDirectTuiApp(): JSX.Element {
       + 1
     : 0;
   const footerLineCount =
-    (slashPanelView
-      ? slashPanelLineCount
-      : composerPopup
-        ? composerPopupLineCount
-        : (showSlashMenu ? commandPaletteItems.length + 1 : 0))
-    + 1
-    + composerLines.length
-    + 1
-    + 1
-    + 1;
+    exitSummaryDisplay
+      ? exitSummaryLineCount
+      : (slashPanelView
+        ? slashPanelLineCount
+        : composerPopup
+          ? composerPopupLineCount
+          : (showSlashMenu ? commandPaletteItems.length + 1 : 0))
+      + 1
+      + composerLines.length
+      + 1
+      + 1
+      + 1;
   const transcriptViewportLineCount = Math.max(6, terminalRows - footerLineCount);
   const transcriptScrollLines = useMemo(
     () => [
@@ -10132,12 +12041,27 @@ function PraxisDirectTuiApp(): JSX.Element {
     [scrollOffset, transcriptScrollLines, transcriptViewportLineCount],
   );
   const cwdLabel = shortenPath(currentCwd);
+  const activeQuestionPrompt = questionViewerSnapshot?.status === "active"
+    ? questionViewerSnapshot.questions[clampQuestionIndex(
+      questionPanelState.currentQuestionIndex,
+      questionViewerSnapshot.questions.length,
+    )]
+    : undefined;
+  const activeQuestionNoteMode = isQuestionNoteModeActive(questionPanelState, activeQuestionPrompt);
   const composerPlaceholder = activeSlashPanelId === "init"
     ? INIT_COMPOSER_PLACEHOLDER
-    : COMPOSER_PLACEHOLDER;
+    : activeSlashPanelId === "question"
+      ? (activeQuestionPrompt?.kind === "freeform" && !activeQuestionNoteMode
+          ? (activeQuestionPrompt.placeholder ?? "Type the answer for the current question, then press ENTER to confirm")
+          : QUESTION_COMPOSER_PLACEHOLDER)
+      : COMPOSER_PLACEHOLDER;
   const cmpContextColor = cmpContextActive
     ? CMP_CONTEXT_ANIMATION_COLORS[Math.floor(cmpContextAnimationFrame / 3) % CMP_CONTEXT_ANIMATION_COLORS.length]
-    : TUI_THEME.textMuted;
+    : cmpStatusDescriptor.tone === "danger"
+      ? TUI_THEME.red
+      : cmpStatusDescriptor.tone === "warning"
+        ? TUI_THEME.yellow
+        : TUI_THEME.textMuted;
   const cmpSpinnerFrame = cmpContextActive
     ? CMP_CONTEXT_SPINNER_FRAMES[Math.floor(cmpContextAnimationFrame / 2) % CMP_CONTEXT_SPINNER_FRAMES.length]
     : "";
@@ -10149,14 +12073,14 @@ function PraxisDirectTuiApp(): JSX.Element {
   const composerCursorColumn = Math.max(1, 5 + composerCursor.column);
   composerCursorParking.row = composerCursorRow;
   composerCursorParking.column = composerCursorColumn;
-  composerCursorParking.active = true;
+  composerCursorParking.active = exitSummaryDisplay === null;
 
   useEffect(() => {
-    composerCursorParking.active = true;
+    composerCursorParking.active = exitSummaryDisplay === null;
     return () => {
       composerCursorParking.active = false;
     };
-  }, []);
+  }, [exitSummaryDisplay]);
   terminalOverlaySnapshot = modelPicker?.open
     ? buildModelPickerOverlaySnapshot(modelPicker, terminalRows, terminalColumns)
     : null;
@@ -10180,31 +12104,36 @@ function PraxisDirectTuiApp(): JSX.Element {
           transientStatusLine={transientRunStatusLine}
         />
       )}
-      <ComposerPane
-        showSlashMenu={showSlashMenu}
-        slashPanel={slashPanelView}
-        composerPopup={composerPopup}
-        slashPanelFocusIndex={slashPanelFocusIndex}
-        slashPanelNotice={slashPanelNotice}
-        commandPaletteItems={commandPaletteItems}
-        selectedSlashIndex={selectedSlashIndex}
-        composerValue={composerDisplayState.value}
-        composerLines={composerLines}
-        composerPlaceholder={composerPlaceholder}
+      {exitSummaryDisplay ? (
+        <ExitSummaryPane lines={exitSummaryLines} />
+      ) : (
+        <ComposerPane
+          showSlashMenu={showSlashMenu}
+          slashPanel={slashPanelView}
+          composerPopup={composerPopup}
+          slashPanelFocusIndex={slashPanelFocusIndex}
+          slashPanelNotice={slashPanelNotice}
+          commandPaletteItems={commandPaletteItems}
+          selectedSlashIndex={selectedSlashIndex}
+          composerValue={composerDisplayState.value}
+          composerLines={composerLines}
+          composerPlaceholder={composerPlaceholder}
         workspaceLabel={cwdLabel}
         contextBar={contextBar}
         contextPercent={contextPercent}
         contextWindowLabel={contextWindowLabel}
         lineWidth={Math.max(1, terminalColumns - 2)}
+        cmpStatusLabel={cmpStatusDescriptor.label}
         cmpContextActive={cmpContextActive}
         cmpContextColor={cmpContextColor}
         cmpSpinnerFrame={cmpSpinnerFrame}
       />
+      )}
     </Box>
   );
 }
 
-render(<PraxisDirectTuiApp />, {
+directTuiInkInstance = render(<PraxisDirectTuiApp />, {
   stdout: inkCursorAwareStdout,
   stdin: process.stdin,
   stderr: process.stderr,

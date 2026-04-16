@@ -20,6 +20,10 @@ test("resolveRaxodeCliCommand defaults bare raxode to tui", () => {
     command: "status",
     rest: [],
   });
+  assert.deepEqual(resolveRaxodeCliCommand(["resume", "session-1"]), {
+    command: "resume",
+    rest: ["session-1"],
+  });
 });
 
 test("resolveRaxodeLaunchPlan uses tsx and source entrypoints in dev/source mode", async () => {
@@ -53,6 +57,7 @@ test("resolveRaxodeLaunchPlan uses tsx and source entrypoints in dev/source mode
     assert.equal(plan.env.PRAXIS_APP_ROOT, rootDir);
     assert.equal(plan.env.PRAXIS_WORKSPACE_ROOT, workspaceDir);
     assert.equal(plan.env.TEST_ENV, "1");
+    assert.equal(plan.env.PRAXIS_DIRECT_SESSION_ID, undefined);
   } finally {
     if (previousWorkspaceRoot === undefined) {
       delete process.env.PRAXIS_WORKSPACE_ROOT;

@@ -3,11 +3,13 @@ import { stdin as input, stdout as output } from "node:process";
 import type { ReadStream } from "node:tty";
 
 import type {
+  CmpPanelSnapshotPayload,
   CmpTurnArtifacts,
   CoreTurnArtifacts,
   DirectFallbackReader,
   LiveCliState,
   LiveCliRuntime,
+  MpPanelSnapshotPayload,
 } from "./shared.js";
 import {
   formatDisplayValue,
@@ -295,6 +297,37 @@ export function printMpViewPlaceholder(): void {
   ]);
 }
 
+export function formatDirectMpSnapshotLines(snapshot: MpPanelSnapshotPayload): string[] {
+  const lines = [
+    snapshot.summaryLines[0] ?? "MP summary is not available yet.",
+    snapshot.summaryLines[1] ?? "MP source detail is not available yet.",
+    snapshot.summaryLines[2] ?? `${snapshot.recordCount ?? snapshot.entries.length} memory records`,
+    `status=${snapshot.status} source=${snapshot.sourceKind}/${snapshot.sourceClass}`,
+    snapshot.rootPath ? `rootPath=${truncate(snapshot.rootPath, 84)}` : undefined,
+    ...(snapshot.detailLines ?? []).slice(0, 3),
+    ...(snapshot.issueLines ?? []).slice(0, 2).map((line) => `issue: ${line}`),
+    ...(snapshot.roleLines ?? []).slice(0, 5),
+  ].filter((line): line is string => typeof line === "string" && line.length > 0);
+
+  if (snapshot.entries.length === 0) {
+    lines.push(snapshot.emptyReason ?? "No MP memory records are available.");
+    return lines;
+  }
+
+  lines.push(`showing ${Math.min(snapshot.entries.length, 8)} of ${snapshot.entries.length} records:`);
+  for (const entry of snapshot.entries.slice(0, 8)) {
+    const scope = [entry.scopeLevel, entry.agentId].filter(Boolean).join(":") || "-";
+    lines.push(`${entry.memoryId} · ${scope}`);
+    lines.push(`  ${truncate(entry.summary || entry.label, 92)}`);
+  }
+  return lines;
+}
+
+export function printMpViewerSnapshot(snapshot: MpPanelSnapshotPayload): void {
+  console.log("");
+  printDirectBox("MP View", formatDirectMpSnapshotLines(snapshot));
+}
+
 export function printInitViewPlaceholder(): void {
   console.log("");
   printDirectBox("Init", [
@@ -306,8 +339,8 @@ export function printInitViewPlaceholder(): void {
 export function printResumeViewPlaceholder(): void {
   console.log("");
   printDirectBox("Resume", [
-    "resume entry is reserved for session recovery",
-    "the current direct CLI still keeps the active transcript in-process only",
+    "session recovery is managed by the direct TUI shell",
+    "use `raxode resume <session-name-or-id>` or the TUI /resume panel",
   ]);
 }
 
@@ -369,6 +402,48 @@ export function printCmpArtifacts(turn: CmpTurnArtifacts): void {
   console.log(
     `live: icma=${formatLiveStatus(turn.summary.live.icma)}, iterator=${formatLiveStatus(turn.summary.live.iterator)}, checker=${formatLiveStatus(turn.summary.live.checker)}, dbagent=${formatLiveStatus(turn.summary.live.dbagent)}, dispatcher=${formatLiveStatus(turn.summary.live.dispatcher)}`,
   );
+}
+
+export function formatDirectCmpSnapshotLines(
+  snapshot: CmpPanelSnapshotPayload,
+  latestTurn?: CmpTurnArtifacts,
+): string[] {
+  const lines = [
+    snapshot.summaryLines[0] ?? "CMP summary is not available yet.",
+    snapshot.summaryLines[1] ?? "CMP lifecycle detail is not available yet.",
+    snapshot.summaryLines[2] ?? `db=${snapshot.truthStatus ?? "unknown"} readback=${snapshot.readbackStatus ?? "unknown"}`,
+    `status=${snapshot.status} source=${snapshot.sourceKind} truth=${snapshot.truthStatus ?? "unknown"} readback=${snapshot.readbackStatus ?? "unknown"}`,
+    ...(snapshot.detailLines ?? []).slice(0, 3),
+    ...(snapshot.requestLines ?? []).slice(0, 2),
+    ...(snapshot.issueLines ?? []).slice(0, 2).map((line) => `issue: ${line}`),
+    ...(snapshot.roleLines ?? []).slice(0, 5),
+  ];
+
+  if (snapshot.entries.length === 0) {
+    lines.push(snapshot.emptyReason ?? "No CMP section records are available.");
+  } else {
+    lines.push(`showing ${Math.min(snapshot.entries.length, 8)} of ${snapshot.entries.length} sections:`);
+    for (const entry of snapshot.entries.slice(0, 8)) {
+      lines.push(`${entry.lifecycle} · ${entry.kind} · ${entry.agentId}`);
+      lines.push(`  ${truncate(entry.ref, 92)}`);
+    }
+  }
+
+  if (latestTurn) {
+    lines.push("latest cmp turn:");
+    lines.push(`  agentId=${latestTurn.agentId} packageRef=${truncate(latestTurn.packageRef, 72)}`);
+    lines.push(`  route=${truncate(latestTurn.routeRationale, 72)} scope=${truncate(latestTurn.scopePolicy, 32)}`);
+  }
+
+  return lines;
+}
+
+export function printCmpViewerSnapshot(
+  snapshot: CmpPanelSnapshotPayload,
+  latestTurn?: CmpTurnArtifacts,
+): void {
+  console.log("");
+  printDirectBox("CMP View", formatDirectCmpSnapshotLines(snapshot, latestTurn));
 }
 
 export function printTapArtifacts(runtime: LiveCliRuntime, sessionId: string, runId?: string): void {
