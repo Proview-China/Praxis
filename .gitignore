@@ -45,10 +45,11 @@ tmp/
 src/.cmp-worktrees/
 
 # Agent runtime scratch state
-.raxode/agents/agent.task_*.json
+.raxode/agents/*.json
+.raxode/rewind/
 
-# Large local overlay caches regenerated from source state
-memory/generated/mp-overlay-cache/
+# Large local generated/runtime artifacts regenerated from source state
+memory/generated/
 
 # One-off local TUI/Ink scratch scripts
 /test_ink_*.mjs
