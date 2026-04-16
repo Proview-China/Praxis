@@ -819,6 +819,8 @@ const FOOTER_MODE_OPTIONS = [
   },
 ] as const;
 const RUSH_OVERLAY_COLOR = "orange";
+const RUSH_MODE_BADGE_COLOR = "#FF8A1F";
+const RUSH_FOOTER_CLOSED_NOTICE_MS = 1500;
 const RUSH_OVERLAY_FRAME_SOURCE = "/home/proview/Downloads/praxis_rocket_tui_15frames.txt";
 const RUSH_OVERLAY_TOTAL_FRAMES = 78;
 const RUSH_OVERLAY_FLAME_FRAME_STEP = 2;
@@ -852,6 +854,10 @@ const RUSH_OVERLAY_BODY_TEMPLATE = [
   "        ▄███  ███▄",
   "         ███  ███",
   "        ▄████████▄",
+] as const;
+const RUSH_CONFIRM_OPTIONS = [
+  "Enable RUSH Mode",
+  "DO NOT Enable RUSH Mode",
 ] as const;
 const RUSH_OVERLAY_FALLBACK_FRAME = [
   "         ▄██▄         ",
@@ -1563,6 +1569,10 @@ interface RewindInFlightState {
 
 interface RushOverlayState {
   startedTick: number;
+}
+
+interface RushConfirmOverlayState {
+  selectedIndex: number;
 }
 
 interface RushOverlayRenderedRow {
@@ -3678,6 +3688,8 @@ function stripAnsi(value: string): string {
 
 function ansiColorCode(color?: string): string {
   switch (color) {
+    case "blue":
+      return "\u001B[94m";
     case "orange":
       return "\u001B[38;5;208m";
     case "red":
@@ -3735,6 +3747,68 @@ function buildOverlayContentLine(
       { text: pad },
       { text: "│", color: TUI_THEME.mintSoft },
     ],
+  };
+}
+
+function centerTextToWidth(text: string, width: number): string {
+  const normalized = truncateTextToWidth(text, width);
+  const remaining = Math.max(0, width - stringWidth(normalized));
+  const left = Math.floor(remaining / 2);
+  const right = remaining - left;
+  return `${" ".repeat(left)}${normalized}${" ".repeat(right)}`;
+}
+
+function buildRushConfirmOverlaySnapshot(
+  state: RushConfirmOverlayState,
+  terminalRows: number,
+  terminalColumns: number,
+): TerminalOverlaySnapshot {
+  const width = Math.max(50, Math.min(terminalColumns - 6, 75));
+  const innerWidth = width - 2;
+  const buildHeavyOverlayContentLine = (content: TerminalOverlaySegment[]): TerminalOverlayLine => {
+    const rawWidth = content.reduce((sum, segment) => sum + stringWidth(segment.text), 0);
+    const pad = " ".repeat(Math.max(0, innerWidth - rawWidth));
+    return {
+      segments: [
+        { text: "┃", color: "whiteBright" },
+        ...content,
+        { text: pad },
+        { text: "┃", color: "whiteBright" },
+      ],
+    };
+  };
+  const lines: TerminalOverlayLine[] = [
+    { segments: [{ text: `┏${"━".repeat(innerWidth)}┓`, color: "whiteBright" }] },
+    buildHeavyOverlayContentLine([{ text: centerTextToWidth("Warning:", innerWidth), color: TUI_THEME.red }]),
+    buildHeavyOverlayContentLine([{
+      text: centerTextToWidth("Using RUSH mode will sharply increase quota or token consumption.", innerWidth),
+      color: TUI_THEME.red,
+    }]),
+    buildHeavyOverlayContentLine([{
+      text: centerTextToWidth("Enable it only if it fits your actual needs.", innerWidth),
+      color: TUI_THEME.red,
+    }]),
+    buildHeavyOverlayContentLine([{ text: " ".repeat(innerWidth) }]),
+    ...RUSH_CONFIRM_OPTIONS.map((option, index) => {
+      const active = index === state.selectedIndex;
+      const text = active ? `→  ${option}` : `   ${option}`;
+      const optionLine = `${" ".repeat(22)}${text}`;
+      return buildHeavyOverlayContentLine([{
+        text: padTextToWidth(optionLine, innerWidth),
+        color: active ? "blue" : TUI_THEME.text,
+      }]);
+    }),
+    buildHeavyOverlayContentLine([{ text: " ".repeat(innerWidth) }]),
+    buildHeavyOverlayContentLine([{
+      text: centerTextToWidth("↑↓ select · Enter confirm · Esc close", innerWidth),
+      color: TUI_THEME.textMuted,
+    }]),
+    { segments: [{ text: `┗${"━".repeat(innerWidth)}┛`, color: "whiteBright" }] },
+  ];
+  return {
+    top: Math.max(1, Math.floor((terminalRows - lines.length) / 2)),
+    left: Math.max(1, Math.floor((terminalColumns - width) / 2)),
+    lines,
   };
 }
 
@@ -6706,6 +6780,7 @@ const ComposerPane = memo(function ComposerPane({
   cmpStatusLabel,
   cmpContextActive,
   cmpContextColor,
+  rushFooterPrefixText,
   footerModeLabel,
   footerModeColor,
   footerModeHint,
@@ -6731,6 +6806,7 @@ const ComposerPane = memo(function ComposerPane({
   cmpStatusLabel: string;
   cmpContextActive: boolean;
   cmpContextColor?: string;
+  rushFooterPrefixText: string | null;
   footerModeLabel: string;
   footerModeColor: string;
   footerModeHint: string;
@@ -6739,6 +6815,12 @@ const ComposerPane = memo(function ComposerPane({
   const panelLabelWidth = slashPanel
     ? slashPanel.fields.reduce((max, field) => Math.max(max, field.label.length), 0)
     : 0;
+  const rushFooterPrefixWidth = rushFooterPrefixText
+    ? stringWidth(rushFooterPrefixText) + stringWidth(" • ")
+    : 0;
+  const footerModeWidth = rushFooterPrefixWidth + stringWidth(footerModeLabel) + stringWidth(footerModeHint);
+  const footerRightWidth = Math.min(lineWidth, footerModeWidth);
+  const footerLeftWidth = Math.max(0, lineWidth - footerRightWidth - 1);
   const [contextBreathFrameIndex, setContextBreathFrameIndex] = useState(0);
   useEffect(() => {
     const timer = setInterval(() => {
@@ -6958,7 +7040,7 @@ const ComposerPane = memo(function ComposerPane({
       ))}
       <Text color={TUI_THEME.line}>{"─".repeat(lineWidth)}</Text>
       <Box>
-        <Box flexGrow={1} flexShrink={1} marginRight={1}>
+        <Box width={footerLeftWidth} flexShrink={1} marginRight={1}>
           <Text wrap="truncate-end">
             <Text color={TUI_THEME.textMuted}>WorkSpace: </Text>
             <Text color={TUI_THEME.text}>{workspaceLabel}</Text>
@@ -6972,8 +7054,14 @@ const ComposerPane = memo(function ComposerPane({
             <Text color={TUI_THEME.text}>{contextWindowLabel}</Text>
           </Text>
         </Box>
-        <Box flexShrink={0}>
-          <Text>
+        <Box width={footerRightWidth} flexShrink={0}>
+          <Text wrap="truncate-end">
+            {rushFooterPrefixText ? (
+              <>
+                <Text color={RUSH_MODE_BADGE_COLOR}>{rushFooterPrefixText}</Text>
+                <Text color={TUI_THEME.textMuted}> • </Text>
+              </>
+            ) : null}
             <Text color={footerModeColor}>{footerModeLabel}</Text>
             <Text color={TUI_THEME.textMuted}>{footerModeHint}</Text>
           </Text>
@@ -7055,6 +7143,9 @@ function PraxisDirectTuiApp(): JSX.Element {
   const [scrollOffset, setScrollOffset] = useState(0);
   const [animationTick, setAnimationTick] = useState(0);
   const [footerModeIndex, setFooterModeIndex] = useState(0);
+  const [rushModeEnabled, setRushModeEnabled] = useState(false);
+  const [rushFooterNotice, setRushFooterNotice] = useState<"closed" | null>(null);
+  const [rushConfirmOverlayState, setRushConfirmOverlayState] = useState<RushConfirmOverlayState | null>(null);
   const [rushOverlayState, setRushOverlayState] = useState<RushOverlayState | null>(null);
   const [surfaceState, setSurfaceState] = useState<SurfaceAppState>(initialBootState.surfaceState);
   const [backendContextSnapshot, setBackendContextSnapshot] = useState<ReturnType<typeof normalizeContextSnapshot>>(null);
@@ -7698,8 +7789,38 @@ function PraxisDirectTuiApp(): JSX.Element {
     setComposerPastedContents([]);
     setComposerFileReferences([]);
     setSelectedSlashIndex(0);
+    setRushFooterNotice(null);
+    setRushModeEnabled(true);
     setRushOverlayState({
       startedTick: animationTick,
+    });
+  };
+
+  const closeRushConfirmOverlay = () => {
+    setRushConfirmOverlayState(null);
+  };
+
+  const disableRushMode = () => {
+    closeRushConfirmOverlay();
+    setRushOverlayState(null);
+    setRushModeEnabled(false);
+    setRushFooterNotice("closed");
+    setComposerState(createTuiTextInputState());
+    setComposerAttachments([]);
+    setComposerPastedContents([]);
+    setComposerFileReferences([]);
+    setSelectedSlashIndex(0);
+  };
+
+  const openRushConfirmOverlay = () => {
+    closeSlashPanel();
+    setComposerState(createTuiTextInputState());
+    setComposerAttachments([]);
+    setComposerPastedContents([]);
+    setComposerFileReferences([]);
+    setSelectedSlashIndex(0);
+    setRushConfirmOverlayState({
+      selectedIndex: 0,
     });
   };
 
@@ -8772,6 +8893,18 @@ function PraxisDirectTuiApp(): JSX.Element {
     }
     setRushOverlayState(null);
   }, [rushOverlayFrame, rushOverlayState]);
+
+  useEffect(() => {
+    if (rushFooterNotice !== "closed") {
+      return;
+    }
+    const timer = setTimeout(() => {
+      setRushFooterNotice(null);
+    }, RUSH_FOOTER_CLOSED_NOTICE_MS);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [rushFooterNotice]);
 
   useEffect(() => {
     if (!process.stdout.isTTY) {
@@ -11045,7 +11178,11 @@ function PraxisDirectTuiApp(): JSX.Element {
     }
 
     if (isRushCommand) {
-      triggerRushMode();
+      if (rushModeEnabled) {
+        disableRushMode();
+        return;
+      }
+      openRushConfirmOverlay();
       return;
     }
 
@@ -11352,6 +11489,28 @@ function PraxisDirectTuiApp(): JSX.Element {
       if (key.ctrl && inputText === "c") {
         flushPendingPasteText();
         requestImmediateQuit({ force: true });
+      }
+      return;
+    }
+    if (rushConfirmOverlayState) {
+      if (key.escape) {
+        closeRushConfirmOverlay();
+        return;
+      }
+      if (key.upArrow || key.downArrow) {
+        setRushConfirmOverlayState((current) => current ? {
+          ...current,
+          selectedIndex: current.selectedIndex === 0 ? 1 : 0,
+        } : current);
+        return;
+      }
+      if (key.return) {
+        const shouldEnableRush = rushConfirmOverlayState.selectedIndex === 0;
+        closeRushConfirmOverlay();
+        if (shouldEnableRush) {
+          triggerRushMode();
+        }
+        return;
       }
       return;
     }
@@ -12122,7 +12281,11 @@ function PraxisDirectTuiApp(): JSX.Element {
             return;
           }
           if (selectedSuggestion.command.id === "rush") {
-            triggerRushMode();
+            if (rushModeEnabled) {
+              disableRushMode();
+              return;
+            }
+            openRushConfirmOverlay();
             return;
           }
           if (selectedSuggestion.command.id === "workspace") {
@@ -12293,6 +12456,9 @@ function PraxisDirectTuiApp(): JSX.Element {
   );
   const contextWindowLabel = formatContextWindowLabel(contextWindowSize);
   const footerMode = FOOTER_MODE_OPTIONS[footerModeIndex] ?? FOOTER_MODE_OPTIONS[0];
+  const rushFooterPrefixText = rushFooterNotice === "closed"
+    ? "Rush Mode has closed"
+    : (rushModeEnabled ? "Rush" : null);
   const baseShouldShowConversationHeader = shouldRenderDirectTuiConversationHeader({
     conversationActivated,
     messages: transcriptMessages,
@@ -12789,11 +12955,13 @@ function PraxisDirectTuiApp(): JSX.Element {
       composerCursorParking.active = false;
     };
   }, [exitSummaryDisplay, rewindInFlight]);
-  terminalOverlaySnapshot = rushOverlayState
-    ? buildRushOverlaySnapshot(rushOverlayFrame, terminalRows, terminalColumns)
-    : modelPicker?.open
-      ? buildModelPickerOverlaySnapshot(modelPicker, terminalRows, terminalColumns)
-      : null;
+  terminalOverlaySnapshot = rushConfirmOverlayState
+    ? buildRushConfirmOverlaySnapshot(rushConfirmOverlayState, terminalRows, terminalColumns)
+    : rushOverlayState
+      ? buildRushOverlaySnapshot(rushOverlayFrame, terminalRows, terminalColumns)
+      : modelPicker?.open
+        ? buildModelPickerOverlaySnapshot(modelPicker, terminalRows, terminalColumns)
+        : null;
 
   return (
     <Box flexDirection="column" paddingX={1} height={terminalRows}>
@@ -12839,6 +13007,7 @@ function PraxisDirectTuiApp(): JSX.Element {
           cmpStatusLabel={cmpStatusDescriptor.label}
           cmpContextActive={cmpContextActive}
           cmpContextColor={cmpContextColor}
+          rushFooterPrefixText={rushFooterPrefixText}
           footerModeLabel={footerMode.label}
           footerModeColor={footerMode.color}
           footerModeHint={FOOTER_MODE_HINT}
