@@ -32,7 +32,7 @@ This document records the current support baseline for exported Praxis surfaces.
 | Surface | macOS local baseline | Linux current state | Notes |
 | --- | --- | --- | --- |
 | `PraxisRuntimeClient.makeDefault(...)` | ready | compile-safe placeholder baseline | Both sides can assemble RuntimeKit; Linux remains a placeholder host profile. |
-| `runs.run(...)` / `runs.resume(...)` | ready | ready | Run lifecycle depends on local SQLite and in-process runtime truth. |
+| `runs.run(...)` / `runs.resume(...)` | ready | ready | Run / resume currently surface durable checkpoint references and fresh-client recovery; provisioning / replay evidence remains readback on TAP project surfaces. |
 | `capabilities.catalog()` | ready | ready | Thin capability baseline includes search chain, `code.sandbox`, provider `skill.list` / `skill.activate`, and bounded `code.run` / `code.patch` / `shell.approve` / `shell.run`. |
 | `capabilities.generate(...)` / `stream(...)` | ready | ready | Uses the local provider inference lane; `stream` is projected bounded output, not raw token transport. |
 | `capabilities.embed(...)` | ready | ready | Uses the local embedding baseline. |
@@ -44,11 +44,11 @@ This document records the current support baseline for exported Praxis surfaces.
 | `capabilities.listSkills(...)` / `activateSkill(...)` | ready | ready | Provider skill activation only accepts registered skill keys and only audits successful activations. |
 | `capabilities.listProviderMCPTools(...)` | ready | ready | Provider MCP registry exposes callable tool names for discovery/readback. |
 | `capabilities.callTool(...)` / `uploadFile(...)` / `submitBatch(...)` | ready | ready | Uses local MCP, file store, and batch baseline; `tool.call` only accepts registered tool names and only audits successful executions. |
-| `capabilities.openSession(...)` | ready | ready | Provides caller-scoped runtime session headers. |
+| `capabilities.openSession(...)` | ready | ready | Provides caller-scoped runtime session headers only; it does not yet elevate durable checkpoint / provisioning / replay evidence to this layer. |
 | `capabilities.searchWeb(...)` / `fetchSearchResult(...)` / `groundSearchResult(...)` | ready | placeholder-backed SDK seam | macOS uses local deterministic baseline; Linux still lacks a real browser / search substrate. |
-| `tap.inspect()` | ready | ready with degraded host summaries | Exposes reviewer backlog, latest decision, section summaries, provider skill / provider MCP tool discovery, reviewer-visible recent provider activity, and recovery / durable evidence readback hints; Linux still reports honest degraded host summaries. |
+| `tap.inspect()` | ready | ready with degraded host summaries | Exposes reviewer backlog, latest decision, section summaries, provider skill / provider MCP tool discovery, reviewer-visible recent provider activity, and durable checkpoint / provisioning / replay evidence readback hints; Linux still reports honest degraded host summaries. |
 | `tap.project(...).overview(...)` | ready | ready | Capability visibility still depends on host wiring truth. |
-| `tap.project(...).reviewWorkbench(...)` | ready | ready with degraded host summaries | Aggregates inspection, TAP history, CMP overview, reviewer queue, provider skill discovery, provider MCP tool discovery, and recent provider activity / durable evidence readback when available; Linux still reports honest degraded host summaries. |
+| `tap.project(...).reviewWorkbench(...)` | ready | ready with degraded host summaries | Aggregates inspection, TAP history, CMP overview, reviewer queue, provider skill discovery, provider MCP tool discovery, and recovered provisioning summary / replay evidence when available; Linux still reports honest degraded host summaries. |
 | `cmp.project(...).overview(...)` / `approvalOverview(...)` | ready | ready with degraded host summaries | Linux still degrades git / shell / process truth. |
 | `cmp.project(...).smoke()` | ready | degraded | Smoke reports degraded host readiness honestly. |
 | `mp.project(...).overview(...)` / `search(...)` / `resolve(...)` / `history(...)` | ready | ready | Uses local semantic memory and heuristic baseline. |
