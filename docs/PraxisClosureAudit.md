@@ -36,7 +36,7 @@ As of the current Phase 6 baseline, the repository has assembled the current pre
 - `docs/PraxisHighRiskCapabilitySafety.md`
 - `docs/PraxisPerformanceBaseline.md`
 
-The canonical command and sign-off record now lives in [PraxisPreviewReleaseEvidence.md](./PraxisPreviewReleaseEvidence.md). Any later `docs/releases/v0.1.0-preview.1/` package is follow-up handoff work, not a prerequisite for the current Task 2 evidence record.
+The canonical command and sign-off record now lives in [PraxisPreviewReleaseEvidence.md](./PraxisPreviewReleaseEvidence.md). The version-scoped package at `docs/releases/v0.1.0-preview.1/` now exists as a derived handoff package for this preview lane, but it remains downstream from the shared preview docs and is not the upstream truth source for the current evidence record.
 
 ## Audit Notes
 

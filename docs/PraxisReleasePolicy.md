@@ -69,7 +69,7 @@ For the current pre-tag `v0.1.0-preview.1` preparation lane, the current Task 2 
 - `docs/PraxisPreviewReleaseChecklist.md`
 - `docs/PraxisPreviewReleaseEvidence.md` as the canonical verification and manual sign-off source
 
-After the pre-tag evidence and sign-off work is complete, later preview-preparation follow-up may assemble the pending version-scoped package at `docs/releases/v0.1.0-preview.1/`. That package is not a current Task 2 deliverable and should not replace `docs/PraxisPreviewReleaseEvidence.md` as the canonical current evidence source.
+For this preview lane, the derived version-scoped handoff package at `docs/releases/v0.1.0-preview.1/` now also exists. That package is a downstream handoff surface derived from the generic preview docs for `v0.1.0-preview.1`; it is not the upstream truth source and must not replace `docs/PraxisPreviewReleaseEvidence.md` as the canonical verification and manual sign-off source.
 
 These items are specific to the current preview thread and should not be read as a permanent release-artifact requirement for every future version.
 
