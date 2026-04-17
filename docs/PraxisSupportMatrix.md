@@ -17,8 +17,13 @@ This document records the current support baseline for exported Praxis surfaces.
 ### Common Qualifiers
 
 - `compile-safe placeholder baseline`: builds and preserves the intended integration shape, but does not claim full host-backed behavior yet
+- `compile-safe, expected degraded host checks`: builds and exposes the smoke path, but current host-backed checks are still expected to report degraded truth
+- `degraded`: callable or inspectable path that honestly reports reduced host truth instead of full parity
+- `macOS-only baseline`: supported today only on the macOS local baseline and not claimed as a cross-platform surface
 - `placeholder contract`: exposes the public contract shape as a placeholder rather than a fully backed implementation claim
 - `placeholder-backed bounded seam`: preserves the bounded API/result shape while the underlying execution path still returns placeholder truth
+- `placeholder-backed SDK seam`: preserves the SDK-facing call shape while the underlying platform path still returns placeholder truth
+- `placeholder only`: explicit placeholder state with no current fully backed implementation claim for that platform/scope
 - `ready with degraded host summaries`: surface is callable today, but reported host truth still includes explicit degraded summaries
 - `unavailable`: the surface is not currently exposed for the stated platform/scope
 
