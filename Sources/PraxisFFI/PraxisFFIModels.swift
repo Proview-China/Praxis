@@ -35,6 +35,14 @@ public struct PraxisFFIEventEnvelope: Sendable, Equatable, Codable {
   public let events: [PraxisRuntimeInterfaceEvent]
   public let error: PraxisRuntimeInterfaceErrorEnvelope?
 
+  /// Creates one FFI event envelope for a runtime session handle.
+  ///
+  /// - Parameters:
+  ///   - eventSchemaVersion: Stable schema version for the event envelope.
+  ///   - status: Success or failure status for the envelope request.
+  ///   - handle: Opaque runtime session handle that owns these events.
+  ///   - events: Buffered runtime interface events for the handle.
+  ///   - error: Structured runtime interface error when the lookup failed.
   public init(
     eventSchemaVersion: PraxisRuntimeInterfaceSchemaVersion = .v1,
     status: PraxisRuntimeInterfaceResponseStatus,

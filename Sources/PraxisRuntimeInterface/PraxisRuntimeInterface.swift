@@ -8,6 +8,10 @@ import PraxisCoreTypes
 // - Keep construction and host adapter wiring outside this target; composition still belongs to
 //   HostRuntime composition / gateway layers.
 
+/// Describes the exported host-neutral runtime interface boundary.
+///
+/// This target owns stable encoded request/response/event shapes that can be reused by
+/// `PraxisFFI` and future language bindings without pulling in presentation concerns.
 public enum PraxisRuntimeInterfaceModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisRuntimeInterface",

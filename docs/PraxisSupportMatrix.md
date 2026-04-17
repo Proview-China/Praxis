@@ -45,6 +45,7 @@ This document records the current support baseline for exported Praxis surfaces.
 | `PraxisFFI` | ready | Minimal encoded bridge over runtime interface registry and opaque handles. |
 | `PraxisFFIEmbeddingExample` | ready | Smallest bridge-level embedding path. |
 | `PraxisAppleHostEmbeddingExample` | ready | Host-like Apple-side embedding path with architecture negotiation first. |
+| `PraxisExportBaselineExample` | ready | Repeatable export latency / payload / resident-memory baseline sampler. |
 
 ## Verification Baseline
 
@@ -54,5 +55,6 @@ Recommended checks for the current exported surface:
 swift test
 swift run PraxisFFIEmbeddingExample
 swift run PraxisAppleHostEmbeddingExample
+swift run PraxisExportBaselineExample --iterations 5 --format json
 swift run PraxisRuntimeKitSmoke --suite all
 ```

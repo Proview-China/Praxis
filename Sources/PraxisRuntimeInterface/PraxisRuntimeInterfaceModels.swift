@@ -37,11 +37,13 @@ private func decodeRuntimeInterfaceSchemaVersion<Key: CodingKey>(
   return version
 }
 
+/// Reports whether one encoded runtime interface response succeeded or failed.
 public enum PraxisRuntimeInterfaceResponseStatus: String, Sendable, Equatable, Codable {
   case success
   case failure
 }
 
+/// Enumerates the stable error codes exposed by runtime interface responses.
 public enum PraxisRuntimeInterfaceErrorCode: String, Sendable, Equatable, Codable {
   case sessionNotFound = "session_not_found"
   case missingRequiredField = "missing_required_field"
@@ -58,6 +60,7 @@ public enum PraxisRuntimeInterfaceErrorCode: String, Sendable, Equatable, Codabl
   case unknown = "unknown_error"
 }
 
+/// Lists the stable command kinds accepted by the host-neutral runtime interface surface.
 public enum PraxisRuntimeInterfaceCommandKind: String, Sendable, Equatable, Codable {
   case inspectArchitecture
   case runGoal
@@ -164,6 +167,7 @@ public struct PraxisRuntimeInterfaceReferenceID:
   }
 }
 
+/// Carries the nested payload for `runGoal` requests.
 public struct PraxisRuntimeInterfaceRunGoalRequestPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let goalID: String
@@ -183,6 +187,7 @@ public struct PraxisRuntimeInterfaceRunGoalRequestPayload: Sendable, Equatable, 
   }
 }
 
+/// Carries the nested payload for `resumeRun` requests.
 public struct PraxisRuntimeInterfaceResumeRunRequestPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let runID: String
@@ -193,6 +198,7 @@ public struct PraxisRuntimeInterfaceResumeRunRequestPayload: Sendable, Equatable
   }
 }
 
+/// Carries the nested payload for `openCmpSession` requests.
 public struct PraxisRuntimeInterfaceOpenCmpSessionRequestPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let projectID: String
@@ -209,6 +215,7 @@ public struct PraxisRuntimeInterfaceOpenCmpSessionRequestPayload: Sendable, Equa
   }
 }
 
+/// Carries the nested payload for project-scoped CMP readback requests.
 public struct PraxisRuntimeInterfaceCmpProjectRequestPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let projectID: String
@@ -219,6 +226,7 @@ public struct PraxisRuntimeInterfaceCmpProjectRequestPayload: Sendable, Equatabl
   }
 }
 
+/// Carries the nested payload for TAP status readback requests.
 public struct PraxisRuntimeInterfaceTapStatusRequestPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let projectID: String
@@ -235,6 +243,7 @@ public struct PraxisRuntimeInterfaceTapStatusRequestPayload: Sendable, Equatable
   }
 }
 
+/// Carries the nested payload for TAP provisioning readback requests.
 public struct PraxisRuntimeInterfaceTapProvisioningRequestPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let projectID: String
@@ -248,6 +257,7 @@ public struct PraxisRuntimeInterfaceTapProvisioningRequestPayload: Sendable, Equ
   }
 }
 
+/// Carries the nested payload for TAP replay lifecycle requests.
 public struct PraxisRuntimeInterfaceTapReplayRequestPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let projectID: String
@@ -273,6 +283,7 @@ public struct PraxisRuntimeInterfaceTapReplayRequestPayload: Sendable, Equatable
   }
 }
 
+/// Carries the nested payload for TAP history readback requests.
 public struct PraxisRuntimeInterfaceTapHistoryRequestPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let projectID: String
@@ -292,6 +303,7 @@ public struct PraxisRuntimeInterfaceTapHistoryRequestPayload: Sendable, Equatabl
   }
 }
 
+/// Carries the nested payload for CMP status readback requests.
 public struct PraxisRuntimeInterfaceCmpStatusRequestPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let projectID: String
@@ -308,6 +320,7 @@ public struct PraxisRuntimeInterfaceCmpStatusRequestPayload: Sendable, Equatable
   }
 }
 
+/// Carries the nested payload for CMP role readback requests.
 public struct PraxisRuntimeInterfaceCmpRolesRequestPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let projectID: String
@@ -324,6 +337,7 @@ public struct PraxisRuntimeInterfaceCmpRolesRequestPayload: Sendable, Equatable,
   }
 }
 
+/// Carries the nested payload for CMP control readback requests.
 public struct PraxisRuntimeInterfaceCmpControlRequestPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let projectID: String
@@ -340,6 +354,7 @@ public struct PraxisRuntimeInterfaceCmpControlRequestPayload: Sendable, Equatabl
   }
 }
 
+/// Carries the nested payload for CMP control update requests.
 public struct PraxisRuntimeInterfaceUpdateCmpControlRequestPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let projectID: String
@@ -374,6 +389,7 @@ public struct PraxisRuntimeInterfaceUpdateCmpControlRequestPayload: Sendable, Eq
   }
 }
 
+/// Carries the nested payload for CMP peer-approval request commands.
 public struct PraxisRuntimeInterfaceRequestCmpPeerApprovalPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let projectID: String
@@ -402,6 +418,7 @@ public struct PraxisRuntimeInterfaceRequestCmpPeerApprovalPayload: Sendable, Equ
   }
 }
 
+/// Carries the nested payload for CMP peer-approval readback requests.
 public struct PraxisRuntimeInterfaceReadbackCmpPeerApprovalPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let projectID: String
@@ -424,6 +441,7 @@ public struct PraxisRuntimeInterfaceReadbackCmpPeerApprovalPayload: Sendable, Eq
   }
 }
 
+/// Carries the nested payload for CMP peer-approval decision commands.
 public struct PraxisRuntimeInterfaceDecideCmpPeerApprovalPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let projectID: String
@@ -455,6 +473,7 @@ public struct PraxisRuntimeInterfaceDecideCmpPeerApprovalPayload: Sendable, Equa
   }
 }
 
+/// Carries the nested payload for CMP project bootstrap requests.
 public struct PraxisRuntimeInterfaceBootstrapCmpProjectRequestPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let projectID: String
@@ -489,6 +508,7 @@ public struct PraxisRuntimeInterfaceBootstrapCmpProjectRequestPayload: Sendable,
   }
 }
 
+/// Carries the nested payload for CMP project recovery requests.
 public struct PraxisRuntimeInterfaceRecoverCmpProjectRequestPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let projectID: String
@@ -553,6 +573,7 @@ public struct PraxisRuntimeInterfaceRecoverCmpProjectRequestPayload: Sendable, E
   }
 }
 
+/// Carries the nested payload for CMP flow ingest requests.
 public struct PraxisRuntimeInterfaceIngestCmpFlowRequestPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let projectID: String
@@ -590,6 +611,7 @@ public struct PraxisRuntimeInterfaceIngestCmpFlowRequestPayload: Sendable, Equat
   }
 }
 
+/// Carries the nested payload for CMP flow commit requests.
 public struct PraxisRuntimeInterfaceCommitCmpFlowRequestPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let projectID: String
@@ -659,6 +681,7 @@ public struct PraxisRuntimeInterfaceCommitCmpFlowRequestPayload: Sendable, Equat
   }
 }
 
+/// Carries the nested payload for CMP flow resolve requests.
 public struct PraxisRuntimeInterfaceResolveCmpFlowRequestPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let projectID: String
@@ -698,6 +721,7 @@ public struct PraxisRuntimeInterfaceResolveCmpFlowRequestPayload: Sendable, Equa
   }
 }
 
+/// Carries the nested payload for CMP flow materialization requests.
 public struct PraxisRuntimeInterfaceMaterializeCmpFlowRequestPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let projectID: String
@@ -729,6 +753,7 @@ public struct PraxisRuntimeInterfaceMaterializeCmpFlowRequestPayload: Sendable, 
   }
 }
 
+/// Carries the nested payload for CMP flow dispatch requests.
 public struct PraxisRuntimeInterfaceDispatchCmpFlowRequestPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let projectID: String
@@ -754,6 +779,7 @@ public struct PraxisRuntimeInterfaceDispatchCmpFlowRequestPayload: Sendable, Equ
   }
 }
 
+/// Carries the nested payload for dispatching one previously materialized CMP package.
 public struct PraxisRuntimeInterfaceDispatchStoredCmpPackageRequestPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let projectID: String
@@ -779,6 +805,7 @@ public struct PraxisRuntimeInterfaceDispatchStoredCmpPackageRequestPayload: Send
   }
 }
 
+/// Carries the nested payload for CMP dispatch retry requests.
 public struct PraxisRuntimeInterfaceRetryCmpDispatchRequestPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let projectID: String
@@ -858,6 +885,7 @@ public struct PraxisRuntimeInterfaceCmpHistoryQuery: Sendable, Equatable, Codabl
   }
 }
 
+/// Carries the nested payload for CMP historical-context requests.
 public struct PraxisRuntimeInterfaceRequestCmpHistoryPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let projectID: String
@@ -880,6 +908,7 @@ public struct PraxisRuntimeInterfaceRequestCmpHistoryPayload: Sendable, Equatabl
   }
 }
 
+/// Carries the nested payload for MP search requests.
 public struct PraxisRuntimeInterfaceMpSearchRequestPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let projectID: String
@@ -911,6 +940,7 @@ public struct PraxisRuntimeInterfaceMpSearchRequestPayload: Sendable, Equatable,
   }
 }
 
+/// Carries the nested payload for MP readback requests.
 public struct PraxisRuntimeInterfaceMpReadbackRequestPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let projectID: String
@@ -942,6 +972,7 @@ public struct PraxisRuntimeInterfaceMpReadbackRequestPayload: Sendable, Equatabl
   }
 }
 
+/// Carries the nested payload for MP smoke requests.
 public struct PraxisRuntimeInterfaceMpSmokeRequestPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let projectID: String
@@ -952,6 +983,7 @@ public struct PraxisRuntimeInterfaceMpSmokeRequestPayload: Sendable, Equatable, 
   }
 }
 
+/// Carries the nested payload for MP ingest requests.
 public struct PraxisRuntimeInterfaceMpIngestRequestPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let projectID: String
@@ -1007,6 +1039,7 @@ public struct PraxisRuntimeInterfaceMpIngestRequestPayload: Sendable, Equatable,
   }
 }
 
+/// Carries the nested payload for MP alignment requests.
 public struct PraxisRuntimeInterfaceMpAlignRequestPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let projectID: String
@@ -1029,6 +1062,7 @@ public struct PraxisRuntimeInterfaceMpAlignRequestPayload: Sendable, Equatable, 
   }
 }
 
+/// Carries the nested payload for MP promotion requests.
 public struct PraxisRuntimeInterfaceMpPromoteRequestPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let projectID: String
@@ -1057,6 +1091,7 @@ public struct PraxisRuntimeInterfaceMpPromoteRequestPayload: Sendable, Equatable
   }
 }
 
+/// Carries the nested payload for MP archive requests.
 public struct PraxisRuntimeInterfaceMpArchiveRequestPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let projectID: String
@@ -1079,6 +1114,7 @@ public struct PraxisRuntimeInterfaceMpArchiveRequestPayload: Sendable, Equatable
   }
 }
 
+/// Carries the nested payload for MP resolve requests.
 public struct PraxisRuntimeInterfaceMpResolveRequestPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let projectID: String
@@ -1107,6 +1143,7 @@ public struct PraxisRuntimeInterfaceMpResolveRequestPayload: Sendable, Equatable
   }
 }
 
+/// Carries the nested payload for MP history requests.
 public struct PraxisRuntimeInterfaceRequestMpHistoryPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let projectID: String
@@ -1138,6 +1175,7 @@ public struct PraxisRuntimeInterfaceRequestMpHistoryPayload: Sendable, Equatable
   }
 }
 
+/// Carries the nested payload for code-sandbox description requests.
 public struct PraxisRuntimeInterfaceCodeSandboxRequestPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
   public let profile: PraxisCodeSandboxProfile
@@ -1157,6 +1195,7 @@ public struct PraxisRuntimeInterfaceCodeSandboxRequestPayload: Sendable, Equatab
   }
 }
 
+/// Carries the nested payload for provider skill-list requests.
 public struct PraxisRuntimeInterfaceProviderSkillListRequestPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
 
@@ -1165,6 +1204,7 @@ public struct PraxisRuntimeInterfaceProviderSkillListRequestPayload: Sendable, E
   }
 }
 
+/// Carries the nested payload for provider MCP tool-list requests.
 public struct PraxisRuntimeInterfaceProviderMCPToolListRequestPayload: Sendable, Equatable, Codable {
   public let payloadSummary: String
 
@@ -1173,6 +1213,10 @@ public struct PraxisRuntimeInterfaceProviderMCPToolListRequestPayload: Sendable,
   }
 }
 
+/// Encodes one host-neutral runtime request with a stable command kind and typed payload.
+///
+/// This enum is the top-level request surface shared by direct runtime interface callers and the
+/// thin FFI bridge.
 public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
   case inspectArchitecture
   case runGoal(PraxisRuntimeInterfaceRunGoalRequestPayload)
@@ -1948,6 +1992,7 @@ public enum PraxisRuntimeInterfaceRequest: Sendable, Equatable, Codable {
   }
 }
 
+/// Declares the stable snapshot kinds emitted by successful runtime interface responses.
 public enum PraxisRuntimeInterfaceSnapshotKind: String, Sendable, Equatable, Codable {
   case architecture
   case run
@@ -1980,6 +2025,10 @@ public enum PraxisRuntimeInterfaceSnapshotKind: String, Sendable, Equatable, Cod
   case providerMCPTools
 }
 
+/// Carries one host-neutral runtime snapshot projected by the runtime interface layer.
+///
+/// This snapshot intentionally reuses one envelope shape for architecture, run, TAP, CMP, MP,
+/// and export-support readbacks without introducing presentation-specific DTO families.
 public struct PraxisRuntimeInterfaceSnapshot: Sendable, Equatable, Codable {
   public let kind: PraxisRuntimeInterfaceSnapshotKind
   public let title: String
@@ -2203,6 +2252,7 @@ extension PraxisRuntimeInterfaceEventName: CustomStringConvertible {
   }
 }
 
+/// Records one host-neutral runtime event emitted by the interface surface.
 public struct PraxisRuntimeInterfaceEvent: Sendable, Equatable, Codable {
   public let name: PraxisRuntimeInterfaceEventName
   public let detail: String
@@ -2210,6 +2260,14 @@ public struct PraxisRuntimeInterfaceEvent: Sendable, Equatable, Codable {
   public let sessionID: PraxisSessionID?
   public let intentID: PraxisRuntimeInterfaceReferenceID?
 
+  /// Creates one runtime interface event entry.
+  ///
+  /// - Parameters:
+  ///   - name: Stable event channel name.
+  ///   - detail: Human-readable event detail suitable for logs and diagnostics.
+  ///   - runID: Optional associated run identifier.
+  ///   - sessionID: Optional associated session identifier.
+  ///   - intentID: Optional outward-facing follow-up intent identifier.
   public init(
     name: PraxisRuntimeInterfaceEventName,
     detail: String,
@@ -2225,6 +2283,7 @@ public struct PraxisRuntimeInterfaceEvent: Sendable, Equatable, Codable {
   }
 }
 
+/// Encodes one structured runtime interface error without leaking host-specific error types.
 public struct PraxisRuntimeInterfaceErrorEnvelope: Sendable, Equatable, Codable {
   public let code: PraxisRuntimeInterfaceErrorCode
   public let message: String
@@ -2233,6 +2292,15 @@ public struct PraxisRuntimeInterfaceErrorEnvelope: Sendable, Equatable, Codable 
   public let runID: PraxisRunID?
   public let sessionID: PraxisSessionID?
 
+  /// Creates one structured runtime interface error envelope.
+  ///
+  /// - Parameters:
+  ///   - code: Stable error code exposed to embedding hosts.
+  ///   - message: Human-readable diagnostic message.
+  ///   - retryable: Whether the caller may retry the same operation.
+  ///   - missingField: Optional missing field name for validation failures.
+  ///   - runID: Optional associated run identifier.
+  ///   - sessionID: Optional associated session identifier.
   public init(
     code: PraxisRuntimeInterfaceErrorCode,
     message: String,
@@ -2250,6 +2318,10 @@ public struct PraxisRuntimeInterfaceErrorEnvelope: Sendable, Equatable, Codable 
   }
 }
 
+/// Encodes one host-neutral runtime interface response.
+///
+/// The response keeps schema version metadata alongside the latest snapshot, buffered events, and
+/// any structured error so embedding hosts can validate the contract before business dispatch.
 public struct PraxisRuntimeInterfaceResponse: Sendable, Equatable, Codable {
   public let responseSchemaVersion: PraxisRuntimeInterfaceSchemaVersion
   public let eventSchemaVersion: PraxisRuntimeInterfaceSchemaVersion
@@ -2258,6 +2330,15 @@ public struct PraxisRuntimeInterfaceResponse: Sendable, Equatable, Codable {
   public let events: [PraxisRuntimeInterfaceEvent]
   public let error: PraxisRuntimeInterfaceErrorEnvelope?
 
+  /// Creates one runtime interface response envelope.
+  ///
+  /// - Parameters:
+  ///   - responseSchemaVersion: Stable schema version for the response envelope.
+  ///   - eventSchemaVersion: Stable schema version for any attached event list.
+  ///   - status: Success or failure status for the response.
+  ///   - snapshot: Optional latest runtime snapshot payload.
+  ///   - events: Buffered runtime interface events attached to the response.
+  ///   - error: Structured runtime interface error when the request failed.
   public init(
     responseSchemaVersion: PraxisRuntimeInterfaceSchemaVersion = .v1,
     eventSchemaVersion: PraxisRuntimeInterfaceSchemaVersion = .v1,
@@ -2274,6 +2355,12 @@ public struct PraxisRuntimeInterfaceResponse: Sendable, Equatable, Codable {
     self.error = error
   }
 
+  /// Builds a successful runtime interface response.
+  ///
+  /// - Parameters:
+  ///   - snapshot: Latest runtime snapshot payload.
+  ///   - events: Newly emitted runtime interface events.
+  /// - Returns: A success response envelope.
   public static func success(
     snapshot: PraxisRuntimeInterfaceSnapshot,
     events: [PraxisRuntimeInterfaceEvent] = []
@@ -2288,6 +2375,12 @@ public struct PraxisRuntimeInterfaceResponse: Sendable, Equatable, Codable {
     )
   }
 
+  /// Builds a failed runtime interface response.
+  ///
+  /// - Parameters:
+  ///   - error: Structured runtime interface error payload.
+  ///   - events: Any events that should still accompany the failure envelope.
+  /// - Returns: A failure response envelope.
   public static func failure(
     error: PraxisRuntimeInterfaceErrorEnvelope,
     events: [PraxisRuntimeInterfaceEvent] = []
@@ -2302,6 +2395,7 @@ public struct PraxisRuntimeInterfaceResponse: Sendable, Equatable, Codable {
     )
   }
 
+  /// Whether the response status is `.success`.
   public var isSuccess: Bool {
     status == .success
   }

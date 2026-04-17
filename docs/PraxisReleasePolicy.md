@@ -45,6 +45,9 @@ If the release touches exported schemas or host integration guidance, also updat
 
 - embedding examples
 - architecture / codec tests that assert wire shape
+- `docs/PraxisSupportMatrix.md`
+- `docs/PraxisHighRiskCapabilitySafety.md`
+- `docs/PraxisPerformanceBaseline.md`
 
 ## Breaking Change Checklist
 
@@ -63,6 +66,8 @@ Before finalizing a release, run at least:
 ```bash
 swift test
 swift run PraxisFFIEmbeddingExample
+swift run PraxisAppleHostEmbeddingExample
+swift run PraxisExportBaselineExample --iterations 5 --format json
 swift run PraxisRuntimeKitSmoke --suite all
 ```
 

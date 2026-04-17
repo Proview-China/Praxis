@@ -150,4 +150,58 @@ struct HostRuntimeTopologyTests {
     #expect(packageManifest.contains(#""PraxisFFI""#))
     #expect(packageManifest.contains(#""PraxisRuntimeInterface""#))
   }
+
+  @Test
+  func readmeLinksPhaseSixExportMaterialsAndAuditChecklist() throws {
+    let projectRoot = URL(fileURLWithPath: #filePath)
+      .deletingLastPathComponent()
+      .deletingLastPathComponent()
+      .deletingLastPathComponent()
+    let readme = try String(contentsOf: projectRoot.appendingPathComponent("README.md"))
+
+    #expect(readme.contains("swift run PraxisFFIEmbeddingExample"))
+    #expect(readme.contains("swift run PraxisAppleHostEmbeddingExample"))
+    #expect(readme.contains("swift run PraxisExportBaselineExample --iterations 5 --format json"))
+    #expect(readme.contains("swift run PraxisRuntimeKitSmoke --suite recovery"))
+    #expect(readme.contains("docs/PraxisFFICompatibility.md"))
+    #expect(readme.contains("docs/PraxisReleasePolicy.md"))
+    #expect(readme.contains("docs/PraxisMigrationNotes.md"))
+    #expect(readme.contains("docs/PraxisSupportMatrix.md"))
+    #expect(readme.contains("docs/PraxisHighRiskCapabilitySafety.md"))
+    #expect(readme.contains("docs/PraxisPerformanceBaseline.md"))
+    #expect(readme.contains("docs/PraxisClosureAudit.md"))
+    #expect(readme.contains("显式 `null` 版本值"))
+  }
+
+  @Test
+  func phaseSixReleaseAndSupportDocsStayAlignedOnVerificationBaseline() throws {
+    let projectRoot = URL(fileURLWithPath: #filePath)
+      .deletingLastPathComponent()
+      .deletingLastPathComponent()
+      .deletingLastPathComponent()
+    let releasePolicy = try String(
+      contentsOf: projectRoot.appendingPathComponent("docs/PraxisReleasePolicy.md")
+    )
+    let supportMatrix = try String(
+      contentsOf: projectRoot.appendingPathComponent("docs/PraxisSupportMatrix.md")
+    )
+    let closureAudit = try String(
+      contentsOf: projectRoot.appendingPathComponent("docs/PraxisClosureAudit.md")
+    )
+
+    for command in [
+      "swift test",
+      "swift run PraxisFFIEmbeddingExample",
+      "swift run PraxisAppleHostEmbeddingExample",
+      "swift run PraxisExportBaselineExample --iterations 5 --format json",
+      "swift run PraxisRuntimeKitSmoke --suite all",
+    ] {
+      #expect(releasePolicy.contains(command))
+      #expect(supportMatrix.contains(command))
+      #expect(closureAudit.contains(command))
+    }
+
+    #expect(supportMatrix.contains("PraxisExportBaselineExample"))
+    #expect(closureAudit.contains("schema-version docs still describe missing fields, explicit `null`, and unknown version values correctly"))
+  }
 }

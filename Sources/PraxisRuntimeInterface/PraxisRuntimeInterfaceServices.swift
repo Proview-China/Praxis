@@ -214,15 +214,30 @@ public protocol PraxisRuntimeInterfaceCoding: Sendable {
   func decodeResponse(_ data: Data) throws -> PraxisRuntimeInterfaceResponse
 }
 
+/// JSON codec for the exported runtime interface request/response surface.
+///
+/// This codec provides the canonical wire shape currently used by `PraxisFFI` and the shipped
+/// embedding examples.
 public struct PraxisJSONRuntimeInterfaceCodec: Sendable, PraxisRuntimeInterfaceCoding {
+  /// Creates the default JSON runtime interface codec.
   public init() {}
 
+  /// Encodes one runtime interface request into canonical JSON.
+  ///
+  /// - Parameter request: The request to encode.
+  /// - Returns: Stable JSON request data.
+  /// - Throws: Any encoding error produced by `JSONEncoder`.
   public func encode(_ request: PraxisRuntimeInterfaceRequest) throws -> Data {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys]
     return try encoder.encode(request)
   }
 
+  /// Decodes one runtime interface request from canonical JSON.
+  ///
+  /// - Parameter data: Stable JSON request data.
+  /// - Returns: The decoded request envelope.
+  /// - Throws: `PraxisError.invalidInput` when decoding fails.
   public func decodeRequest(_ data: Data) throws -> PraxisRuntimeInterfaceRequest {
     do {
       return try JSONDecoder().decode(PraxisRuntimeInterfaceRequest.self, from: data)
@@ -231,17 +246,31 @@ public struct PraxisJSONRuntimeInterfaceCodec: Sendable, PraxisRuntimeInterfaceC
     }
   }
 
+  /// Encodes one runtime interface response into canonical JSON.
+  ///
+  /// - Parameter response: The response to encode.
+  /// - Returns: Stable JSON response data.
+  /// - Throws: Any encoding error produced by `JSONEncoder`.
   public func encode(_ response: PraxisRuntimeInterfaceResponse) throws -> Data {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys]
     return try encoder.encode(response)
   }
 
+  /// Decodes one runtime interface response from canonical JSON.
+  ///
+  /// - Parameter data: Stable JSON response data.
+  /// - Returns: The decoded response envelope.
+  /// - Throws: Any decoding error produced by `JSONDecoder`.
   public func decodeResponse(_ data: Data) throws -> PraxisRuntimeInterfaceResponse {
     try JSONDecoder().decode(PraxisRuntimeInterfaceResponse.self, from: data)
   }
 }
 
+/// Owns runtime interface sessions behind stable opaque handles.
+///
+/// This registry lets export layers allocate, route, inspect, and close host-neutral runtime
+/// sessions without exposing the underlying facade graph to embedding hosts.
 public actor PraxisRuntimeInterfaceRegistry {
   public typealias SessionFactory =
     @Sendable (PraxisRuntimeInterfaceSessionHandle) async throws -> any PraxisRuntimeInterfaceServing
@@ -372,12 +401,22 @@ public actor PraxisRuntimeInterfaceRegistry {
   }
 }
 
+/// Serves one host-neutral runtime interface session over typed request/response/event envelopes.
+///
+/// This actor owns the per-session buffered event list while delegating actual runtime work to
+/// the injected `PraxisRuntimeFacade`.
 public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
   public let runtimeFacade: PraxisRuntimeFacade
   public let blueprint: PraxisRuntimeBlueprint
 
   private var events: [PraxisRuntimeInterfaceEvent]
 
+  /// Creates one runtime interface session backed by a runtime facade and topology blueprint.
+  ///
+  /// - Parameters:
+  ///   - runtimeFacade: Runtime facade that executes host-neutral requests.
+  ///   - blueprint: Runtime topology metadata used by architecture snapshots.
+  ///   - events: Seed event buffer contents, primarily for tests.
   public init(
     runtimeFacade: PraxisRuntimeFacade,
     blueprint: PraxisRuntimeBlueprint,
@@ -388,6 +427,9 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
     self.events = events
   }
 
+  /// Returns the static architecture bootstrap snapshot for this session.
+  ///
+  /// - Returns: The architecture snapshot describing exported runtime topology and schema support.
   public nonisolated func bootstrapSnapshot() -> PraxisRuntimeInterfaceSnapshot {
     PraxisRuntimeInterfaceSnapshot(
       kind: .architecture,
@@ -400,6 +442,10 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
     )
   }
 
+  /// Handles one runtime interface request and appends emitted events on success.
+  ///
+  /// - Parameter request: The host-neutral request to execute.
+  /// - Returns: A stable response envelope for the executed request.
   public func handle(_ request: PraxisRuntimeInterfaceRequest) async -> PraxisRuntimeInterfaceResponse {
     do {
       let response = try await handleThrowing(request)
@@ -412,10 +458,16 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
     }
   }
 
+  /// Returns the current buffered events without clearing the session buffer.
+  ///
+  /// - Returns: Buffered runtime interface events for this session.
   public func snapshotEvents() async -> [PraxisRuntimeInterfaceEvent] {
     events
   }
 
+  /// Returns and clears the buffered events for this session.
+  ///
+  /// - Returns: Drained runtime interface events for this session.
   public func drainEvents() async -> [PraxisRuntimeInterfaceEvent] {
     let snapshot = events
     events = []
@@ -1636,6 +1688,7 @@ public actor PraxisRuntimeInterfaceSession: PraxisRuntimeInterfaceServing {
   }
 }
 
+/// Error helpers used by runtime interface field validation before request dispatch.
 public enum PraxisRuntimeInterfaceError: Error, Sendable, Equatable {
   case missingRequiredField(String)
 }

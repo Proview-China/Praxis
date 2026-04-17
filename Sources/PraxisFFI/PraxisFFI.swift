@@ -3,6 +3,10 @@ import PraxisCoreTypes
 import PraxisRuntimeGateway
 import PraxisRuntimeInterface
 
+/// Describes the minimal exported FFI boundary for cross-language hosts.
+///
+/// `PraxisFFI` should stay focused on the encoded runtime bridge and must not absorb UI,
+/// terminal, or provider-specific runtime semantics.
 public enum PraxisFFIModule {
   public static let boundary = PraxisBoundaryDescriptor(
     name: "PraxisFFI",

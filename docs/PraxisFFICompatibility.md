@@ -17,6 +17,7 @@ Encoded payloads now expose these stable version fields:
 Current decode behavior is intentionally conservative:
 
 - Missing version fields are accepted and treated as `v1`.
+- Explicit `null` version fields are rejected during decode.
 - Unknown version values are rejected during decode.
 - Legacy flat payload decoding remains limited to the original `runGoal` and `resumeRun` bootstrap shapes.
 - New commands must continue to use the nested payload envelope.
@@ -61,7 +62,7 @@ Embedding hosts should:
 
 1. log the received request / response / event schema versions
 2. reject unknown versions before dispatching into host business logic
-3. treat missing version fields as legacy `v1`
+3. treat only missing version fields as legacy `v1`
 4. keep transport concerns outside `PraxisRuntimeKit`
 5. prefer `PraxisFFI` or `PraxisRuntimeInterface` only at export boundaries
 

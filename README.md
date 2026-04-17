@@ -18,14 +18,17 @@ swift run PraxisRuntimeKitSearchExample
 swift run PraxisFFIEmbeddingExample
 swift run PraxisAppleHostEmbeddingExample
 swift run PraxisExportBaselineExample --iterations 5 --format json
+swift run PraxisRuntimeKitSmoke --suite code
+swift run PraxisRuntimeKitSmoke --suite code-patch
 swift run PraxisRuntimeKitSmoke --suite shell
 swift run PraxisRuntimeKitSmoke --suite shell-approval
 swift run PraxisRuntimeKitSmoke --suite code-sandbox
+swift run PraxisRuntimeKitSmoke --suite recovery
 swift run PraxisRuntimeKitSmoke --suite provisioning
 swift run PraxisRuntimeKitSmoke --suite all
 ```
 
-这四条示例直接提炼自 `PraxisRuntimeKitTests` 中已验证的真实路径：
+这组 examples 和 smoke 路径直接提炼自仓库里已经被测试覆盖的真实调用链：
 
 - `PraxisRuntimeKitRunExample`
   展示 `runs.run(...)` 与 `runs.resumeRun(...)`。
@@ -147,13 +150,14 @@ Praxis 当前的设计目标是把运行时拆成边界明确的 Swift package p
 - response payloads emit `responseSchemaVersion = "1"` and `eventSchemaVersion = "1"`
 - FFI event envelopes emit `eventSchemaVersion = "1"`
 
-当前 decode 规则会兼容缺失版本字段的 legacy payload，并拒绝未知版本值。
+当前 decode 规则会兼容缺失版本字段的 legacy payload，并拒绝未知版本值或显式 `null` 版本值。
 `inspectArchitecture` / `bootstrapSnapshot` 现在也会返回 machine-readable 的 supported schema versions 与 legacy compatibility flag，便于 embedding host 在发出业务请求前做协商。
 更完整的兼容说明见 [docs/PraxisFFICompatibility.md](/Users/shiyu/Documents/Project/Praxis/docs/PraxisFFICompatibility.md)。
 发布和升级纪律见 [docs/PraxisReleasePolicy.md](/Users/shiyu/Documents/Project/Praxis/docs/PraxisReleasePolicy.md) 与 [docs/PraxisMigrationNotes.md](/Users/shiyu/Documents/Project/Praxis/docs/PraxisMigrationNotes.md)。
 当前公开面支持矩阵见 [docs/PraxisSupportMatrix.md](/Users/shiyu/Documents/Project/Praxis/docs/PraxisSupportMatrix.md)。
 高风险 capability 安全说明见 [docs/PraxisHighRiskCapabilitySafety.md](/Users/shiyu/Documents/Project/Praxis/docs/PraxisHighRiskCapabilitySafety.md)。
 导出面性能/资源基线见 [docs/PraxisPerformanceBaseline.md](/Users/shiyu/Documents/Project/Praxis/docs/PraxisPerformanceBaseline.md)。
+Phase 6 收尾审计清单见 [docs/PraxisClosureAudit.md](/Users/shiyu/Documents/Project/Praxis/docs/PraxisClosureAudit.md)。
 
 ## Recommended Entry
 

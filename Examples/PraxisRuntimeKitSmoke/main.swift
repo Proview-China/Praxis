@@ -240,8 +240,9 @@ private struct PraxisRuntimeKitSmokeHarness {
   }
 
   private func provisioningSuite() async throws -> String {
-    let cmpProject = client.cmp.project("cmp.local-runtime")
-    let tapProject = client.tap.project("cmp.local-runtime")
+    let projectID = PraxisRuntimeProjectRef("cmp.runtime-kit-provisioning")
+    let cmpProject = client.cmp.project(projectID)
+    let tapProject = client.tap.project(projectID)
 
     _ = try await cmpProject.openSession("cmp.runtime-kit-provisioning")
     let requested = try await cmpProject.approvals.request(
@@ -276,7 +277,7 @@ private struct PraxisRuntimeKitSmokeHarness {
     let inspection = try await tapProject.inspect(historyLimit: 10)
     let workbench = try await tapProject.reviewWorkbench(for: "checker.local", limit: 10)
     let recoveredClient = try PraxisRuntimeClient.makeDefault(rootDirectory: rootDirectory)
-    let recoveredTapProject = recoveredClient.tap.project("cmp.local-runtime")
+    let recoveredTapProject = recoveredClient.tap.project(projectID)
     let recoveredProvisioning = try await recoveredTapProject.provisioning()
     let recoveredWorkbench = try await recoveredTapProject.reviewWorkbench(for: "checker.local", limit: 10)
 
@@ -311,12 +312,16 @@ private struct PraxisRuntimeKitSmokeHarness {
       "Provisioning smoke expected TAP inspection to expose an activation/replay section."
     )
     try require(
-      workbench.latestDecisionSummary?.contains("is ready") == true,
-      "Provisioning smoke expected the reviewer workbench to surface the replay-ready activation summary."
+      workbench.provisioning.activationSummary?.contains("is ready") == true,
+      "Provisioning smoke expected the reviewer workbench provisioning readback to surface the replay-ready activation summary."
     )
     try require(
       workbench.provisioning == provisioning,
       "Provisioning smoke expected the reviewer workbench to embed the same durable provisioning readback."
+    )
+    try require(
+      workbench.latestDecisionSummary == workbench.tapOverview.latestDecisionSummary,
+      "Provisioning smoke expected latestDecisionSummary to keep following TAP overview rather than preserved activation text."
     )
     try require(
       recoveredProvisioning.activeReplayCount == provisioning.activeReplayCount,
@@ -325,6 +330,10 @@ private struct PraxisRuntimeKitSmokeHarness {
     try require(
       recoveredWorkbench.provisioning == recoveredProvisioning,
       "Provisioning smoke expected a recovered reviewer workbench to keep the durable provisioning readback."
+    )
+    try require(
+      recoveredWorkbench.latestDecisionSummary == recoveredWorkbench.tapOverview.latestDecisionSummary,
+      "Provisioning smoke expected the recovered reviewer workbench to keep preferring the latest TAP overview decision summary."
     )
 
     return

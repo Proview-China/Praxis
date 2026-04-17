@@ -15,6 +15,7 @@ Version fields now shipped by default:
 ## Legacy Compatibility
 
 The current implementation still accepts payloads that omit schema version fields and treats them as `v1`.
+Payloads that explicitly send `null` for version fields are rejected as malformed.
 
 This compatibility exists only to avoid breaking already shipped host bootstraps while the export path is being formalized. It should not be treated as the long-term preferred wire shape.
 
