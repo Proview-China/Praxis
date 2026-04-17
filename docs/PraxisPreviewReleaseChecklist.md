@@ -6,6 +6,10 @@ Target the first preview only after the outward-facing docs, RuntimeKit examples
 
 ## Required Checks
 
+Run the focused smoke suites to prove each public chain, then use `swift run PraxisRuntimeKitSmoke --suite all` as the final aggregate regression sweep before preview sign-off.
+
+### RuntimeKit examples and export/embedding checks
+
 ```bash
 swift test
 swift run PraxisRuntimeKitRunExample
@@ -17,6 +21,12 @@ swift run PraxisRuntimeKitDurableRuntimeExample
 swift run PraxisFFIEmbeddingExample
 swift run PraxisAppleHostEmbeddingExample
 swift run PraxisExportBaselineExample --iterations 5 --format json
+```
+
+### Focused smoke gates
+
+```bash
+swift run PraxisRuntimeKitSmoke --suite search
 swift run PraxisRuntimeKitSmoke --suite cmp-tap
 swift run PraxisRuntimeKitSmoke --suite recovery
 swift run PraxisRuntimeKitSmoke --suite provisioning
@@ -26,7 +36,17 @@ swift run PraxisRuntimeKitSmoke --suite code-sandbox
 swift run PraxisRuntimeKitSmoke --suite code-patch
 swift run PraxisRuntimeKitSmoke --suite shell
 swift run PraxisRuntimeKitSmoke --suite shell-approval
+```
+
+### Aggregate smoke sweep
+
+```bash
 swift run PraxisRuntimeKitSmoke --suite all
+```
+
+### Native demo host verification
+
+```bash
 swift build --product PraxisDemoHostApp
 ./script/build_and_run.sh --verify
 ```

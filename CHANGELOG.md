@@ -16,9 +16,9 @@ The format follows a lightweight Keep a Changelog style and uses `Unreleased` un
 - decode-time rejection for unsupported schema versions while preserving legacy versionless payload compatibility
 - machine-readable supported schema metadata on the `inspectArchitecture` / `bootstrapSnapshot` path
 - `PraxisFFIEmbeddingExample` as the smallest shipped host embedding example
-- shipped RuntimeKit example and smoke paths for the current preview baseline, including governed execution, durable runtime recovery/provisioning readback, reviewer context, and capability verification
+- focused RuntimeKit examples and smoke paths for the current preview baseline, covering search, governed execution, durable runtime readback, reviewer context, and capability verification on the documented macOS-first surfaces
 - `docs/PraxisFFICompatibility.md` to document the current FFI / runtime interface compatibility contract
-- `docs/PraxisReleasePolicy.md` and `docs/PraxisMigrationNotes.md` as Phase 6 baseline release materials
+- `docs/PraxisReleasePolicy.md` and `docs/PraxisMigrationNotes.md` as the preview release policy and migration references
 - `docs/PraxisSupportMatrix.md` as the current exported-surface support matrix
 - `docs/PraxisHighRiskCapabilitySafety.md`, `docs/PraxisReviewerContextGuide.md`, and `docs/PraxisDurableRuntimeGuide.md` as the current governed-execution, reviewer-context, and durable-runtime reference set
 - `PraxisExportBaselineExample` plus `docs/PraxisPerformanceBaseline.md` as the repeatable export latency/resource baseline
