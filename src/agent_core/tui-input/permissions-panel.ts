@@ -67,6 +67,27 @@ export function buildPermissionModeMatrixLines(
       derivedRiskLevel?: string;
       errorCode?: string;
     };
+    toolReviewerSummary?: {
+      total?: number;
+      open?: number;
+      waitingHuman?: number;
+      blocked?: number;
+      completed?: number;
+    };
+    tmaSummary?: {
+      total?: number;
+      inProgress?: number;
+      resumable?: number;
+      completed?: number;
+    };
+    thickCapabilities?: Array<{
+      capabilityKey: string;
+      stage: string;
+      toolReviewerSessions?: number;
+      tmaSessions?: number;
+      pendingReplays?: number;
+      activationAttempts?: number;
+    }>;
   } = {},
 ): PraxisSlashPanelBodyLine[] {
   const lines: PraxisSlashPanelBodyLine[] = [
@@ -118,6 +139,36 @@ export function buildPermissionModeMatrixLines(
       text: `${PERMISSION_MATRIX_INDENT}Last write attempt: ${options.lastAttempt.capabilityKey} · ${options.lastAttempt.routeDecision ?? "unknown"} · final=${options.lastAttempt.finalStatus ?? "unknown"}${options.lastAttempt.derivedRiskLevel ? ` · risk=${options.lastAttempt.derivedRiskLevel}` : ""}${options.lastAttempt.errorCode ? ` · error=${options.lastAttempt.errorCode}` : ""}`,
       tone: options.lastAttempt.finalStatus === "failed" ? "danger" : "warning",
     });
+  }
+  if (options.toolReviewerSummary) {
+    lines.push({
+      text: `${PERMISSION_MATRIX_INDENT}toolReviewer: total=${options.toolReviewerSummary.total ?? 0} · open=${options.toolReviewerSummary.open ?? 0} · blocked=${options.toolReviewerSummary.blocked ?? 0} · waitingHuman=${options.toolReviewerSummary.waitingHuman ?? 0}`,
+      tone: (options.toolReviewerSummary.blocked ?? 0) > 0 || (options.toolReviewerSummary.waitingHuman ?? 0) > 0
+        ? "warning"
+        : "info",
+    });
+  }
+  if (options.tmaSummary) {
+    lines.push({
+      text: `${PERMISSION_MATRIX_INDENT}TMA: total=${options.tmaSummary.total ?? 0} · inProgress=${options.tmaSummary.inProgress ?? 0} · resumable=${options.tmaSummary.resumable ?? 0} · completed=${options.tmaSummary.completed ?? 0}`,
+      tone: (options.tmaSummary.inProgress ?? 0) > 0 || (options.tmaSummary.resumable ?? 0) > 0
+        ? "warning"
+        : "info",
+    });
+  }
+  if ((options.thickCapabilities?.length ?? 0) > 0) {
+    lines.push(
+      {
+        text: `${PERMISSION_MATRIX_INDENT}Thick lanes:`,
+        tone: "info",
+      },
+      ...options.thickCapabilities!.slice(0, 4).map((entry) => ({
+        text: `${PERMISSION_MATRIX_INDENT}${entry.capabilityKey.padEnd(18, " ")} stage=${entry.stage}${entry.toolReviewerSessions ? ` toolReview=${entry.toolReviewerSessions}` : ""}${entry.tmaSessions ? ` tma=${entry.tmaSessions}` : ""}${entry.pendingReplays ? ` replay=${entry.pendingReplays}` : ""}${entry.activationAttempts ? ` activation=${entry.activationAttempts}` : ""}`,
+        tone: entry.stage === "tool_review_blocked" || entry.stage === "waiting_human"
+          ? "warning" as const
+          : undefined,
+      })),
+    );
   }
   return lines;
 }

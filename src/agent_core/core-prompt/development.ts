@@ -4,6 +4,10 @@ import type {
   CoreDevelopmentPromptInput,
   CoreDevelopmentPromptPack,
 } from "./types.js";
+import {
+  renderCoreCmpContextPackageV1,
+  renderCoreCmpWorksitePackageV1,
+} from "./contextual.js";
 
 const CORE_DEVELOPMENT_PROMPT_V1_BASE = `You are currently operating inside the Praxis runtime discipline layer.
 
@@ -106,6 +110,32 @@ export function createCoreDevelopmentPromptPack(
     `- automation depth: ${input.automationDepth}`,
     input.uiMode ? `- ui mode: ${input.uiMode}` : undefined,
   ].filter((line): line is string => Boolean(line));
+  const cmpGovernanceSections = [
+    typeof input.cmpWorksitePackage === "string"
+      ? input.cmpWorksitePackage.trim()
+      : input.cmpWorksitePackage
+        ? [
+            "Immutable governed CMP worksite package:",
+            renderCoreCmpWorksitePackageV1(input.cmpWorksitePackage),
+          ].join("\n")
+        : undefined,
+    typeof input.cmpContextPackage === "string"
+      ? input.cmpContextPackage.trim()
+      : input.cmpContextPackage
+        ? [
+            "Immutable governed CMP context package:",
+            renderCoreCmpContextPackageV1(input.cmpContextPackage),
+          ].join("\n")
+        : undefined,
+  ].filter((line): line is string => Boolean(line.trim()));
+  const cmpGovernanceText = cmpGovernanceSections.length > 0
+    ? [
+        "Current governed CMP runtime handoff:",
+        "These CMP packages are part of the developer-side governance layer, not user-authored context.",
+        "Treat them as immutable runtime control-surface input for this turn.",
+        ...cmpGovernanceSections,
+      ].join("\n\n")
+    : "";
 
   return {
     promptPackId: "core-development/v1",
@@ -113,6 +143,7 @@ export function createCoreDevelopmentPromptPack(
       CORE_DEVELOPMENT_PROMPT_V1_BASE,
       "",
       runtimeFacts.join("\n"),
+      cmpGovernanceText ? `\n${cmpGovernanceText}` : "",
     ].join("\n"),
   };
 }

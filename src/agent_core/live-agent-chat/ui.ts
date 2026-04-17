@@ -375,6 +375,27 @@ interface DirectCapabilitiesSnapshotView {
       capabilityKey: string;
     }>;
   }>;
+  toolReviewerSummary?: {
+    total?: number;
+    open?: number;
+    waitingHuman?: number;
+    blocked?: number;
+    completed?: number;
+  };
+  tmaSummary?: {
+    total?: number;
+    inProgress?: number;
+    resumable?: number;
+    completed?: number;
+  };
+  thickCapabilities?: Array<{
+    capabilityKey: string;
+    stage: string;
+    toolReviewerSessions?: number;
+    tmaSessions?: number;
+    pendingReplays?: number;
+    activationAttempts?: number;
+  }>;
   lastAttempt?: DirectTapCapabilityDiagnosticView;
   writeDiagnostics?: DirectTapCapabilityDiagnosticView[];
 }
@@ -400,6 +421,16 @@ export function printPermissionsView(
   const lastAttemptLine = capabilitySnapshot?.lastAttempt
     ? `lastAttempt: ${capabilitySnapshot.lastAttempt.capabilityKey} / ${capabilitySnapshot.lastAttempt.routeDecision ?? "unknown"} / final=${capabilitySnapshot.lastAttempt.finalStatus ?? "unknown"}${capabilitySnapshot.lastAttempt.derivedRiskLevel ? ` / risk=${capabilitySnapshot.lastAttempt.derivedRiskLevel}` : ""}${capabilitySnapshot.lastAttempt.errorCode ? ` / error=${capabilitySnapshot.lastAttempt.errorCode}` : ""}`
     : undefined;
+  const toolReviewerLine = capabilitySnapshot?.toolReviewerSummary
+    ? `toolReviewer: total=${capabilitySnapshot.toolReviewerSummary.total ?? 0} open=${capabilitySnapshot.toolReviewerSummary.open ?? 0} blocked=${capabilitySnapshot.toolReviewerSummary.blocked ?? 0} waitingHuman=${capabilitySnapshot.toolReviewerSummary.waitingHuman ?? 0}`
+    : undefined;
+  const tmaLine = capabilitySnapshot?.tmaSummary
+    ? `tma: total=${capabilitySnapshot.tmaSummary.total ?? 0} inProgress=${capabilitySnapshot.tmaSummary.inProgress ?? 0} resumable=${capabilitySnapshot.tmaSummary.resumable ?? 0} completed=${capabilitySnapshot.tmaSummary.completed ?? 0}`
+    : undefined;
+  const thickLines = (capabilitySnapshot?.thickCapabilities ?? [])
+    .slice(0, 4)
+    .map((entry) =>
+      `${entry.capabilityKey}: stage=${entry.stage}${entry.toolReviewerSessions ? ` / toolReview=${entry.toolReviewerSessions}` : ""}${entry.tmaSessions ? ` / tma=${entry.tmaSessions}` : ""}${entry.pendingReplays ? ` / replay=${entry.pendingReplays}` : ""}${entry.activationAttempts ? ` / activation=${entry.activationAttempts}` : ""}`);
   console.log("");
   printDirectBox("Permissions", [
     `effectiveMode: ${governance.taskPolicy.effectiveMode}`,
@@ -407,6 +438,9 @@ export function printPermissionsView(
     `capabilityOverrides: ${LIVE_CHAT_PERMISSIONS_CONFIG.capabilityOverrides.length}`,
     `pendingHumanGateCount: ${userSurface.pendingHumanGateCount}`,
     `blockingCapabilityKeys: ${snapshot.blockingCapabilityKeys.join(", ") || "(none)"}`,
+    ...(toolReviewerLine ? [toolReviewerLine] : []),
+    ...(tmaLine ? [tmaLine] : []),
+    ...(thickLines.length > 0 ? ["thick lanes:", ...thickLines] : []),
     ...(previewLines.length > 0 ? ["common write lanes:", ...previewLines] : []),
     ...(lastAttemptLine ? [lastAttemptLine] : []),
   ]);
@@ -541,6 +575,23 @@ export function printTapArtifacts(runtime: LiveCliRuntime, sessionId: string, ru
     `pendingHumanGateCount=${userSurface.pendingHumanGateCount} activeCapabilityKeys=${userSurface.activeCapabilityKeys.join(", ") || "(none)"}`,
   );
   console.log(`blockingCapabilityKeys=${snapshot.blockingCapabilityKeys.join(", ") || "(none)"}`);
+  console.log(
+    `toolReviewerSessions total=${snapshot.counts.toolReviewerSessions.total} open=${snapshot.counts.toolReviewerSessions.open} blocked=${snapshot.counts.toolReviewerSessions.blocked} waitingHuman=${snapshot.counts.toolReviewerSessions.waitingHuman}`,
+  );
+  console.log(
+    `tmaSessions total=${snapshot.counts.tmaSessions.total} inProgress=${snapshot.counts.tmaSessions.inProgress} resumable=${snapshot.counts.tmaSessions.resumable} completed=${snapshot.counts.tmaSessions.completed}`,
+  );
+  const thickCapabilities = snapshot.capabilities
+    .filter((entry) => entry.stage !== "idle" && entry.stage !== "settled")
+    .slice(0, 8);
+  if (thickCapabilities.length > 0) {
+    console.log("thickCapabilityStages:");
+    for (const entry of thickCapabilities) {
+      console.log(
+        `  ${entry.capabilityKey}: stage=${entry.stage} toolReview=${entry.toolReviewerSessions.total} tma=${entry.tmaSessions.total} replay=${entry.pendingReplays.total} activation=${entry.activationAttempts.total}`,
+      );
+    }
+  }
   console.log(`threeAgentUsage: ${usage.summary}`);
   console.log(`registeredCapabilities(${capabilityKeys.length}): ${capabilityKeys.join(", ") || "(none)"}`);
   console.log(`bindings(${bindingKeys.length}): ${bindingKeys.join(", ") || "(none)"}`);
@@ -599,6 +650,21 @@ export function printDirectCapabilities(
     if (snapshot.lastAttempt.routeReason) {
       lines.push(`lastAttemptReason: ${snapshot.lastAttempt.routeReason}`);
     }
+  }
+  if (snapshot?.toolReviewerSummary) {
+    lines.push(
+      `toolReviewer: total=${snapshot.toolReviewerSummary.total ?? 0} open=${snapshot.toolReviewerSummary.open ?? 0} blocked=${snapshot.toolReviewerSummary.blocked ?? 0} waitingHuman=${snapshot.toolReviewerSummary.waitingHuman ?? 0}`,
+    );
+  }
+  if (snapshot?.tmaSummary) {
+    lines.push(
+      `tma: total=${snapshot.tmaSummary.total ?? 0} inProgress=${snapshot.tmaSummary.inProgress ?? 0} resumable=${snapshot.tmaSummary.resumable ?? 0} completed=${snapshot.tmaSummary.completed ?? 0}`,
+    );
+  }
+  for (const lane of (snapshot?.thickCapabilities ?? []).slice(0, 4)) {
+    lines.push(
+      `thick ${lane.capabilityKey}: stage=${lane.stage}${lane.toolReviewerSessions ? ` / toolReview=${lane.toolReviewerSessions}` : ""}${lane.tmaSessions ? ` / tma=${lane.tmaSessions}` : ""}${lane.pendingReplays ? ` / replay=${lane.pendingReplays}` : ""}${lane.activationAttempts ? ` / activation=${lane.activationAttempts}` : ""}`,
+    );
   }
   for (const preview of (snapshot?.writeDiagnostics ?? [])
     .filter((entry) => entry.requestedMode === LIVE_CHAT_TAP_OVERRIDE.requestedMode)

@@ -150,6 +150,8 @@ export interface ParsedTapRequest {
   capabilityKey: string;
   input: Record<string, unknown>;
   rawCommand?: string;
+  requestedTier?: "B0" | "B1" | "B2" | "B3";
+  reason?: string;
 }
 
 export interface SpreadsheetReadFactSummary {
@@ -3856,6 +3858,12 @@ export function parseTapRequest(text: string): ParsedTapRequest | undefined {
     return undefined;
   }
   const capabilityKey = capabilityMatch[1].trim();
+  const requestedTierMatch = block.match(/requestedTier:\s*(B[0-3])/u);
+  const requestedTier = requestedTierMatch?.[1] as ParsedTapRequest["requestedTier"] | undefined;
+  const reasonMatch = block.match(/reason:\s*([^\n\r]+)/u);
+  const explicitReason = reasonMatch?.[1]?.trim();
+  const timeoutMsMatch = block.match(/timeoutMs:\s*(\d+)/u);
+  const timeoutMs = timeoutMsMatch?.[1] ? Number.parseInt(timeoutMsMatch[1], 10) : undefined;
 
   if (capabilityKey === "shell.restricted") {
     const commandMatch = block.match(/command:\s*([^\n\r]+)/u);
@@ -3868,22 +3876,93 @@ export function parseTapRequest(text: string): ParsedTapRequest | undefined {
     return {
       capabilityKey,
       rawCommand,
+      requestedTier,
+      reason: explicitReason,
       input: needsShell
         ? {
           command: "zsh",
           args: ["-lc", rawCommand],
           cwd: cwdMatch?.[1]?.trim() || ".",
-          timeoutMs: 20_000,
+          timeoutMs: timeoutMs ?? 20_000,
         }
         : {
           command: rawCommand,
           cwd: cwdMatch?.[1]?.trim() || ".",
-          timeoutMs: 20_000,
+          timeoutMs: timeoutMs ?? 20_000,
         },
     };
   }
 
-  return undefined;
+  const parseScalar = (rawValue: string): unknown => {
+    const trimmed = rawValue.trim();
+    if (!trimmed) {
+      return "";
+    }
+    if (
+      trimmed === "true"
+      || trimmed === "false"
+      || trimmed === "null"
+      || /^-?\d+(?:\.\d+)?$/u.test(trimmed)
+      || trimmed.startsWith("{")
+      || trimmed.startsWith("[")
+      || trimmed.startsWith("\"")
+    ) {
+      try {
+        return JSON.parse(trimmed);
+      } catch {
+        // fall through
+      }
+    }
+    return trimmed;
+  };
+
+  const parseKeyValueLines = (source: string): Record<string, unknown> => {
+    const record: Record<string, unknown> = {};
+    for (const line of source.split(/\r?\n/u)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("[") || !trimmed.includes(":")) {
+        continue;
+      }
+      const separatorIndex = trimmed.indexOf(":");
+      const key = trimmed.slice(0, separatorIndex).trim();
+      const value = trimmed.slice(separatorIndex + 1).trim();
+      if (!key || key === "capability" || key === "requestedTier" || key === "reason" || key === "input") {
+        continue;
+      }
+      record[key] = parseScalar(value);
+    }
+    return record;
+  };
+
+  const inputBlockMatch = block.match(/(?:^|\n)input:\s*([\s\S]+)$/u);
+  let parsedInput: Record<string, unknown> | undefined;
+  if (inputBlockMatch?.[1]) {
+    const inputBlock = inputBlockMatch[1].trim();
+    if (inputBlock) {
+      try {
+        const candidate = JSON.parse(extractFirstJsonObject(inputBlock)) as unknown;
+        if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
+          parsedInput = candidate as Record<string, unknown>;
+        }
+      } catch {
+        const fallbackRecord = parseKeyValueLines(inputBlock);
+        parsedInput = Object.keys(fallbackRecord).length > 0 ? fallbackRecord : undefined;
+      }
+    }
+  }
+
+  const fallbackInput = parseKeyValueLines(block);
+  const input = parsedInput ?? fallbackInput;
+  if (timeoutMs !== undefined && input.timeoutMs === undefined) {
+    input.timeoutMs = timeoutMs;
+  }
+
+  return {
+    capabilityKey,
+    requestedTier,
+    reason: explicitReason,
+    input,
+  };
 }
 
 export function extractResponseTextMaybe(text: string): string {

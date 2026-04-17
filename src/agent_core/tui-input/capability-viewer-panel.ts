@@ -20,6 +20,27 @@ export interface CapabilityViewerSnapshotRecord {
   familyCount?: number;
   blockedCount?: number;
   pendingHumanGateCount?: number;
+  toolReviewerSummary?: {
+    total?: number;
+    open?: number;
+    waitingHuman?: number;
+    blocked?: number;
+    completed?: number;
+  };
+  tmaSummary?: {
+    total?: number;
+    inProgress?: number;
+    resumable?: number;
+    completed?: number;
+  };
+  thickCapabilities?: Array<{
+    capabilityKey: string;
+    stage: string;
+    toolReviewerSessions?: number;
+    tmaSessions?: number;
+    pendingReplays?: number;
+    activationAttempts?: number;
+  }>;
   lastAttempt?: {
     capabilityKey: string;
     requestedMode?: string;
@@ -173,11 +194,11 @@ export function buildCapabilityViewerBodyLines(params: {
     .filter((entry) => !visibleMode || entry.requestedMode === visibleMode)
     .slice(0, 6);
   if (writeDiagnostics.length > 0) {
-    lines.push(
-      {
-        text: `    Write route preview${visibleMode ? ` · ${visibleMode}` : ""}`,
-        tone: "info",
-      },
+  lines.push(
+    {
+      text: `    Write route preview${visibleMode ? ` · ${visibleMode}` : ""}`,
+      tone: "info",
+    },
       ...writeDiagnostics.map((entry) => ({
         text: `      ${entry.capabilityKey.padEnd(18, " ")} ${String(entry.routeDecision ?? "unknown").padEnd(10, " ")} risk=${entry.derivedRiskLevel ?? "unknown"}${entry.matchedToolPolicy ? ` policy=${entry.matchedToolPolicy}` : ""}`,
         tone: entry.routeDecision === "human_gate" || entry.routeDecision === "interrupt"
@@ -190,6 +211,33 @@ export function buildCapabilityViewerBodyLines(params: {
         text: "      route preview shows TAP governance path only; adapter payload guards can still reject invalid writes.",
         tone: "warning",
       },
+    );
+  }
+  if (snapshot?.toolReviewerSummary) {
+    lines.push({
+      text: `    toolReviewer · total=${snapshot.toolReviewerSummary.total ?? 0} · open=${snapshot.toolReviewerSummary.open ?? 0} · blocked=${snapshot.toolReviewerSummary.blocked ?? 0} · waitingHuman=${snapshot.toolReviewerSummary.waitingHuman ?? 0}`,
+      tone: (snapshot.toolReviewerSummary.blocked ?? 0) > 0 || (snapshot.toolReviewerSummary.waitingHuman ?? 0) > 0
+        ? "warning"
+        : "info",
+    });
+  }
+  if (snapshot?.tmaSummary) {
+    lines.push({
+      text: `    TMA · total=${snapshot.tmaSummary.total ?? 0} · inProgress=${snapshot.tmaSummary.inProgress ?? 0} · resumable=${snapshot.tmaSummary.resumable ?? 0} · completed=${snapshot.tmaSummary.completed ?? 0}`,
+      tone: (snapshot.tmaSummary.inProgress ?? 0) > 0 || (snapshot.tmaSummary.resumable ?? 0) > 0
+        ? "warning"
+        : "info",
+    });
+  }
+  if ((snapshot?.thickCapabilities?.length ?? 0) > 0) {
+    lines.push(
+      { text: "    Thick path snapshot", tone: "info" },
+      ...snapshot!.thickCapabilities!.slice(0, 4).map((entry) => ({
+        text: `      ${entry.capabilityKey.padEnd(18, " ")} stage=${entry.stage}${entry.toolReviewerSessions ? ` / toolReview=${entry.toolReviewerSessions}` : ""}${entry.tmaSessions ? ` / tma=${entry.tmaSessions}` : ""}${entry.pendingReplays ? ` / replay=${entry.pendingReplays}` : ""}${entry.activationAttempts ? ` / activation=${entry.activationAttempts}` : ""}`,
+        tone: entry.stage === "tool_review_blocked" || entry.stage === "waiting_human"
+          ? "warning" as const
+          : undefined,
+      })),
     );
   }
 

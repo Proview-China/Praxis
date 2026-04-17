@@ -1246,6 +1246,27 @@ interface CapabilityViewerSnapshot {
   blockedCount?: number;
   pendingHumanGateCount?: number;
   pendingHumanGates: HumanGatePanelEntry[];
+  toolReviewerSummary?: {
+    total?: number;
+    open?: number;
+    waitingHuman?: number;
+    blocked?: number;
+    completed?: number;
+  };
+  tmaSummary?: {
+    total?: number;
+    inProgress?: number;
+    resumable?: number;
+    completed?: number;
+  };
+  thickCapabilities?: Array<{
+    capabilityKey: string;
+    stage: string;
+    toolReviewerSessions?: number;
+    tmaSessions?: number;
+    pendingReplays?: number;
+    activationAttempts?: number;
+  }>;
   lastAttempt?: TapCapabilityDiagnosticRecord;
   writeDiagnostics: TapCapabilityDiagnosticRecord[];
   groups: CapabilityViewerGroup[];
@@ -1587,6 +1608,7 @@ interface TerminalOverlaySegment {
 
 interface TerminalOverlayLine {
   segments: TerminalOverlaySegment[];
+  leftOffset?: number;
 }
 
 interface TerminalOverlaySnapshot {
@@ -3504,6 +3526,9 @@ function buildSlashPanelView(
             ?? 0,
           previewRecords: context.capabilityViewerSnapshot?.writeDiagnostics,
           lastAttempt: context.capabilityViewerSnapshot?.lastAttempt,
+          toolReviewerSummary: context.capabilityViewerSnapshot?.toolReviewerSummary,
+          tmaSummary: context.capabilityViewerSnapshot?.tmaSummary,
+          thickCapabilities: context.capabilityViewerSnapshot?.thickCapabilities,
         }),
         fields: permissionFields,
         hints: [
@@ -4077,6 +4102,27 @@ function buildRushOverlayLineSegments(line: string, sourceRowIndex: number): Ter
   return segments.length > 0 ? segments : [{ text: "" }];
 }
 
+function buildTransparentRushOverlayLine(
+  line: string,
+  sourceRowIndex: number,
+): TerminalOverlayLine {
+  const graphemes = splitGraphemes(line);
+  let firstVisibleIndex = graphemes.findIndex((char) => char.trim().length > 0);
+  if (firstVisibleIndex < 0) {
+    firstVisibleIndex = 0;
+  }
+  let lastVisibleIndex = graphemes.length - 1;
+  while (lastVisibleIndex >= firstVisibleIndex && graphemes[lastVisibleIndex]?.trim().length === 0) {
+    lastVisibleIndex -= 1;
+  }
+  const visibleChars = graphemes.slice(firstVisibleIndex, lastVisibleIndex + 1);
+  const visibleText = visibleChars.join("");
+  return {
+    leftOffset: graphemes.slice(0, firstVisibleIndex).reduce((sum, char) => sum + stringWidth(char), 0),
+    segments: buildRushOverlayLineSegments(visibleText, sourceRowIndex),
+  };
+}
+
 function buildRushOverlaySnapshot(
   frame: number,
   terminalRows: number,
@@ -4107,9 +4153,8 @@ function buildRushOverlaySnapshot(
   return {
     top: visibleRows[0]?.screenRow ?? 1,
     left: Math.max(1, Math.floor((terminalColumns - frameWidth) / 2)),
-    lines: visibleRows.map(({ line, sourceRowIndex }) => ({
-      segments: buildRushOverlayLineSegments(line, sourceRowIndex),
-    })),
+    lines: visibleRows.map(({ line, sourceRowIndex }) =>
+      buildTransparentRushOverlayLine(line, sourceRowIndex)),
   };
 }
 
@@ -4122,7 +4167,7 @@ function paintTerminalOverlayIfNeeded(stdout: NodeJS.WriteStream): void {
     return;
   }
   for (const [index, line] of terminalOverlaySnapshot.lines.entries()) {
-    stdout.write(`\u001B[${terminalOverlaySnapshot.top + index};${terminalOverlaySnapshot.left}H${renderTerminalOverlayLine(line)}`);
+    stdout.write(`\u001B[${terminalOverlaySnapshot.top + index};${terminalOverlaySnapshot.left + (line.leftOffset ?? 0)}H${renderTerminalOverlayLine(line)}`);
   }
 }
 
@@ -6161,6 +6206,60 @@ function normalizeCapabilityViewerSnapshot(input: unknown): CapabilityViewerSnap
       ? record.pendingHumanGateCount
       : pendingHumanGates.length,
     pendingHumanGates,
+    toolReviewerSummary: record.toolReviewerSummary && typeof record.toolReviewerSummary === "object"
+      ? {
+          total: typeof (record.toolReviewerSummary as Record<string, unknown>).total === "number"
+            ? (record.toolReviewerSummary as Record<string, unknown>).total as number
+            : undefined,
+          open: typeof (record.toolReviewerSummary as Record<string, unknown>).open === "number"
+            ? (record.toolReviewerSummary as Record<string, unknown>).open as number
+            : undefined,
+          waitingHuman: typeof (record.toolReviewerSummary as Record<string, unknown>).waitingHuman === "number"
+            ? (record.toolReviewerSummary as Record<string, unknown>).waitingHuman as number
+            : undefined,
+          blocked: typeof (record.toolReviewerSummary as Record<string, unknown>).blocked === "number"
+            ? (record.toolReviewerSummary as Record<string, unknown>).blocked as number
+            : undefined,
+          completed: typeof (record.toolReviewerSummary as Record<string, unknown>).completed === "number"
+            ? (record.toolReviewerSummary as Record<string, unknown>).completed as number
+            : undefined,
+        }
+      : undefined,
+    tmaSummary: record.tmaSummary && typeof record.tmaSummary === "object"
+      ? {
+          total: typeof (record.tmaSummary as Record<string, unknown>).total === "number"
+            ? (record.tmaSummary as Record<string, unknown>).total as number
+            : undefined,
+          inProgress: typeof (record.tmaSummary as Record<string, unknown>).inProgress === "number"
+            ? (record.tmaSummary as Record<string, unknown>).inProgress as number
+            : undefined,
+          resumable: typeof (record.tmaSummary as Record<string, unknown>).resumable === "number"
+            ? (record.tmaSummary as Record<string, unknown>).resumable as number
+            : undefined,
+          completed: typeof (record.tmaSummary as Record<string, unknown>).completed === "number"
+            ? (record.tmaSummary as Record<string, unknown>).completed as number
+            : undefined,
+        }
+      : undefined,
+    thickCapabilities: Array.isArray(record.thickCapabilities)
+      ? record.thickCapabilities.flatMap((entry) => {
+          if (!entry || typeof entry !== "object") {
+            return [];
+          }
+          const item = entry as Record<string, unknown>;
+          if (typeof item.capabilityKey !== "string" || typeof item.stage !== "string") {
+            return [];
+          }
+          return [{
+            capabilityKey: item.capabilityKey,
+            stage: item.stage,
+            toolReviewerSessions: typeof item.toolReviewerSessions === "number" ? item.toolReviewerSessions : undefined,
+            tmaSessions: typeof item.tmaSessions === "number" ? item.tmaSessions : undefined,
+            pendingReplays: typeof item.pendingReplays === "number" ? item.pendingReplays : undefined,
+            activationAttempts: typeof item.activationAttempts === "number" ? item.activationAttempts : undefined,
+          }];
+        })
+      : undefined,
     lastAttempt: normalizeTapCapabilityDiagnostic(record.lastAttempt) ?? undefined,
     writeDiagnostics: Array.isArray(record.writeDiagnostics)
       ? record.writeDiagnostics.flatMap((entry) => {

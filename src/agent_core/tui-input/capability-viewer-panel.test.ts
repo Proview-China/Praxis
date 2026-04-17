@@ -134,6 +134,27 @@ test("buildCapabilityViewerBodyLines includes last attempt and write route previ
           matchedToolPolicySelector: "code.edit",
         },
       ],
+      toolReviewerSummary: {
+        total: 2,
+        open: 1,
+        blocked: 1,
+        waitingHuman: 0,
+      },
+      tmaSummary: {
+        total: 1,
+        inProgress: 1,
+        resumable: 0,
+        completed: 0,
+      },
+      thickCapabilities: [
+        {
+          capabilityKey: "computer.use",
+          stage: "tma_pending",
+          toolReviewerSessions: 1,
+          tmaSessions: 1,
+          pendingReplays: 1,
+        },
+      ],
     },
     pageIndex: 0,
     lineWidth: 100,
@@ -146,4 +167,7 @@ test("buildCapabilityViewerBodyLines includes last attempt and write route previ
   assert.match(joined, /Write route preview · standard/u);
   assert.match(joined, /repo\.write/u);
   assert.match(joined, /policy=human_gate/u);
+  assert.match(joined, /toolReviewer · total=2/u);
+  assert.match(joined, /TMA · total=1/u);
+  assert.match(joined, /computer\.use/u);
 });

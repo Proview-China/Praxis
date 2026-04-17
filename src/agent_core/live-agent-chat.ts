@@ -266,6 +266,27 @@ interface CapabilityPanelSnapshotPayload {
   blockedCount: number;
   pendingHumanGateCount?: number;
   pendingHumanGates?: HumanGatePanelEntry[];
+  toolReviewerSummary?: {
+    total: number;
+    open: number;
+    waitingHuman: number;
+    blocked: number;
+    completed: number;
+  };
+  tmaSummary?: {
+    total: number;
+    inProgress: number;
+    resumable: number;
+    completed: number;
+  };
+  thickCapabilities?: Array<{
+    capabilityKey: string;
+    stage: string;
+    toolReviewerSessions?: number;
+    tmaSessions?: number;
+    pendingReplays?: number;
+    activationAttempts?: number;
+  }>;
   lastAttempt?: TapCapabilityDiagnosticSnapshotPayload;
   writeDiagnostics?: TapCapabilityDiagnosticSnapshotPayload[];
   groups: CapabilityPanelSnapshotGroup[];
@@ -895,6 +916,8 @@ function createCoreUserInputAssembly(input: {
     tapMode: LIVE_CHAT_TAP_OVERRIDE.requestedMode ?? "bapr",
     automationDepth: LIVE_CHAT_TAP_OVERRIDE.automationDepth ?? "default",
     uiMode: "direct" as const,
+    cmpWorksitePackage: contextualInput.cmpWorksitePackage,
+    cmpContextPackage: contextualInput.cmpContextPackage,
   };
   const modeInstructions = [
       "You are answering inside the Praxis live CLI harness.",
@@ -1026,11 +1049,6 @@ function createCoreActionPlannerAssembly(
       availableCapabilityKeys: availableCapabilities,
     }),
   );
-  const developmentInput = {
-    tapMode: LIVE_CHAT_TAP_OVERRIDE.requestedMode ?? "bapr",
-    automationDepth: LIVE_CHAT_TAP_OVERRIDE.automationDepth ?? "default",
-    uiMode: "direct" as const,
-  };
   const contextualInput = createLiveChatCoreContextualInput({
     userMessage,
     transcript: state.transcript,
@@ -1045,6 +1063,13 @@ function createCoreActionPlannerAssembly(
     skillEntries: state.skillOverlayEntries,
     memoryEntries: state.memoryOverlayEntries,
   });
+  const developmentInput = {
+    tapMode: LIVE_CHAT_TAP_OVERRIDE.requestedMode ?? "bapr",
+    automationDepth: LIVE_CHAT_TAP_OVERRIDE.automationDepth ?? "default",
+    uiMode: "direct" as const,
+    cmpWorksitePackage: contextualInput.cmpWorksitePackage,
+    cmpContextPackage: contextualInput.cmpContextPackage,
+  };
   const modeInstructions = [
       "Return strict JSON only.",
       "Choose the next action for the frontstage core agent.",
@@ -1969,6 +1994,27 @@ function buildCapabilitiesPanelSnapshot(state: LiveCliState): CapabilityPanelSna
         plainLanguageRisk: gate.plainLanguageRisk,
       };
     });
+  const thickCapabilities = governance.capabilities
+    .filter((entry) =>
+      entry.stage !== "idle"
+      && (
+        entry.stage !== "settled"
+        || entry.toolReviewerSessions.total > 0
+        || entry.tmaSessions.total > 0
+        || entry.pendingReplays.total > 0
+        || entry.activationAttempts.total > 0
+      ))
+    .slice()
+    .sort((left, right) => left.capabilityKey.localeCompare(right.capabilityKey))
+    .slice(0, 8)
+    .map((entry) => ({
+      capabilityKey: entry.capabilityKey,
+      stage: entry.stage,
+      toolReviewerSessions: entry.toolReviewerSessions.total,
+      tmaSessions: entry.tmaSessions.total,
+      pendingReplays: entry.pendingReplays.total,
+      activationAttempts: entry.activationAttempts.total,
+    }));
   return {
     summaryLines: [
       `${manifests.length} registered`,
@@ -1982,6 +2028,9 @@ function buildCapabilitiesPanelSnapshot(state: LiveCliState): CapabilityPanelSna
     blockedCount: governance.blockingCapabilityKeys.length,
     pendingHumanGateCount: pendingHumanGates.length,
     pendingHumanGates,
+    toolReviewerSummary: governance.counts.toolReviewerSessions,
+    tmaSummary: governance.counts.tmaSessions,
+    thickCapabilities,
     lastAttempt,
     writeDiagnostics,
     groups: orderedGroups,
@@ -4057,9 +4106,9 @@ async function runCoreTurn(
       responseText: text,
       capabilityRequest: {
         capabilityKey: tapRequest.capabilityKey,
-        reason: `Core requested ${tapRequest.capabilityKey} from live CLI bridge.`,
+        reason: tapRequest.reason ?? `Core requested ${tapRequest.capabilityKey} from live CLI bridge.`,
         input: tapRequest.input,
-        requestedTier: "B0",
+        requestedTier: tapRequest.requestedTier ?? "B0",
         timeoutMs: readPositiveInteger(tapRequest.input.timeoutMs),
       },
     };

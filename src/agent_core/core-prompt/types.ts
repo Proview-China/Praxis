@@ -206,6 +206,8 @@ export interface CoreDevelopmentPromptInput {
   tapMode: string;
   automationDepth: string;
   uiMode?: string;
+  cmpWorksitePackage?: string | CoreCmpWorksitePackageV1;
+  cmpContextPackage?: string | CoreCmpContextPackageV1;
 }
 
 export interface CoreContextualUserV1 {

@@ -1,6 +1,4 @@
 import type {
-  CoreCmpContextPackageV1,
-  CoreCmpWorksitePackageV1,
   CoreMpRoutedPackageV1,
   CoreContextualTextBlock,
   CoreContextualUserV1,
@@ -230,22 +228,6 @@ export function createCoreContextualBlocks(input: CoreContextualUserV1): CoreCon
         ? input.workspaceInitContext
         : input.workspaceInitContext
           ? renderCoreWorkspaceInitContextV1(input.workspaceInitContext)
-          : undefined,
-    ),
-    createBlock(
-      "cmp_worksite_package",
-      typeof input.cmpWorksitePackage === "string"
-        ? input.cmpWorksitePackage
-        : input.cmpWorksitePackage
-          ? renderCoreCmpWorksitePackageV1(input.cmpWorksitePackage)
-          : undefined,
-    ),
-    createBlock(
-      "cmp_context_package",
-      typeof input.cmpContextPackage === "string"
-        ? input.cmpContextPackage
-        : input.cmpContextPackage
-          ? renderCoreCmpContextPackageV1(input.cmpContextPackage)
           : undefined,
     ),
     createBlock(

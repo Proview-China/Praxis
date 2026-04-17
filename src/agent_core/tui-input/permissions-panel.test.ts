@@ -63,6 +63,27 @@ test("buildPermissionModeMatrixLines can show common write-lane previews and the
       derivedRiskLevel: "risky",
       errorCode: "code_edit_old_string_not_found",
     },
+    toolReviewerSummary: {
+      total: 2,
+      open: 1,
+      blocked: 1,
+      waitingHuman: 0,
+    },
+    tmaSummary: {
+      total: 1,
+      inProgress: 1,
+      resumable: 0,
+      completed: 0,
+    },
+    thickCapabilities: [
+      {
+        capabilityKey: "computer.use",
+        stage: "tma_pending",
+        toolReviewerSessions: 1,
+        tmaSessions: 1,
+        pendingReplays: 1,
+      },
+    ],
   });
 
   const joined = lines.map((line) => line.text).join("\n");
@@ -70,6 +91,9 @@ test("buildPermissionModeMatrixLines can show common write-lane previews and the
   assert.match(joined, /repo\.write/u);
   assert.match(joined, /policy=human_gate\(code\.edit\)/u);
   assert.match(joined, /Last write attempt: code\.edit · human_gate · final=failed · risk=risky · error=code_edit_old_string_not_found/u);
+  assert.match(joined, /toolReviewer: total=2/u);
+  assert.match(joined, /TMA: total=1/u);
+  assert.match(joined, /computer\.use/u);
 });
 
 test("findPermissionPanelFocusIndex selects the current requested mode row", () => {
