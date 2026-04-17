@@ -4,28 +4,24 @@
 
 Target the first preview only after the outward-facing docs, RuntimeKit examples/smoke paths, export checks, and native demo host all describe the same macOS-first public baseline.
 
-## Required Checks
+## Public Blocking CI Baseline
 
-Run the focused smoke suites to prove each public chain, then use `swift run PraxisRuntimeKitSmoke --suite all` as the final aggregate regression sweep before preview sign-off.
+The release branch should be green on the public macOS blocking workflow before preview sign-off.
+That workflow should cover:
 
-### RuntimeKit examples and export/embedding checks
+### RuntimeKit examples, export checks, and focused smoke suites
 
 ```bash
 swift test
 swift run PraxisRuntimeKitRunExample
-swift run PraxisRuntimeKitCapabilitiesExample
 swift run PraxisRuntimeKitCmpTapExample
+swift run PraxisRuntimeKitCapabilitiesExample
 swift run PraxisRuntimeKitGovernedExecutionExample
 swift run PraxisRuntimeKitSearchExample
 swift run PraxisRuntimeKitDurableRuntimeExample
 swift run PraxisFFIEmbeddingExample
 swift run PraxisAppleHostEmbeddingExample
 swift run PraxisExportBaselineExample --iterations 5 --format json
-```
-
-### Focused smoke gates
-
-```bash
 swift run PraxisRuntimeKitSmoke --suite search
 swift run PraxisRuntimeKitSmoke --suite cmp-tap
 swift run PraxisRuntimeKitSmoke --suite recovery
@@ -36,22 +32,21 @@ swift run PraxisRuntimeKitSmoke --suite code-sandbox
 swift run PraxisRuntimeKitSmoke --suite code-patch
 swift run PraxisRuntimeKitSmoke --suite shell
 swift run PraxisRuntimeKitSmoke --suite shell-approval
+swift build --product PraxisDemoHostApp
 ```
 
-### Aggregate smoke sweep
+This public CI baseline covers the current macOS-first preview baseline, including demo-host build proof, but not native app launch verification.
+
+## Release-Only Additional Verification
+
+Run these heavier local checks before preview sign-off:
 
 ```bash
 swift run PraxisRuntimeKitSmoke --suite all
-```
-
-### Native demo host verification
-
-```bash
-swift build --product PraxisDemoHostApp
 ./script/build_and_run.sh --verify
 ```
 
-These checks should leave an outside evaluator with evidence for the caller-facing RuntimeKit baseline, governed execution boundaries, durable runtime readback, export/embedding behavior, and native demo-host launch.
+Use `PraxisRuntimeKitSmoke --suite all` as the aggregate regression sweep and `./script/build_and_run.sh --verify` as native demo-host launch evidence.
 
 ## Required Docs
 

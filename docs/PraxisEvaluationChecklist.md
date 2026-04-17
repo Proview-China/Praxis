@@ -38,6 +38,9 @@ Use this checklist when you need to decide whether Praxis is ready for your host
 
 ## 4. Run The Commands That Verify The Current Story
 
+- [ ] Start with the public macOS blocking baseline commands below.
+  Treat `swift run PraxisRuntimeKitSmoke --suite all` and `./script/build_and_run.sh --verify` as heavier local verification, not as part of the default public-baseline read.
+
 - [ ] Verify recovery and durable readback:
 
 ```bash
@@ -65,17 +68,27 @@ swift run PraxisRuntimeKitCmpTapExample
 swift run PraxisRuntimeKitSmoke --suite cmp-tap
 ```
 
-- [ ] Verify export baseline and embedding readiness:
+- [ ] Verify search path, export baseline, and embedding readiness:
 
 ```bash
 swift test
+swift run PraxisRuntimeKitSearchExample
 swift run PraxisFFIEmbeddingExample
 swift run PraxisAppleHostEmbeddingExample
 swift run PraxisExportBaselineExample --iterations 5 --format json
+swift run PraxisRuntimeKitSmoke --suite search
+```
+
+- [ ] Run heavier local verification only when you need aggregate smoke or native demo-host launch proof:
+
+```bash
 swift run PraxisRuntimeKitSmoke --suite all
+./script/build_and_run.sh --verify
 ```
 
 Use the corresponding evidence notes in [docs/PraxisDurableRuntimeGuide.md](./PraxisDurableRuntimeGuide.md), [docs/PraxisHighRiskCapabilitySafety.md](./PraxisHighRiskCapabilitySafety.md), [docs/PraxisReviewerContextGuide.md](./PraxisReviewerContextGuide.md), [docs/PraxisReleasePolicy.md](./PraxisReleasePolicy.md), and [docs/PraxisPerformanceBaseline.md](./PraxisPerformanceBaseline.md) to interpret what each command actually proves.
+
+Public GitHub Actions CI covers the macOS blocking baseline only: tests, current public examples, focused smoke suites, and demo-host build proof. If your evaluation depends on aggregate smoke or proof that the native demo host actually launches, use the heavier local checks above instead of assuming CI already proved them.
 
 ## 5. Ask The Questions That Decide Host Fit
 
@@ -110,4 +123,5 @@ Use the corresponding evidence notes in [docs/PraxisDurableRuntimeGuide.md](./Pr
 - [ ] You have matched your host requirements against [docs/PraxisSupportMatrix.md](./PraxisSupportMatrix.md).
 - [ ] You have run the relevant smoke/example commands for recovery, governed execution, reviewer context, and export baseline.
 - [ ] You have identified any required unsupported behavior before promising integration scope.
+- [ ] You know which claims come from public blocking CI and which still require heavier local verification.
 - [ ] You can point to the exact evidence doc that supports each integration claim you plan to make.
