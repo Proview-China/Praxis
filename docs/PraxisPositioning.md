@@ -55,30 +55,24 @@ Praxis is not currently positioned as:
 
 That distinction matters. Praxis is intentionally narrowing the message to the surfaces that are actually documented, exported, and verifiable today.
 
-## Why The Current Lead Message Is Apple, Swift, Embedding, Governance, Recovery, And Auditability
+## Why Praxis Currently Emphasizes Apple, Swift, Embedding, Governance, Recovery, And Auditability
 
-These are the lead themes because they are where the repository currently has the clearest alignment between implementation, docs, and verification.
+Praxis emphasizes these areas because they are the parts of the system an external evaluator can inspect against the repository today.
 
-- **Apple:** the primary validated host profile is the macOS local baseline, so Apple-hosted runtime evaluation is where the strongest operational truth exists today.
-- **Swift:** the public integration story is package-first and Swift-first, with `PraxisRuntimeKit` as the default entry surface for callers.
-- **Embedding:** Praxis is most compelling when used as something a host embeds, exports, and negotiates against, rather than as a monolithic standalone shell.
-- **Governance:** the repository gives unusual weight to approval boundaries, reviewer context, and risky-capability framing, which is central to how Praxis wants to be trusted.
-- **Recovery:** durable state, replay, and readback are part of the shipped story, not an afterthought, and they matter for serious host workflows.
-- **Auditability:** support labels, safety notes, and release discipline are treated as product-facing truth, which helps external evaluators separate validated behavior from placeholders or degraded paths.
+The current primary baseline is local macOS operation, and the public integration surface is Swift-first through `PraxisRuntimeKit`. That makes Apple-hosted embedding a concrete evaluation path rather than a hypothetical future direction. If you want to judge whether Praxis fits your host, the repository gives you a direct Swift entry surface, embedding-oriented export paths, and examples that show how a host would negotiate and consume runtime behavior.
 
-In short, the current message follows the strongest evidence trail in the repository.
+The same applies to governance, recovery, and auditability. Praxis does not ask evaluators to assume that risky execution is simply "handled somewhere." The repository documents approval boundaries, reviewer-facing context, durable recovery and replay readback, and release/support qualifiers that describe what is validated and what is not. Those are practical evaluation criteria for teams that care about trust, resumption, and operational evidence.
 
-## Why Linux And Broader Cross-Platform Execution Are Not The Lead Message
+## Why Linux And Broader Cross-Platform Execution Are Not The Main Story Today
 
-Linux and broader cross-platform execution are not the lead message because the current repository truth does not justify presenting them as the main commercial story.
+Praxis does not present Linux or broader cross-platform execution as the main story because the current support level is narrower than the macOS local baseline.
 
-Today, Linux is documented as compile-safe placeholder or degraded host truth unless stated otherwise. That is an honest and useful status, but it is not the same as parity with the macOS local baseline. Making cross-platform execution the headline would blur the support matrix and weaken trust in the rest of the positioning.
+Today, Linux is documented as compile-safe placeholder or degraded host truth unless a document says otherwise. For an evaluator, that means Linux support is visible and honestly described, but it should not be read as parity with the primary macOS path. If your adoption decision depends on production-grade cross-platform execution today, the support matrix should be your source of truth.
 
-Praxis is therefore choosing a narrower but more defensible external message:
+The practical reading is straightforward:
 
-- lead with the validated Apple and Swift baseline
-- lead with embedding-ready exported surfaces
-- lead with governance, recovery, and auditability as differentiators
-- keep Linux and future broader execution support visible, but secondary, until the support matrix says more
+- evaluate Praxis first as a Swift and Apple-hosted runtime foundation
+- treat embedding, governance, recovery, and auditability as the most developed parts of the current story
+- read Linux and broader cross-platform execution as partial or future-facing unless the support docs explicitly say more
 
-For external evaluators, this is the important takeaway: Praxis is trying to earn trust by being specific about where it is already strong, instead of implying platform breadth that the repository does not yet prove.
+This tells evaluators where Praxis is ready for serious integration review today, and where stronger platform proof is still needed.
