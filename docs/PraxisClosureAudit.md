@@ -10,7 +10,7 @@ Can a new host or SDK integrator understand the exported surface, estimate compa
 
 ## Current Checklist
 
-- README points to the current recommended entry surface and the current execution handbook.
+- README points to the current recommended entry surface and the current remediation plan.
 - Exported schema version rules are documented in one place and match codec behavior.
 - Embedding examples cover the smallest bridge path and the host-like negotiation path.
 - Release policy, migration notes, support matrix, safety notes, and performance baseline all exist and cross-reference the same exported contract.

@@ -4,7 +4,7 @@
 >
 > 作用：把当前审计报告里的判断，细化成可以排期、可以验收、可以对外交付的整改目标。
 >
-> 关系：本文件不是新的总路线图；Swift 重构范围、target 职责、执行顺序和阶段边界仍以 [TAKEOVER_EXECUTION_WORKFLOW.md](./TAKEOVER_EXECUTION_WORKFLOW.md) 为准。本文件只负责把“为什么先做什么、做到什么算完成、对外该交付什么”说清楚。
+> 关系：当前仓库缺失 `TAKEOVER_EXECUTION_WORKFLOW.md`，因此在新的总执行手册补回前，本文件临时承担接下来整改与实现排期的计划入口。涉及 Swift 重构范围、target 职责、执行顺序和阶段边界时，需要同时对照 `README.md`、`Package.swift`、`docs/PraxisSupportMatrix.md` 与现有代码事实，不要把这里当成脱离实现现状的独立叙事文档。
 
 ## 1. 定位结论
 
@@ -62,7 +62,7 @@
 
 1. 修正所有根入口里的过时路径、绝对路径和旧架构引用。
 2. 回扫 open issues，把仍引用旧 `src/**`、`runtime.ts`、`docs/ability/**`、Node/TS 布局的条目改成当前 Swift 仓库语言。
-3. 明确 `TAKEOVER_EXECUTION_WORKFLOW.md` 是唯一总执行入口，并让 README 与其他说明文档一致引用它。
+3. 明确当前总执行入口，并让 README 与其他说明文档保持一致。
 4. 输出一份 baseline 事实记录，覆盖：
    - 当前 package/product 结构
    - 默认公开入口
@@ -430,7 +430,7 @@
 
 如果只做最小一轮整改，优先做下面十件事：
 
-1. 修正 `TAKEOVER_EXECUTION_WORKFLOW.md` 里的绝对路径引用。
+1. 修正总执行入口文档里的绝对路径引用。
 2. 回扫 open issues，替换所有旧 TS/Node 布局引用。
 3. 输出一份 baseline 报告，明确当前主线、入口、平台边界、placeholder 能力。
 4. 建立 milestones / labels，并把现有 open issues 重挂到新结构。

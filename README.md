@@ -3,7 +3,7 @@
 Praxis 是一个基于 Swift + SwiftPM 的本地 agent runtime framework。仓库当前主线不是 CLI、TUI 或 GUI，而是一组可嵌入、可测试、可导出的 runtime products，用来承载 run lifecycle、capability governance、project context、memory retrieval 和 host export boundary。
 
 对大多数 Swift 调用方，默认公开入口是 `PraxisRuntimeKit`。
-当前仓库推进节奏与阶段顺序，统一以 [TAKEOVER_EXECUTION_WORKFLOW.md](./TAKEOVER_EXECUTION_WORKFLOW.md) 为准。
+当前仓库推进节奏与下一步整改顺序，当前统一以 [AUDIT_REMEDIATION_EXECUTION_GOALS.md](./AUDIT_REMEDIATION_EXECUTION_GOALS.md) 为准。
 
 ## Quick Start
 
@@ -475,8 +475,8 @@ dependencies: [
   package products、targets、平台与依赖关系定义
 - `AGENTS.md`
   仓库协作约束
-- `TAKEOVER_EXECUTION_WORKFLOW.md`
-  接手执行流程文档
+- `AUDIT_REMEDIATION_EXECUTION_GOALS.md`
+  当前整改与实现排期入口文档
 
 如果你第一次读代码，建议顺序：
 
