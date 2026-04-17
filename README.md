@@ -502,22 +502,25 @@ dependencies: [
 ```
 
 如果你是在做 runtime 装配、宿主桥接或导出边界，再考虑 `PraxisHostContracts`、`PraxisHostRuntime` 或 `PraxisFFI`。
-当前对外导出边界的兼容说明、release policy 和 migration baseline 分别在：
+当前兼容性、发布与预发布资料见：
 
-- [docs/PraxisFFICompatibility.md](./docs/PraxisFFICompatibility.md)
-- [docs/PraxisReleasePolicy.md](./docs/PraxisReleasePolicy.md)
-- [docs/PraxisMigrationNotes.md](./docs/PraxisMigrationNotes.md)
-- [docs/PraxisSupportMatrix.md](./docs/PraxisSupportMatrix.md)
-- capability baseline 说明见 [docs/PraxisCapabilityGuide.md](./docs/PraxisCapabilityGuide.md)。
-- search chain 说明见 [docs/PraxisSearchChainGuide.md](./docs/PraxisSearchChainGuide.md)。
+- 接口兼容说明见 [docs/PraxisFFICompatibility.md](./docs/PraxisFFICompatibility.md)。
+- 发布规则见 [docs/PraxisReleasePolicy.md](./docs/PraxisReleasePolicy.md)。
+- 迁移说明见 [docs/PraxisMigrationNotes.md](./docs/PraxisMigrationNotes.md)。
+- 支持矩阵见 [docs/PraxisSupportMatrix.md](./docs/PraxisSupportMatrix.md)。
+- 预发布检查清单见 [docs/PraxisPreviewReleaseChecklist.md](./docs/PraxisPreviewReleaseChecklist.md)。
+- 预发布说明见 [docs/PraxisPreviewReleaseNote.md](./docs/PraxisPreviewReleaseNote.md)。
+- 变更记录见 [CHANGELOG.md](./CHANGELOG.md)。
+
+其他补充说明见：
+
+- 能力基线说明见 [docs/PraxisCapabilityGuide.md](./docs/PraxisCapabilityGuide.md)。
+- 搜索链路说明见 [docs/PraxisSearchChainGuide.md](./docs/PraxisSearchChainGuide.md)。
 - 术语表见 [docs/PraxisGlossary.md](./docs/PraxisGlossary.md)。
 - 平台状态说明见 [docs/PraxisPlatformStatus.md](./docs/PraxisPlatformStatus.md)。
 - 入口选择说明见 [docs/PraxisEntrySurfaces.md](./docs/PraxisEntrySurfaces.md)。
-- preview release working checklist 见 [docs/PraxisPreviewReleaseChecklist.md](./docs/PraxisPreviewReleaseChecklist.md)。
-- preview release note 见 [docs/PraxisPreviewReleaseNote.md](./docs/PraxisPreviewReleaseNote.md)。
 - 当前仓库事实基线见 [docs/PraxisRepositoryBaseline.md](./docs/PraxisRepositoryBaseline.md)。
-- [docs/PraxisHighRiskCapabilitySafety.md](./docs/PraxisHighRiskCapabilitySafety.md)
-- [CHANGELOG.md](./CHANGELOG.md)
+- 高风险能力安全说明见 [docs/PraxisHighRiskCapabilitySafety.md](./docs/PraxisHighRiskCapabilitySafety.md)。
 
 ## Repository Layout
 
