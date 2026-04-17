@@ -59,18 +59,44 @@ Treat the release as breaking if any of the following is true:
 - an existing enum raw value changes
 - a required field is added to an already released encoded payload shape
 
-## Verification Baseline
+## Public Blocking CI Baseline
 
-Before finalizing a release, run at least:
+The public GitHub Actions blocking baseline must stay aligned with `.github/workflows/swift-ci.yml` and README.
+Today that defined blocking baseline is macOS-only and consists of:
 
 ```bash
 swift test
+swift run PraxisRuntimeKitRunExample
+swift run PraxisRuntimeKitCmpTapExample
+swift run PraxisRuntimeKitCapabilitiesExample
+swift run PraxisRuntimeKitGovernedExecutionExample
+swift run PraxisRuntimeKitSearchExample
+swift run PraxisRuntimeKitDurableRuntimeExample
 swift run PraxisFFIEmbeddingExample
 swift run PraxisAppleHostEmbeddingExample
 swift run PraxisExportBaselineExample --iterations 5 --format json
-swift run PraxisRuntimeKitSmoke --suite all
+swift run PraxisRuntimeKitSmoke --suite search
+swift run PraxisRuntimeKitSmoke --suite cmp-tap
+swift run PraxisRuntimeKitSmoke --suite recovery
+swift run PraxisRuntimeKitSmoke --suite provisioning
+swift run PraxisRuntimeKitSmoke --suite capabilities
+swift run PraxisRuntimeKitSmoke --suite code
+swift run PraxisRuntimeKitSmoke --suite code-sandbox
+swift run PraxisRuntimeKitSmoke --suite code-patch
+swift run PraxisRuntimeKitSmoke --suite shell
+swift run PraxisRuntimeKitSmoke --suite shell-approval
+swift build --product PraxisDemoHostApp
 ```
 
-The public GitHub Actions baseline should stay aligned with the documented CI scope in README. Release verification may intentionally exceed CI coverage; when it does, document the extra local-only checks in the release note.
+This CI baseline is the current public blocking evidence set for the macOS baseline only. It does not imply Linux parity and does not claim native app launch verification.
 
-If one of these is intentionally skipped, the release note should state which check was skipped and why.
+## Release-Only Additional Verification
+
+Before finalizing a preview or release, also run:
+
+```bash
+swift run PraxisRuntimeKitSmoke --suite all
+./script/build_and_run.sh --verify
+```
+
+Release verification intentionally exceeds public CI coverage. If one of these heavier local checks is skipped, the release note should state which check was skipped and why.

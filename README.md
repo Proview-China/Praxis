@@ -455,7 +455,7 @@ swift package describe
 
 ## Test
 
-仓库主验证入口：
+基础验证入口：
 
 ```bash
 swift test
@@ -463,11 +463,13 @@ swift test
 
 当前验证分工按下面这条规则理解：
 
-- `swift test` 是当前 durable runtime / export path 的主验证入口；integration-style tests 也承担了当前仓库的 e2e 责任。
+- `swift test` 是当前 durable runtime / export path 的基础验证入口，优先覆盖单元测试与 integration-style tests 的核心契约，但不单独代表整个公开阻塞基线。
 - `PraxisRuntimeKitSmoke` 是当前 shipped 的可执行 smoke harness，用来做跨模块快速回归和 operator-friendly 验收。
 - 当前仓库还没有单独发布 `PraxisRuntimeKitE2E` 之类的独立 e2e executable product；如果后续补上，README 和执行手册会一起更新。
 
-当前公开 CI 以 `.github/workflows/swift-ci.yml` 为准，默认在 macOS runner 上执行 `swift test`、关键 examples，以及 `recovery` / `capabilities` / `search` smoke。`PraxisRuntimeKitSmoke --suite all` 继续保留为更重的本地或 release 前验证。
+当前公开阻塞 CI 以 `.github/workflows/swift-ci.yml` 为准，固定在 macOS runner 上执行 `swift test`、当前公开 RuntimeKit / reviewer context / governed execution / durable runtime / export examples、聚焦 smoke suites，以及 `swift build --product PraxisDemoHostApp` 这条 demo host build proof。它覆盖的是当前 macOS-first public blocking baseline，不宣称 Linux parity，也不把 GUI 启动验证伪装成 CI 已覆盖行为。
+
+更重的本地或 release 前验证继续保留给 `swift run PraxisRuntimeKitSmoke --suite all` 与 `./script/build_and_run.sh --verify`。前者是 aggregate regression sweep，后者才是 native demo host 实际启动证据。
 
 如果只想先验证公开 API 或边界守卫，可以按需执行：
 
