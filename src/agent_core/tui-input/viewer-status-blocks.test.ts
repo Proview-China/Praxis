@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   buildViewerStatusBlockLines,
+  buildViewerStatusGridLines,
   isViewerStatusTextAbnormal,
   isViewerStatusValueAbnormal,
   parseViewerAssignmentEntries,
@@ -59,4 +60,25 @@ test("buildViewerStatusBlockLines colors the label and abnormal values separatel
   assert.equal(lines[2]?.segments?.[2]?.tone, "danger");
   assert.match(lines[1]?.text ?? "", /object=ready/u);
   assert.match(lines[2]?.text ?? "", /loop=degraded/u);
+});
+
+test("buildViewerStatusGridLines packs viewer entries horizontally when width allows", () => {
+  const lines = buildViewerStatusGridLines({
+    label: "Route",
+    labelTone: "info",
+    entries: [
+      { key: "delivery_status", value: "available", abnormal: false },
+      { key: "source_class", value: "cmp_seeded_memory", abnormal: false },
+      { key: "candidate_intake", value: "2", abnormal: false },
+      { key: "rejected", value: "1", abnormal: true },
+    ],
+    lineWidth: 100,
+  });
+
+  assert.equal(lines.length, 3);
+  assert.equal(lines[0]?.segments?.[1]?.tone, "info");
+  assert.match(lines[1]?.text ?? "", /delivery_status=available/u);
+  assert.match(lines[1]?.text ?? "", /source_class=cmp_seeded_memory/u);
+  assert.match(lines[2]?.text ?? "", /candidate_intake=2/u);
+  assert.match(lines[2]?.text ?? "", /rejected=1/u);
 });

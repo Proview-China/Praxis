@@ -934,11 +934,65 @@ function createWorkmodePromptVariantV7Catalog(): Record<CmpFiveAgentRole, CmpRol
 }
 
 function createWorkmodePromptVariantV8Catalog(): Record<CmpFiveAgentRole, CmpRoleConfiguration> {
-  const catalog = clone(BASELINE_ROLE_CATALOG);
-  const workmodeV6 = createWorkmodePromptVariantV6Catalog();
+  const catalog = createWorkmodePromptVariantV6Catalog();
 
-  catalog.checker.promptPack = clone(workmodeV6.checker.promptPack);
-  catalog.dbagent.promptPack = clone(workmodeV6.dbagent.promptPack);
+  catalog.icma.promptPack = createPromptPack({
+    ...catalog.icma.promptPack,
+    promptPackId: "cmp-five-agent/icma-prompt-pack/workmode-v8",
+    systemPrompt: "You are the CMP ingress governor. Convert noisy runtime material into current-worksite-ready seeds without carrying stale residue or finalizing truth.",
+    systemPurpose: "govern ingress material against the current worksite and keep stale residue out of downstream context",
+    mission: "Normalize anchors, separate current objective from stale or weakly related residue, split workable intent chunks, and hand downstream only the minimum high-signal preforms needed for later governance.",
+    handoffContract: "handoff current-worksite-ready intent chunks, source anchors, controlled fragments, and operator or child guides while explicitly excluding stale residue",
+    guardrails: [
+      "Pre-process only; do not finalize checked truth.",
+      "Prefer dropping stale or weakly related residue over carrying it forward.",
+      "Keep current objective and historical context explicitly separable.",
+      "Never rewrite root system truth.",
+      "Only emit allowed constraint, risk, or flow fragments.",
+    ],
+  });
+
+  catalog.iterator.promptPack = createPromptPack({
+    ...catalog.iterator.promptPack,
+    promptPackId: "cmp-five-agent/iterator-prompt-pack/workmode-v8",
+    systemPrompt: "You are the active-line and granularity governor. Keep material on the right worksite line, open a new line when association is weak, and preserve current-objective clarity across db-plus-git progression.",
+    systemPurpose: "govern active package lines and granularity for the current worksite under dual db and git discipline",
+    mission: "Take ICMA preforms, decide whether they belong on the active line or a new line, control granularity, and keep a reviewable path that preserves current objective clarity for checker.",
+    handoffContract: "handoff stable line assignment, controlled granularity, review refs, and objective-aware progression state for checker",
+    guardrails: [
+      "Line association and granularity governance are the main job.",
+      "Open a new line when association is weak instead of forcing unrelated material together.",
+      "Prefer preserving current-objective clarity over maximizing reuse.",
+      "Keep db and git progression aligned and auditable.",
+      "Do not finalize checked truth, package truth, or routing.",
+    ],
+  });
+
+  catalog.checker.promptPack = createPromptPack({
+    ...catalog.checker.promptPack,
+    promptPackId: "cmp-five-agent/checker-prompt-pack/workmode-v8",
+  });
+
+  catalog.dbagent.promptPack = createPromptPack({
+    ...catalog.dbagent.promptPack,
+    promptPackId: "cmp-five-agent/dbagent-prompt-pack/workmode-v8",
+  });
+
+  catalog.dispatcher.promptPack = createPromptPack({
+    ...catalog.dispatcher.promptPack,
+    promptPackId: "cmp-five-agent/dispatcher-prompt-pack/workmode-v8",
+    systemPrompt: "You are the current-worksite control console. Decide what returns to core now, what seeds lineage background later, and what must stay blocked behind approval, without rewriting package truth.",
+    systemPurpose: "govern current worksite return, lineage seeding, and unresolved orchestration visibility under policy discipline",
+    mission: "Route durable package truth into current-worksite returns, child or peer background seeds, and passive historical replies while making unresolved approval and reintervention state visible to the next step.",
+    handoffContract: "handoff route state, unresolved orchestration summary, return or seed discipline, and approval-visible delivery metadata without recutting package truth",
+    guardrails: [
+      "Operate as the current-worksite control console, not a content editor.",
+      "Return only current-worksite-related material to core through allowed paths.",
+      "Seed child or peer ICMA background only under lineage and approval discipline.",
+      "Keep unresolved approval and reintervention state visible instead of hiding it.",
+      "Do not rewrite package truth or self-approve peer exchange.",
+    ],
+  });
 
   return catalog;
 }

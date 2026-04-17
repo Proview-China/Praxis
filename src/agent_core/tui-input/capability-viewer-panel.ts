@@ -43,9 +43,12 @@ export interface CapabilityViewerSnapshotRecord {
   }>;
   lastAttempt?: {
     capabilityKey: string;
+    probeLabel?: string;
     requestedMode?: string;
     effectiveMode?: string;
     derivedRiskLevel?: string;
+    accessStatus?: string;
+    safetyOutcome?: string;
     routeDecision?: string;
     routeReason?: string;
     matchedToolPolicy?: string;
@@ -55,10 +58,28 @@ export interface CapabilityViewerSnapshotRecord {
   };
   writeDiagnostics?: Array<{
     capabilityKey: string;
+    probeLabel?: string;
+    requestedTier?: string;
     requestedMode?: string;
     effectiveMode?: string;
     derivedRiskLevel?: string;
+    accessStatus?: string;
+    safetyOutcome?: string;
     routeDecision?: string;
+    matchedToolPolicy?: string;
+    matchedToolPolicySelector?: string;
+  }>;
+  modeWalkthroughs?: Array<{
+    capabilityKey: string;
+    probeLabel?: string;
+    requestedTier?: string;
+    requestedMode?: string;
+    effectiveMode?: string;
+    derivedRiskLevel?: string;
+    accessStatus?: string;
+    safetyOutcome?: string;
+    routeDecision?: string;
+    routeReason?: string;
     matchedToolPolicy?: string;
     matchedToolPolicySelector?: string;
   }>;
@@ -239,6 +260,39 @@ export function buildCapabilityViewerBodyLines(params: {
           : undefined,
       })),
     );
+  }
+  const walkthroughGroups = new Map<string, NonNullable<CapabilityViewerSnapshotRecord["modeWalkthroughs"]>[number][]>();
+  for (const entry of snapshot?.modeWalkthroughs ?? []) {
+    const key = `${entry.probeLabel ?? entry.capabilityKey}:${entry.capabilityKey}`;
+    const bucket = walkthroughGroups.get(key) ?? [];
+    bucket.push(entry);
+    walkthroughGroups.set(key, bucket);
+  }
+  if (walkthroughGroups.size > 0) {
+    lines.push({ text: "    TAP route anatomy", tone: "info" });
+    for (const [key, entries] of walkthroughGroups.entries()) {
+      const separator = key.indexOf(":");
+      const probeLabel = separator >= 0 ? key.slice(0, separator) : key;
+      const capabilityKey = separator >= 0 ? key.slice(separator + 1) : key;
+      lines.push({
+        text: `      ${probeLabel} · ${capabilityKey}`,
+        tone: "warning",
+      });
+      for (const mode of ["bapr", "yolo", "permissive", "standard", "restricted"] as const) {
+        const entry = entries.find((candidate) => candidate.requestedMode === mode);
+        if (!entry) {
+          continue;
+        }
+        lines.push({
+          text: `        ${mode.padEnd(10, " ")} risk=${entry.derivedRiskLevel ?? "unknown"} -> access=${entry.accessStatus ?? "unknown"} -> safety=${entry.safetyOutcome ?? "unknown"} -> route=${entry.routeDecision ?? "unknown"}`,
+          tone: entry.routeDecision === "human_gate" || entry.routeDecision === "interrupt"
+            ? "warning"
+            : entry.routeDecision === "deny"
+              ? "danger"
+              : undefined,
+        });
+      }
+    }
   }
 
   if (!currentGroup || currentGroup.entries.length === 0) {

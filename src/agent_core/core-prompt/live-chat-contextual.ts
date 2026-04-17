@@ -120,6 +120,29 @@ function createCmpContextPackage(input: CmpTurnArtifacts | undefined): CoreCmpCo
   };
 }
 
+function createGovernedRecentTranscript(input: {
+  transcript: DialogueTurn[];
+  cmpWorksitePackage?: CoreCmpWorksitePackageV1;
+}): string {
+  const deliveryStatus = input.cmpWorksitePackage?.deliveryStatus;
+  const limit = deliveryStatus === "available"
+    ? 2
+    : deliveryStatus === "partial"
+      ? 3
+      : 6;
+  return formatTranscript(input.transcript.slice(-limit));
+}
+
+function createGovernedCmpContextPackage(input: {
+  cmp?: CmpTurnArtifacts;
+  cmpWorksitePackage?: CoreCmpWorksitePackageV1;
+}): CoreCmpContextPackageV1 | undefined {
+  if (input.cmpWorksitePackage) {
+    return undefined;
+  }
+  return createCmpContextPackage(input.cmp);
+}
+
 export function createLiveChatCoreContextualInput(input: {
   userMessage: string;
   transcript: DialogueTurn[];
@@ -135,14 +158,18 @@ export function createLiveChatCoreContextualInput(input: {
   toolResultText?: string;
   groundingEvidenceText?: string;
 }): CoreContextualUserV1 {
-  const recentTurns = input.transcript.slice(-6);
-
   return {
     currentObjective: input.userMessage,
-    recentTranscript: formatTranscript(recentTurns),
+    recentTranscript: createGovernedRecentTranscript({
+      transcript: input.transcript,
+      cmpWorksitePackage: input.cmpWorksitePackage,
+    }),
     workspaceInitContext: input.workspaceInitContext,
     cmpWorksitePackage: input.cmpWorksitePackage,
-    cmpContextPackage: createCmpContextPackage(input.cmp),
+    cmpContextPackage: createGovernedCmpContextPackage({
+      cmp: input.cmp,
+      cmpWorksitePackage: input.cmpWorksitePackage,
+    }),
     mpRoutedPackage: input.mpRoutedPackage,
     overlayIndex: createLiveChatOverlayIndex({
       userMessage: input.userMessage,

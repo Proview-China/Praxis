@@ -112,6 +112,7 @@ function formatSlashCommandHelpLines(): string[] {
     ...builtInLines,
     `${String(builtInLines.length + 1).padStart(2, "0")} /rewind <turn>`.padEnd(maxLabelWidth + 5, " ") + "  rewind the in-memory conversation to a prior turn",
     `${String(builtInLines.length + 2).padStart(2, "0")} /cmp worksite`.padEnd(maxLabelWidth + 5, " ") + "  show the focused CMP worksite and MP bridge summary",
+    `${String(builtInLines.length + 3).padStart(2, "0")} /cmp roles`.padEnd(maxLabelWidth + 5, " ") + "  show CMP five-role prompt, model, and live-status diagnostics",
   ];
 }
 
@@ -356,9 +357,13 @@ export function printAgentsViewPlaceholder(): void {
 
 interface DirectTapCapabilityDiagnosticView {
   capabilityKey: string;
+  probeLabel?: string;
+  requestedTier?: string;
   requestedMode?: string;
   effectiveMode?: string;
   derivedRiskLevel?: string;
+  accessStatus?: string;
+  safetyOutcome?: string;
   routeDecision?: string;
   routeReason?: string;
   matchedToolPolicy?: string;
@@ -398,6 +403,7 @@ interface DirectCapabilitiesSnapshotView {
   }>;
   lastAttempt?: DirectTapCapabilityDiagnosticView;
   writeDiagnostics?: DirectTapCapabilityDiagnosticView[];
+  modeWalkthroughs?: DirectTapCapabilityDiagnosticView[];
 }
 
 export function printPermissionsView(
@@ -431,6 +437,32 @@ export function printPermissionsView(
     .slice(0, 4)
     .map((entry) =>
       `${entry.capabilityKey}: stage=${entry.stage}${entry.toolReviewerSessions ? ` / toolReview=${entry.toolReviewerSessions}` : ""}${entry.tmaSessions ? ` / tma=${entry.tmaSessions}` : ""}${entry.pendingReplays ? ` / replay=${entry.pendingReplays}` : ""}${entry.activationAttempts ? ` / activation=${entry.activationAttempts}` : ""}`);
+  const walkthroughLines = (() => {
+    const groups = new Map<string, DirectTapCapabilityDiagnosticView[]>();
+    for (const entry of capabilitySnapshot?.modeWalkthroughs ?? []) {
+      const key = `${entry.probeLabel ?? entry.capabilityKey}:${entry.capabilityKey}`;
+      const bucket = groups.get(key) ?? [];
+      bucket.push(entry);
+      groups.set(key, bucket);
+    }
+    const modeOrder = ["bapr", "yolo", "permissive", "standard", "restricted"];
+    const lines: string[] = [];
+    for (const [key, entries] of groups.entries()) {
+      const [probeLabel, capabilityKey] = key.split(":");
+      lines.push(`${probeLabel} / ${capabilityKey}`);
+      const byMode = new Map(entries.map((entry) => [entry.requestedMode ?? "", entry]));
+      for (const mode of modeOrder) {
+        const entry = byMode.get(mode);
+        if (!entry) {
+          continue;
+        }
+        lines.push(
+          `  ${mode}: risk=${entry.derivedRiskLevel ?? "unknown"} -> access=${entry.accessStatus ?? "unknown"} -> safety=${entry.safetyOutcome ?? "unknown"} -> route=${entry.routeDecision ?? "unknown"}${entry.requestedTier ? ` / tier=${entry.requestedTier}` : ""}${entry.matchedToolPolicy ? ` / policy=${entry.matchedToolPolicy}${entry.matchedToolPolicySelector ? `(${entry.matchedToolPolicySelector})` : ""}` : ""}`,
+        );
+      }
+    }
+    return lines;
+  })();
   console.log("");
   printDirectBox("Permissions", [
     `effectiveMode: ${governance.taskPolicy.effectiveMode}`,
@@ -441,6 +473,7 @@ export function printPermissionsView(
     ...(toolReviewerLine ? [toolReviewerLine] : []),
     ...(tmaLine ? [tmaLine] : []),
     ...(thickLines.length > 0 ? ["thick lanes:", ...thickLines] : []),
+    ...(walkthroughLines.length > 0 ? ["tap route anatomy:", ...walkthroughLines] : []),
     ...(previewLines.length > 0 ? ["common write lanes:", ...previewLines] : []),
     ...(lastAttemptLine ? [lastAttemptLine] : []),
   ]);
@@ -531,6 +564,25 @@ export function formatDirectCmpWorksiteSnapshotLines(
     : [snapshot.emptyReason ?? "CMP worksite summary is not available yet."];
 }
 
+export function formatDirectCmpRoleSnapshotLines(
+  snapshot: CmpPanelSnapshotPayload,
+): string[] {
+  const configLines = (snapshot.detailLines ?? []).filter((line) =>
+    line.startsWith("config:")
+    || line.startsWith("health:")
+    || line.startsWith("readiness:"));
+  const roleLines = snapshot.roleLines ?? [];
+  const issueLines = (snapshot.issueLines ?? []).slice(0, 2).map((line) => `issue: ${line}`);
+  const lines = [
+    ...configLines,
+    ...roleLines,
+    ...issueLines,
+  ];
+  return lines.length > 0
+    ? lines
+    : [snapshot.emptyReason ?? "CMP role diagnostics are not available yet."];
+}
+
 export function printCmpViewerSnapshot(
   snapshot: CmpPanelSnapshotPayload,
   latestTurn?: CmpTurnArtifacts,
@@ -542,6 +594,11 @@ export function printCmpViewerSnapshot(
 export function printCmpWorksiteSnapshot(snapshot: CmpPanelSnapshotPayload): void {
   console.log("");
   printDirectBox("CMP Worksite", formatDirectCmpWorksiteSnapshotLines(snapshot));
+}
+
+export function printCmpRolesSnapshot(snapshot: CmpPanelSnapshotPayload): void {
+  console.log("");
+  printDirectBox("CMP Roles", formatDirectCmpRoleSnapshotLines(snapshot));
 }
 
 export function printTapArtifacts(runtime: LiveCliRuntime, sessionId: string, runId?: string): void {
@@ -672,6 +729,26 @@ export function printDirectCapabilities(
     lines.push(
       `preview ${preview.capabilityKey}: ${preview.routeDecision ?? "unknown"} / risk=${preview.derivedRiskLevel ?? "unknown"}${preview.matchedToolPolicy ? ` / policy=${preview.matchedToolPolicy}${preview.matchedToolPolicySelector ? `(${preview.matchedToolPolicySelector})` : ""}` : ""}${preview.effectiveMode && preview.requestedMode && preview.effectiveMode !== preview.requestedMode ? ` / effective=${preview.effectiveMode}` : ""}`,
     );
+  }
+  const capabilityWalkthroughGroups = new Map<string, DirectTapCapabilityDiagnosticView[]>();
+  for (const walkthrough of snapshot?.modeWalkthroughs ?? []) {
+    const key = `${walkthrough.probeLabel ?? walkthrough.capabilityKey}:${walkthrough.capabilityKey}`;
+    const bucket = capabilityWalkthroughGroups.get(key) ?? [];
+    bucket.push(walkthrough);
+    capabilityWalkthroughGroups.set(key, bucket);
+  }
+  for (const [key, entries] of capabilityWalkthroughGroups.entries()) {
+    const [probeLabel, capabilityKey] = key.split(":");
+    lines.push(`walkthrough ${probeLabel} / ${capabilityKey}`);
+    for (const mode of ["bapr", "yolo", "permissive", "standard", "restricted"]) {
+      const entry = entries.find((candidate) => candidate.requestedMode === mode);
+      if (!entry) {
+        continue;
+      }
+      lines.push(
+        `  ${mode}: risk=${entry.derivedRiskLevel ?? "unknown"} -> access=${entry.accessStatus ?? "unknown"} -> safety=${entry.safetyOutcome ?? "unknown"} -> route=${entry.routeDecision ?? "unknown"}`,
+      );
+    }
   }
   for (const [family, items] of grouped.entries()) {
     lines.push(`${family}: ${items.join(", ")}`);

@@ -620,6 +620,124 @@ test("AgentCoreRuntime can resolve a baseline T/A grant and dispatch it through 
   );
 });
 
+test("AgentCoreRuntime re-queues pooled dispatches before results arrive when the run is still deciding", async () => {
+  const runtime = createAgentCoreRuntime({
+    taProfile: createFirstWaveCapabilityProfile({
+      profileId: "profile.runtime.dispatch-from-deciding",
+      agentClass: "main-agent",
+      baselineCapabilities: ["search.ground"],
+    }),
+  });
+  const session = runtime.createSession();
+  const goal = runtime.createCompiledGoal(
+    createGoalSource({
+      goalId: "goal-runtime-dispatch-from-deciding",
+      sessionId: session.sessionId,
+      userInput: "Dispatch should push the run back into waiting before async results land.",
+    }),
+  );
+  const created = await runtime.createRun({
+    sessionId: session.sessionId,
+    goal,
+  });
+
+  const adapter: CapabilityAdapter = {
+    id: "adapter.search.ground.dispatch-from-deciding",
+    runtimeKind: "tool",
+    supports(plan) {
+      return plan.capabilityKey === "search.ground";
+    },
+    async prepare(plan, lease) {
+      return {
+        preparedId: `${plan.planId}:prepared`,
+        leaseId: lease.leaseId,
+        capabilityKey: plan.capabilityKey,
+        bindingId: lease.bindingId,
+        generation: lease.generation,
+        executionMode: "direct",
+      };
+    },
+    async execute(prepared) {
+      return {
+        executionId: `${prepared.preparedId}:execution`,
+        resultId: `${prepared.preparedId}:result`,
+        status: "success",
+        output: {
+          answer: "dispatch-from-deciding-ok",
+        },
+        completedAt: new Date("2026-03-18T00:00:04.250Z").toISOString(),
+      };
+    },
+  };
+
+  runtime.registerCapabilityAdapter({
+    capabilityId: "cap-search-ground-dispatch-from-deciding",
+    capabilityKey: "search.ground",
+    kind: "tool",
+    version: "1.0.0",
+    generation: 1,
+    description: "Baseline grounded search capability for deciding-state dispatch coverage.",
+  }, adapter);
+
+  runtime.journal.appendEvent({
+    eventId: "evt-force-deciding",
+    type: "state.delta_applied",
+    sessionId: session.sessionId,
+    runId: created.run.runId,
+    createdAt: "2026-03-18T00:00:03.500Z",
+    correlationId: "evt-force-deciding",
+    payload: {
+      previousStatus: "waiting",
+      nextStatus: "deciding",
+      delta: {
+        control: {
+          status: "deciding",
+          phase: "decision",
+          pendingIntentId: undefined,
+        },
+      },
+    },
+  });
+
+  const resolved = runtime.resolveTaCapabilityAccess({
+    sessionId: session.sessionId,
+    runId: created.run.runId,
+    agentId: "agent-main",
+    capabilityKey: "search.ground",
+    reason: "Baseline search should recover from deciding before the async result lands.",
+    requestedTier: "B0",
+  });
+  assert.equal(resolved.status, "baseline_granted");
+
+  await runtime.dispatchTaCapabilityGrant({
+    grant: resolved.grant,
+    sessionId: session.sessionId,
+    runId: created.run.runId,
+    intentId: "intent-ta-dispatch-from-deciding",
+    requestId: "request-ta-dispatch-from-deciding",
+    input: {
+      query: "Praxis dispatch from deciding",
+    },
+    priority: "high",
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  const events = runtime.readRunEvents(created.run.runId).map((entry) => entry.event);
+  const decidingIndex = events.findIndex((event) => event.eventId === "evt-force-deciding");
+  const queuedAfterDeciding = events.findIndex((event, index) =>
+    index > decidingIndex
+    && event.type === "intent.queued"
+    && event.payload.intentId === "intent-ta-dispatch-from-deciding");
+  const resultAfterQueued = events.findIndex((event, index) =>
+    index > queuedAfterDeciding
+    && event.type === "capability.result_received");
+
+  assert.notEqual(queuedAfterDeciding, -1);
+  assert.notEqual(resultAfterQueued, -1);
+  assert.ok(queuedAfterDeciding < resultAfterQueued);
+});
+
 test("AgentCoreRuntime routes capability_call through TAP by default in dispatchIntent", async () => {
   const runtime = createAgentCoreRuntime({
     taProfile: createAgentCapabilityProfile({
@@ -2397,7 +2515,7 @@ test("AgentCoreRuntime can route model inference through TAP when model.infer is
   assert.match(result.answer ?? "", /意义|活出来/u);
   assert.deepEqual(
     result.finalEvents.map((entry) => entry.event.type).slice(-4),
-    ["state.delta_applied", "intent.queued", "capability.result_received", "state.delta_applied"],
+    ["intent.queued", "state.delta_applied", "capability.result_received", "state.delta_applied"],
   );
 });
 

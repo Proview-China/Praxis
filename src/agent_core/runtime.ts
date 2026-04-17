@@ -1235,6 +1235,7 @@ export class AgentCoreRuntime {
   }
 
   async dispatchCapabilityPlan(input: DispatchCapabilityPlanInput): Promise<DispatchCapabilityPlanResult> {
+    await this.#markRunWaitingForCapabilityDispatch(input);
     const lease = await this.capabilityGateway.acquire(input.plan);
     const prepared = await this.capabilityGateway.prepare(lease, input.plan);
     this.#capabilityPreparedContext.set(prepared.preparedId, input);
@@ -7945,6 +7946,48 @@ export class AgentCoreRuntime {
     } catch {
       // Ignore and let later dispatch surface the truthful failure.
     }
+  }
+
+  async #markRunWaitingForCapabilityDispatch(
+    input: DispatchCapabilityPlanInput,
+  ): Promise<void> {
+    await this.#ensureRunAvailable(input.runId);
+    const events = this.readRunEvents(input.runId).map((entry) => entry.event);
+    const state = projectStateFromEvents(events);
+    if (state.control.status !== "deciding" && state.control.status !== "acting") {
+      return;
+    }
+
+    const run = this.runCoordinator.getRun(input.runId);
+    if (!run) {
+      return;
+    }
+
+    const queuedEvent: KernelEvent = {
+      eventId: randomUUID(),
+      type: "intent.queued",
+      sessionId: input.sessionId,
+      runId: input.runId,
+      createdAt: new Date().toISOString(),
+      correlationId: input.correlationId ?? input.plan.intentId,
+      payload: {
+        intentId: input.plan.intentId,
+        kind: "capability_call",
+        priority: input.plan.priority,
+      },
+      metadata: {
+        source: "dispatchCapabilityPlan",
+        capabilityKey: input.plan.capabilityKey,
+        requestId: input.requestId,
+        planId: input.plan.planId,
+      },
+    };
+
+    const outcome = await this.runCoordinator.tickRun({
+      runId: run.runId,
+      incomingEvent: queuedEvent,
+    });
+    this.#syncSessionFromRun(outcome.run);
   }
 
   #readAnswerTextForRun(runId: string): string | undefined {

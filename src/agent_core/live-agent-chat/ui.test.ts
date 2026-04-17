@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   formatDirectCmpSnapshotLines,
+  formatDirectCmpRoleSnapshotLines,
   formatDirectCmpWorksiteSnapshotLines,
   formatDirectMpSnapshotLines,
 } from "./ui.js";
@@ -154,4 +155,32 @@ test("formatDirectCmpWorksiteSnapshotLines keeps only the focused worksite and b
   assert.match(lines[1] ?? "", /worksite:/u);
   assert.match(lines[2] ?? "", /orchestration:/u);
   assert.match(lines[3] ?? "", /bridge:/u);
+});
+
+test("formatDirectCmpRoleSnapshotLines keeps config and per-role diagnostics together", () => {
+  const lines = formatDirectCmpRoleSnapshotLines({
+    summaryLines: ["CMP summary"],
+    status: "ready",
+    sourceKind: "cmp_readback",
+    detailLines: [
+      "config: cmp-five-agent-role-catalog/v1:workmode_v8",
+      "health: infra=ready liveReady=5 fallback=0 failed=0 drift=0 expired=0",
+      "readiness: object=ready loop=ready llm=ready infra=ready final=ready",
+    ],
+    roleLines: [
+      "icma: pack=cmp-five-agent/icma-prompt-pack/workmode-v8 model=gpt-5.4-mini/none count=2 stage=attach_fragment live=succeeded fallback=no · chunking=multi_auto",
+      "iterator: pack=cmp-five-agent/iterator-prompt-pack/workmode-v8 model=gpt-5.4-mini/medium count=2 stage=update_review_ref live=succeeded fallback=no · verdict=advance_commit",
+    ],
+    issueLines: [
+      "CMP five-agent has 1 pending peer exchange approval(s).",
+    ],
+    entries: [],
+  });
+
+  assert.match(lines[0] ?? "", /config: cmp-five-agent-role-catalog\/v1:workmode_v8/u);
+  assert.match(lines[1] ?? "", /health: infra=ready/u);
+  assert.match(lines[2] ?? "", /readiness: object=ready/u);
+  assert.match(lines[3] ?? "", /icma: pack=cmp-five-agent\/icma-prompt-pack\/workmode-v8/u);
+  assert.match(lines[4] ?? "", /iterator: pack=cmp-five-agent\/iterator-prompt-pack\/workmode-v8/u);
+  assert.match(lines[5] ?? "", /issue: CMP five-agent has 1 pending peer exchange approval\(s\)\./u);
 });

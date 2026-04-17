@@ -7,6 +7,7 @@ import {
 const PERMISSION_MATRIX_INDENT = "    ";
 const PERMISSION_MODE_COLUMN_WIDTH = 13;
 const PERMISSION_RISK_COLUMN_WIDTH = 15;
+const ROUTE_WALKTHROUGH_MODE_ORDER = ["bapr", "yolo", "permissive", "standard", "restricted"] as const;
 
 function padColumn(value: string, width: number): string {
   return value.padEnd(width, " ");
@@ -59,6 +60,24 @@ export function buildPermissionModeMatrixLines(
       routeDecision?: string;
       matchedToolPolicy?: string;
       matchedToolPolicySelector?: string;
+    }>;
+    modeWalkthroughs?: Array<{
+      capabilityKey: string;
+      probeLabel?: string;
+      requestedMode?: string;
+      effectiveMode?: string;
+      requestedTier?: string;
+      derivedRiskLevel?: string;
+      routeDecision?: string;
+      routeReason?: string;
+      matchedToolPolicy?: string;
+      matchedToolPolicySelector?: string;
+      accessStatus?: string;
+      accessAssignment?: string;
+      accessMatchedPattern?: string;
+      safetyOutcome?: string;
+      safetyReason?: string;
+      requestedScopeKind?: string;
     }>;
     lastAttempt?: {
       capabilityKey: string;
@@ -133,6 +152,68 @@ export function buildPermissionModeMatrixLines(
         tone: "warning",
       },
     );
+  }
+  const walkthroughGroups = new Map<string, {
+    probeLabel: string;
+    capabilityKey: string;
+    entries: NonNullable<typeof options.modeWalkthroughs>[number][];
+  }>();
+  for (const entry of options.modeWalkthroughs ?? []) {
+    const groupKey = `${entry.probeLabel ?? entry.capabilityKey}:${entry.capabilityKey}`;
+    const existing = walkthroughGroups.get(groupKey) ?? {
+      probeLabel: entry.probeLabel ?? entry.capabilityKey,
+      capabilityKey: entry.capabilityKey,
+      entries: [],
+    };
+    existing.entries.push(entry);
+    walkthroughGroups.set(groupKey, existing);
+  }
+  if (walkthroughGroups.size > 0) {
+    lines.push({
+      text: `${PERMISSION_MATRIX_INDENT}TAP route anatomy across all modes:`,
+      tone: "info",
+    });
+    for (const group of walkthroughGroups.values()) {
+      lines.push({
+        text: `${PERMISSION_MATRIX_INDENT}${group.probeLabel} · ${group.capabilityKey}`,
+        tone: "warning",
+      });
+      const entriesByMode = new Map(group.entries.map((entry) => [entry.requestedMode ?? "", entry]));
+      for (const mode of ROUTE_WALKTHROUGH_MODE_ORDER) {
+        const entry = entriesByMode.get(mode);
+        if (!entry) {
+          continue;
+        }
+        const process = [
+          `risk=${entry.derivedRiskLevel ?? "unknown"}`,
+          `access=${entry.accessStatus ?? "unknown"}`,
+          `safety=${entry.safetyOutcome ?? "unknown"}`,
+          `route=${entry.routeDecision ?? "unknown"}`,
+        ].join(" -> ");
+        const details = [
+          entry.requestedTier ? `tier=${entry.requestedTier}` : undefined,
+          entry.requestedScopeKind ? `scope=${entry.requestedScopeKind}` : undefined,
+          entry.matchedToolPolicy
+            ? `policy=${entry.matchedToolPolicy}${entry.matchedToolPolicySelector ? `(${entry.matchedToolPolicySelector})` : ""}`
+            : undefined,
+          entry.accessAssignment ? `assign=${entry.accessAssignment}` : undefined,
+        ].filter((part): part is string => Boolean(part)).join(" · ");
+        lines.push({
+          text: `${PERMISSION_MATRIX_INDENT}${mode.padEnd(PERMISSION_MODE_COLUMN_WIDTH, " ")} ${process}${details ? ` · ${details}` : ""}`,
+          tone: entry.routeDecision === "human_gate" || entry.routeDecision === "interrupt"
+            ? "warning"
+            : entry.routeDecision === "deny"
+              ? "danger"
+              : undefined,
+        });
+        if (entry.routeReason) {
+          lines.push({
+            text: `${PERMISSION_MATRIX_INDENT}${"".padEnd(PERMISSION_MODE_COLUMN_WIDTH, " ")} ${entry.routeReason}`,
+            tone: "info",
+          });
+        }
+      }
+    }
   }
   if (options.lastAttempt) {
     lines.push({

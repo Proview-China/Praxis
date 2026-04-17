@@ -423,6 +423,7 @@ test("CmpFiveAgentRuntime can surface peer exchange pending approval inside the 
         candidateId: "candidate-peer-1",
         checkedSnapshotId: "snapshot-peer-1",
         checkedAt: "2026-04-11T00:20:02.000Z",
+        suggestPromote: false,
         metadata: {
           sourceSectionIds: ["section-pre-peer-1"],
           checkedSectionIds: ["section-checked-peer-1"],
@@ -673,6 +674,7 @@ test("CmpFiveAgentRuntime passes configured prompt variants into role runtimes",
     candidateId: "variant-candidate",
     checkedSnapshotId: "variant-snapshot",
     checkedAt: "2026-04-11T00:00:01.000Z",
+    suggestPromote: false,
     metadata: {
       sourceSectionIds: ["section-pre-variant-1"],
       checkedSectionIds: ["section-checked-variant-1"],
@@ -695,6 +697,8 @@ test("CmpFiveAgentRuntime passes configured prompt variants into role runtimes",
       branchRef: "refs/heads/cmp/variant-main",
       commitRef: "commit-variant",
       checkedAt: "2026-04-11T00:00:02.000Z",
+      qualityLabel: "usable",
+      promotable: false,
     },
     contextPackage: {
       packageId: "variant-package",
@@ -764,15 +768,15 @@ test("CmpFiveAgentRuntime surfaces v7 workmode prompt ids in summaries", () => {
   assert.equal(summary.configuredRoles.dispatcher.promptPackId, "cmp-five-agent/dispatcher-prompt-pack/workmode-v7");
 });
 
-test("CmpFiveAgentRuntime surfaces v8 hybrid prompt ids in summaries", () => {
+test("CmpFiveAgentRuntime surfaces v8 unified workmode prompt ids in summaries", () => {
   const runtime = createCmpFiveAgentRuntime({
     configuration: createCmpFiveAgentConfiguration({ promptVariant: "workmode_v8" }),
   });
 
   const summary = runtime.createSummary();
-  assert.equal(summary.configuredRoles.icma.promptPackId, "cmp-five-agent/icma-prompt-pack/v1");
-  assert.equal(summary.configuredRoles.iterator.promptPackId, "cmp-five-agent/iterator-prompt-pack/v1");
-  assert.equal(summary.configuredRoles.checker.promptPackId, "cmp-five-agent/checker-prompt-pack/workmode-v6");
-  assert.equal(summary.configuredRoles.dbagent.promptPackId, "cmp-five-agent/dbagent-prompt-pack/workmode-v6");
-  assert.equal(summary.configuredRoles.dispatcher.promptPackId, "cmp-five-agent/dispatcher-prompt-pack/v1");
+  assert.equal(summary.configuredRoles.icma.promptPackId, "cmp-five-agent/icma-prompt-pack/workmode-v8");
+  assert.equal(summary.configuredRoles.iterator.promptPackId, "cmp-five-agent/iterator-prompt-pack/workmode-v8");
+  assert.equal(summary.configuredRoles.checker.promptPackId, "cmp-five-agent/checker-prompt-pack/workmode-v8");
+  assert.equal(summary.configuredRoles.dbagent.promptPackId, "cmp-five-agent/dbagent-prompt-pack/workmode-v8");
+  assert.equal(summary.configuredRoles.dispatcher.promptPackId, "cmp-five-agent/dispatcher-prompt-pack/workmode-v8");
 });

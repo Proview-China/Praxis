@@ -45,6 +45,8 @@ test("development prompt keeps discipline text but avoids giant capability schem
   assert.match(pack.text, /Continuation and resume discipline:/);
   assert.doesNotMatch(pack.text, /shell\.restricted/);
   assert.doesNotMatch(pack.text, /Exact JSON schema/);
+  assert.doesNotMatch(pack.text, /core-cmp-worksite-package\/v1/);
+  assert.doesNotMatch(pack.text, /core-cmp-context-package\/v1/);
 });
 
 test("createCoreTaskStatusDisciplineLines renders shared task status rules", () => {

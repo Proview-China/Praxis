@@ -12,7 +12,11 @@ const tsxBin = resolve(appRoot, "node_modules", ".bin", "tsx");
 const argv = process.argv.slice(2);
 const raxodeHome = resolve(process.env.RAXCODE_HOME ?? resolve(process.env.HOME ?? process.cwd(), ".raxcode"));
 const configPath = resolve(raxodeHome, "config.json");
-const launchWorkspace = resolve(process.env.PRAXIS_WORKSPACE_ROOT ?? appRoot);
+const launchWorkspace = resolve(
+  process.env.PRAXIS_WORKSPACE_ROOT
+  ?? process.env.INIT_CWD
+  ?? process.cwd(),
+);
 
 function resolveDevCommand(args) {
   const [rawCommand] = args;

@@ -240,14 +240,20 @@ test("cmp five-agent configuration can produce a v7 workmode prompt variant with
   );
 });
 
-test("cmp five-agent configuration can produce a v8 hybrid workmode variant", () => {
+test("cmp five-agent configuration can produce a v8 unified workmode variant", () => {
   const baseline = createCmpFiveAgentConfiguration();
   const v8 = createCmpFiveAgentConfiguration({ promptVariant: "workmode_v8" });
 
   assert.equal(v8.version, `${CMP_FIVE_AGENT_CONFIGURATION_VERSION}:workmode_v8`);
-  assert.equal(v8.roles.icma.promptPack.promptPackId, baseline.roles.icma.promptPack.promptPackId);
-  assert.equal(v8.roles.iterator.promptPack.promptPackId, baseline.roles.iterator.promptPack.promptPackId);
-  assert.equal(v8.roles.dispatcher.promptPack.promptPackId, baseline.roles.dispatcher.promptPack.promptPackId);
-  assert.equal(v8.roles.checker.promptPack.promptPackId, "cmp-five-agent/checker-prompt-pack/workmode-v6");
-  assert.equal(v8.roles.dbagent.promptPack.promptPackId, "cmp-five-agent/dbagent-prompt-pack/workmode-v6");
+  assert.equal(v8.roles.icma.promptPack.promptPackId, "cmp-five-agent/icma-prompt-pack/workmode-v8");
+  assert.equal(v8.roles.iterator.promptPack.promptPackId, "cmp-five-agent/iterator-prompt-pack/workmode-v8");
+  assert.equal(v8.roles.checker.promptPack.promptPackId, "cmp-five-agent/checker-prompt-pack/workmode-v8");
+  assert.equal(v8.roles.dbagent.promptPack.promptPackId, "cmp-five-agent/dbagent-prompt-pack/workmode-v8");
+  assert.equal(v8.roles.dispatcher.promptPack.promptPackId, "cmp-five-agent/dispatcher-prompt-pack/workmode-v8");
+  assert.match(v8.roles.icma.promptPack.systemPrompt, /ingress governor/i);
+  assert.match(v8.roles.iterator.promptPack.systemPrompt, /active-line and granularity governor/i);
+  assert.match(v8.roles.dispatcher.promptPack.systemPrompt, /current-worksite control console/i);
+  assert.notEqual(v8.roles.icma.promptPack.promptPackId, baseline.roles.icma.promptPack.promptPackId);
+  assert.notEqual(v8.roles.iterator.promptPack.promptPackId, baseline.roles.iterator.promptPack.promptPackId);
+  assert.notEqual(v8.roles.dispatcher.promptPack.promptPackId, baseline.roles.dispatcher.promptPack.promptPackId);
 });

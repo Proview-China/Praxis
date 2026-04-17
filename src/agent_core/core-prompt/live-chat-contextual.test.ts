@@ -84,11 +84,7 @@ test("buildLiveChatCoreContextualPrompt injects key live-chat blocks", () => {
   assert.match(rendered, /<cmp_worksite_package>/);
   assert.match(rendered, /schema_version: core-cmp-worksite-package\/v1/);
   assert.match(rendered, /current_objective: 继续调研 core prompt engineering/);
-  assert.match(rendered, /<cmp_context_package>/);
-  assert.match(rendered, /schema_version: core-cmp-context-package\/v1/);
-  assert.match(rendered, /delivery_status: available/);
-  assert.match(rendered, /package_kind: active_reseed/);
-  assert.match(rendered, /package_mode:/);
+  assert.doesNotMatch(rendered, /<cmp_context_package>/);
   assert.match(rendered, /<mp_routed_package>/);
   assert.match(rendered, /schema_version: core-mp-routed-package\/v1/);
   assert.match(rendered, /source_class: mp_resolve_bundle/);
@@ -158,9 +154,6 @@ test("createLiveChatCoreContextualInput returns structured contextual object bef
   if (typeof contextual.cmpWorksitePackage === "string" || !contextual.cmpWorksitePackage) {
     throw new Error("expected structured cmpWorksitePackage");
   }
-  if (typeof contextual.cmpContextPackage === "string" || !contextual.cmpContextPackage) {
-    throw new Error("expected structured cmpContextPackage");
-  }
   if (typeof contextual.mpRoutedPackage === "string" || !contextual.mpRoutedPackage) {
     throw new Error("expected structured mpRoutedPackage");
   }
@@ -170,11 +163,12 @@ test("createLiveChatCoreContextualInput returns structured contextual object bef
   assert.match(contextual.tapCapabilityWindow ?? "", /Currently registered TAP capabilities:/);
   assert.equal(contextual.workspaceInitContext.schemaVersion, "core-workspace-init-context/v1");
   assert.equal(contextual.cmpWorksitePackage.schemaVersion, "core-cmp-worksite-package/v1");
-  assert.equal(contextual.cmpContextPackage.schemaVersion, "core-cmp-context-package/v1");
+  assert.equal(contextual.cmpContextPackage, undefined);
   assert.equal(contextual.mpRoutedPackage.schemaVersion, "core-mp-routed-package/v1");
   assert.equal(contextual.overlayIndex?.schemaVersion, "core-overlay-index/v1");
   assert.equal(contextual.overlayIndex?.memories?.[0]?.id, "workspace-init:agents");
   assert.equal(contextual.overlayIndex?.memories?.[0]?.bodyRef, ".raxode/AGENTS.md");
+  assert.doesNotMatch(contextual.recentTranscript, /assistant:/u);
 });
 
 test("createLiveChatCoreContextualInput degrades cleanly when cmp and capability index are absent", () => {
@@ -292,4 +286,32 @@ test("createLiveChatCoreContextualInput maps pending skipped and partial cmp sta
   assert.equal(partial.cmpContextPackage.deliveryStatus, "partial");
   assert.equal(partial.cmpContextPackage.governance?.confidenceLabel, "medium");
   assert.equal(partial.cmpContextPackage.governance?.freshness, "aging");
+});
+
+test("createLiveChatCoreContextualInput trims transcript harder when cmp worksite is available", () => {
+  const contextual = createLiveChatCoreContextualInput({
+    userMessage: "继续主任务",
+    transcript: [
+      { role: "user", text: "u1" },
+      { role: "assistant", text: "a1" },
+      { role: "user", text: "u2" },
+      { role: "assistant", text: "a2" },
+      { role: "user", text: "u3" },
+      { role: "assistant", text: "a3" },
+    ],
+    cmpWorksitePackage: {
+      schemaVersion: "core-cmp-worksite-package/v1",
+      deliveryStatus: "available",
+      identity: {
+        sessionId: "session-1",
+        agentId: "cmp-main",
+      },
+    },
+    availableCapabilitiesText: "Currently registered TAP capabilities: code.read.",
+  });
+
+  assert.match(contextual.recentTranscript, /u3/u);
+  assert.match(contextual.recentTranscript, /a3/u);
+  assert.doesNotMatch(contextual.recentTranscript, /u1/u);
+  assert.doesNotMatch(contextual.recentTranscript, /a1/u);
 });

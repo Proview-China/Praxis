@@ -56,6 +56,44 @@ test("buildPermissionModeMatrixLines can show common write-lane previews and the
         matchedToolPolicySelector: "code.edit",
       },
     ],
+    modeWalkthroughs: [
+      {
+        probeLabel: "Normal probe",
+        capabilityKey: "repo.write",
+        requestedMode: "bapr",
+        requestedTier: "B0",
+        derivedRiskLevel: "normal",
+        accessStatus: "baseline_granted",
+        safetyOutcome: "allow",
+        routeDecision: "allow",
+        routeReason: "TAP can keep repo.write on the baseline path in bapr mode.",
+        requestedScopeKind: "workspace",
+      },
+      {
+        probeLabel: "Normal probe",
+        capabilityKey: "repo.write",
+        requestedMode: "restricted",
+        requestedTier: "B0",
+        derivedRiskLevel: "normal",
+        accessStatus: "review_required",
+        safetyOutcome: "escalate_to_human",
+        routeDecision: "human_gate",
+        routeReason: "restricted mode routes repo.write to human gate.",
+        matchedToolPolicy: "human_gate",
+        matchedToolPolicySelector: "repo.write",
+      },
+      {
+        probeLabel: "Dangerous probe",
+        capabilityKey: "shell.rm.force",
+        requestedMode: "permissive",
+        requestedTier: "B2",
+        derivedRiskLevel: "dangerous",
+        accessStatus: "review_required",
+        safetyOutcome: "block",
+        routeDecision: "deny",
+        routeReason: "Dangerous shell deletion is blocked before reviewer handoff.",
+      },
+    ],
     lastAttempt: {
       capabilityKey: "code.edit",
       routeDecision: "human_gate",
@@ -94,6 +132,11 @@ test("buildPermissionModeMatrixLines can show common write-lane previews and the
   assert.match(joined, /toolReviewer: total=2/u);
   assert.match(joined, /TMA: total=1/u);
   assert.match(joined, /computer\.use/u);
+  assert.match(joined, /TAP route anatomy across all modes:/u);
+  assert.match(joined, /Normal probe · repo\.write/u);
+  assert.match(joined, /bapr\s+risk=normal -> access=baseline_granted -> safety=allow -> route=allow/u);
+  assert.match(joined, /restricted\s+risk=normal -> access=review_required -> safety=escalate_to_human -> route=human_gate/u);
+  assert.match(joined, /Dangerous shell deletion is blocked before reviewer handoff\./u);
 });
 
 test("findPermissionPanelFocusIndex selects the current requested mode row", () => {

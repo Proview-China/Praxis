@@ -38,7 +38,6 @@ test("createCoreContextualBlocks keeps stable order and omits empty optional blo
       "current_objective",
       "recent_transcript",
       "cmp_worksite_package",
-      "cmp_context_package",
       "latest_tool_result",
     ],
   );
@@ -90,11 +89,33 @@ test("renderCoreContextualUserV1 renders structured cmp package blocks without d
 
   assert.match(rendered, /<cmp_worksite_package>/);
   assert.match(rendered, /schema_version: core-cmp-worksite-package\/v1/);
+  assert.doesNotMatch(rendered, /<cmp_context_package>/);
+  assert.doesNotMatch(rendered, /<core_overlay_index>/);
+});
+
+test("renderCoreContextualUserV1 falls back to cmp context package when no worksite package is present", () => {
+  const rendered = renderCoreContextualUserV1({
+    currentObjective: "继续推进 core-cmp handoff",
+    recentTranscript: "u: hi",
+    cmpContextPackage: {
+      schemaVersion: "core-cmp-context-package/v1",
+      deliveryStatus: "available",
+      identity: {
+        packageId: "cmp-1",
+        packageRef: "cmp-package:1",
+        packageMode: "core_return",
+      },
+      governance: {
+        operatorGuide: "focus on checked package",
+        routeRationale: "core return",
+      },
+    },
+  });
+
+  assert.doesNotMatch(rendered, /<cmp_worksite_package>/);
   assert.match(rendered, /<cmp_context_package>/);
   assert.match(rendered, /schema_version: core-cmp-context-package\/v1/);
-  assert.match(rendered, /delivery_status: available/);
   assert.match(rendered, /package_mode: core_return/);
-  assert.doesNotMatch(rendered, /<core_overlay_index>/);
 });
 
 test("renderCoreCmpContextPackageV1 supports multiple delivery states without inventing body text", () => {

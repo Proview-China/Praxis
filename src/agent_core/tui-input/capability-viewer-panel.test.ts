@@ -134,6 +134,35 @@ test("buildCapabilityViewerBodyLines includes last attempt and write route previ
           matchedToolPolicySelector: "code.edit",
         },
       ],
+      modeWalkthroughs: [
+        {
+          probeLabel: "Normal probe",
+          capabilityKey: "repo.write",
+          requestedMode: "bapr",
+          derivedRiskLevel: "normal",
+          accessStatus: "baseline_granted",
+          safetyOutcome: "allow",
+          routeDecision: "allow",
+        },
+        {
+          probeLabel: "Normal probe",
+          capabilityKey: "repo.write",
+          requestedMode: "restricted",
+          derivedRiskLevel: "normal",
+          accessStatus: "review_required",
+          safetyOutcome: "escalate_to_human",
+          routeDecision: "human_gate",
+        },
+        {
+          probeLabel: "Dangerous probe",
+          capabilityKey: "shell.rm.force",
+          requestedMode: "standard",
+          derivedRiskLevel: "dangerous",
+          accessStatus: "review_required",
+          safetyOutcome: "block",
+          routeDecision: "deny",
+        },
+      ],
       toolReviewerSummary: {
         total: 2,
         open: 1,
@@ -170,4 +199,8 @@ test("buildCapabilityViewerBodyLines includes last attempt and write route previ
   assert.match(joined, /toolReviewer · total=2/u);
   assert.match(joined, /TMA · total=1/u);
   assert.match(joined, /computer\.use/u);
+  assert.match(joined, /TAP route anatomy/u);
+  assert.match(joined, /Normal probe · repo\.write/u);
+  assert.match(joined, /bapr\s+risk=normal -> access=baseline_granted -> safety=allow -> route=allow/u);
+  assert.match(joined, /shell\.rm\.force/u);
 });

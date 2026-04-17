@@ -155,6 +155,7 @@ import {
 import {
   createDirectFallbackReader,
   printCmpArtifacts,
+  printCmpRolesSnapshot,
   printCoreArtifacts,
   printDirectAnswer,
   printAgentsViewPlaceholder,
@@ -227,6 +228,7 @@ interface CapabilityPanelSnapshotEntry {
 
 interface TapCapabilityDiagnosticSnapshotPayload {
   capabilityKey: string;
+  probeLabel?: string;
   requestedTier?: string;
   requestedMode?: string;
   effectiveMode?: string;
@@ -289,6 +291,7 @@ interface CapabilityPanelSnapshotPayload {
   }>;
   lastAttempt?: TapCapabilityDiagnosticSnapshotPayload;
   writeDiagnostics?: TapCapabilityDiagnosticSnapshotPayload[];
+  modeWalkthroughs?: TapCapabilityDiagnosticSnapshotPayload[];
   groups: CapabilityPanelSnapshotGroup[];
 }
 
@@ -916,8 +919,6 @@ function createCoreUserInputAssembly(input: {
     tapMode: LIVE_CHAT_TAP_OVERRIDE.requestedMode ?? "bapr",
     automationDepth: LIVE_CHAT_TAP_OVERRIDE.automationDepth ?? "default",
     uiMode: "direct" as const,
-    cmpWorksitePackage: contextualInput.cmpWorksitePackage,
-    cmpContextPackage: contextualInput.cmpContextPackage,
   };
   const modeInstructions = [
       "You are answering inside the Praxis live CLI harness.",
@@ -1067,8 +1068,6 @@ function createCoreActionPlannerAssembly(
     tapMode: LIVE_CHAT_TAP_OVERRIDE.requestedMode ?? "bapr",
     automationDepth: LIVE_CHAT_TAP_OVERRIDE.automationDepth ?? "default",
     uiMode: "direct" as const,
-    cmpWorksitePackage: contextualInput.cmpWorksitePackage,
-    cmpContextPackage: contextualInput.cmpContextPackage,
   };
   const modeInstructions = [
       "Return strict JSON only.",
@@ -1573,9 +1572,23 @@ async function buildCmpPanelSnapshot(state: LiveCliState): Promise<CmpPanelSnaps
     sessionId: state.sessionId,
     limit: 6,
   });
+  const cmpConfiguredRoles = summary?.fiveAgentSummary?.configuredRoles;
+  const cmpConfigurationVersion = summary?.fiveAgentSummary?.configurationVersion;
+  const cmpRolePlans = {
+    icma: LIVE_CHAT_MODEL_PLAN.cmp.icma,
+    iterator: LIVE_CHAT_MODEL_PLAN.cmp.iterator,
+    checker: LIVE_CHAT_MODEL_PLAN.cmp.checker,
+    dbagent: LIVE_CHAT_MODEL_PLAN.cmp.dbagent,
+    dispatcher: LIVE_CHAT_MODEL_PLAN.cmp.dispatcher,
+  } as const;
+  const roleOrder = ["icma", "iterator", "checker", "dbagent", "dispatcher"] as const;
   const roleLines = summary?.statusPanel
-    ? Object.entries(summary.statusPanel.roles).map(([role, roleSummary]) =>
-      `${role}: count=${roleSummary.count} stage=${roleSummary.latestStage ?? "idle"} live=${roleSummary.liveStatus ?? "unknown"}${roleSummary.semanticSummary ? ` · ${roleSummary.semanticSummary}` : ""}`)
+    ? roleOrder.map((role) => {
+      const roleSummary = summary.statusPanel?.roles[role];
+      const configured = cmpConfiguredRoles?.[role];
+      const routePlan = cmpRolePlans[role];
+      return `${role}: pack=${configured?.promptPackId ?? "unknown"} model=${routePlan.model}/${routePlan.reasoning} count=${roleSummary?.count ?? 0} stage=${roleSummary?.latestStage ?? "idle"} live=${roleSummary?.liveStatus ?? "unknown"} fallback=${roleSummary?.fallbackApplied === true ? "yes" : "no"}${roleSummary?.semanticSummary ? ` · ${roleSummary.semanticSummary}` : ""}`;
+    })
     : [];
   const requestLines = [
     summary?.statusPanel
@@ -1617,7 +1630,10 @@ async function buildCmpPanelSnapshot(state: LiveCliState): Promise<CmpPanelSnaps
     emptyReason,
     truthStatus: dbTruth,
     readbackStatus,
-    detailLines,
+    detailLines: [
+      ...(cmpConfigurationVersion ? [`config: ${cmpConfigurationVersion}`] : []),
+      ...detailLines,
+    ],
     roleLines,
     requestLines,
     issueLines,
@@ -1950,6 +1966,68 @@ function buildCapabilitiesPanelSnapshot(state: LiveCliState): CapabilityPanelSna
     routeDecision: diagnostic.routeDecision,
     routeReason: diagnostic.routeReason,
   }));
+  const modeWalkthroughSpecs = [
+    {
+      probeLabel: "Normal probe",
+      capabilityKey: "repo.write",
+      requestedTier: "B0" as const,
+      input: { path: "memory/generated/tap-mode-walkthrough.txt", content: "preview" },
+    },
+    {
+      probeLabel: "Risky probe",
+      capabilityKey: "shell.restricted",
+      requestedTier: "B0" as const,
+      input: { command: "pwd", args: [], cwd: "." },
+    },
+    {
+      probeLabel: "Dangerous probe",
+      capabilityKey: "shell.rm.force",
+      requestedTier: "B2" as const,
+      input: { command: "rm", args: ["-rf", "memory/generated/tap-mode-walkthrough"], cwd: "." },
+    },
+  ];
+  const modeWalkthroughs = modeWalkthroughSpecs.flatMap((spec) =>
+    diagnosticModes.map((mode) =>
+      state.runtime.inspectTapCapabilityRoute({
+        sessionId: state.sessionId,
+        runId: state.lastTurn?.core.runId ?? `${state.sessionId}:mode-walkthrough`,
+        agentId: `live-cli-core:${state.sessionId}`,
+        capabilityKey: spec.capabilityKey,
+        reason: `Preview TAP internals for ${spec.capabilityKey} in ${mode} mode.`,
+        requestedTier: spec.requestedTier,
+        mode,
+        requestInput: spec.input,
+        metadata: {
+          cliBridge: "permissions-mode-walkthrough",
+        },
+      }),
+    ),
+  ).map<TapCapabilityDiagnosticSnapshotPayload>((diagnostic, index) => {
+    const spec = modeWalkthroughSpecs[Math.floor(index / diagnosticModes.length)]!;
+    return {
+      probeLabel: spec.probeLabel,
+      capabilityKey: diagnostic.capabilityKey,
+      requestedTier: diagnostic.requestedTier,
+      requestedMode: diagnostic.requestedMode,
+      effectiveMode: diagnostic.effectiveMode,
+      automationDepth: diagnostic.automationDepth,
+      explanationStyle: diagnostic.explanationStyle,
+      derivedRiskLevel: diagnostic.derivedRiskLevel,
+      matchedToolPolicy: diagnostic.matchedToolPolicy,
+      matchedToolPolicySelector: diagnostic.matchedToolPolicySelector,
+      forceHumanByRisk: diagnostic.forceHumanByRisk,
+      accessStatus: diagnostic.accessStatus,
+      accessAssignment: diagnostic.accessAssignment,
+      accessMatchedPattern: diagnostic.accessMatchedPattern,
+      safetyOutcome: diagnostic.safetyOutcome,
+      safetyReason: diagnostic.safetyReason,
+      safetyMatchedPattern: diagnostic.safetyMatchedPattern,
+      requestedScopeKind: diagnostic.requestedScopeKind,
+      externalPathPrefixes: diagnostic.externalPathPrefixes,
+      routeDecision: diagnostic.routeDecision,
+      routeReason: diagnostic.routeReason,
+    };
+  });
   const selectedToolExecution = state.lastTurn?.core.primaryToolExecution
     ?? state.lastTurn?.core.toolExecution;
   const lastAttempt = selectedToolExecution?.diagnostics
@@ -2033,6 +2111,7 @@ function buildCapabilitiesPanelSnapshot(state: LiveCliState): CapabilityPanelSna
     thickCapabilities,
     lastAttempt,
     writeDiagnostics,
+    modeWalkthroughs,
     groups: orderedGroups,
   };
 }
@@ -3042,6 +3121,11 @@ async function executeCoreCapabilityRequest(
               reviewDecision: dispatch.reviewDecision,
               humanGate: dispatch.humanGate,
               safety: dispatch.safety,
+              provisionRequest: dispatch.provisionRequest,
+              provisionBundle: dispatch.provisionBundle,
+              replay: dispatch.replay,
+              activation: dispatch.activation,
+              continueResult: dispatch.continueResult,
             },
           },
           diagnostics,
@@ -4087,6 +4171,102 @@ async function runCoreTurn(
       eventTypes: params.eventTypes,
     };
   };
+
+  const directTapRequest = parseTapRequest(userMessage);
+  if (directTapRequest) {
+    const directCapabilityRequest = await applyCliDefaultsToCapabilityRequest({
+      capabilityKey: directTapRequest.capabilityKey,
+      reason: directTapRequest.reason ?? `Direct TAP request for ${directTapRequest.capabilityKey}.`,
+      input: directTapRequest.input,
+      requestedTier: directTapRequest.requestedTier ?? "B0",
+      timeoutMs: readPositiveInteger(directTapRequest.input.timeoutMs),
+    }, config, userMessage);
+    const directToolExecution = await executeCoreCapabilityRequest(state, directCapabilityRequest);
+    const directCapabilityKey = directToolExecution.capabilityKey || directCapabilityRequest.capabilityKey;
+    latestToolExecution = directToolExecution;
+    latestPrimaryToolExecution = directToolExecution;
+    latestRunId = `${state.sessionId}:tap-request:${state.turnIndex}`;
+    latestEventTypes = ["core.tap_request.direct"];
+    latestTaskStatus =
+      directToolExecution.status === "success" || directToolExecution.status === "partial"
+        ? "completed"
+        : directToolExecution.status === "waiting_human" || directToolExecution.status === "blocked" || directToolExecution.status === "interrupted"
+          ? "blocked"
+          : "incomplete";
+    latestUsage = latestUsage ?? {
+      inputTokens: latestContext.promptTokens,
+      outputTokens: estimateContextTokens(userMessage),
+      estimated: true,
+    };
+    const synthesizedAnswer = synthesizeUserFacingToolAnswer(
+      directCapabilityKey,
+      directToolExecution.output,
+      directToolExecution.status,
+      directToolExecution.error,
+    );
+    const directError = directToolExecution.error && typeof directToolExecution.error === "object"
+      ? directToolExecution.error as Record<string, unknown>
+      : undefined;
+    const directDetails = directError?.details && typeof directError.details === "object"
+      ? directError.details as Record<string, unknown>
+      : undefined;
+    const provisionRequest = directDetails?.provisionRequest && typeof directDetails.provisionRequest === "object"
+      ? directDetails.provisionRequest as Record<string, unknown>
+      : undefined;
+    const provisionBundle = directDetails?.provisionBundle && typeof directDetails.provisionBundle === "object"
+      ? directDetails.provisionBundle as Record<string, unknown>
+      : undefined;
+    const replay = directDetails?.replay && typeof directDetails.replay === "object"
+      ? directDetails.replay as Record<string, unknown>
+      : undefined;
+    const activation = directDetails?.activation && typeof directDetails.activation === "object"
+      ? directDetails.activation as Record<string, unknown>
+      : undefined;
+    const fallbackAnswer = directToolExecution.status === "provisioned"
+      ? [
+          `已把 ${directCapabilityKey} 送进 provisioning 主链。`,
+          provisionRequest && typeof provisionRequest.provisionId === "string"
+            ? `- provisionId: ${provisionRequest.provisionId}`
+            : undefined,
+          provisionBundle && typeof provisionBundle.status === "string"
+            ? `- bundleStatus: ${provisionBundle.status}`
+            : undefined,
+          replay && typeof replay.state === "string"
+            ? `- replayState: ${replay.state}`
+            : undefined,
+          activation && typeof activation.status === "string"
+            ? `- activation: ${activation.status}`
+            : undefined,
+          "这说明 reviewer 已经把请求 redirect 到 provisioning；接下来重点看 /capabilities、/permissions、/tap 里的 tool-reviewer/TMA 读回。",
+        ].filter((line): line is string => Boolean(line)).join("\n")
+      : directToolExecution.status === "waiting_human"
+        ? [
+            `当前请求 ${directCapabilityKey} 已进入 human gate。`,
+            directError?.message ? `- reason: ${String(directError.message)}` : undefined,
+            "这条链没有偷跑，后续应在 /capabilities、/permissions、/tap 中看到 waiting_human 与对应 blocker。",
+          ].filter((line): line is string => Boolean(line)).join("\n")
+        : directToolExecution.status === "failed"
+          ? [
+              `本次 TAP 直连请求没有成功执行 ${directCapabilityKey}。`,
+              directError?.code ? `- error: ${String(directError.code)}` : undefined,
+              directError?.message ? `- message: ${String(directError.message)}` : undefined,
+            ].filter((line): line is string => Boolean(line)).join("\n")
+          : `已执行 ${directCapabilityKey}，当前状态 ${directToolExecution.status}。`;
+    return {
+      runId: latestRunId,
+      answer: synthesizedAnswer || fallbackAnswer,
+      dispatchStatus: "capability_executed",
+      taskStatus: latestTaskStatus,
+      capabilityKey: directCapabilityRequest.capabilityKey,
+      capabilityResultStatus: directToolExecution.status,
+      context: latestContext,
+      usage: latestUsage,
+      plannerRawAnswer: userMessage,
+      toolExecution: directToolExecution,
+      primaryToolExecution: directToolExecution,
+      eventTypes: latestEventTypes,
+    };
+  }
 
   const deriveActionEnvelopeFromRaw = (text: string): CoreActionEnvelope | undefined => {
     try {
@@ -5488,6 +5668,12 @@ async function main(): Promise<void> {
           await state.cmpInfraReady?.catch(() => undefined);
           const snapshots = await emitViewerPanelSnapshots(state);
           printCmpWorksiteSnapshot(snapshots.cmp);
+          continue;
+        }
+        if (line === "/cmp roles") {
+          await state.cmpInfraReady?.catch(() => undefined);
+          const snapshots = await emitViewerPanelSnapshots(state);
+          printCmpRolesSnapshot(snapshots.cmp);
           continue;
         }
         if (line === "/tap") {

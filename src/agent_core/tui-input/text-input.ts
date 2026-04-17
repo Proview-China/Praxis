@@ -332,7 +332,7 @@ export function applyTuiTextInputKey(
     return { nextState: state, submit: false, handled: true };
   }
   if (key.tab) {
-    return { nextState: insertIntoTuiTextInput(state, "  "), submit: false, handled: true };
+    return { nextState: state, submit: false, handled: true };
   }
   if (!inputText) {
     return { nextState: state, submit: false, handled: false };

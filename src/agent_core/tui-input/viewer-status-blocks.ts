@@ -43,6 +43,12 @@ function truncateTextToWidth(text: string, maxWidth: number): string {
   return `${output}…`;
 }
 
+function padTextToWidth(text: string, width: number): string {
+  const normalized = truncateTextToWidth(text, width);
+  const remaining = Math.max(0, width - stringWidth(normalized));
+  return `${normalized}${" ".repeat(remaining)}`;
+}
+
 function normalizeStatusText(value: string): string {
   return value.replace(/\s+/gu, " ").trim();
 }
@@ -176,6 +182,71 @@ export function buildViewerStatusBlockLines(params: {
         { text: entryIndent },
         { text: renderedValue, tone: entry.abnormal ? "danger" : undefined },
       ],
+    });
+  }
+  return lines;
+}
+
+export function buildViewerStatusGridLines(params: {
+  label: string;
+  labelTone: PraxisSlashPanelFieldTone;
+  entries: ViewerStatusEntry[];
+  lineWidth: number;
+  emptyValue?: string;
+  entryIndent?: number;
+  columnCount?: number;
+  columnGap?: number;
+}): PraxisSlashPanelBodyLine[] {
+  const entryIndent = " ".repeat(params.entryIndent ?? 6);
+  const entries = params.entries.length > 0
+    ? params.entries
+    : params.emptyValue
+      ? [{ value: params.emptyValue, abnormal: false }]
+      : [];
+  const lines: PraxisSlashPanelBodyLine[] = [{
+    text: `    ${params.label}`,
+    segments: [
+      { text: "    " },
+      { text: params.label, tone: params.labelTone },
+    ],
+  }];
+  if (entries.length === 0) {
+    return lines;
+  }
+  const requestedColumns = params.columnCount ?? (params.lineWidth >= 92 ? 2 : 1);
+  const columns = Math.max(1, Math.min(requestedColumns, entries.length));
+  const gap = Math.max(2, params.columnGap ?? 4);
+  const availableWidth = Math.max(16, params.lineWidth - entryIndent.length);
+  const columnWidth = columns <= 1
+    ? availableWidth
+    : Math.max(14, Math.floor((availableWidth - gap * (columns - 1)) / columns));
+
+  for (let index = 0; index < entries.length; index += columns) {
+    const rowEntries = entries.slice(index, index + columns);
+    const rowSegments: PraxisSlashPanelBodyLine["segments"] = [{ text: entryIndent }];
+    let rowText = entryIndent;
+    rowEntries.forEach((entry, entryIndex) => {
+      const prefix = entry.key ? `${entry.key}=` : "";
+      const valueWidth = Math.max(6, columnWidth - stringWidth(prefix));
+      const renderedValue = truncateTextToWidth(normalizeStatusText(entry.value), valueWidth);
+      const renderedText = padTextToWidth(`${prefix}${renderedValue}`, columnWidth);
+      rowText += renderedText;
+      if (entry.key) {
+        rowSegments.push({ text: prefix });
+      }
+      rowSegments.push({
+        text: entry.key ? padTextToWidth(renderedValue, columnWidth - stringWidth(prefix)) : renderedText,
+        tone: entry.abnormal ? "danger" : undefined,
+      });
+      if (entryIndex < rowEntries.length - 1) {
+        const spacer = " ".repeat(gap);
+        rowText += spacer;
+        rowSegments.push({ text: spacer });
+      }
+    });
+    lines.push({
+      text: rowText,
+      segments: rowSegments,
     });
   }
   return lines;

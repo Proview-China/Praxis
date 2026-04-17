@@ -166,7 +166,18 @@ import {
   type TerminalTableRow,
 } from "./tui-input/viewer-table-layout.js";
 import {
+  buildMpSummaryTableLines,
+  type MpSummaryTableSection,
+} from "./tui-input/mp-summary-table.js";
+import {
+  buildMpViewerHints,
+  cycleMpViewerSubtab,
+  resolveMpViewerSubtab,
+  type MpViewerSubtab,
+} from "./tui-input/mp-viewer-subtabs.js";
+import {
   buildViewerStatusBlockLines,
+  buildViewerStatusGridLines,
   isViewerStatusTextAbnormal,
   parseViewerAssignmentEntries,
   parseViewerRoleEntries,
@@ -1130,7 +1141,14 @@ interface SlashPanelContext {
 }
 
 type DirectSlashPanelId = PraxisSlashPanelId | "question";
-type DirectSlashPanelView = Omit<PraxisSlashPanelView, "id"> & { id: DirectSlashPanelId };
+type DirectSlashPanelView = Omit<PraxisSlashPanelView, "id"> & {
+  id: DirectSlashPanelId;
+  summaryMaxScrollX?: number;
+  chromeSegments?: Array<{
+    text: string;
+    tone?: PraxisSlashPanelField["tone"];
+  }>;
+};
 
 interface DirectTuiAgentEntry {
   agentId: string;
@@ -1207,6 +1225,7 @@ interface CapabilityViewerEntry {
 
 interface TapCapabilityDiagnosticRecord {
   capabilityKey: string;
+  probeLabel?: string;
   requestedTier?: string;
   requestedMode?: string;
   effectiveMode?: string;
@@ -1269,6 +1288,7 @@ interface CapabilityViewerSnapshot {
   }>;
   lastAttempt?: TapCapabilityDiagnosticRecord;
   writeDiagnostics: TapCapabilityDiagnosticRecord[];
+  modeWalkthroughs: TapCapabilityDiagnosticRecord[];
   groups: CapabilityViewerGroup[];
 }
 
@@ -1542,6 +1562,28 @@ interface PendingOutboundTurn {
   queuedAt: string;
 }
 
+type PendingComposerDispatchMode = "steer" | "queue";
+type PendingComposerDispatchStatus = "waiting_tool_end" | "waiting_turn_end" | "ready";
+type PendingComposerDispatchReleaseTrigger = "tool_call_end" | "turn_end" | "force_interrupt";
+
+interface PendingComposerDispatch {
+  id: string;
+  mode: PendingComposerDispatchMode;
+  text: string;
+  attachments: DirectInputImageAttachment[];
+  pastedContents: TuiPastedContentAttachment[];
+  fileReferences: TuiFileReferenceAttachment[];
+  createdAt: string;
+  status: PendingComposerDispatchStatus;
+}
+
+interface PreparedOutboundSubmission {
+  text: string;
+  attachments: DirectInputImageAttachment[];
+  pastedContents: TuiPastedContentAttachment[];
+  fileReferences: TuiFileReferenceAttachment[];
+}
+
 type ModelPickerSource = "chat" | "embedding";
 
 interface ModelPickerOverlayState {
@@ -1699,7 +1741,7 @@ function panelToneColor(tone: SlashPanelNoticeTone | PraxisSlashPanelField["tone
     case "brown":
       return "yellow";
     case "orange":
-      return "red";
+      return "yellow";
     case "info":
       return TUI_THEME.mintSoft;
     case "fast":
@@ -2006,6 +2048,19 @@ function viewerPageDraftKey(panelId: ViewerPanelId): string {
   return `${panelId}:page`;
 }
 
+function mpViewerSubtabDraftKey(): string {
+  return "mp:subtab";
+}
+
+function mpViewerSummaryScrollDraftKey(): string {
+  return "mp:summary:scrollX";
+}
+
+function resolveMpViewerSummaryScrollX(draft: Record<string, string>): number {
+  const raw = Number.parseInt(draft[mpViewerSummaryScrollDraftKey()] ?? "0", 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : 0;
+}
+
 function resolveViewerPageIndex(
   panelId: ViewerPanelId,
   draft: Record<string, string>,
@@ -2039,6 +2094,115 @@ function buildViewerPageMeta(
 
 function formatViewerPageLine(label: string, meta: { pageIndex: number; pageCount: number }, totalItems: number): string {
   return `    ${label} · page ${meta.pageIndex + 1}/${meta.pageCount} · ${totalItems} total`;
+}
+
+function buildMpViewerTabHeader(activeSubtab: MpViewerSubtab): PraxisSlashPanelBodyLine {
+  const summaryActive = activeSubtab === "summary";
+  const recordsActive = activeSubtab === "records";
+  return {
+    text: `    ${summaryActive ? "[Summary]" : "Summary"}  ${recordsActive ? "[Records]" : "Records"}`,
+    segments: [
+      { text: "    " },
+      { text: summaryActive ? "[Summary]" : "Summary", tone: summaryActive ? "green" : "default" },
+      { text: "  " },
+      { text: recordsActive ? "[Records]" : "Records", tone: recordsActive ? "green" : "default" },
+    ],
+  };
+}
+
+function buildMpViewerChromeSegments(activeSubtab: MpViewerSubtab): NonNullable<DirectSlashPanelView["chromeSegments"]> {
+  const summaryActive = activeSubtab === "summary";
+  const recordsActive = activeSubtab === "records";
+  return [
+    { text: "/mp", tone: "pink" },
+    { text: "  Browse current memory state", tone: "default" },
+    { text: "  " },
+    { text: summaryActive ? "[Summary]" : "Summary", tone: summaryActive ? "green" : "default" },
+    { text: "  " },
+    { text: recordsActive ? "[Records]" : "Records", tone: recordsActive ? "green" : "default" },
+  ];
+}
+
+function buildMpSummarySections(snapshot: MpViewerSnapshot | null): MpSummaryTableSection[] {
+  const issueEntries = buildIssueEntries(snapshot?.issueLines, snapshot?.emptyReason);
+  const routeEntries = parseViewerAssignmentEntries(snapshot?.routingLines?.join(", ") ?? "");
+  const sourceEntries: ViewerStatusEntry[] = [
+    ...(snapshot?.sourceKind || snapshot?.sourceClass
+      ? [{
+          key: "kind",
+          value: snapshot.sourceKind ?? snapshot.sourceClass ?? "unknown",
+          abnormal: false,
+        }]
+      : []),
+    ...(snapshot?.rootPath
+      ? [{
+          key: "path",
+          value: shortenPath(snapshot.rootPath),
+          abnormal: false,
+        }]
+      : []),
+  ];
+  const flowEntries = [
+    ...buildWorkflowEntries(findSnapshotDetailValue(snapshot?.detailLines, "workflow")),
+    ...parseViewerAssignmentEntries(findSnapshotDetailValue(snapshot?.flowLines, "readiness") ?? ""),
+    ...parseViewerAssignmentEntries(findSnapshotDetailValue(snapshot?.flowLines, "flow") ?? ""),
+  ];
+  const overviewEntries = buildOverviewEntries({
+    lines: snapshot?.summaryLines,
+    excludedLines: issueEntries.map((entry) => entry.value),
+  }).map((entry, index) => ({
+    subtitle: index === 0 ? "summary" : `detail ${index}`,
+    content: entry.value,
+    abnormal: entry.abnormal,
+  }));
+  const normalizeSectionRows = (entries: ViewerStatusEntry[], fallbackSubtitle: string) =>
+    entries.map((entry, index) => ({
+      subtitle: entry.key ?? `${fallbackSubtitle} ${index + 1}`,
+      content: entry.value,
+      abnormal: entry.abnormal,
+    }));
+  return [
+    {
+      title: "Overview",
+      titleTone: "green",
+      rows: overviewEntries.length > 0
+        ? overviewEntries
+        : [{ subtitle: "summary", content: "MP summary is not available yet." }],
+    },
+    {
+      title: "Route",
+      titleTone: "info",
+      rows: normalizeSectionRows(routeEntries, "item").length > 0
+        ? normalizeSectionRows(routeEntries, "item")
+        : [{ subtitle: "route", content: "route diagnostics unavailable" }],
+    },
+    {
+      title: "Source",
+      titleTone: "warning",
+      rows: normalizeSectionRows(sourceEntries, "item").length > 0
+        ? normalizeSectionRows(sourceEntries, "item")
+        : [{ subtitle: "source", content: "source unavailable" }],
+    },
+    {
+      title: "Flow",
+      titleTone: "pink",
+      rows: normalizeSectionRows(flowEntries, "item").length > 0
+        ? normalizeSectionRows(flowEntries, "item")
+        : [{ subtitle: "flow", content: "workflow unavailable" }],
+    },
+    {
+      title: "Roles",
+      titleTone: "brown",
+      rows: normalizeSectionRows(parseViewerRoleEntries(snapshot?.roleLines), "role").length > 0
+        ? normalizeSectionRows(parseViewerRoleEntries(snapshot?.roleLines), "role")
+        : [{ subtitle: "role", content: "no role telemetry yet" }],
+    },
+    {
+      title: "Issue",
+      titleTone: "orange",
+      rows: normalizeSectionRows(issueEntries, "issue"),
+    },
+  ];
 }
 
 function findSnapshotDetailValue(lines: string[] | undefined, label: string): string | undefined {
@@ -2267,77 +2431,26 @@ function buildMpViewerBodyLines(
   snapshot: MpViewerSnapshot | null,
   pageIndex: number,
   lineWidth: number,
-): { lines: PraxisSlashPanelBodyLine[]; meta: { pageIndex: number; pageCount: number } } {
+  activeSubtab: MpViewerSubtab,
+  summaryScrollX: number,
+): { lines: PraxisSlashPanelBodyLine[]; meta: { pageIndex: number; pageCount: number; summaryScrollX: number; summaryMaxScrollX: number } } {
   const entries = snapshot?.entries ?? [];
   const meta = buildViewerPageMeta(pageIndex, entries.length);
   const visibleEntries = entries.slice(meta.start, meta.end);
-  const issueEntries = buildIssueEntries(snapshot?.issueLines, snapshot?.emptyReason);
-  const sourceEntries: ViewerStatusEntry[] = [
-    ...(snapshot?.sourceKind || snapshot?.sourceClass
-      ? [{
-          key: "kind",
-          value: snapshot.sourceKind ?? snapshot.sourceClass ?? "unknown",
-          abnormal: false,
-        }]
-      : []),
-    ...(snapshot?.rootPath
-      ? [{
-          key: "path",
-          value: shortenPath(snapshot.rootPath),
-          abnormal: false,
-        }]
-      : []),
+  const summaryTable = buildMpSummaryTableLines({
+    sections: buildMpSummarySections(snapshot),
+    lineWidth,
+    scrollX: summaryScrollX,
+  });
+  const summaryLines: PraxisSlashPanelBodyLine[] = [
+    {
+      text: `    Memory summary table · scroll ${summaryTable.meta.scrollX}/${summaryTable.meta.maxScrollX}`,
+      tone: "info",
+    },
+    ...summaryTable.lines,
   ];
-  const lines: PraxisSlashPanelBodyLine[] = [
+  const recordsLines: PraxisSlashPanelBodyLine[] = [
     { text: formatViewerPageLine("Memory records", meta, entries.length), tone: "info" },
-    ...buildViewerStatusBlockLines({
-      label: "Overview",
-      labelTone: "green",
-      entries: buildOverviewEntries({
-        lines: snapshot?.summaryLines,
-        excludedLines: issueEntries.map((entry) => entry.value),
-      }),
-      lineWidth,
-      emptyValue: "MP summary is not available yet.",
-    }),
-    ...buildViewerStatusBlockLines({
-      label: "Route",
-      labelTone: "info",
-      entries: parseViewerAssignmentEntries(snapshot?.routingLines?.join(", ") ?? ""),
-      lineWidth,
-      emptyValue: "route diagnostics unavailable",
-    }),
-    ...buildViewerStatusBlockLines({
-      label: "Source",
-      labelTone: "warning",
-      entries: sourceEntries,
-      lineWidth,
-      emptyValue: "source unavailable",
-    }),
-    ...buildViewerStatusBlockLines({
-      label: "Flow",
-      labelTone: "pink",
-      entries: [
-        ...buildWorkflowEntries(findSnapshotDetailValue(snapshot?.detailLines, "workflow")),
-        ...parseViewerAssignmentEntries(findSnapshotDetailValue(snapshot?.flowLines, "readiness") ?? ""),
-        ...parseViewerAssignmentEntries(findSnapshotDetailValue(snapshot?.flowLines, "flow") ?? ""),
-      ],
-      lineWidth,
-      emptyValue: "workflow unavailable",
-    }),
-    ...buildViewerStatusBlockLines({
-      label: "Roles",
-      labelTone: "brown",
-      entries: parseViewerRoleEntries(snapshot?.roleLines),
-      lineWidth,
-      emptyValue: "no role telemetry yet",
-    }),
-    ...buildViewerStatusBlockLines({
-      label: "Issue",
-      labelTone: "orange",
-      entries: issueEntries,
-      lineWidth,
-    }),
     ...buildTerminalTableBodyLines({
       columns: [
         {
@@ -2385,11 +2498,16 @@ function buildMpViewerBodyLines(
       emptyTone: snapshot?.status === "degraded" ? "warning" : undefined,
     }),
   ];
+  const lines = activeSubtab === "records" ? recordsLines : summaryLines;
   return {
-    lines: padViewerBodyLinesForTrailingPage(lines, meta, visibleEntries.length),
+    lines: activeSubtab === "records"
+      ? padViewerBodyLinesForTrailingPage(lines, meta, visibleEntries.length)
+      : lines,
     meta: {
       pageIndex: meta.pageIndex,
       pageCount: meta.pageCount,
+      summaryScrollX: summaryTable.meta.scrollX,
+      summaryMaxScrollX: summaryTable.meta.maxScrollX,
     },
   };
 }
@@ -3162,22 +3280,28 @@ function buildSlashPanelView(
       }
     case "mp":
       {
+        const mpSubtab = resolveMpViewerSubtab(draft[mpViewerSubtabDraftKey()]);
         const mpPageIndex = resolveViewerPageIndex("mp", draft, context.mpViewerSnapshot?.entries.length ?? 0);
-        const mpViewer = buildMpViewerBodyLines(context.mpViewerSnapshot, mpPageIndex, lineWidth);
+        const mpSummaryScrollX = resolveMpViewerSummaryScrollX(draft);
+        const mpViewer = buildMpViewerBodyLines(context.mpViewerSnapshot, mpPageIndex, lineWidth, mpSubtab, mpSummaryScrollX);
       return {
         id,
         title: "/mp",
         description: "Browse current memory state",
         status: statusText,
-        viewerPage: {
-          pageIndex: mpViewer.meta.pageIndex,
-          pageCount: mpViewer.meta.pageCount,
-          totalItems: context.mpViewerSnapshot?.entries.length ?? 0,
-        },
+        viewerPage: mpSubtab === "records"
+          ? {
+            pageIndex: mpViewer.meta.pageIndex,
+            pageCount: mpViewer.meta.pageCount,
+            totalItems: context.mpViewerSnapshot?.entries.length ?? 0,
+          }
+          : undefined,
         showStatus: false,
         showFields: false,
         showHints: true,
+        chromeSegments: buildMpViewerChromeSegments(mpSubtab),
         bodyLines: mpViewer.lines,
+        summaryMaxScrollX: mpSubtab === "summary" ? mpViewer.meta.summaryMaxScrollX : undefined,
         fields: [
           {
             kind: "action",
@@ -3187,11 +3311,7 @@ function buildSlashPanelView(
             primary: true,
           },
         ],
-        hints: [
-          "press ← to previous page • press → to next page",
-          "press ENTER to refresh current memory state",
-          "press ESC to return to previous page",
-        ],
+        hints: buildMpViewerHints(mpSubtab),
       };
       }
     case "capabilities":
@@ -3525,6 +3645,7 @@ function buildSlashPanelView(
             ?? context.runtimeConfig?.permissions.persistedAllowRules.length
             ?? 0,
           previewRecords: context.capabilityViewerSnapshot?.writeDiagnostics,
+          modeWalkthroughs: context.capabilityViewerSnapshot?.modeWalkthroughs,
           lastAttempt: context.capabilityViewerSnapshot?.lastAttempt,
           toolReviewerSummary: context.capabilityViewerSnapshot?.toolReviewerSummary,
           tmaSummary: context.capabilityViewerSnapshot?.tmaSummary,
@@ -4360,6 +4481,87 @@ const graphemeSegmenter = new Intl.Segmenter("zh", { granularity: "grapheme" });
 
 function splitGraphemes(text: string): string[] {
   return Array.from(graphemeSegmenter.segment(text), (segment) => segment.segment);
+}
+
+function truncatePendingComposerPreviewText(text: string, maxWidth: number): string {
+  if (maxWidth <= 0) {
+    return "";
+  }
+  let output = "";
+  let usedWidth = 0;
+  for (const grapheme of splitGraphemes(text)) {
+    const width = Math.max(1, stringWidth(grapheme));
+    if (usedWidth + width > maxWidth) {
+      return `${output}...`;
+    }
+    output += grapheme;
+    usedWidth += width;
+  }
+  return output;
+}
+
+function formatPendingComposerDispatchOrdinal(ordinal: number): string {
+  return String(Math.max(0, ordinal)).padStart(2, "0");
+}
+
+function resolvePendingComposerDispatchPreviewLeader(index: number): string {
+  return `┌ ${formatPendingComposerDispatchOrdinal(index)} `;
+}
+
+function resolvePendingComposerDispatchStatusCopy(mode: PendingComposerDispatchMode): string {
+  return mode === "steer"
+    ? "(Steer once the next tool call ends. Press ESC to interrupt and send)"
+    : "(Queueing... Press ESC to interrupt and send)";
+}
+
+function findLeadingPendingComposerDispatchIndex(
+  entries: readonly PendingComposerDispatch[],
+): number {
+  return entries.length > 0 ? 0 : -1;
+}
+
+function resolvePendingComposerDispatchReleaseCount(
+  entries: readonly PendingComposerDispatch[],
+  trigger: PendingComposerDispatchReleaseTrigger,
+): number {
+  if (entries.length === 0) {
+    return 0;
+  }
+  const [firstEntry] = entries;
+  if (!firstEntry) {
+    return 0;
+  }
+  if (trigger === "tool_call_end") {
+    if (firstEntry.mode !== "steer") {
+      return 0;
+    }
+    let count = 0;
+    for (const entry of entries) {
+      if (entry.mode !== "steer") {
+        break;
+      }
+      count += 1;
+    }
+    return count;
+  }
+  if (firstEntry.mode === "steer") {
+    let count = 0;
+    for (const entry of entries) {
+      if (entry.mode !== "steer") {
+        break;
+      }
+      count += 1;
+    }
+    return count;
+  }
+  let count = 1;
+  for (const entry of entries.slice(1)) {
+    if (entry.mode !== "steer") {
+      break;
+    }
+    count += 1;
+  }
+  return count;
 }
 
 function yieldToEventLoop(): Promise<void> {
@@ -6038,6 +6240,7 @@ function normalizeCapabilityViewerSnapshot(input: unknown): CapabilityViewerSnap
     }
     return {
       capabilityKey: item.capabilityKey,
+      probeLabel: typeof item.probeLabel === "string" ? item.probeLabel : undefined,
       requestedTier: typeof item.requestedTier === "string" ? item.requestedTier : undefined,
       requestedMode: typeof item.requestedMode === "string" ? item.requestedMode : undefined,
       effectiveMode: typeof item.effectiveMode === "string" ? item.effectiveMode : undefined,
@@ -6263,9 +6466,15 @@ function normalizeCapabilityViewerSnapshot(input: unknown): CapabilityViewerSnap
     lastAttempt: normalizeTapCapabilityDiagnostic(record.lastAttempt) ?? undefined,
     writeDiagnostics: Array.isArray(record.writeDiagnostics)
       ? record.writeDiagnostics.flatMap((entry) => {
-        const normalized = normalizeTapCapabilityDiagnostic(entry);
-        return normalized ? [normalized] : [];
-      })
+          const normalized = normalizeTapCapabilityDiagnostic(entry);
+          return normalized ? [normalized] : [];
+        })
+      : [],
+    modeWalkthroughs: Array.isArray(record.modeWalkthroughs)
+      ? record.modeWalkthroughs.flatMap((entry) => {
+          const normalized = normalizeTapCapabilityDiagnostic(entry);
+          return normalized ? [normalized] : [];
+        })
       : [],
     groups,
   };
@@ -6865,6 +7074,7 @@ const ComposerPane = memo(function ComposerPane({
   slashPanelNotice,
   commandPaletteItems,
   selectedSlashIndex,
+  pendingComposerDispatchPreviewLines,
   composerValue,
   composerLines,
   composerPlaceholder,
@@ -6891,6 +7101,7 @@ const ComposerPane = memo(function ComposerPane({
   slashPanelNotice: SlashPanelNotice | null;
   commandPaletteItems: Array<{ key: string; label: string; description?: string }>;
   selectedSlashIndex: number;
+  pendingComposerDispatchPreviewLines: Array<Array<{ text: string; color: string }>>;
   composerValue: string;
   composerLines: string[];
   composerPlaceholder: string;
@@ -6943,10 +7154,23 @@ const ComposerPane = memo(function ComposerPane({
               <>
           {slashPanel.showChrome !== false ? (
             <>
-              <Text>
-                <Text color={TUI_THEME.violet}>{slashPanel.title}</Text>
-                <Text color={TUI_THEME.textMuted}>  {slashPanel.description}</Text>
-              </Text>
+              {slashPanel.chromeSegments?.length ? (
+                <Text>
+                  {slashPanel.chromeSegments.map((segment, index) => (
+                    <Text
+                      key={`${slashPanel.id}:chrome:${index}`}
+                      color={panelToneColor(segment.tone)}
+                    >
+                      {segment.text}
+                    </Text>
+                  ))}
+                </Text>
+              ) : (
+                <Text>
+                  <Text color={TUI_THEME.violet}>{slashPanel.title}</Text>
+                  <Text color={TUI_THEME.textMuted}>  {slashPanel.description}</Text>
+                </Text>
+              )}
               {slashPanelNotice ? (
                 <Text color={panelToneColor(slashPanelNotice.tone)}>
                   {slashPanelNotice.text}
@@ -7117,6 +7341,15 @@ const ComposerPane = memo(function ComposerPane({
           </Text>
         </Box>
       ) : null}
+      {pendingComposerDispatchPreviewLines.map((segments, index) => (
+        <Text key={`pending-composer-dispatch-${index}`} wrap="truncate-end">
+          {segments.map((segment, segmentIndex) => (
+            <Text key={`pending-composer-dispatch-${index}-${segmentIndex}`} color={segment.color}>
+              {segment.text}
+            </Text>
+          ))}
+        </Text>
+      ))}
       <Text color={TUI_THEME.line}>{"─".repeat(lineWidth)}</Text>
       {composerLines.map((line, index) => (
         <Text key={`composer-line-${index}`}>
@@ -7255,6 +7488,7 @@ function PraxisDirectTuiApp(): JSX.Element {
   const [questionViewerSnapshot, setQuestionViewerSnapshot] = useState<QuestionViewerSnapshot | null>(null);
   const [questionPanelState, setQuestionPanelState] = useState<QuestionPanelState>(() => createEmptyQuestionPanelState());
   const [runIndicator, setRunIndicator] = useState<{ startedAt: string; label: string } | null>(null);
+  const [pendingComposerDispatches, setPendingComposerDispatches] = useState<PendingComposerDispatch[]>([]);
   const [activeCmpStages, setActiveCmpStages] = useState<Array<{ key: string; stage: string }>>([]);
   const [workspaceIndexSnapshot, setWorkspaceIndexSnapshot] = useState<WorkspaceIndexSnapshot | null>(null);
   const [workspaceIndexStatus, setWorkspaceIndexStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
@@ -7312,6 +7546,11 @@ function PraxisDirectTuiApp(): JSX.Element {
   const turnUserTextRef = useRef(new Map<string, string>());
   const transcriptMessagesRef = useRef<SurfaceMessage[]>([]);
   const pendingOutboundTurnsRef = useRef<PendingOutboundTurn[]>([]);
+  const pendingComposerDispatchesRef = useRef<PendingComposerDispatch[]>([]);
+  const backendStatusRef = useRef<BackendStatus>("starting");
+  const runIndicatorRef = useRef<{ startedAt: string; label: string } | null>(null);
+  const pendingComposerDispatchFlushRef = useRef<string | null>(null);
+  const pendingComposerDispatchChainInterruptRef = useRef(false);
   const initCompletedAutoCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingInitCompletedPanelRef = useRef(false);
   const sessionUsageLedgerRef = useRef<DirectTuiSessionUsageEntry[]>(initialBootState.usageLedger);
@@ -7326,6 +7565,281 @@ function PraxisDirectTuiApp(): JSX.Element {
   useEffect(() => {
     surfaceStateRef.current = surfaceState;
   }, [surfaceState]);
+
+  useEffect(() => {
+    backendStatusRef.current = backendStatus;
+  }, [backendStatus]);
+
+  useEffect(() => {
+    runIndicatorRef.current = runIndicator;
+  }, [runIndicator]);
+
+  const replacePendingComposerDispatches = (
+    nextValue: PendingComposerDispatch[] | ((previous: PendingComposerDispatch[]) => PendingComposerDispatch[]),
+  ): PendingComposerDispatch[] => {
+    const resolved = typeof nextValue === "function"
+      ? (nextValue as (previous: PendingComposerDispatch[]) => PendingComposerDispatch[])(pendingComposerDispatchesRef.current)
+      : nextValue;
+    pendingComposerDispatchesRef.current = resolved;
+    setPendingComposerDispatches(resolved);
+    return resolved;
+  };
+
+  const clearComposerDraft = () => {
+    setComposerState(createTuiTextInputState());
+    setComposerAttachments([]);
+    setComposerPastedContents([]);
+    setComposerFileReferences([]);
+    setScrollOffset(0);
+  };
+
+  const hasRunningForegroundWork = () =>
+    Boolean(interruptibleTasksRef.current.length > 0 || activeTurnIdsRef.current.size > 0);
+
+  const hasActiveCapabilityBridge = () =>
+    activeTasksRef.current.some((task) =>
+      task.metadata?.stage === "core/capability_bridge"
+      && (
+        task.status === "queued"
+        || task.status === "running"
+        || task.status === "waiting"
+        || task.status === "blocked"
+      ));
+
+  const removePendingComposerDispatchById = (dispatchId: string) => {
+    replacePendingComposerDispatches((previous) =>
+      previous.filter((entry) => entry.id !== dispatchId));
+  };
+
+  const getLeadingPendingComposerDispatch = () => pendingComposerDispatchesRef.current[0] ?? null;
+
+  const createPreparedOutboundPayload = async (
+    outboundMessage: string,
+    attachments: DirectInputImageAttachment[],
+    pastedContents: TuiPastedContentAttachment[],
+    fileReferences: TuiFileReferenceAttachment[],
+  ): Promise<string> => {
+    if (attachments.length > 0) {
+      return JSON.stringify({
+        type: "direct_user_input",
+        text: outboundMessage,
+        attachments: attachments.map((attachment) => ({
+          id: attachment.id,
+          tokenText: attachment.tokenText,
+          sourceKind: attachment.sourceKind,
+          displayName: attachment.displayName,
+          mimeType: attachment.mimeType,
+          localPath: attachment.localPath,
+          remoteUrl: attachment.remoteUrl,
+        })),
+        ...(pastedContents.length > 0
+          ? {
+            pastedContents: pastedContents.map((entry) => ({
+              id: entry.id,
+              tokenText: entry.tokenText,
+              text: entry.text,
+              characterCount: entry.characterCount,
+            })),
+          }
+          : {}),
+        ...(fileReferences.length > 0
+          ? {
+            fileRefs: fileReferences.map((entry) => ({
+              id: entry.id,
+              tokenText: entry.tokenText,
+              relativePath: entry.relativePath,
+              absolutePath: entry.absolutePath,
+              displayName: entry.displayName,
+            })),
+          }
+          : {}),
+      });
+    }
+    if (pastedContents.length > 0 || fileReferences.length > 0) {
+      return JSON.stringify({
+        type: "direct_user_input",
+        text: outboundMessage,
+        ...(pastedContents.length > 0
+          ? {
+            pastedContents: pastedContents.map((entry) => ({
+              id: entry.id,
+              tokenText: entry.tokenText,
+              text: entry.text,
+              characterCount: entry.characterCount,
+            })),
+          }
+          : {}),
+        ...(fileReferences.length > 0
+          ? {
+            fileRefs: fileReferences.map((entry) => ({
+              id: entry.id,
+              tokenText: entry.tokenText,
+              relativePath: entry.relativePath,
+              absolutePath: entry.absolutePath,
+              displayName: entry.displayName,
+            })),
+          }
+          : {}),
+      });
+    }
+    return outboundMessage;
+  };
+
+  const sendPreparedOutboundSubmission = async (submission: PreparedOutboundSubmission): Promise<boolean> => {
+    const child = childRef.current;
+    if (!child || child.killed || backendStatusRef.current === "failed") {
+      const at = new Date().toISOString();
+      dispatchSurfaceEvent({
+        type: "error.reported",
+        at,
+        message: createSurfaceMessage({
+          messageId: `submit-error:${at}`,
+          kind: "error",
+          createdAt: at,
+          text: "backend unavailable, cannot send message",
+        }),
+      });
+      return false;
+    }
+    const optimisticTurnIndex = resolveNextOptimisticTurnIndex({
+      existingTurns: surfaceStateRef.current.turns,
+      transcriptMessages: transcriptMessagesRef.current,
+      usageLedger: sessionUsageLedgerRef.current,
+      pendingOutboundTurns: pendingOutboundTurnsRef.current,
+    });
+    const optimisticTurnId = createTurnId(optimisticTurnIndex);
+    const optimisticMessageId = `user:${optimisticTurnId}`;
+    const queuedAt = new Date().toISOString();
+    const submissionId = createPendingOutboundSubmissionId();
+    const preTurnTranscriptCutMessageId = transcriptMessagesRef.current[transcriptMessagesRef.current.length - 1]?.messageId;
+    const payload = await createPreparedOutboundPayload(
+      submission.text,
+      submission.attachments,
+      submission.pastedContents,
+      submission.fileReferences,
+    );
+    turnUserTextRef.current.set(optimisticTurnId, submission.text.trim());
+    void persistPreTurnCheckpoint({
+      turnId: optimisticTurnId,
+      createdAt: queuedAt,
+      userText: submission.text.trim(),
+      transcriptCutMessageId: preTurnTranscriptCutMessageId,
+    });
+    dispatchSurfaceEvent({
+      type: "turn.started",
+      at: queuedAt,
+      turn: createSurfaceTurn({
+        turnId: optimisticTurnId,
+        sessionId: sessionIdRef.current,
+        turnIndex: optimisticTurnIndex,
+        status: "waiting",
+        startedAt: queuedAt,
+        updatedAt: queuedAt,
+        userText: submission.text.trim(),
+        outputMessageIds: [],
+        taskIds: [],
+      }),
+    });
+    dispatchSurfaceEvent({
+      type: "message.appended",
+      at: queuedAt,
+      message: createSurfaceMessage({
+        messageId: optimisticMessageId,
+        sessionId: sessionIdRef.current,
+        turnId: optimisticTurnId,
+        kind: "user",
+        text: submission.text.trim(),
+        createdAt: queuedAt,
+        metadata: {
+          optimistic: true,
+          submissionId,
+          deliveryState: "queued",
+        },
+      }),
+    });
+    pendingOutboundTurnsRef.current.push({
+      submissionId,
+      turnIndex: optimisticTurnIndex,
+      turnId: optimisticTurnId,
+      messageId: optimisticMessageId,
+      userText: submission.text.trim(),
+      queuedAt,
+    });
+    setConversationActivated(true);
+    setRunIndicator({
+      startedAt: queuedAt,
+      label: backendStatusRef.current === "ready" ? "queued" : "waiting for backend",
+    });
+    try {
+      child.stdin.write(`${payload}\u0000`);
+      return true;
+    } catch (error) {
+      pendingOutboundTurnsRef.current = pendingOutboundTurnsRef.current.filter((entry) => entry.submissionId !== submissionId);
+      dispatchSurfaceEvent({
+        type: "message.updated",
+        at: queuedAt,
+        message: createSurfaceMessage({
+          messageId: optimisticMessageId,
+          sessionId: sessionIdRef.current,
+          turnId: optimisticTurnId,
+          kind: "user",
+          text: submission.text.trim(),
+          createdAt: queuedAt,
+          updatedAt: queuedAt,
+          metadata: {
+            optimistic: false,
+            submissionId,
+            deliveryState: "failed",
+            failureReason: error instanceof Error ? error.message : String(error),
+          },
+        }),
+      });
+      appendInlineError(`Failed to queue the message: ${error instanceof Error ? error.message : String(error)}`);
+      setRunIndicator(null);
+      return false;
+    }
+  };
+
+  const enqueuePendingComposerDispatch = (submission: PreparedOutboundSubmission, mode: PendingComposerDispatchMode) => {
+    const createdAt = new Date().toISOString();
+    const nextEntry: PendingComposerDispatch = {
+      id: `${mode}:${createdAt}:${Math.random().toString(36).slice(2, 8)}`,
+      mode,
+      text: submission.text,
+      attachments: [...submission.attachments],
+      pastedContents: [...submission.pastedContents],
+      fileReferences: [...submission.fileReferences],
+      createdAt,
+      status: mode === "queue"
+        ? "waiting_turn_end"
+        : "waiting_tool_end",
+    };
+    replacePendingComposerDispatches((previous) => [...previous, nextEntry]);
+    return nextEntry;
+  };
+
+  const releasePendingComposerDispatchBatch = (trigger: PendingComposerDispatchReleaseTrigger) => {
+    let releasedCount = 0;
+    replacePendingComposerDispatches((previous) => {
+      if (previous.length === 0) {
+        return previous;
+      }
+      const releaseCount = resolvePendingComposerDispatchReleaseCount(previous, trigger);
+      if (releaseCount <= 0) {
+        return previous;
+      }
+      const next = previous.map((entry, index) =>
+        index < releaseCount
+          ? {
+            ...entry,
+            status: "ready" as const,
+          }
+          : entry);
+      releasedCount = releaseCount;
+      return next;
+    });
+    return releasedCount;
+  };
 
   const appendInlineError = (text: string) => {
     const at = new Date().toISOString();
@@ -8569,6 +9083,23 @@ function PraxisDirectTuiApp(): JSX.Element {
     activeTurnIdsRef.current = activeTurnIds;
   }, [activeTasks, activeTurnIds, interruptibleTasks]);
   useEffect(() => {
+    if (!pendingComposerDispatchChainInterruptRef.current) {
+      return;
+    }
+    const pendingEntry = pendingComposerDispatchesRef.current[0];
+    if (!pendingEntry || pendingEntry.status !== "ready") {
+      pendingComposerDispatchChainInterruptRef.current = false;
+      return;
+    }
+    if (!hasRunningForegroundWork()) {
+      return;
+    }
+    const interrupted = interruptActiveRun(false);
+    if (interrupted) {
+      pendingComposerDispatchChainInterruptRef.current = false;
+    }
+  }, [activeTasks, activeTurnIds, interruptibleTasks, pendingComposerDispatches]);
+  useEffect(() => {
     if (!rewindOverlayState) {
       rewindPrimedAtRef.current = 0;
       return;
@@ -9215,6 +9746,34 @@ function PraxisDirectTuiApp(): JSX.Element {
         ? "backend exited before confirming the queued input"
         : "backend closed before confirming the queued input");
       if (wasInterrupted) {
+        const interruptedAt = new Date().toISOString();
+        const staleTurnIds = new Set(
+          activeTasksRef.current
+            .map((task) => task.turnId)
+            .filter((turnId): turnId is string => typeof turnId === "string" && turnId.length > 0),
+        );
+        for (const task of activeTasksRef.current) {
+          dispatchSurfaceEvent({
+            type: "task.completed",
+            at: interruptedAt,
+            taskId: task.taskId,
+            status: "cancelled",
+            summary: task.summary ?? "interrupted by user",
+          });
+        }
+        for (const turnId of staleTurnIds) {
+          dispatchSurfaceEvent({
+            type: "turn.completed",
+            at: interruptedAt,
+            turn: createSurfaceTurn({
+              turnId,
+              status: "blocked",
+              updatedAt: interruptedAt,
+              completedAt: interruptedAt,
+            }),
+          });
+        }
+        resetSwitchRuntimeState();
         setBackendStatus("starting");
         setBackendEpoch((previous) => previous + 1);
         return;
@@ -9883,6 +10442,9 @@ function PraxisDirectTuiApp(): JSX.Element {
             if (record.stage === "core/run") {
               setRunIndicator(null);
             }
+            if (record.stage === "core/capability_bridge") {
+              promoteSteerDispatchAfterToolCall();
+            }
             continue;
           }
 
@@ -10011,6 +10573,11 @@ function PraxisDirectTuiApp(): JSX.Element {
             });
             setRunIndicator(null);
             completedTurnIdsRef.current.add(turnId);
+            const releasedSteerCount = promoteSteerDispatchAfterTurnCompletion();
+            const releasedQueueCount = releasedSteerCount > 0 ? 0 : promoteQueueDispatchAfterTurnCompletion();
+            if (releasedSteerCount > 1 || releasedQueueCount > 1) {
+              pendingComposerDispatchChainInterruptRef.current = true;
+            }
             for (const key of [...toolFamilyStateRef.current.keys()]) {
               if (key.startsWith(`${turnId}:`)) {
                 toolFamilyStateRef.current.delete(key);
@@ -11163,7 +11730,7 @@ function PraxisDirectTuiApp(): JSX.Element {
     }
   };
 
-  const submitInput = async () => {
+  const submitInput = async (runningMode: PendingComposerDispatchMode | null = null) => {
     if (rewindInFlight) {
       return;
     }
@@ -11304,181 +11871,28 @@ function PraxisDirectTuiApp(): JSX.Element {
       return;
     }
 
-    const child = childRef.current;
-    if (!child || child.killed || backendStatus === "failed") {
-      const at = new Date().toISOString();
-      dispatchSurfaceEvent({
-        type: "error.reported",
-        at,
-        message: createSurfaceMessage({
-          messageId: `submit-error:${at}`,
-          kind: "error",
-          createdAt: at,
-          text: "backend unavailable, cannot send message",
-        }),
-      });
+    const preparedSubmission: PreparedOutboundSubmission = {
+      text: outboundMessage.trim(),
+      attachments,
+      pastedContents: tokenBackedPastedContents,
+      fileReferences: tokenBackedFileRefs,
+    };
+    if (runningMode && hasRunningForegroundWork()) {
+      enqueuePendingComposerDispatch(preparedSubmission, runningMode);
+      clearComposerDraft();
+      if (pendingInitNote) {
+        setPendingInitNote(null);
+      }
       return;
     }
-    const optimisticTurnIndex = resolveNextOptimisticTurnIndex({
-      existingTurns: surfaceState.turns,
-      transcriptMessages: transcriptMessagesRef.current,
-      usageLedger: sessionUsageLedgerRef.current,
-      pendingOutboundTurns: pendingOutboundTurnsRef.current,
-    });
-    const optimisticTurnId = createTurnId(optimisticTurnIndex);
-    const optimisticMessageId = `user:${optimisticTurnId}`;
-    const queuedAt = new Date().toISOString();
-    const submissionId = createPendingOutboundSubmissionId();
-    const preTurnTranscriptCutMessageId = transcriptMessagesRef.current[transcriptMessagesRef.current.length - 1]?.messageId;
-    const payload = attachments.length > 0
-      ? JSON.stringify({
-        type: "direct_user_input",
-        text: outboundMessage,
-        attachments: attachments.map((attachment) => ({
-          id: attachment.id,
-          tokenText: attachment.tokenText,
-          sourceKind: attachment.sourceKind,
-          displayName: attachment.displayName,
-          mimeType: attachment.mimeType,
-          localPath: attachment.localPath,
-          remoteUrl: attachment.remoteUrl,
-        })),
-        ...(tokenBackedPastedContents.length > 0
-          ? {
-            pastedContents: tokenBackedPastedContents.map((entry) => ({
-              id: entry.id,
-              tokenText: entry.tokenText,
-              text: entry.text,
-              characterCount: entry.characterCount,
-            })),
-          }
-          : {}),
-        ...(tokenBackedFileRefs.length > 0
-          ? {
-            fileRefs: tokenBackedFileRefs.map((entry) => ({
-              id: entry.id,
-              tokenText: entry.tokenText,
-              relativePath: entry.relativePath,
-              absolutePath: entry.absolutePath,
-              displayName: entry.displayName,
-            })),
-          }
-          : {}),
-      })
-      : tokenBackedPastedContents.length > 0 || tokenBackedFileRefs.length > 0
-        ? JSON.stringify({
-          type: "direct_user_input",
-          text: outboundMessage,
-          ...(tokenBackedPastedContents.length > 0
-            ? {
-              pastedContents: tokenBackedPastedContents.map((entry) => ({
-                id: entry.id,
-                tokenText: entry.tokenText,
-                text: entry.text,
-                characterCount: entry.characterCount,
-              })),
-            }
-            : {}),
-          ...(tokenBackedFileRefs.length > 0
-            ? {
-              fileRefs: tokenBackedFileRefs.map((entry) => ({
-                id: entry.id,
-                tokenText: entry.tokenText,
-                relativePath: entry.relativePath,
-                absolutePath: entry.absolutePath,
-                displayName: entry.displayName,
-              })),
-            }
-            : {}),
-        })
-        : outboundMessage;
-    turnUserTextRef.current.set(optimisticTurnId, outboundMessage.trim());
-    void persistPreTurnCheckpoint({
-      turnId: optimisticTurnId,
-      createdAt: queuedAt,
-      userText: outboundMessage.trim(),
-      transcriptCutMessageId: preTurnTranscriptCutMessageId,
-    });
-    dispatchSurfaceEvent({
-      type: "turn.started",
-      at: queuedAt,
-      turn: createSurfaceTurn({
-        turnId: optimisticTurnId,
-        sessionId: sessionIdRef.current,
-        turnIndex: optimisticTurnIndex,
-        status: "waiting",
-        startedAt: queuedAt,
-        updatedAt: queuedAt,
-        userText: outboundMessage.trim(),
-        outputMessageIds: [],
-        taskIds: [],
-      }),
-    });
-    dispatchSurfaceEvent({
-      type: "message.appended",
-      at: queuedAt,
-      message: createSurfaceMessage({
-        messageId: optimisticMessageId,
-        sessionId: sessionIdRef.current,
-        turnId: optimisticTurnId,
-        kind: "user",
-        text: outboundMessage.trim(),
-        createdAt: queuedAt,
-        metadata: {
-          optimistic: true,
-          submissionId,
-          deliveryState: "queued",
-        },
-      }),
-    });
-    pendingOutboundTurnsRef.current.push({
-      submissionId,
-      turnIndex: optimisticTurnIndex,
-      turnId: optimisticTurnId,
-      messageId: optimisticMessageId,
-      userText: outboundMessage.trim(),
-      queuedAt,
-    });
-    setConversationActivated(true);
-    setRunIndicator({
-      startedAt: queuedAt,
-      label: backendStatus === "ready" ? "queued" : "waiting for backend",
-    });
-    try {
-      child.stdin.write(`${payload}\u0000`);
-    } catch (error) {
-      pendingOutboundTurnsRef.current = pendingOutboundTurnsRef.current.filter((entry) => entry.submissionId !== submissionId);
-      dispatchSurfaceEvent({
-        type: "message.updated",
-        at: queuedAt,
-        message: createSurfaceMessage({
-          messageId: optimisticMessageId,
-          sessionId: sessionIdRef.current,
-          turnId: optimisticTurnId,
-          kind: "user",
-          text: outboundMessage.trim(),
-          createdAt: queuedAt,
-          updatedAt: queuedAt,
-          metadata: {
-            optimistic: false,
-            submissionId,
-            deliveryState: "failed",
-            failureReason: error instanceof Error ? error.message : String(error),
-          },
-        }),
-      });
-      appendInlineError(`Failed to queue the message: ${error instanceof Error ? error.message : String(error)}`);
-      setRunIndicator(null);
+    const sent = await sendPreparedOutboundSubmission(preparedSubmission);
+    if (!sent) {
       return;
     }
     if (pendingInitNote) {
       setPendingInitNote(null);
     }
-    setComposerState(createTuiTextInputState());
-    setComposerAttachments([]);
-    setComposerPastedContents([]);
-    setComposerFileReferences([]);
-    setScrollOffset(0);
+    clearComposerDraft();
   };
 
   const interruptActiveRun = (announceNotice: boolean) => {
@@ -11486,7 +11900,7 @@ function PraxisDirectTuiApp(): JSX.Element {
     if (!child || child.killed) {
       return false;
     }
-    if (!(runIndicator || interruptibleTasksRef.current.length > 0 || activeTurnIdsRef.current.size > 0)) {
+    if (!(runIndicatorRef.current || interruptibleTasksRef.current.length > 0 || activeTurnIdsRef.current.size > 0)) {
       return false;
     }
     interruptPendingRef.current = true;
@@ -11582,6 +11996,77 @@ function PraxisDirectTuiApp(): JSX.Element {
     child.kill("SIGINT");
     return true;
   };
+
+  const readyNextPendingComposerDispatchForImmediateSend = () => {
+    const releasedCount = releasePendingComposerDispatchBatch("force_interrupt");
+    if (releasedCount <= 0 && !getLeadingPendingComposerDispatch()) {
+      return false;
+    }
+    pendingComposerDispatchChainInterruptRef.current = releasedCount > 1;
+    return interruptActiveRun(false);
+  };
+
+  const promoteSteerDispatchAfterToolCall = () => {
+    const leadingEntry = getLeadingPendingComposerDispatch();
+    if (!leadingEntry || leadingEntry.mode !== "steer" || leadingEntry.status !== "waiting_tool_end") {
+      return;
+    }
+    const releasedCount = releasePendingComposerDispatchBatch("tool_call_end");
+    if (releasedCount <= 0) {
+      return;
+    }
+    pendingComposerDispatchChainInterruptRef.current = releasedCount > 1;
+    interruptActiveRun(false);
+  };
+
+  const promoteSteerDispatchAfterTurnCompletion = () => {
+    const leadingEntry = getLeadingPendingComposerDispatch();
+    if (!leadingEntry || leadingEntry.mode !== "steer" || leadingEntry.status !== "waiting_tool_end") {
+      return 0;
+    }
+    return releasePendingComposerDispatchBatch("turn_end");
+  };
+
+  const promoteQueueDispatchAfterTurnCompletion = () => {
+    const leadingEntry = getLeadingPendingComposerDispatch();
+    if (!leadingEntry || leadingEntry.mode !== "queue" || leadingEntry.status !== "waiting_turn_end") {
+      return 0;
+    }
+    return releasePendingComposerDispatchBatch("turn_end");
+  };
+
+  useEffect(() => {
+    const pendingEntry = pendingComposerDispatches[0];
+    if (!pendingEntry) {
+      pendingComposerDispatchFlushRef.current = null;
+      return;
+    }
+    if (!pendingEntry || pendingEntry.status !== "ready") {
+      pendingComposerDispatchFlushRef.current = null;
+      return;
+    }
+    if (backendStatus !== "ready" || hasRunningForegroundWork()) {
+      return;
+    }
+    if (pendingComposerDispatchFlushRef.current === pendingEntry.id) {
+      return;
+    }
+    pendingComposerDispatchFlushRef.current = pendingEntry.id;
+    void (async () => {
+      const sent = await sendPreparedOutboundSubmission({
+        text: pendingEntry.text,
+        attachments: pendingEntry.attachments,
+        pastedContents: pendingEntry.pastedContents,
+        fileReferences: pendingEntry.fileReferences,
+      });
+      pendingComposerDispatchFlushRef.current = null;
+      if (sent) {
+        removePendingComposerDispatchById(pendingEntry.id);
+        pendingComposerDispatchChainInterruptRef.current =
+          (pendingComposerDispatchesRef.current[0]?.status === "ready");
+      }
+    })();
+  }, [backendStatus, pendingComposerDispatches, runIndicator, surfaceState]);
 
   useInput((inputText, key) => {
     if (rewindInFlight) {
@@ -11864,6 +12349,11 @@ function PraxisDirectTuiApp(): JSX.Element {
         return;
       }
       flushPendingPasteText();
+      if (pendingComposerDispatchesRef.current.length > 0 && hasRunningForegroundWork()) {
+        if (readyNextPendingComposerDispatchForImmediateSend()) {
+          return;
+        }
+      }
       if (runIndicator || interruptibleTasksRef.current.length > 0 || activeTurnIdsRef.current.size > 0) {
         interruptActiveRun(true);
         return;
@@ -12116,6 +12606,49 @@ function PraxisDirectTuiApp(): JSX.Element {
         confirmCurrentQuestionAnswer();
         return;
       }
+    }
+
+    if (activeSlashPanelId === "mp" && ((key.tab && !key.shift) || inputText === "\t")) {
+      setSlashPanelDraft((previous) => ({
+        ...previous,
+        [mpViewerSubtabDraftKey()]: cycleMpViewerSubtab(
+          resolveMpViewerSubtab(previous[mpViewerSubtabDraftKey()]),
+        ),
+      }));
+      setSlashPanelNotice(null);
+      return;
+    }
+
+    if (
+      activeSlashPanelId === "mp"
+      && slashPanelView
+      && !key.escape
+      && !key.return
+      && !key.upArrow
+      && !key.downArrow
+      && !key.leftArrow
+      && !key.rightArrow
+      && inputText.length > 0
+    ) {
+      return;
+    }
+
+    if (
+      activeSlashPanelId === "mp"
+      && resolveMpViewerSubtab(slashPanelDraft[mpViewerSubtabDraftKey()]) === "summary"
+      && (key.leftArrow || key.rightArrow)
+    ) {
+      const delta = key.leftArrow ? -12 : 12;
+      const maxScrollX = typeof slashPanelView?.summaryMaxScrollX === "number" ? slashPanelView.summaryMaxScrollX : 0;
+      setSlashPanelDraft((previous) => {
+        const current = resolveMpViewerSummaryScrollX(previous);
+        const next = Math.max(0, Math.min(current + delta, maxScrollX));
+        return {
+          ...previous,
+          [mpViewerSummaryScrollDraftKey()]: String(next),
+        };
+      });
+      return;
     }
 
     if (
@@ -12410,10 +12943,25 @@ function PraxisDirectTuiApp(): JSX.Element {
       }
     }
 
+    if (
+      key.tab
+      && !key.shift
+      && !showSlashMenu
+      && !activeSlashPanelId
+      && !workspacePickerInputState
+      && !activeFileMention
+    ) {
+      flushPendingPasteText();
+      if (hasRunningForegroundWork()) {
+        void submitInput("queue");
+      }
+      return;
+    }
+
     flushPendingPasteText();
     const inputResult = applyTuiTextInputKey(composerState, inputText, key);
     if (inputResult.submit) {
-      void submitInput();
+      void submitInput(hasRunningForegroundWork() ? "steer" : null);
       return;
     }
     if (inputResult.handled) {
@@ -12429,6 +12977,40 @@ function PraxisDirectTuiApp(): JSX.Element {
   const terminalRows = terminalSize.rows;
   const terminalColumns = terminalSize.columns;
   const transcriptLineWidth = Math.max(1, terminalColumns - 2);
+  const pendingComposerDispatchPreviewLines = useMemo(
+    () => {
+      if (pendingComposerDispatches.length === 0) {
+        return [] as Array<Array<{ text: string; color: string }>>;
+      }
+      const totalCount = pendingComposerDispatches.length;
+      const activeEntryId = pendingComposerDispatches[0]?.id ?? null;
+      return pendingComposerDispatches
+        .map((entry, index) => ({ entry, index }))
+        .reverse()
+        .map(({ entry, index }) => {
+          const leader = resolvePendingComposerDispatchPreviewLeader(totalCount - index);
+          const suffix = entry.id === activeEntryId
+            ? ` ${resolvePendingComposerDispatchStatusCopy(entry.mode)}`
+            : "";
+          const previewSourceText = entry.text.length > 0 ? entry.text : "[Attachment]";
+          const availableBodyWidth = Math.max(
+            1,
+            Math.min(
+              40,
+              transcriptLineWidth - stringWidth(leader) - stringWidth(">> ") - stringWidth(suffix),
+            ),
+          );
+          const truncatedBody = truncatePendingComposerPreviewText(previewSourceText, availableBodyWidth);
+          return [
+            { text: leader, color: TUI_THEME.text },
+            { text: ">> ", color: entry.mode === "steer" ? TUI_THEME.red : RUSH_MODE_BADGE_COLOR },
+            ...renderComposerLineFragments(truncatedBody, TUI_THEME.text),
+            ...(suffix.length > 0 ? [{ text: suffix, color: TUI_THEME.textMuted }] : []),
+          ];
+        });
+    },
+    [pendingComposerDispatches, transcriptLineWidth],
+  );
   const composerDisplayState = rewindInFlight
     ? createTuiTextInputState()
     : workspacePickerInputState
@@ -12989,6 +13571,7 @@ function PraxisDirectTuiApp(): JSX.Element {
         : composerPopup
           ? composerPopupLineCount
           : (showSlashMenu ? commandPaletteItems.length + 1 : 0))
+      + pendingComposerDispatchPreviewLines.length
       + 1
       + composerLines.length
       + 1
@@ -13092,12 +13675,13 @@ function PraxisDirectTuiApp(): JSX.Element {
           slashPanelNotice={slashPanelNotice}
           commandPaletteItems={commandPaletteItems}
           selectedSlashIndex={selectedSlashIndex}
+          pendingComposerDispatchPreviewLines={pendingComposerDispatchPreviewLines}
           composerValue={composerDisplayState.value}
           composerLines={composerLines}
           composerPlaceholder={rewindInFlight ? "" : composerPlaceholder}
           composerPrefix={composerPrefix}
           composerPrefixColor={composerPrefixColor}
-          composerInputLocked={Boolean(rewindInFlight)}
+          composerInputLocked={Boolean(rewindInFlight || activeSlashPanelId === "mp")}
           workspaceLabel={cwdLabel}
           contextBar={contextBar}
           contextPercent={contextPercent}
