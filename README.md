@@ -458,6 +458,7 @@ dependencies: [
 如果你是在做 runtime 装配、宿主桥接或导出边界，再考虑 `PraxisHostContracts`、`PraxisHostRuntime` 或 `PraxisFFI`。
 当前对外导出边界的兼容说明、release policy 和 migration baseline 分别在：
 
+- 5 分钟接入路径见 [docs/PraxisQuickStart.md](./docs/PraxisQuickStart.md)。
 - [docs/PraxisFFICompatibility.md](./docs/PraxisFFICompatibility.md)
 - [docs/PraxisReleasePolicy.md](./docs/PraxisReleasePolicy.md)
 - [docs/PraxisMigrationNotes.md](./docs/PraxisMigrationNotes.md)
