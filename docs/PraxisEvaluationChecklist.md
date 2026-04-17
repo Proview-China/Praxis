@@ -21,6 +21,8 @@ Use this checklist when you need to decide whether Praxis is ready for your host
   This is the default public entry for real callers, and it is the surface the support matrix marks as `recommended`.
 - [ ] Start with `PraxisRuntimeInterface` or `PraxisFFI` only if your host needs a transport-safe exported boundary.
   If that is your path, review schema and release discipline first in [docs/PraxisMigrationNotes.md](./PraxisMigrationNotes.md) and [docs/PraxisReleasePolicy.md](./PraxisReleasePolicy.md).
+- [ ] Start with [docs/PraxisDemoHost.md](./PraxisDemoHost.md) if you want to inspect one native host baseline instead of only command-line embedding examples.
+  Use this when your evaluator question is "show me a real native macOS host entrypoint." Read the doc first, then use `./script/build_and_run.sh --verify` if you want proof that the native host bundle launches locally. The demo host stays intentionally narrow: one window, one fixed demo goal, and one returned evidence summary.
 - [ ] Start with reviewer or durable examples only when your integration needs those exact operator-facing readbacks.
   Use `PraxisRuntimeKitCmpTapExample` for reviewer context and `PraxisRuntimeKitDurableRuntimeExample` for checkpoint / provisioning / replay recovery, instead of inventing your own first-read path.
 
