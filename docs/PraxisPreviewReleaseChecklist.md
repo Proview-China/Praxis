@@ -11,8 +11,8 @@ Target the first preview only after the outward-facing docs, RuntimeKit examples
 - selected first preview version: `v0.1.0-preview.1`
 - release state: pre-tag preparation only
 - publication state: no tag yet, not yet published
-- evidence handoff path: `docs/PraxisPreviewReleaseEvidence.md`
-- version-scoped draft package path: `docs/releases/v0.1.0-preview.1/`
+- canonical evidence source: [PraxisPreviewReleaseEvidence.md](./PraxisPreviewReleaseEvidence.md)
+- deferred future version-scoped handoff path: `docs/releases/v0.1.0-preview.1/`
 
 ## Public Blocking CI Baseline
 
@@ -58,13 +58,14 @@ swift run PraxisRuntimeKitSmoke --suite all
 
 Use `PraxisRuntimeKitSmoke --suite all` as the aggregate regression sweep and `./script/build_and_run.sh --verify` as native demo-host launch evidence.
 
-Record the command evidence in `docs/PraxisPreviewReleaseEvidence.md` and treat `docs/releases/v0.1.0-preview.1/` as the package handoff location for the first preview draft set before any tag is created.
+Record the command evidence in [PraxisPreviewReleaseEvidence.md](./PraxisPreviewReleaseEvidence.md). Treat `docs/releases/v0.1.0-preview.1/` only as a later handoff location for a future version-scoped draft set, not as a prerequisite for the current Task 2 evidence record.
 
 ## Required Docs
 
 - `README.md`
 - `CHANGELOG.md`
 - `docs/PraxisPreviewReleaseNote.md`
+- `docs/PraxisPreviewReleaseEvidence.md`
 - `docs/PraxisPositioning.md`
 - `docs/PraxisEvaluationChecklist.md`
 - `docs/PraxisDemoHost.md`
@@ -83,6 +84,7 @@ Record the command evidence in `docs/PraxisPreviewReleaseEvidence.md` and treat 
 - preview version string selected
 - `v0.1.0-preview.1` is threaded through the release-facing docs as a pre-tag first preview target
 - blocking CI workflow green on the release branch
+- canonical evidence is captured through `docs/PraxisPreviewReleaseEvidence.md` before any future tag is cut
 - Linux placeholder / degraded language reviewed for honesty
 - governed execution wording keeps declared contract separate from enforced host behavior where relevant
 - durable runtime and reviewer-context wording stays scoped to recovery/readback evidence rather than a general execution-console claim

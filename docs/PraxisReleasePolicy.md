@@ -63,12 +63,13 @@ If the release touches exported schemas or host integration guidance, also updat
 
 ## Current Preview Preparation Artifacts
 
-For the current pre-tag `v0.1.0-preview.1` preparation lane, also assemble:
+For the current pre-tag `v0.1.0-preview.1` preparation lane, the current Task 2 preparation artifacts are:
 
 - `docs/PraxisPreviewReleaseNote.md`
 - `docs/PraxisPreviewReleaseChecklist.md`
-- `docs/PraxisPreviewReleaseEvidence.md`
-- `docs/releases/v0.1.0-preview.1/`
+- `docs/PraxisPreviewReleaseEvidence.md` as the canonical verification and manual sign-off source
+
+After the pre-tag evidence and sign-off work is complete, later preview-preparation follow-up may assemble the pending version-scoped package at `docs/releases/v0.1.0-preview.1/`. That package is not a current Task 2 deliverable and should not replace `docs/PraxisPreviewReleaseEvidence.md` as the canonical current evidence source.
 
 These items are specific to the current preview thread and should not be read as a permanent release-artifact requirement for every future version.
 
@@ -122,4 +123,4 @@ swift run PraxisRuntimeKitSmoke --suite all
 ./script/build_and_run.sh --verify
 ```
 
-Release verification intentionally exceeds public CI coverage. If one of these heavier local checks is skipped, the release note should state which check was skipped and why. For `v0.1.0-preview.1`, these checks support pre-tag preparation first and should not be described as publication evidence until the tag exists.
+Release verification intentionally exceeds public CI coverage. If one of these heavier local checks is skipped, record which check was skipped, why, and the manual review interpretation in [PraxisPreviewReleaseEvidence.md](./PraxisPreviewReleaseEvidence.md) as the primary explanation surface. A later release note may summarize that outcome, but it should not replace the evidence record. For `v0.1.0-preview.1`, do not describe the result as publication evidence until the tag exists.

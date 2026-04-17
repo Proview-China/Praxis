@@ -14,7 +14,7 @@ Can a new host or SDK integrator understand the exported surface, estimate compa
 - Exported schema version rules are documented in one place and match codec behavior.
 - Embedding examples cover the smallest bridge path and the host-like negotiation path.
 - Release policy, migration notes, support matrix, safety notes, and performance baseline all exist and cross-reference the same exported contract.
-- Public blocking CI and heavier local or release-only verification are aligned across release, support, evaluation, and audit documents.
+- Public blocking CI and Release-Only Additional Verification are aligned across release, support, evaluation, and audit documents.
 - Linux is described honestly as placeholder or degraded host truth where parity does not exist.
 
 ## Current Status
@@ -23,6 +23,7 @@ As of the current Phase 6 baseline, the repository has assembled the current pre
 
 - `CHANGELOG.md`
 - `docs/PraxisPreviewReleaseNote.md`
+- `docs/PraxisPreviewReleaseEvidence.md`
 - `PraxisFFIEmbeddingExample`
 - `PraxisAppleHostEmbeddingExample`
 - `PraxisExportBaselineExample`
@@ -35,7 +36,7 @@ As of the current Phase 6 baseline, the repository has assembled the current pre
 - `docs/PraxisHighRiskCapabilitySafety.md`
 - `docs/PraxisPerformanceBaseline.md`
 
-Before the first preview tag is cut, `docs/PraxisPreviewReleaseEvidence.md` and `docs/releases/v0.1.0-preview.1/` remain pending as release-preparation handoff artifacts that should join this set.
+The canonical command and sign-off record now lives in [PraxisPreviewReleaseEvidence.md](./PraxisPreviewReleaseEvidence.md). Any later `docs/releases/v0.1.0-preview.1/` package is follow-up handoff work, not a prerequisite for the current Task 2 evidence record.
 
 ## Audit Notes
 
@@ -73,7 +74,7 @@ swift run PraxisRuntimeKitSmoke --suite shell-approval
 swift build --product PraxisDemoHostApp
 ```
 
-Then run the heavier local-only checks:
+Then run the Release-Only Additional Verification checks:
 
 ```bash
 swift run PraxisRuntimeKitSmoke --suite all
@@ -83,6 +84,7 @@ swift run PraxisRuntimeKitSmoke --suite all
 Then manually confirm:
 
 - README, release policy, preview checklist, evaluation checklist, and closure audit describe the same two-tier verification story
+- `PraxisPreviewReleaseEvidence.md` remains discoverable from the preview checklist, release policy, and closure audit
 - the selected first preview target stays `v0.1.0-preview.1` and is still described as pre-tag and not yet published until a tag exists
 - support matrix matches actual claimed platform truth
 - release policy and migration notes still match current codec behavior
