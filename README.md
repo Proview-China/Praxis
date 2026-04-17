@@ -3,7 +3,7 @@
 Praxis 是一个基于 Swift + SwiftPM 的本地 agent runtime framework。仓库当前主线不是 CLI、TUI 或 GUI，而是一组可嵌入、可测试、可导出的 runtime products，用来承载 run lifecycle、capability governance、project context、memory retrieval 和 host export boundary。
 
 对大多数 Swift 调用方，默认公开入口是 `PraxisRuntimeKit`。
-当前仓库推进节奏与阶段顺序，统一以 [TAKEOVER_EXECUTION_WORKFLOW.md](/Users/shiyu/Documents/Project/Praxis/TAKEOVER_EXECUTION_WORKFLOW.md) 为准。
+当前仓库推进节奏与阶段顺序，统一以 [TAKEOVER_EXECUTION_WORKFLOW.md](./TAKEOVER_EXECUTION_WORKFLOW.md) 为准。
 
 ## Quick Start
 
@@ -152,12 +152,12 @@ Praxis 当前的设计目标是把运行时拆成边界明确的 Swift package p
 
 当前 decode 规则会兼容缺失版本字段的 legacy payload，并拒绝未知版本值或显式 `null` 版本值。
 `inspectArchitecture` / `bootstrapSnapshot` 现在也会返回 machine-readable 的 supported schema versions 与 legacy compatibility flag，便于 embedding host 在发出业务请求前做协商。
-更完整的兼容说明见 [docs/PraxisFFICompatibility.md](/Users/shiyu/Documents/Project/Praxis/docs/PraxisFFICompatibility.md)。
-发布和升级纪律见 [docs/PraxisReleasePolicy.md](/Users/shiyu/Documents/Project/Praxis/docs/PraxisReleasePolicy.md) 与 [docs/PraxisMigrationNotes.md](/Users/shiyu/Documents/Project/Praxis/docs/PraxisMigrationNotes.md)。
-当前公开面支持矩阵见 [docs/PraxisSupportMatrix.md](/Users/shiyu/Documents/Project/Praxis/docs/PraxisSupportMatrix.md)。
-高风险 capability 安全说明见 [docs/PraxisHighRiskCapabilitySafety.md](/Users/shiyu/Documents/Project/Praxis/docs/PraxisHighRiskCapabilitySafety.md)。
-导出面性能/资源基线见 [docs/PraxisPerformanceBaseline.md](/Users/shiyu/Documents/Project/Praxis/docs/PraxisPerformanceBaseline.md)。
-Phase 6 收尾审计清单见 [docs/PraxisClosureAudit.md](/Users/shiyu/Documents/Project/Praxis/docs/PraxisClosureAudit.md)。
+更完整的兼容说明见 [docs/PraxisFFICompatibility.md](./docs/PraxisFFICompatibility.md)。
+发布和升级纪律见 [docs/PraxisReleasePolicy.md](./docs/PraxisReleasePolicy.md) 与 [docs/PraxisMigrationNotes.md](./docs/PraxisMigrationNotes.md)。
+当前公开面支持矩阵见 [docs/PraxisSupportMatrix.md](./docs/PraxisSupportMatrix.md)。
+高风险 capability 安全说明见 [docs/PraxisHighRiskCapabilitySafety.md](./docs/PraxisHighRiskCapabilitySafety.md)。
+导出面性能/资源基线见 [docs/PraxisPerformanceBaseline.md](./docs/PraxisPerformanceBaseline.md)。
+Phase 6 收尾审计清单见 [docs/PraxisClosureAudit.md](./docs/PraxisClosureAudit.md)。
 
 ## Recommended Entry
 
@@ -202,7 +202,7 @@ print(run.phaseSummary)
 
 当前可直接参考的真实用法，优先看：
 
-- [PraxisRuntimeKitTests.swift](/Users/shiyu/Documents/Project/Praxis/Tests/PraxisRuntimeKitTests/PraxisRuntimeKitTests.swift)
+- [PraxisRuntimeKitTests.swift](./Tests/PraxisRuntimeKitTests/PraxisRuntimeKitTests.swift)
 
 这个测试 target 已覆盖：
 
@@ -415,6 +415,12 @@ swift package describe
 swift test
 ```
 
+当前验证分工按下面这条规则理解：
+
+- `swift test` 是当前 durable runtime / export path 的主验证入口；integration-style tests 也承担了当前仓库的 e2e 责任。
+- `PraxisRuntimeKitSmoke` 是当前 shipped 的可执行 smoke harness，用来做跨模块快速回归和 operator-friendly 验收。
+- 当前仓库还没有单独发布 `PraxisRuntimeKitE2E` 之类的独立 e2e executable product；如果后续补上，README 和执行手册会一起更新。
+
 如果只想先验证公开 API 或边界守卫，可以按需执行：
 
 ```bash
@@ -450,12 +456,12 @@ dependencies: [
 如果你是在做 runtime 装配、宿主桥接或导出边界，再考虑 `PraxisHostContracts`、`PraxisHostRuntime` 或 `PraxisFFI`。
 当前对外导出边界的兼容说明、release policy 和 migration baseline 分别在：
 
-- [docs/PraxisFFICompatibility.md](/Users/shiyu/Documents/Project/Praxis/docs/PraxisFFICompatibility.md)
-- [docs/PraxisReleasePolicy.md](/Users/shiyu/Documents/Project/Praxis/docs/PraxisReleasePolicy.md)
-- [docs/PraxisMigrationNotes.md](/Users/shiyu/Documents/Project/Praxis/docs/PraxisMigrationNotes.md)
-- [docs/PraxisSupportMatrix.md](/Users/shiyu/Documents/Project/Praxis/docs/PraxisSupportMatrix.md)
-- [docs/PraxisHighRiskCapabilitySafety.md](/Users/shiyu/Documents/Project/Praxis/docs/PraxisHighRiskCapabilitySafety.md)
-- [CHANGELOG.md](/Users/shiyu/Documents/Project/Praxis/CHANGELOG.md)
+- [docs/PraxisFFICompatibility.md](./docs/PraxisFFICompatibility.md)
+- [docs/PraxisReleasePolicy.md](./docs/PraxisReleasePolicy.md)
+- [docs/PraxisMigrationNotes.md](./docs/PraxisMigrationNotes.md)
+- [docs/PraxisSupportMatrix.md](./docs/PraxisSupportMatrix.md)
+- [docs/PraxisHighRiskCapabilitySafety.md](./docs/PraxisHighRiskCapabilitySafety.md)
+- [CHANGELOG.md](./CHANGELOG.md)
 
 ## Repository Layout
 

@@ -34,7 +34,7 @@ This document records the current support baseline for exported Praxis surfaces.
 | `mp.project(...).overview(...)` / `search(...)` / `resolve(...)` / `history(...)` | ready | ready | Uses local semantic memory and heuristic baseline. |
 | `mp.project(...).smoke()` | ready | ready | Host-neutral smoke surface. |
 | system shell / system git / process supervision | macOS-only baseline | placeholder only | Linux implementation remains explicitly postponed. |
-| `PraxisRuntimeKitSmoke` | ready | compile-safe, expected degraded host checks | Smoke harness is a verification product, not a fully backed cross-platform runtime claim. |
+| `PraxisRuntimeKitSmoke` | ready | compile-safe, expected degraded host checks | Smoke harness is the shipped executable smoke entry. It is not a fully backed cross-platform runtime claim, and it does not replace the current integration-style `swift test` e2e coverage. |
 
 ## Export Surface Matrix
 
