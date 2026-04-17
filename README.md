@@ -26,6 +26,7 @@ swift run PraxisRuntimeKitSmoke --suite code-patch
 swift run PraxisRuntimeKitSmoke --suite shell
 swift run PraxisRuntimeKitSmoke --suite shell-approval
 swift run PraxisRuntimeKitSmoke --suite code-sandbox
+swift run PraxisRuntimeKitSmoke --suite cmp-tap
 swift run PraxisRuntimeKitSmoke --suite recovery
 swift run PraxisRuntimeKitSmoke --suite provisioning
 swift run PraxisRuntimeKitSmoke --suite all
@@ -36,7 +37,7 @@ swift run PraxisRuntimeKitSmoke --suite all
 - `PraxisRuntimeKitRunExample`
   展示 `runs.run(...)` 与 `runs.resumeRun(...)`。
 - `PraxisRuntimeKitCmpTapExample`
-  展示 project-scoped CMP approval、TAP overview、`tap.inspect()` reviewer context，以及 `reviewWorkbench()` 聚合读面。
+  展示 project-scoped CMP approval、TAP overview、`tap.inspect()` reviewer context，以及 `reviewWorkbench()` 聚合读面；对应 shipped reviewer path 是 `swift run PraxisRuntimeKitCmpTapExample`，并用 `swift run PraxisRuntimeKitSmoke --suite cmp-tap`、`swift run PraxisRuntimeKitSmoke --suite recovery`、`swift run PraxisRuntimeKitSmoke --suite provisioning` 核对 provider skill / provider MCP tool discovery、recent activity / durable evidence readback 与 provisioning summaries。
 - reviewer context 说明见 [docs/PraxisReviewerContextGuide.md](./docs/PraxisReviewerContextGuide.md)。
 - `PraxisRuntimeKitMpExample`
   展示 MP overview、search、resolve、history。
@@ -60,6 +61,8 @@ swift run PraxisRuntimeKitSmoke --suite all
   展示 Phase 5 第一条 bounded shell 路径；macOS 走真实本地 shell，Linux 诚实返回 placeholder failed-to-launch 语义。
 - `PraxisRuntimeKitSmoke --suite shell-approval`
   展示 Phase 5 第二条 bounded shell approval 路径；请求、readback 与 fresh-client recovery 都通过 CMP/TAP durable approval state 完成。
+- `PraxisRuntimeKitSmoke --suite cmp-tap`
+  展示 reviewer context 的 CMP/TAP evidence chain：`tap.inspect()`、project-scoped `reviewWorkbench()`、provider skill / MCP tool discovery，以及当前可读回的 reviewer-facing durable evidence；这不是跨平台 fully-backed execution console 声明。
 - `PraxisRuntimeKitSmoke --suite provisioning`
   展示 Phase 4 的 host-neutral provisioning receipt、activation staging、project-scoped provisioning readback、pending replay，以及 inspection/readback 恢复链。
 
@@ -344,9 +347,9 @@ print(generated.outputText)
 | `capabilities.callTool(...)` / `uploadFile(...)` / `submitBatch(...)` | ready | ready | 当前复用本地 MCP / file store / batch baseline；`tool.call` 只接受 provider MCP tool registry 已注册的工具名 |
 | `capabilities.openSession(...)` | ready | ready | 当前先提供 caller-scoped runtime session header，durable 恢复链后续再继续接深 |
 | `capabilities.searchWeb(...)` / `fetchSearchResult(...)` / `groundSearchResult(...)` | ready | placeholder-backed SDK seam | 当前 search 链先接 deterministic local baseline；Linux 仍未接真实 browser / search substrate |
-| `tap.inspect()` | ready | ready with degraded host summaries | 当前 inspection 会暴露 reviewer backlog、latest decision、section summaries、provider skill / MCP tool discovery 和 recovery hints；TAP approval request / decision 也会自动刷新 inspection checkpoint；Linux 仍会诚实反映 placeholder host truth |
+| `tap.inspect()` | ready | ready with degraded host summaries | 当前 inspection 会暴露 reviewer backlog、latest decision、section summaries、provider skill / provider MCP tool discovery，以及 recovery / durable evidence readback hints；TAP approval request / decision 也会自动刷新 inspection checkpoint；Linux 仍会诚实反映 degraded host summaries |
 | `tap.project(...).overview(...)` | ready | ready | TAP 读取面可用，但其 capability 可见性仍受宿主 wiring 影响 |
-| `tap.project(...).reviewWorkbench(...)` | ready | ready with degraded host summaries | 当前 workbench 聚合 inspection / TAP history / CMP overview / reviewer queue，Linux 下仍会诚实暴露 placeholder host truth |
+| `tap.project(...).reviewWorkbench(...)` | ready | ready with degraded host summaries | 当前 workbench 聚合 inspection / TAP history / CMP overview / reviewer queue，并在适用时读回 recent provider activity 与 durable evidence summaries；Linux 下仍会诚实暴露 degraded host summaries |
 | `cmp.project(...).overview(...)` / `approvalOverview(...)` | ready | ready with degraded host summaries | Linux 下 git / shell / process 仍会退化为占位语义 |
 | `cmp.project(...).smoke()` | ready | degraded | smoke 会诚实反映 git executor / host runtime 退化状态 |
 | `mp.project(...).overview(...)` / `search(...)` / `resolve(...)` / `history(...)` | ready | ready | 当前默认走本地 semantic memory / local heuristic baseline |
