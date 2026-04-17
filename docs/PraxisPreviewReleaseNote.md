@@ -1,8 +1,16 @@
 # Praxis Preview Release Note
 
+This document drafts the first Praxis preview release note for `v0.1.0-preview.1`. The target remains in pre-tag preparation and is not yet published.
+
 This first preview exposes the current Praxis public baseline for Swift, Apple-hosted embedding, and one native macOS demo-host lane without pretending that the broader repository is already a fully mature cross-platform agent framework.
 
 The goal of this preview is to make the current public contract reviewable from the outside: what the default Swift integration surface is, what the encoded export boundary looks like today, how the shipped embedding paths are expected to behave, and which verification commands and reference documents define the current baseline.
+
+## Release Target
+
+- selected first preview version: `v0.1.0-preview.1`
+- release state: pre-tag preparation only
+- publication state: no tag yet, not yet published
 
 ## What This First Preview Exposes
 
@@ -70,7 +78,7 @@ swift build --product PraxisDemoHostApp
 ./script/build_and_run.sh --verify
 ```
 
-This command set defines the baseline that an outside evaluator should expect to run when checking the current preview story.
+This command set defines the baseline that an outside evaluator should expect to run when checking the current preview story before the first preview tag is cut.
 It intentionally goes beyond the narrower exported-surface minimum in the release policy so the preview can cover the export boundary, the current caller-facing RuntimeKit baseline, and the first native macOS demo-host proof point.
 If you want the surface-by-surface smoke gates behind governed execution, reviewer context, durable recovery, or provisioning, use [PraxisEvaluationChecklist.md](./PraxisEvaluationChecklist.md) as the deeper evaluation guide.
 
@@ -88,7 +96,7 @@ Use these documents as the source of truth for the current preview:
 - performance and resident-memory baseline truth for the exported path: [PraxisPerformanceBaseline.md](./PraxisPerformanceBaseline.md)
 - release discipline and release-bucket rules: [PraxisReleasePolicy.md](./PraxisReleasePolicy.md)
 - current repository-facing public baseline summary: [PraxisRepositoryBaseline.md](./PraxisRepositoryBaseline.md)
-- shipped change summary for the next release cut: [CHANGELOG.md](../CHANGELOG.md)
+- shipped change summary for the prepared first preview cut: [CHANGELOG.md](../CHANGELOG.md)
 
 When these documents disagree with a higher-level summary, prefer the more specific contract document for that surface.
 For example, support labels come from the support matrix, sandbox and approval claims come from the safety note, and export-surface baseline interpretation comes from the performance note.

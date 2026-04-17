@@ -1,6 +1,6 @@
 # Praxis Closure Audit
 
-This document records the Phase 6 close-out audit from the perspective of a first-time external integrator evaluating Praxis.
+This document records the Phase 6 close-out audit from the perspective of a first-time external integrator evaluating Praxis. For the first preview cut, the current deliverable is pre-tag release preparation for `v0.1.0-preview.1`, not an already published release.
 
 ## Audit Goal
 
@@ -19,8 +19,10 @@ Can a new host or SDK integrator understand the exported surface, estimate compa
 
 ## Current Status
 
-As of the current Phase 6 baseline, the repository now ships the closure package below:
+As of the current Phase 6 baseline, the repository has assembled the current pre-tag preview preparation set below:
 
+- `CHANGELOG.md`
+- `docs/PraxisPreviewReleaseNote.md`
 - `PraxisFFIEmbeddingExample`
 - `PraxisAppleHostEmbeddingExample`
 - `PraxisExportBaselineExample`
@@ -32,6 +34,8 @@ As of the current Phase 6 baseline, the repository now ships the closure package
 - `docs/PraxisSupportMatrix.md`
 - `docs/PraxisHighRiskCapabilitySafety.md`
 - `docs/PraxisPerformanceBaseline.md`
+
+Before the first preview tag is cut, `docs/PraxisPreviewReleaseEvidence.md` and `docs/releases/v0.1.0-preview.1/` remain pending as release-preparation handoff artifacts that should join this set.
 
 ## Audit Notes
 
@@ -79,6 +83,7 @@ swift run PraxisRuntimeKitSmoke --suite all
 Then manually confirm:
 
 - README, release policy, preview checklist, evaluation checklist, and closure audit describe the same two-tier verification story
+- the selected first preview target stays `v0.1.0-preview.1` and is still described as pre-tag and not yet published until a tag exists
 - support matrix matches actual claimed platform truth
 - release policy and migration notes still match current codec behavior
 - schema-version docs still describe missing fields, explicit `null`, and unknown version values correctly

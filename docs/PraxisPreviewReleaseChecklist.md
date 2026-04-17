@@ -2,7 +2,17 @@
 
 ## Release Intent
 
+This checklist prepares `v0.1.0-preview.1` as the first Praxis preview cut. It remains a pre-tag, unpublished target.
+
 Target the first preview only after the outward-facing docs, RuntimeKit examples/smoke paths, export checks, and native demo host all describe the same macOS-first public baseline.
+
+## Release Target
+
+- selected first preview version: `v0.1.0-preview.1`
+- release state: pre-tag preparation only
+- publication state: no tag yet, not yet published
+- evidence handoff path: `docs/PraxisPreviewReleaseEvidence.md`
+- version-scoped draft package path: `docs/releases/v0.1.0-preview.1/`
 
 ## Public Blocking CI Baseline
 
@@ -48,6 +58,8 @@ swift run PraxisRuntimeKitSmoke --suite all
 
 Use `PraxisRuntimeKitSmoke --suite all` as the aggregate regression sweep and `./script/build_and_run.sh --verify` as native demo-host launch evidence.
 
+Record the command evidence in `docs/PraxisPreviewReleaseEvidence.md` and treat `docs/releases/v0.1.0-preview.1/` as the package handoff location for the first preview draft set before any tag is created.
+
 ## Required Docs
 
 - `README.md`
@@ -69,6 +81,7 @@ Use `PraxisRuntimeKitSmoke --suite all` as the aggregate regression sweep and `.
 ## Required Decisions
 
 - preview version string selected
+- `v0.1.0-preview.1` is threaded through the release-facing docs as a pre-tag first preview target
 - blocking CI workflow green on the release branch
 - Linux placeholder / degraded language reviewed for honesty
 - governed execution wording keeps declared contract separate from enforced host behavior where relevant

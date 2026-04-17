@@ -32,6 +32,18 @@ Before publishing a release, confirm:
 3. old versionless payload compatibility remains limited to the currently documented legacy path
 4. `README.md`, `CHANGELOG.md`, and migration notes match the shipped contract
 
+## Pre-Tag Preview Preparation
+
+Before the first preview tag exists, Praxis may select a concrete preview version and thread it through release-facing documentation as a pre-tag target.
+
+For the current first preview preparation lane:
+
+- the selected version string is `v0.1.0-preview.1`
+- `CHANGELOG.md` must keep `Unreleased` as the top bucket until the tag is actually cut
+- the preview note and preview checklist may describe the target preview, but they must also say it is not yet tagged or published
+
+Selecting a preview version in documentation is not the same as publishing a release. A tag or GitHub release should only happen after the required artifacts and verification evidence exist.
+
 ## Required Release Artifacts
 
 Each release should update:
@@ -48,6 +60,17 @@ If the release touches exported schemas or host integration guidance, also updat
 - `docs/PraxisSupportMatrix.md`
 - `docs/PraxisHighRiskCapabilitySafety.md`
 - `docs/PraxisPerformanceBaseline.md`
+
+## Current Preview Preparation Artifacts
+
+For the current pre-tag `v0.1.0-preview.1` preparation lane, also assemble:
+
+- `docs/PraxisPreviewReleaseNote.md`
+- `docs/PraxisPreviewReleaseChecklist.md`
+- `docs/PraxisPreviewReleaseEvidence.md`
+- `docs/releases/v0.1.0-preview.1/`
+
+These items are specific to the current preview thread and should not be read as a permanent release-artifact requirement for every future version.
 
 ## Breaking Change Checklist
 
@@ -99,4 +122,4 @@ swift run PraxisRuntimeKitSmoke --suite all
 ./script/build_and_run.sh --verify
 ```
 
-Release verification intentionally exceeds public CI coverage. If one of these heavier local checks is skipped, the release note should state which check was skipped and why.
+Release verification intentionally exceeds public CI coverage. If one of these heavier local checks is skipped, the release note should state which check was skipped and why. For `v0.1.0-preview.1`, these checks support pre-tag preparation first and should not be described as publication evidence until the tag exists.

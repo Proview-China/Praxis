@@ -6,6 +6,11 @@ The format follows a lightweight Keep a Changelog style and uses `Unreleased` un
 
 ## [Unreleased]
 
+### Planned Release Target
+
+- first tagged preview target: `v0.1.0-preview.1`
+- current state: prepared as the first preview cut, not yet tagged or published
+
 ### Planned
 
 - first public preview baseline aligned around the current outward-facing RuntimeKit, embedding, and native demo-host story
