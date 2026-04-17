@@ -32,11 +32,20 @@ jobs:
       - name: Run RuntimeKit Example
         run: swift run PraxisRuntimeKitRunExample
 
+      - name: Run CMP TAP Example
+        run: swift run PraxisRuntimeKitCmpTapExample
+
       - name: Run Capabilities Example
         run: swift run PraxisRuntimeKitCapabilitiesExample
 
+      - name: Run Governed Execution Example
+        run: swift run PraxisRuntimeKitGovernedExecutionExample
+
       - name: Run Search Example
         run: swift run PraxisRuntimeKitSearchExample
+
+      - name: Run Durable Runtime Example
+        run: swift run PraxisRuntimeKitDurableRuntimeExample
 
       - name: Run FFI Embedding Example
         run: swift run PraxisFFIEmbeddingExample
@@ -45,13 +54,37 @@ jobs:
         run: swift run PraxisAppleHostEmbeddingExample
 
       - name: Run Export Baseline Example
-        run: swift run PraxisExportBaselineExample --iterations 3 --format json
+        run: swift run PraxisExportBaselineExample --iterations 5 --format json
+
+      - name: Run Search Smoke
+        run: swift run PraxisRuntimeKitSmoke --suite search
+
+      - name: Run CMP TAP Smoke
+        run: swift run PraxisRuntimeKitSmoke --suite cmp-tap
 
       - name: Run Recovery Smoke
         run: swift run PraxisRuntimeKitSmoke --suite recovery
 
+      - name: Run Provisioning Smoke
+        run: swift run PraxisRuntimeKitSmoke --suite provisioning
+
       - name: Run Capabilities Smoke
         run: swift run PraxisRuntimeKitSmoke --suite capabilities
 
-      - name: Run Search Smoke
-        run: swift run PraxisRuntimeKitSmoke --suite search
+      - name: Run Code Smoke
+        run: swift run PraxisRuntimeKitSmoke --suite code
+
+      - name: Run Code Sandbox Smoke
+        run: swift run PraxisRuntimeKitSmoke --suite code-sandbox
+
+      - name: Run Code Patch Smoke
+        run: swift run PraxisRuntimeKitSmoke --suite code-patch
+
+      - name: Run Shell Smoke
+        run: swift run PraxisRuntimeKitSmoke --suite shell
+
+      - name: Run Shell Approval Smoke
+        run: swift run PraxisRuntimeKitSmoke --suite shell-approval
+
+      - name: Build Native Demo Host
+        run: swift build --product PraxisDemoHostApp
