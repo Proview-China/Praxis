@@ -476,6 +476,7 @@ dependencies: [
 - [docs/PraxisMigrationNotes.md](./docs/PraxisMigrationNotes.md)
 - [docs/PraxisSupportMatrix.md](./docs/PraxisSupportMatrix.md)
 - capability baseline 说明见 [docs/PraxisCapabilityGuide.md](./docs/PraxisCapabilityGuide.md)。
+- search chain 说明见 [docs/PraxisSearchChainGuide.md](./docs/PraxisSearchChainGuide.md)。
 - 术语表见 [docs/PraxisGlossary.md](./docs/PraxisGlossary.md)。
 - 平台状态说明见 [docs/PraxisPlatformStatus.md](./docs/PraxisPlatformStatus.md)。
 - 入口选择说明见 [docs/PraxisEntrySurfaces.md](./docs/PraxisEntrySurfaces.md)。
