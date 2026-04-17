@@ -9,6 +9,26 @@ private func makeRuntimeRoot(named name: String) throws -> URL {
   return rootDirectory
 }
 
+private func printSectionSummaries<Section>(
+  from sections: [Section],
+  prefix: String,
+  sectionID: (Section) -> String,
+  summary: (Section) -> String
+) {
+  let reviewerContextSectionIDs = [
+    "provider-skills",
+    "provider-mcp-tools",
+    "provider-activity",
+  ]
+
+  for reviewerContextSectionID in reviewerContextSectionIDs {
+    guard let section = sections.first(where: { sectionID($0) == reviewerContextSectionID }) else {
+      continue
+    }
+    print("\(prefix).\(reviewerContextSectionID).summary: \(summary(section))")
+  }
+}
+
 @main
 struct PraxisRuntimeKitCmpTapExample {
   static func main() async throws {
@@ -46,6 +66,19 @@ struct PraxisRuntimeKitCmpTapExample {
         capabilityID: "tool.git"
       )
     )
+    _ = try await client.capabilities.activateSkill(
+      .init(
+        skillKey: "runtime.inspect",
+        reason: "Reviewer context example coverage"
+      )
+    )
+    _ = try await client.capabilities.callTool(
+      .init(
+        toolName: "web.search",
+        summary: "Reviewer context example provider MCP tool coverage",
+        serverName: "local-example"
+      )
+    )
     let tapInspection = try await client.tap.inspect()
     let cmpOverview = try await cmpProject.overview(.init(agentID: "checker.local"))
     let tapOverview = try await tapProject.overview(.init(agentID: "checker.local", limit: 10))
@@ -62,8 +95,20 @@ struct PraxisRuntimeKitCmpTapExample {
     print("tap.historyCount: \(tapOverview.history.totalCount)")
     print("tap.inspect.requestedAction: \(tapInspection.requestedAction)")
     print("tap.inspect.sections: \(tapInspection.sections.map(\.sectionID).joined(separator: ", "))")
+    printSectionSummaries(
+      from: tapInspection.sections,
+      prefix: "tap.inspect",
+      sectionID: { $0.sectionID },
+      summary: { $0.summary }
+    )
     print("tap.workbench.summary: \(reviewWorkbench.summary)")
     print("tap.workbench.pendingCount: \(reviewWorkbench.pendingItems.count)")
+    printSectionSummaries(
+      from: reviewWorkbench.inspection.sections,
+      prefix: "tap.workbench",
+      sectionID: { $0.sectionID },
+      summary: { $0.summary }
+    )
     if let latestDecision = tapOverview.status.latestDecisionSummary {
       print("tap.latestDecision: \(latestDecision)")
     }
