@@ -7,6 +7,13 @@ This document records the current support baseline for exported Praxis surfaces.
 - macOS local baseline: primary validated host profile
 - Linux current state: compile-safe placeholder or degraded host truth unless stated otherwise
 
+## Maturity Labels
+
+- `recommended`: default entry point for the intended caller group
+- `ready`: implemented and supported for the stated platform/scope today
+- `declared-only contract`: contract shape is public, but full backed behavior is not yet claimed
+- `placeholder / degraded`: honest non-parity path that preserves shape or reduced truth without pretending full support
+
 ## RuntimeKit Surface Matrix
 
 | Surface | macOS local baseline | Linux current state | Notes |
