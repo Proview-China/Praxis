@@ -20,6 +20,7 @@ Use these shipped entry points when you need to inspect or verify the current go
 
 - public example: `swift run PraxisRuntimeKitGovernedExecutionExample`
 - bounded code verification: `swift run PraxisRuntimeKitSmoke --suite code`
+- declared sandbox verification: `swift run PraxisRuntimeKitSmoke --suite code-sandbox`
 - bounded code patch verification: `swift run PraxisRuntimeKitSmoke --suite code-patch`
 - bounded shell verification: `swift run PraxisRuntimeKitSmoke --suite shell`
 - durable shell approval verification: `swift run PraxisRuntimeKitSmoke --suite shell-approval`
@@ -52,7 +53,7 @@ The current repository baseline already enforces these principles unevenly but i
 - The contract is structured and caller-visible
 - The contract currently does not claim kernel-enforced isolation
 - Public read path: `swift run PraxisRuntimeKitGovernedExecutionExample`
-- Verification path: `swift run PraxisRuntimeKitSmoke --suite code`
+- Verification path: `swift run PraxisRuntimeKitSmoke --suite code-sandbox`
 
 Hosts should treat `code.sandbox` as an execution contract description, not as proof of OS-level isolation.
 
