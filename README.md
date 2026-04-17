@@ -514,6 +514,7 @@ dependencies: [
 - 平台状态说明见 [docs/PraxisPlatformStatus.md](./docs/PraxisPlatformStatus.md)。
 - 入口选择说明见 [docs/PraxisEntrySurfaces.md](./docs/PraxisEntrySurfaces.md)。
 - preview release working checklist 见 [docs/PraxisPreviewReleaseChecklist.md](./docs/PraxisPreviewReleaseChecklist.md)。
+- preview release note 见 [docs/PraxisPreviewReleaseNote.md](./docs/PraxisPreviewReleaseNote.md)。
 - 当前仓库事实基线见 [docs/PraxisRepositoryBaseline.md](./docs/PraxisRepositoryBaseline.md)。
 - [docs/PraxisHighRiskCapabilitySafety.md](./docs/PraxisHighRiskCapabilitySafety.md)
 - [CHANGELOG.md](./CHANGELOG.md)
