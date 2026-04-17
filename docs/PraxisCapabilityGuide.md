@@ -13,6 +13,11 @@ The current thin capability baseline includes:
 - `file.upload`
 - `batch.submit`
 - `session.open`
+- `search.web`
+- `search.fetch`
+- `search.ground`
+- `skill.list`
+- `skill.activate`
 - `code.sandbox`
 - bounded `code.run`
 - bounded `code.patch`
@@ -42,6 +47,8 @@ What this example demonstrates:
 - skill and MCP tool discovery
 - file upload, batch submission, and session opening
 
+For the dedicated search-chain walkthrough, use `swift run PraxisRuntimeKitSearchExample`; the focused follow-on reference is [Praxis Search Chain Guide](./PraxisSearchChainGuide.md).
+
 ## Verification Path
 
 Use:
@@ -51,6 +58,8 @@ swift run PraxisRuntimeKitSmoke --suite capabilities
 ```
 
 This smoke path should confirm the shipped capability baseline is callable and still projects the expected bounded contract/results.
+
+The dedicated search-chain verification path lives in `swift run PraxisRuntimeKitSmoke --suite search`, with [Praxis Search Chain Guide](./PraxisSearchChainGuide.md) as the focused follow-on reference.
 
 ## Related Docs
 
