@@ -1564,9 +1564,9 @@ struct HostRuntimeSurfaceTests {
     #expect(started.tickCount == 1)
     #expect(started.checkpointReference == "checkpoint.run:session.host-runtime:goal.host-runtime")
     #expect(started.phaseSummary.contains("journal 1"))
-    #expect(started.phaseSummary.contains("Next action model_inference"))
-    #expect(started.followUpAction?.kind.rawValue == "model_inference")
-    #expect(started.followUpAction?.intentKind?.rawValue == "model_inference")
+    #expect(started.phaseSummary.contains("Next action model_conversation"))
+    #expect(started.followUpAction?.kind.rawValue == "model_conversation")
+    #expect(started.followUpAction?.intentKind?.rawValue == "model_conversation")
     #expect(resumed.runID == started.runID)
     #expect(resumed.sessionID == started.sessionID)
     #expect(resumed.phase == .running)
@@ -1843,7 +1843,7 @@ struct HostRuntimeSurfaceTests {
     )
     let cmpSnapshot = try await runtimeFacade.inspectionFacade.inspectCmp()
 
-    #expect(started.followUpAction?.kind.rawValue == "model_inference")
+    #expect(started.followUpAction?.kind.rawValue == "model_conversation")
     #expect(resumed.followUpAction?.kind.rawValue == "internal_step")
     #expect(projectionDescriptors.count == 1)
     #expect(projectionDescriptors.first?.projectionID == .init(rawValue: "projection.\(started.runID.rawValue)"))
@@ -2566,7 +2566,7 @@ struct HostRuntimeSurfaceTests {
     let invalidProcessUpdate = try await secondRegistry.processSupervisor?.poll(
       handle: .init(identifier: "not-a-pid", origin: .shell)
     )
-    let inferenceResponse = try await secondRegistry.providerInferenceExecutor?.infer(
+    let conversationResponse = try await secondRegistry.providerConversationExecutor?.converse(
       .init(
         systemPrompt: "Be precise",
         prompt: "Summarize the local runtime baseline and next action",
@@ -2662,11 +2662,11 @@ struct HostRuntimeSurfaceTests {
     #expect(runningProcessUpdate?.status == .running)
     #expect(runningProcessUpdate?.stdoutTail != nil)
     #expect(invalidProcessUpdate?.status == .failed)
-    #expect(inferenceResponse?.receipt.backend == "local-runtime")
-    #expect(inferenceResponse?.output.summary.contains("local runtime baseline") == true)
-    #expect(inferenceResponse?.output.structuredFields["inferenceMode"]?.stringValue == "heuristic_baseline")
-    #expect(inferenceResponse?.output.structuredFields["effectiveModel"]?.stringValue == "local-smoke-model")
-    #expect(secondRegistry.providerInferenceSurfaceProvenance == .localBaseline)
+    #expect(conversationResponse?.receipt.backend == "local-runtime")
+    #expect(conversationResponse?.output.summary.contains("local runtime baseline") == true)
+    #expect(conversationResponse?.output.structuredFields["conversationMode"]?.stringValue == "heuristic_baseline")
+    #expect(conversationResponse?.output.structuredFields["effectiveModel"]?.stringValue == "local-smoke-model")
+    #expect(secondRegistry.providerConversationSurfaceProvenance == .localBaseline)
     #expect(secondRegistry.browserGroundingSurfaceProvenance == .localBaseline)
     #expect(secondRegistry.audioTranscriptionSurfaceProvenance == .localBaseline)
     #expect(secondRegistry.speechSynthesisSurfaceProvenance == .localBaseline)

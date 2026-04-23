@@ -46,7 +46,7 @@ public struct PraxisTransitionEvaluator: Sendable {
         stateDelta: .init(
           control: .init(status: .acting, phase: .execution)
         ),
-        nextAction: defaultModelInferenceAction(for: incomingEvent),
+        nextAction: defaultModelConversationAction(for: incomingEvent),
         eventID: incomingEvent.eventID
       )
     case .runResumed(let checkpointID):
@@ -140,25 +140,25 @@ public struct PraxisTransitionEvaluator: Sendable {
       guard matches(currentState.control.status, allowed: [.waiting, .acting]) else {
         throw invalidTransition(state: currentState, event: incomingEvent)
       }
-      let isFinalModelResult =
-        incomingEvent.metadata?["resultSource"]?.stringValue == "model"
+      let isFinalConversationResult =
+        incomingEvent.metadata?["resultSource"]?.stringValue == "conversation"
         && incomingEvent.metadata?["final"]?.boolValue == true
-      if isFinalModelResult {
+      if isFinalConversationResult {
         return PraxisTransitionDecision(
           fromStatus: currentState.control.status,
           toStatus: .completed,
           nextPhase: .commit,
-          reason: "Model result \(resultID) completed the run.",
+          reason: "Conversation result \(resultID) completed the run.",
           stateDelta: .init(
             control: .init(status: .completed, phase: .commit, pendingIntentID: nil),
             observed: .init(lastResultID: resultID, lastResultStatus: status)
           ),
           nextAction: .init(
             kind: .complete,
-            reason: "Model produced a final result.",
+            reason: "Conversation flow produced a final result.",
             metadata: [
               "resultID": .string(resultID),
-              "source": .string("model"),
+              "source": .string("conversation"),
             ]
           ),
           eventID: incomingEvent.eventID
@@ -271,7 +271,7 @@ public extension PraxisTransitionTable {
         fromStatuses: [.created, .idle],
         toStatus: .acting,
         nextPhase: .execution,
-        summary: "进入首个执行步，默认走 model inference 热路径。"
+        summary: "进入首个执行步，默认走 model conversation 热路径。"
       ),
       .init(
         name: "run.resumed",
@@ -373,15 +373,15 @@ private func invalidTransition(
   )
 }
 
-private func defaultModelInferenceAction(for event: PraxisKernelEvent) -> PraxisNextActionDecision {
+private func defaultModelConversationAction(for event: PraxisKernelEvent) -> PraxisNextActionDecision {
   PraxisNextActionDecision(
-    kind: .modelInference,
+    kind: .modelConversation,
     reason: "Use the compiled goal and current state to produce the next kernel step.",
     intent: .init(
       intentID: "\(event.eventID):model",
       sessionID: event.sessionID,
       runID: event.runID,
-      kind: .modelInference,
+      kind: .modelConversation,
       createdAt: event.createdAt,
       priority: .normal,
       correlationID: event.correlationID ?? event.eventID
@@ -451,7 +451,7 @@ private func resolveNextAction(
     )
   }
 
-  return defaultModelInferenceAction(for: event)
+  return defaultModelConversationAction(for: event)
 }
 
 private func resolvePriority(from state: PraxisStateSnapshot) -> PraxisTransitionPriority {

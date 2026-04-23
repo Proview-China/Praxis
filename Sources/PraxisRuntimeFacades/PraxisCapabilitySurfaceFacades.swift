@@ -13,12 +13,34 @@ import PraxisWorkspaceContracts
 
 /// Structured generation command for the thin capability surface.
 public struct PraxisCapabilityGenerateCommand: Sendable, Equatable, Codable {
-  public let prompt: String
-  public let systemPrompt: String?
-  public let contextSummary: String?
+  public let messages: [PraxisProviderMessage]
   public let preferredModel: String?
   public let temperature: Double?
   public let requiredCapabilityIDs: [PraxisCapabilityID]
+  public let continuation: [String: String]
+  public let toolDefinitions: [PraxisProviderToolDefinition]
+  public let providerProfile: PraxisProviderConversationProfile?
+  public let stream: Bool
+
+  public init(
+    messages: [PraxisProviderMessage],
+    preferredModel: String? = nil,
+    temperature: Double? = nil,
+    requiredCapabilityIDs: [PraxisCapabilityID] = [],
+    continuation: [String: String] = [:],
+    toolDefinitions: [PraxisProviderToolDefinition] = [],
+    providerProfile: PraxisProviderConversationProfile? = nil,
+    stream: Bool = false
+  ) {
+    self.messages = messages
+    self.preferredModel = preferredModel
+    self.temperature = temperature
+    self.requiredCapabilityIDs = requiredCapabilityIDs
+    self.continuation = continuation
+    self.toolDefinitions = toolDefinitions
+    self.providerProfile = providerProfile
+    self.stream = stream
+  }
 
   public init(
     prompt: String,
@@ -26,14 +48,30 @@ public struct PraxisCapabilityGenerateCommand: Sendable, Equatable, Codable {
     contextSummary: String? = nil,
     preferredModel: String? = nil,
     temperature: Double? = nil,
-    requiredCapabilityIDs: [PraxisCapabilityID] = []
+    requiredCapabilityIDs: [PraxisCapabilityID] = [],
+    toolDefinitions: [PraxisProviderToolDefinition] = [],
+    providerProfile: PraxisProviderConversationProfile? = nil,
+    stream: Bool = false
   ) {
-    self.prompt = prompt
-    self.systemPrompt = systemPrompt
-    self.contextSummary = contextSummary
-    self.preferredModel = preferredModel
-    self.temperature = temperature
-    self.requiredCapabilityIDs = requiredCapabilityIDs
+    var messages: [PraxisProviderMessage] = []
+    if let systemPrompt, !systemPrompt.isEmpty {
+      messages.append(.systemText(systemPrompt))
+    }
+    if let contextSummary, !contextSummary.isEmpty {
+      messages.append(.developerText(contextSummary))
+    }
+    messages.append(.userText(prompt))
+
+    self.init(
+      messages: messages,
+      preferredModel: preferredModel,
+      temperature: temperature,
+      requiredCapabilityIDs: requiredCapabilityIDs,
+      continuation: contextSummary.map { ["contextSummary": $0] } ?? [:],
+      toolDefinitions: toolDefinitions,
+      providerProfile: providerProfile,
+      stream: stream
+    )
   }
 }
 
@@ -224,17 +262,29 @@ public struct PraxisCapabilitySkillActivateCommand: Sendable, Equatable, Codable
 /// Structured tool-call command for the thin capability surface.
 public struct PraxisCapabilityToolCallCommand: Sendable, Equatable, Codable {
   public let toolName: String
-  public let summary: String
+  public let input: [String: PraxisValue]
   public let serverName: String?
+
+  public init(
+    toolName: String,
+    input: [String: PraxisValue] = [:],
+    serverName: String? = nil
+  ) {
+    self.toolName = toolName
+    self.input = input
+    self.serverName = serverName
+  }
 
   public init(
     toolName: String,
     summary: String,
     serverName: String? = nil
   ) {
-    self.toolName = toolName
-    self.summary = summary
-    self.serverName = serverName
+    self.init(
+      toolName: toolName,
+      input: ["summary": .string(summary)],
+      serverName: serverName
+    )
   }
 }
 
@@ -1084,7 +1134,7 @@ private func thinCapabilityManifestIDs(
     ? [PraxisThinCapabilityKey.sessionOpen.capabilityID]
     : []
 
-  if providerSurface?.supportsInference == true {
+  if providerSurface?.supportsConversation == true {
     capabilityIDs.insert(PraxisThinCapabilityKey.generateCreate.capabilityID)
     capabilityIDs.insert(PraxisThinCapabilityKey.generateStream.capabilityID)
   }
@@ -1259,27 +1309,29 @@ public final class PraxisCapabilityFacade: Sendable {
   /// - Returns: The normalized generation snapshot.
   /// - Throws: Propagates provider or validation failures.
   public func generate(_ command: PraxisCapabilityGenerateCommand) async throws -> PraxisCapabilityGenerationSnapshot {
-    let prompt = try normalizedCapabilityText(command.prompt, fieldName: "prompt")
+    let providerMessages = try normalizedCapabilityMessages(command.messages)
     let providerSurface = try requireProviderSurface(
-      isSupported: { $0.supportsInference },
-      errorMessage: "Thin capability \(PraxisThinCapabilityKey.generateCreate.rawValue) requires a provider inference executor."
+      isSupported: { $0.supportsConversation },
+      errorMessage: "Thin capability \(PraxisThinCapabilityKey.generateCreate.rawValue) requires a provider conversation executor."
     )
-    let response = try await providerSurface.infer(
-      .init(
-        systemPrompt: command.systemPrompt,
-        prompt: prompt,
-        contextSummary: command.contextSummary,
+    let response = try await providerSurface.converse(
+      PraxisProviderConversationRequest(
+        messages: providerMessages,
         preferredModel: command.preferredModel,
         temperature: command.temperature,
-        requiredCapabilities: command.requiredCapabilityIDs.map(\.rawValue)
+        requiredCapabilities: command.requiredCapabilityIDs.map(\.rawValue),
+        continuation: command.continuation,
+        toolDefinitions: command.toolDefinitions,
+        providerProfile: command.providerProfile,
+        stream: command.stream
       )
     )
 
     return PraxisCapabilityGenerationSnapshot(
       capabilityID: PraxisThinCapabilityKey.generateCreate.capabilityID,
       summary: "Thin capability \(PraxisThinCapabilityKey.generateCreate.rawValue) returned a bounded generation response.",
-      outputText: response.output.summary,
-      structuredFields: response.output.structuredFields,
+      outputText: response.outputText,
+      structuredFields: response.structuredFields,
       backend: response.receipt.backend,
       providerOperationID: response.receipt.providerOperationID,
       completedAt: response.receipt.completedAt,
@@ -1681,7 +1733,7 @@ public final class PraxisCapabilityFacade: Sendable {
   /// - Throws: Propagates provider or validation failures.
   public func callTool(_ command: PraxisCapabilityToolCallCommand) async throws -> PraxisCapabilityToolCallSnapshot {
     let toolName = try normalizedCapabilityText(command.toolName, fieldName: "toolName")
-    let summary = try normalizedCapabilityText(command.summary, fieldName: "summary")
+    let normalizedToolInput = try normalizedCapabilityToolInput(command.input)
     let providerSurface = try requireProviderSurface(
       isSupported: { $0.supportsToolCalls && $0.supportsMCPToolRegistry },
       errorMessage: "Thin capability tool.call requires a provider MCP tool registry and executor."
@@ -1693,13 +1745,13 @@ public final class PraxisCapabilityFacade: Sendable {
       )
     }
     let receipt = try await providerSurface.callTool(
-      .init(
+      PraxisProviderMCPToolCallRequest(
         toolName: toolName,
-        summary: summary,
+        input: normalizedToolInput,
         serverName: command.serverName?.trimmingCharacters(in: .whitespacesAndNewlines)
       )
     )
-    if receipt.status == .succeeded {
+    if receipt.status == PraxisHostCapabilityExecutionStatus.succeeded {
       try await appendCapabilityAuditEvent(
         eventKind: .providerMCPToolCalled,
         capabilityID: PraxisThinCapabilityKey.toolCall.capabilityID,
@@ -2012,6 +2064,51 @@ public final class PraxisCapabilityFacade: Sendable {
     }
     return browserGroundingCollector
   }
+}
+
+private func normalizedCapabilityMessages(
+  _ messages: [PraxisProviderMessage]
+) throws -> [PraxisProviderMessage] {
+  let normalized = messages.compactMap { message -> PraxisProviderMessage? in
+    let parts = message.parts.compactMap { part -> PraxisProviderMessagePart? in
+      switch part {
+      case .text(let text):
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : .text(trimmed)
+      case .image(let url):
+        let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : .image(url: trimmed)
+      }
+    }
+    guard !parts.isEmpty else {
+      return nil
+    }
+    return PraxisProviderMessage(role: message.role, parts: parts)
+  }
+
+  guard !normalized.isEmpty else {
+    throw PraxisError.invalidInput("Thin capability generate.create requires at least one non-empty message.")
+  }
+
+  return normalized
+}
+
+private func normalizedCapabilityToolInput(
+  _ input: [String: PraxisValue]
+) throws -> [String: PraxisValue] {
+  let normalized = input.reduce(into: [String: PraxisValue]()) { partialResult, entry in
+    let key = entry.key.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !key.isEmpty else {
+      return
+    }
+    partialResult[key] = entry.value
+  }
+
+  guard !normalized.isEmpty else {
+    throw PraxisError.invalidInput("Thin capability tool.call requires at least one structured input field.")
+  }
+
+  return normalized
 }
 
 private func mapShellApprovalSnapshot(

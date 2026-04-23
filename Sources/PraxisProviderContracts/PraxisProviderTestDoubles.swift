@@ -15,17 +15,17 @@ public struct PraxisStubCapabilityExecutor: PraxisCapabilityExecutor, Sendable {
   }
 }
 
-/// Stub inference executor that returns deterministic normalized outputs.
-public struct PraxisStubProviderInferenceExecutor: PraxisProviderInferenceExecutor, Sendable {
-  public let responseFactory: @Sendable (PraxisProviderInferenceRequest) -> PraxisProviderInferenceResponse
+/// Stub conversation executor that returns deterministic normalized outputs.
+public struct PraxisStubProviderConversationExecutor: PraxisProviderConversationExecutor, Sendable {
+  public let responseFactory: @Sendable (PraxisProviderConversationRequest) -> PraxisProviderConversationResponse
 
   public init(
-    responseFactory: @escaping @Sendable (PraxisProviderInferenceRequest) -> PraxisProviderInferenceResponse
+    responseFactory: @escaping @Sendable (PraxisProviderConversationRequest) -> PraxisProviderConversationResponse
   ) {
     self.responseFactory = responseFactory
   }
 
-  public func infer(_ request: PraxisProviderInferenceRequest) async throws -> PraxisProviderInferenceResponse {
+  public func converse(_ request: PraxisProviderConversationRequest) async throws -> PraxisProviderConversationResponse {
     responseFactory(request)
   }
 }

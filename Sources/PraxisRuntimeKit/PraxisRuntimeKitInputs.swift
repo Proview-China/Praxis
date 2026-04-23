@@ -1,5 +1,7 @@
+import PraxisCoreTypes
 import PraxisCmpTypes
 import PraxisMpTypes
+import PraxisProviderContracts
 import PraxisTapProvision
 import PraxisTapRuntime
 import PraxisTapTypes
@@ -386,12 +388,34 @@ public struct PraxisRuntimeMpMemoryPromotionInput: Sendable, Equatable {
 
 /// Caller-friendly request for one thin generation call.
 public struct PraxisRuntimeGenerateRequest: Sendable, Equatable {
-  public let prompt: String
-  public let systemPrompt: String?
-  public let contextSummary: String?
+  public let messages: [PraxisProviderMessage]
   public let preferredModel: String?
   public let temperature: Double?
   public let requiredCapabilities: [PraxisRuntimeCapabilityRef]
+  public let continuation: [String: String]
+  public let toolDefinitions: [PraxisProviderToolDefinition]
+  public let providerProfile: PraxisProviderConversationProfile?
+  public let stream: Bool
+
+  public init(
+    messages: [PraxisProviderMessage],
+    preferredModel: String? = nil,
+    temperature: Double? = nil,
+    requiredCapabilities: [PraxisRuntimeCapabilityRef] = [],
+    continuation: [String: String] = [:],
+    toolDefinitions: [PraxisProviderToolDefinition] = [],
+    providerProfile: PraxisProviderConversationProfile? = nil,
+    stream: Bool = false
+  ) {
+    self.messages = messages
+    self.preferredModel = preferredModel
+    self.temperature = temperature
+    self.requiredCapabilities = requiredCapabilities
+    self.continuation = continuation
+    self.toolDefinitions = toolDefinitions
+    self.providerProfile = providerProfile
+    self.stream = stream
+  }
 
   public init(
     prompt: String,
@@ -399,14 +423,30 @@ public struct PraxisRuntimeGenerateRequest: Sendable, Equatable {
     contextSummary: String? = nil,
     preferredModel: String? = nil,
     temperature: Double? = nil,
-    requiredCapabilities: [PraxisRuntimeCapabilityRef] = []
+    requiredCapabilities: [PraxisRuntimeCapabilityRef] = [],
+    toolDefinitions: [PraxisProviderToolDefinition] = [],
+    providerProfile: PraxisProviderConversationProfile? = nil,
+    stream: Bool = false
   ) {
-    self.prompt = prompt
-    self.systemPrompt = systemPrompt
-    self.contextSummary = contextSummary
-    self.preferredModel = preferredModel
-    self.temperature = temperature
-    self.requiredCapabilities = requiredCapabilities
+    var messages: [PraxisProviderMessage] = []
+    if let systemPrompt, !systemPrompt.isEmpty {
+      messages.append(.systemText(systemPrompt))
+    }
+    if let contextSummary, !contextSummary.isEmpty {
+      messages.append(.developerText(contextSummary))
+    }
+    messages.append(.userText(prompt))
+
+    self.init(
+      messages: messages,
+      preferredModel: preferredModel,
+      temperature: temperature,
+      requiredCapabilities: requiredCapabilities,
+      continuation: contextSummary.map { ["contextSummary": $0] } ?? [:],
+      toolDefinitions: toolDefinitions,
+      providerProfile: providerProfile,
+      stream: stream
+    )
   }
 }
 
@@ -597,17 +637,29 @@ public struct PraxisRuntimeProviderMCPToolListRequest: Sendable, Equatable {
 /// Caller-friendly request for one thin tool call.
 public struct PraxisRuntimeToolCallRequest: Sendable, Equatable {
   public let toolName: String
-  public let summary: String
+  public let input: [String: PraxisValue]
   public let serverName: String?
+
+  public init(
+    toolName: String,
+    input: [String: PraxisValue] = [:],
+    serverName: String? = nil
+  ) {
+    self.toolName = toolName
+    self.input = input
+    self.serverName = serverName
+  }
 
   public init(
     toolName: String,
     summary: String,
     serverName: String? = nil
   ) {
-    self.toolName = toolName
-    self.summary = summary
-    self.serverName = serverName
+    self.init(
+      toolName: toolName,
+      input: ["summary": .string(summary)],
+      serverName: serverName
+    )
   }
 }
 

@@ -910,7 +910,7 @@ struct HostRuntimeInterfaceTests {
           journalSequence: 1,
           checkpointReference: "   ",
           followUpAction: .init(
-            kind: .modelInference,
+            kind: .modelConversation,
             reason: "Continue with normalized blank reference.",
             intentID: "   "
           )
@@ -2778,7 +2778,7 @@ struct HostRuntimeInterfaceTests {
         inspectMpUseCase: StubInspectMpUseCase {
           PraxisMpInspection(
             summary: "MP workflow surface is reading HostRuntime memory and current adapter provenance.",
-            workflowSummary: "ICMA / Iterator / Checker / DbAgent / Dispatcher lanes have a composed provider inference surface available.",
+            workflowSummary: "ICMA / Iterator / Checker / DbAgent / Dispatcher lanes have a composed provider conversation surface available.",
             memoryStoreSummary: "Semantic memory bundle exposes 1 primary records and omits 0 superseded records. Semantic search matches for inspection query: 1.",
             multimodalSummary: "No multimodal host chips are currently registered.",
             issues: []
@@ -2876,11 +2876,11 @@ struct HostRuntimeInterfaceTests {
           #expect(command.projectID == "mp.local-runtime")
           return PraxisMpSmoke(
             projectID: command.projectID,
-            summary: "MP smoke checks passed for semantic memory, semantic search, provider inference, and browser grounding.",
+            summary: "MP smoke checks passed for semantic memory, semantic search, provider conversation, and browser grounding.",
             checks: [
               .init(id: "semantic_memory_store", gate: .memoryStore, status: .ready, summary: "ok"),
               .init(id: "semantic_search", gate: .semanticSearch, status: .ready, summary: "ok"),
-              .init(id: "provider_inference", gate: .providerInference, status: .ready, summary: "ok"),
+              .init(id: "provider_conversation", gate: .providerConversation, status: .ready, summary: "ok"),
               .init(id: "browser_grounding", gate: .browserGrounding, status: .ready, summary: "ok"),
             ]
           )
@@ -5336,7 +5336,7 @@ struct HostRuntimeInterfaceTests {
         ),
         .init(
           name: .runFollowUpReady,
-          detail: "model_inference: next",
+          detail: "model_conversation: next",
           runID: .init(rawValue: "run:session.codec:goal.codec"),
           sessionID: .init(rawValue: "session.codec"),
           intentID: runtimeInterfaceReferenceID("evt.follow-up")

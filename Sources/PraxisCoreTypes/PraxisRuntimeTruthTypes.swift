@@ -6,7 +6,7 @@ public enum PraxisRuntimeSmokeGate: String, Sendable, Equatable, Codable {
   case host
   case memoryStore = "memory-store"
   case semanticSearch = "semantic-search"
-  case providerInference = "provider-inference"
+  case providerConversation = "provider-conversation"
   case browserGrounding = "browser-grounding"
 }
 

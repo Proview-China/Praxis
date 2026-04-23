@@ -4,7 +4,7 @@ import Testing
 
 struct PraxisTransitionEvaluatorTests {
   @Test
-  func runCreatedEntersHotPathAndEmitsModelInferenceAction() throws {
+  func runCreatedEntersHotPathAndEmitsModelConversationAction() throws {
     let evaluator = PraxisTransitionEvaluator()
     let state = makeState(status: .created, phase: .decision)
     let event = PraxisKernelEvent(
@@ -20,8 +20,8 @@ struct PraxisTransitionEvaluatorTests {
     #expect(decision.fromStatus == .created)
     #expect(decision.toStatus == .acting)
     #expect(decision.nextPhase == .execution)
-    #expect(decision.nextAction?.kind == .modelInference)
-    #expect(decision.nextAction?.intent?.kind == .modelInference)
+    #expect(decision.nextAction?.kind == .modelConversation)
+    #expect(decision.nextAction?.intent?.kind == .modelConversation)
   }
 
   @Test
@@ -104,7 +104,7 @@ struct PraxisTransitionEvaluatorTests {
       sessionID: "session-1",
       runID: "run-1",
       createdAt: "2026-03-17T12:02:00.000Z",
-      payload: .intentQueued(intentID: "intent-1", kind: "model_inference", priority: "normal")
+      payload: .intentQueued(intentID: "intent-1", kind: "model_conversation", priority: "normal")
     )
 
     let decision = try evaluator.evaluate(currentState: state, incomingEvent: event)
@@ -132,6 +132,31 @@ struct PraxisTransitionEvaluatorTests {
     #expect(decision.nextPhase == .decision)
     #expect(decision.stateDelta?.observed?.lastResultID == "result-1")
     #expect(decision.stateDelta?.observed?.lastResultStatus == "success")
+  }
+
+  @Test
+  func finalConversationResultCompletesRunAndMarksConversationSource() throws {
+    let evaluator = PraxisTransitionEvaluator()
+    let state = makeState(status: .waiting, phase: .execution)
+    let event = PraxisKernelEvent(
+      eventID: "evt-conversation-result",
+      sessionID: "session-1",
+      runID: "run-1",
+      createdAt: "2026-03-17T12:03:30.000Z",
+      payload: .capabilityResultReceived(requestID: "request-1", resultID: "result-final", status: "success"),
+      metadata: [
+        "resultSource": "conversation",
+        "final": true,
+      ]
+    )
+
+    let decision = try evaluator.evaluate(currentState: state, incomingEvent: event)
+
+    #expect(decision.toStatus == .completed)
+    #expect(decision.nextPhase == .commit)
+    #expect(decision.nextAction?.kind == .complete)
+    #expect(decision.nextAction?.metadata["source"]?.stringValue == "conversation")
+    #expect(decision.stateDelta?.observed?.lastResultID == "result-final")
   }
 
   @Test

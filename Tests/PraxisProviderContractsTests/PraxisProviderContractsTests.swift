@@ -5,35 +5,52 @@ import Testing
 
 struct PraxisProviderContractsTests {
   @Test
-  func inferenceEmbeddingAndCapabilityContractsStayStructured() async throws {
-    let inferenceExecutor = PraxisStubProviderInferenceExecutor { request in
+  func conversationEmbeddingAndCapabilityContractsStayStructured() async throws {
+    let conversationExecutor = PraxisStubProviderConversationExecutor { request in
       let receipt = PraxisHostCapabilityReceipt(
-        capabilityKey: "model.inference",
+        capabilityKey: "model.conversation",
         backend: "openai",
         status: .succeeded,
         providerOperationID: "op-1",
         completedAt: "2026-04-10T22:00:00Z",
-        summary: request.prompt
+        summary: request.messages.last?.textParts.joined(separator: " ") ?? ""
       )
-      let output = PraxisNormalizedCapabilityOutput(
-        summary: "Inference complete",
-        structuredFields: ["model": "gpt-5.4"]
+      return PraxisProviderConversationResponse(
+        messages: [
+          .assistantText("Inference complete")
+        ],
+        structuredFields: ["model": "gpt-5.4"],
+        receipt: receipt,
+        continuation: ["responseID": "resp-1"]
       )
-      return PraxisProviderInferenceResponse(output: output, receipt: receipt)
     }
-    let inference = try await inferenceExecutor.infer(
+    let conversation = try await conversationExecutor.converse(
       .init(
-        systemPrompt: "Be concise",
-        prompt: "Summarize Wave5",
-        contextSummary: "Host contract migration",
+        messages: [
+          .systemText("Be concise"),
+          .userText("Summarize Wave5")
+        ],
         preferredModel: "gpt-5.4",
         temperature: 0.2,
-        requiredCapabilities: ["cmp.inspect"]
+        continuation: ["contextSummary": "Host contract migration"],
+        toolDefinitions: [
+          .remote(
+            name: "workspace.search",
+            transportID: "provider-mcp",
+            inputSchema: .object(
+              properties: ["query": .string],
+              required: ["query"]
+            ),
+            description: "Search the workspace."
+          )
+        ]
       )
     )
 
-    #expect(inference.receipt.backend == "openai")
-    #expect(inference.output.summary == "Inference complete")
+    #expect(conversation.receipt.backend == "openai")
+    #expect(conversation.messages == [.assistantText("Inference complete")])
+    #expect(conversation.structuredFields["model"] == "gpt-5.4")
+    #expect(conversation.continuation["responseID"] == "resp-1")
 
     let embeddingExecutor = PraxisStubProviderEmbeddingExecutor { request in
       PraxisProviderEmbeddingResponse(vectorLength: request.content.count, model: request.preferredModel)
@@ -88,27 +105,37 @@ struct PraxisProviderContractsTests {
       PraxisProviderMCPToolCallReceipt(
         toolName: request.toolName,
         status: .succeeded,
-        summary: request.summary
+        payload: request.input,
+        summary: PraxisValue.object(request.input).canonicalDescription
       )
     }
-    let mcpReceipt = try await mcp.callTool(.init(toolName: "web.search", summary: "Find Swift docs", serverName: "openai"))
+    let mcpReceipt = try await mcp.callTool(
+      PraxisProviderMCPToolCallRequest(
+        toolName: "web.search",
+        input: ["query": "Find Swift docs"],
+        serverName: "openai"
+      )
+    )
     #expect(mcpReceipt.toolName == "web.search")
-    #expect(mcpReceipt.status == .succeeded)
+    #expect(mcpReceipt.status == PraxisHostCapabilityExecutionStatus.succeeded)
+    #expect(mcpReceipt.payload["query"] == "Find Swift docs")
   }
 
   @Test
   func providerRequestSurfaceExposesAvailabilityAndForwardsProviderRequests() async throws {
-    let inferenceExecutor = PraxisStubProviderInferenceExecutor { request in
-      PraxisProviderInferenceResponse(
-        output: .init(summary: "Generated \(request.prompt)"),
+    let conversationExecutor = PraxisStubProviderConversationExecutor { request in
+      PraxisProviderConversationResponse(
+        messages: [.assistantText("Generated \(request.messages.last?.textParts.joined(separator: " ") ?? "")")],
+        structuredFields: [:],
         receipt: .init(
-          capabilityKey: "provider.infer",
+          capabilityKey: "provider.converse",
           backend: "openai",
           status: .succeeded,
           providerOperationID: "op-surface",
           completedAt: "2026-04-15T00:00:00Z",
-          summary: request.prompt
-        )
+          summary: request.messages.last?.textParts.joined(separator: " ") ?? ""
+        ),
+        continuation: ["responseID": "surface-response"]
       )
     }
     let webSearchExecutor = PraxisStubProviderWebSearchExecutor { request in
@@ -138,11 +165,12 @@ struct PraxisProviderContractsTests {
       PraxisProviderMCPToolCallReceipt(
         toolName: request.toolName,
         status: .succeeded,
-        summary: request.summary
+        payload: request.input,
+        summary: PraxisValue.object(request.input).canonicalDescription
       )
     }
     let surface = PraxisProviderRequestSurface(
-      inferenceExecutor: inferenceExecutor,
+      conversationExecutor: conversationExecutor,
       webSearchExecutor: webSearchExecutor,
       embeddingExecutor: embeddingExecutor,
       fileStore: fileStore,
@@ -153,7 +181,7 @@ struct PraxisProviderContractsTests {
       mcpExecutor: mcpExecutor
     )
 
-    #expect(surface.supportsInference == true)
+    #expect(surface.supportsConversation == true)
     #expect(surface.supportsWebSearch == true)
     #expect(surface.supportsEmbedding == true)
     #expect(surface.supportsFileUpload == true)
@@ -163,17 +191,26 @@ struct PraxisProviderContractsTests {
     #expect(surface.supportsMCPToolRegistry == true)
     #expect(surface.supportsToolCalls == true)
 
-    let inference = try await surface.infer(.init(prompt: "Summarize Phase 4"))
-    let webSearch = try await surface.search(.init(query: "Swift structured concurrency", limit: 1))
-    let embedding = try await surface.embed(.init(content: "CMP delivery baseline", preferredModel: "text-embedding-3-large"))
-    let fileReceipt = try await surface.upload(.init(summary: "Upload transcript", purpose: "assistants"))
-    let batchReceipt = try await surface.enqueue(.init(summary: "Nightly embedding batch", itemCount: 8))
+    let conversation = try await surface.converse(
+      PraxisProviderConversationRequest(
+        messages: [PraxisProviderMessage.userText("Summarize Phase 4")],
+        preferredModel: "gpt-5.4"
+      )
+    )
+    let webSearch = try await surface.search(PraxisProviderWebSearchRequest(query: "Swift structured concurrency", limit: 1))
+    let embedding = try await surface.embed(PraxisProviderEmbeddingRequest(content: "CMP delivery baseline", preferredModel: "text-embedding-3-large"))
+    let fileReceipt = try await surface.upload(PraxisProviderFileUploadRequest(summary: "Upload transcript", purpose: "assistants"))
+    let batchReceipt = try await surface.enqueue(PraxisProviderBatchRequest(summary: "Nightly embedding batch", itemCount: 8))
     let skillKeys = try await surface.listSkillKeys()
-    let activationReceipt = try await surface.activate(.init(skillKey: "swift.test", reason: "Run verification"))
+    let activationReceipt = try await surface.activate(PraxisProviderSkillActivationRequest(skillKey: "swift.test", reason: "Run verification"))
     let toolNames = try await surface.listToolNames()
-    let mcpReceipt = try await surface.callTool(.init(toolName: "web.search", summary: "Find Swift docs", serverName: "openai"))
+    let mcpReceipt = try await surface.callTool(
+      PraxisProviderMCPToolCallRequest(toolName: "web.search", input: ["query": "Find Swift docs"], serverName: "openai")
+    )
 
-    #expect(inference.receipt.providerOperationID == "op-surface")
+    #expect(conversation.receipt.providerOperationID == "op-surface")
+    #expect(conversation.messages == [PraxisProviderMessage.assistantText("Generated Summarize Phase 4")])
+    #expect(conversation.continuation["responseID"] == "surface-response")
     #expect(webSearch.results.first?.url == "https://swift.org/documentation/")
     #expect(embedding.vectorLength == "CMP delivery baseline".count)
     #expect(fileReceipt.backend == "openai")
@@ -185,14 +222,15 @@ struct PraxisProviderContractsTests {
     #expect((await skillActivator.allRequests()).first?.reason == "Run verification")
     #expect(toolNames == ["web.search", "workspace.search"])
     #expect(mcpReceipt.toolName == "web.search")
-    #expect(mcpReceipt.status == .succeeded)
+    #expect(mcpReceipt.status == PraxisHostCapabilityExecutionStatus.succeeded)
+    #expect(mcpReceipt.payload["query"] == "Find Swift docs")
   }
 
   @Test
   func providerRequestSurfaceReportsDependencyMissingForUnavailableCapability() async throws {
     let surface = PraxisProviderRequestSurface()
 
-    #expect(surface.supportsInference == false)
+    #expect(surface.supportsConversation == false)
     #expect(surface.supportsWebSearch == false)
     #expect(surface.supportsEmbedding == false)
     #expect(surface.supportsFileUpload == false)
@@ -203,10 +241,12 @@ struct PraxisProviderContractsTests {
     #expect(surface.supportsToolCalls == false)
 
     do {
-      _ = try await surface.infer(.init(prompt: "Summarize Phase 4"))
-      Issue.record("Expected dependencyMissing when inference executor is unavailable.")
+      _ = try await surface.converse(
+        PraxisProviderConversationRequest(messages: [PraxisProviderMessage.userText("Summarize Phase 4")])
+      )
+      Issue.record("Expected dependencyMissing when conversation executor is unavailable.")
     } catch let error as PraxisError {
-      #expect(error == .dependencyMissing("Provider request surface requires an inference executor."))
+      #expect(error == .dependencyMissing("Provider request surface requires a conversation executor."))
     }
   }
 }

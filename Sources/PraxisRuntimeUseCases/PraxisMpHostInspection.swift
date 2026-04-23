@@ -25,7 +25,7 @@ public struct PraxisMpHostInspectionService: Sendable {
     projectID: String,
     hostAdapters: PraxisHostAdapterRegistry
   ) -> PraxisMpSmoke {
-    let providerInferenceProvenance = hostAdapters.providerInferenceSurfaceProvenance
+    let providerConversationProvenance = hostAdapters.providerConversationSurfaceProvenance
     let browserGroundingProvenance = hostAdapters.browserGroundingSurfaceProvenance
     let checks: [PraxisRuntimeSmokeCheckRecord] = [
       smokeCheck(
@@ -47,13 +47,13 @@ public struct PraxisMpHostInspectionService: Sendable {
         fallbackSummary: "Semantic search index is missing."
       ),
       smokeCheck(
-        id: "mp.provider.inference",
-        gate: .providerInference,
-        ready: providerInferenceProvenance != .unavailable,
+        id: "mp.provider.conversation",
+        gate: .providerConversation,
+        ready: providerConversationProvenance != .unavailable,
         readyStatus: .ready,
         missingStatus: .degraded,
-        readySummary: providerInferenceReadySummary(for: providerInferenceProvenance),
-        fallbackSummary: providerInferenceUnavailableSummary()
+        readySummary: providerConversationReadySummary(for: providerConversationProvenance),
+        fallbackSummary: providerConversationUnavailableSummary()
       ),
       smokeCheck(
         id: "mp.browser.grounding",
@@ -104,7 +104,7 @@ public struct PraxisMpHostInspectionService: Sendable {
 
     return PraxisMpInspection(
       summary: "MP workflow surface is reading HostRuntime memory and current adapter provenance.",
-      workflowSummary: workflowSummary(providerInferenceProvenance: hostAdapters.providerInferenceSurfaceProvenance),
+      workflowSummary: workflowSummary(providerConversationProvenance: hostAdapters.providerConversationSurfaceProvenance),
       memoryStoreSummary: memoryStoreSummary(
         bundle: memoryBundle,
         semanticMatchCount: semanticMatches.count
@@ -134,18 +134,18 @@ public struct PraxisMpHostInspectionService: Sendable {
     )
   }
 
-  private func providerInferenceReadySummary(
+  private func providerConversationReadySummary(
     for provenance: PraxisHostAdapterSurfaceProvenance
   ) -> String {
     switch provenance {
     case .scaffoldPlaceholder:
-      return "Provider inference surface is wired through scaffold placeholders for assembly smoke coverage and does not claim a live provider-backed lane."
+      return "Provider conversation surface is wired through scaffold placeholders for assembly smoke coverage and does not claim a live provider-backed lane."
     case .localBaseline:
-      return "Provider inference surface is wired through a local heuristic baseline for MP enrichment smoke coverage."
+      return "Provider conversation surface is wired through a local heuristic baseline for MP enrichment smoke coverage."
     case .composed:
-      return "Provider inference surface is composed for MP enrichment."
+      return "Provider conversation surface is composed for MP enrichment."
     case .unavailable:
-      return providerInferenceUnavailableSummary()
+      return providerConversationUnavailableSummary()
     }
   }
 
@@ -165,22 +165,22 @@ public struct PraxisMpHostInspectionService: Sendable {
   }
 
   private func workflowSummary(
-    providerInferenceProvenance: PraxisHostAdapterSurfaceProvenance
+    providerConversationProvenance: PraxisHostAdapterSurfaceProvenance
   ) -> String {
-    switch providerInferenceProvenance {
+    switch providerConversationProvenance {
     case .scaffoldPlaceholder:
-      return "ICMA / Iterator / Checker / DbAgent / Dispatcher lanes can exercise provider inference contracts through scaffold placeholders; this profile does not claim local-baseline execution or an external provider-backed service."
+      return "ICMA / Iterator / Checker / DbAgent / Dispatcher lanes can exercise provider conversation contracts through scaffold placeholders; this profile does not claim local-baseline execution or an external provider-backed service."
     case .localBaseline:
-      return "ICMA / Iterator / Checker / DbAgent / Dispatcher lanes can exercise a provider inference lane through a local heuristic baseline; this profile does not claim an external provider-backed service."
+      return "ICMA / Iterator / Checker / DbAgent / Dispatcher lanes can exercise a provider conversation lane through a local heuristic baseline; this profile does not claim an external provider-backed service."
     case .composed:
-      return "ICMA / Iterator / Checker / DbAgent / Dispatcher lanes have a composed provider inference surface available."
+      return "ICMA / Iterator / Checker / DbAgent / Dispatcher lanes have a composed provider conversation surface available."
     case .unavailable:
-      return "Five-agent lanes remain Core-side protocols because no provider inference surface is currently registered."
+      return "Five-agent lanes remain Core-side protocols because no provider conversation surface is currently registered."
     }
   }
 
-  private func providerInferenceUnavailableSummary() -> String {
-    "Provider inference is absent; MP does not currently expose a provider inference lane."
+  private func providerConversationUnavailableSummary() -> String {
+    "Provider conversation is absent; MP does not currently expose a provider conversation lane."
   }
 
   private func memoryStoreSummary(
@@ -212,7 +212,7 @@ public struct PraxisMpHostInspectionService: Sendable {
       issues.append("No semantic search matches are currently available for the local MP inspection query.")
     }
     if [
-      hostAdapters.providerInferenceSurfaceProvenance,
+      hostAdapters.providerConversationSurfaceProvenance,
       hostAdapters.browserGroundingSurfaceProvenance,
       hostAdapters.audioTranscriptionSurfaceProvenance,
       hostAdapters.speechSynthesisSurfaceProvenance,
@@ -223,7 +223,7 @@ public struct PraxisMpHostInspectionService: Sendable {
       )
     }
     if [
-      hostAdapters.providerInferenceSurfaceProvenance,
+      hostAdapters.providerConversationSurfaceProvenance,
       hostAdapters.browserGroundingSurfaceProvenance,
       hostAdapters.audioTranscriptionSurfaceProvenance,
       hostAdapters.speechSynthesisSurfaceProvenance,

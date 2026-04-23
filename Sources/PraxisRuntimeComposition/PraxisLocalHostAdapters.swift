@@ -2435,7 +2435,7 @@ private enum PraxisLocalProcessHandleParser {
 }
 #endif
 
-private enum PraxisLocalInferenceBaseline {
+private enum PraxisLocalConversationBaseline {
   static func condensedText(from text: String, limit: Int = 160) -> String {
     let normalized = text
       .components(separatedBy: .newlines)
@@ -2453,25 +2453,33 @@ private enum PraxisLocalInferenceBaseline {
     return normalized[..<endIndex].trimmingCharacters(in: .whitespacesAndNewlines) + "..."
   }
 
-  static func output(for request: PraxisProviderInferenceRequest) -> PraxisNormalizedCapabilityOutput {
-    let promptSummary = condensedText(from: request.prompt)
-    let contextSummary = request.contextSummary.map { condensedText(from: $0, limit: 120) }
+  static func output(for request: PraxisProviderConversationRequest) -> PraxisNormalizedCapabilityOutput {
+    let promptSummary = condensedText(
+      from: request.messages
+        .flatMap(\.textParts)
+        .joined(separator: " ")
+    )
+    let contextSummary = request.continuation["contextSummary"].map { condensedText(from: $0, limit: 120) }
+    let systemPrompt = request.messages
+      .first { $0.role == .system }?
+      .textParts
+      .joined(separator: " ")
     let summary: String
     if let contextSummary, !contextSummary.isEmpty {
-      summary = "Local heuristic inference prepared a response plan for: \(promptSummary). Context: \(contextSummary)."
+      summary = "Local heuristic conversation baseline prepared a response plan for: \(promptSummary). Context: \(contextSummary)."
     } else {
-      summary = "Local heuristic inference prepared a response plan for: \(promptSummary)."
+      summary = "Local heuristic conversation baseline prepared a response plan for: \(promptSummary)."
     }
 
     var structuredFields: [String: PraxisValue] = [
       "backendProfile": .string("local-runtime"),
-      "inferenceMode": .string("heuristic_baseline"),
+      "conversationMode": .string("heuristic_baseline"),
       "effectiveModel": .string(request.preferredModel ?? "local-heuristic-v1"),
       "promptSummary": .string(promptSummary),
-      "promptLength": .number(Double(request.prompt.count)),
+      "promptLength": .number(Double(promptSummary.count)),
       "requiredCapabilities": .array(request.requiredCapabilities.map(PraxisValue.string))
     ]
-    if let systemPrompt = request.systemPrompt, !systemPrompt.isEmpty {
+    if let systemPrompt, !systemPrompt.isEmpty {
       structuredFields["systemPromptSummary"] = .string(condensedText(from: systemPrompt, limit: 100))
     }
     if let contextSummary, !contextSummary.isEmpty {
@@ -2498,7 +2506,7 @@ private enum PraxisLocalHostBaseline {
   }
 
   static func condensedText(from text: String, limit: Int = 120) -> String {
-    PraxisLocalInferenceBaseline.condensedText(from: text, limit: limit)
+    PraxisLocalConversationBaseline.condensedText(from: text, limit: limit)
   }
 
   static func assetReference(
@@ -2561,19 +2569,24 @@ private enum PraxisLocalBrowserArtifactWriter {
   }
 }
 
-public struct PraxisLocalProviderInferenceExecutor: PraxisProviderInferenceExecutor, Sendable {
+public struct PraxisLocalProviderConversationExecutor: PraxisProviderConversationExecutor, Sendable {
   public init() {}
 
-  public func infer(_ request: PraxisProviderInferenceRequest) async throws -> PraxisProviderInferenceResponse {
-    PraxisProviderInferenceResponse(
-      output: PraxisLocalInferenceBaseline.output(for: request),
+  public func converse(_ request: PraxisProviderConversationRequest) async throws -> PraxisProviderConversationResponse {
+    let output = PraxisLocalConversationBaseline.output(for: request)
+    return PraxisProviderConversationResponse(
+      messages: [
+        .assistantText(output.summary)
+      ],
+      structuredFields: output.structuredFields,
       receipt: PraxisHostCapabilityReceipt(
-        capabilityKey: "provider.infer",
+        capabilityKey: "provider.converse",
         backend: "local-runtime",
         status: .succeeded,
         completedAt: localRuntimeNow(),
-        summary: "Local heuristic inference baseline executed without an external provider dependency."
-      )
+        summary: "Local heuristic conversation baseline executed without an external provider dependency."
+      ),
+      continuation: request.continuation
     )
   }
 }
@@ -2697,7 +2710,7 @@ public struct PraxisLocalProviderSkillRegistry: PraxisProviderSkillRegistry, Sen
     "runtime.inspect",
     "workspace.read",
     "tool.git",
-    "provider.infer",
+    "provider.converse",
     "browser.ground"
   ]) {
     self.skillKeys = skillKeys
@@ -2864,11 +2877,12 @@ public struct PraxisLocalProviderMCPExecutor: PraxisProviderMCPExecutor, Sendabl
   public init() {}
 
   public func callTool(_ request: PraxisProviderMCPToolCallRequest) async throws -> PraxisProviderMCPToolCallReceipt {
-    let summaryText = PraxisLocalInferenceBaseline.condensedText(from: request.summary, limit: 140)
+    let summaryText = PraxisValue.object(request.input).canonicalDescription
     let serverLabel = request.serverName ?? "local-runtime"
     return PraxisProviderMCPToolCallReceipt(
       toolName: request.toolName,
       status: .succeeded,
+      payload: request.input,
       summary: "Local MCP baseline accepted \(request.toolName) for \(serverLabel): \(summaryText)"
     )
   }
@@ -3527,12 +3541,19 @@ public extension PraxisHostAdapterRegistry {
     let resolvedRootDirectory = PraxisLocalRuntimePaths.resolveRootDirectory(rootDirectory)
     let paths = PraxisLocalRuntimePaths(rootDirectory: resolvedRootDirectory)
     let workspaceRootDirectory = PraxisLocalWorkspaceContext.resolveRootDirectory(rootDirectory)
+    let fallbackConversationExecutor = PraxisLocalProviderConversationExecutor()
+    let providerMCPExecutor = PraxisLocalProviderMCPExecutor()
+    let providerConversationExecutor = PraxisSDKConversationEnvironment.makeConversationExecutor(
+      environment: ProcessInfo.processInfo.environment,
+      fallback: fallbackConversationExecutor,
+      providerMCPExecutor: providerMCPExecutor
+    )
 
     return PraxisHostAdapterRegistry(
       runtimeRootDirectory: resolvedRootDirectory,
       workspaceRootDirectory: workspaceRootDirectory,
       capabilityExecutor: PraxisLocalCapabilityExecutor(),
-      providerInferenceExecutor: PraxisLocalProviderInferenceExecutor(),
+      providerConversationExecutor: providerConversationExecutor,
       providerWebSearchExecutor: PraxisLocalProviderWebSearchExecutor(),
       providerEmbeddingExecutor: PraxisLocalProviderEmbeddingExecutor(),
       providerFileStore: PraxisLocalProviderFileStore(rootDirectory: resolvedRootDirectory),
@@ -3540,7 +3561,7 @@ public extension PraxisHostAdapterRegistry {
       providerSkillRegistry: PraxisLocalProviderSkillRegistry(),
       providerSkillActivator: PraxisLocalProviderSkillActivator(),
       providerMCPToolRegistry: PraxisLocalProviderMCPToolRegistry(),
-      providerMCPExecutor: PraxisLocalProviderMCPExecutor(),
+      providerMCPExecutor: providerMCPExecutor,
       workspaceReader: PraxisLocalWorkspaceReader(rootDirectory: workspaceRootDirectory),
       workspaceSearcher: PraxisLocalWorkspaceSearcher(rootDirectory: workspaceRootDirectory),
       workspaceWriter: PraxisLocalWorkspaceWriter(rootDirectory: workspaceRootDirectory),
@@ -3574,7 +3595,7 @@ public extension PraxisHostAdapterRegistry {
       audioTranscriptionDriver: PraxisLocalAudioTranscriptionDriver(),
       speechSynthesisDriver: PraxisLocalSpeechSynthesisDriver(rootDirectory: resolvedRootDirectory),
       imageGenerationDriver: PraxisLocalImageGenerationDriver(rootDirectory: resolvedRootDirectory),
-      providerInferenceSurfaceProvenance: .localBaseline,
+      providerConversationSurfaceProvenance: .localBaseline,
       browserGroundingSurfaceProvenance: .localBaseline,
       audioTranscriptionSurfaceProvenance: .localBaseline,
       speechSynthesisSurfaceProvenance: .localBaseline,

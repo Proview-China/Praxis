@@ -1,3 +1,4 @@
+import PraxisCmpTypes
 import PraxisMpTypes
 import PraxisRuntimeFacades
 
@@ -258,9 +259,82 @@ public struct PraxisRuntimeMpProjectClient: Sendable {
     try await mpFacade.smoke(.init(projectID: project.rawValue))
   }
 
+  /// Ingests one MP memory record for the scoped project.
+  public func ingest(_ input: PraxisRuntimeMpIngestInput) async throws -> PraxisMpIngestSnapshot {
+    try await mpFacade.ingest(
+      .init(
+        projectID: project.rawValue,
+        agentID: input.agentID.rawValue,
+        sessionID: input.sessionID?.rawValue,
+        scopeLevel: input.scopeLevel,
+        summary: input.summary,
+        checkedSnapshotRef: .init(rawValue: input.checkedSnapshotRef),
+        branchRef: input.branchRef,
+        storageKey: input.storageKey,
+        memoryKind: input.memoryKind,
+        observedAt: input.observedAt,
+        capturedAt: input.capturedAt,
+        semanticGroupID: input.semanticGroupID,
+        tags: input.tags,
+        sourceRefs: input.sourceRefs,
+        confidence: input.confidence
+      )
+    )
+  }
+
   /// Returns one memory-scoped MP client for lifecycle mutations.
   public func memory(_ memory: PraxisRuntimeMemoryRef) -> PraxisRuntimeMpMemoryClient {
     PraxisRuntimeMpMemoryClient(project: project, memory: memory, mpFacade: mpFacade)
+  }
+}
+
+/// Caller-friendly input for one MP memory ingest operation.
+public struct PraxisRuntimeMpIngestInput: Sendable, Equatable {
+  public let agentID: PraxisRuntimeAgentRef
+  public let sessionID: PraxisRuntimeSessionRef?
+  public let scopeLevel: PraxisMpScopeLevel
+  public let summary: String
+  public let checkedSnapshotRef: String
+  public let branchRef: String
+  public let storageKey: String?
+  public let memoryKind: PraxisMpMemoryKind
+  public let observedAt: String?
+  public let capturedAt: String?
+  public let semanticGroupID: String?
+  public let tags: [String]
+  public let sourceRefs: [String]
+  public let confidence: PraxisMpMemoryConfidenceLevel
+
+  public init(
+    agentID: PraxisRuntimeAgentRef,
+    sessionID: PraxisRuntimeSessionRef? = nil,
+    scopeLevel: PraxisMpScopeLevel = .agentIsolated,
+    summary: String,
+    checkedSnapshotRef: String,
+    branchRef: String,
+    storageKey: String? = nil,
+    memoryKind: PraxisMpMemoryKind = .semantic,
+    observedAt: String? = nil,
+    capturedAt: String? = nil,
+    semanticGroupID: String? = nil,
+    tags: [String] = [],
+    sourceRefs: [String] = [],
+    confidence: PraxisMpMemoryConfidenceLevel = .medium
+  ) {
+    self.agentID = agentID
+    self.sessionID = sessionID
+    self.scopeLevel = scopeLevel
+    self.summary = summary
+    self.checkedSnapshotRef = checkedSnapshotRef
+    self.branchRef = branchRef
+    self.storageKey = storageKey
+    self.memoryKind = memoryKind
+    self.observedAt = observedAt
+    self.capturedAt = capturedAt
+    self.semanticGroupID = semanticGroupID
+    self.tags = tags
+    self.sourceRefs = sourceRefs
+    self.confidence = confidence
   }
 }
 

@@ -6,7 +6,7 @@ import PraxisCoreTypes
 /// of reaching into individual provider executors directly. It does not own browser, shell, or
 /// other non-provider host capabilities.
 public protocol PraxisProviderRequestSurfaceProtocol: Sendable {
-  var supportsInference: Bool { get }
+  var supportsConversation: Bool { get }
   var supportsWebSearch: Bool { get }
   var supportsEmbedding: Bool { get }
   var supportsFileUpload: Bool { get }
@@ -16,12 +16,12 @@ public protocol PraxisProviderRequestSurfaceProtocol: Sendable {
   var supportsMCPToolRegistry: Bool { get }
   var supportsToolCalls: Bool { get }
 
-  /// Runs one provider inference request through the aggregated surface.
+  /// Runs one provider conversation request through the aggregated surface.
   ///
-  /// - Parameter request: Normalized inference request.
-  /// - Returns: Normalized inference response.
-  /// - Throws: `PraxisError.dependencyMissing` when no inference backend is wired.
-  func infer(_ request: PraxisProviderInferenceRequest) async throws -> PraxisProviderInferenceResponse
+  /// - Parameter request: Normalized conversation request.
+  /// - Returns: Normalized conversation response.
+  /// - Throws: `PraxisError.dependencyMissing` when no conversation backend is wired.
+  func converse(_ request: PraxisProviderConversationRequest) async throws -> PraxisProviderConversationResponse
 
   /// Runs one provider web-search request through the aggregated surface.
   ///
@@ -80,7 +80,7 @@ public protocol PraxisProviderRequestSurfaceProtocol: Sendable {
 
 /// Default value-type implementation for the aggregated provider request seam.
 public struct PraxisProviderRequestSurface: PraxisProviderRequestSurfaceProtocol, Sendable {
-  private let inferenceExecutor: (any PraxisProviderInferenceExecutor)?
+  private let conversationExecutor: (any PraxisProviderConversationExecutor)?
   private let webSearchExecutor: (any PraxisProviderWebSearchExecutor)?
   private let embeddingExecutor: (any PraxisProviderEmbeddingExecutor)?
   private let fileStore: (any PraxisProviderFileStore)?
@@ -91,7 +91,7 @@ public struct PraxisProviderRequestSurface: PraxisProviderRequestSurfaceProtocol
   private let mcpExecutor: (any PraxisProviderMCPExecutor)?
 
   public init(
-    inferenceExecutor: (any PraxisProviderInferenceExecutor)? = nil,
+    conversationExecutor: (any PraxisProviderConversationExecutor)? = nil,
     webSearchExecutor: (any PraxisProviderWebSearchExecutor)? = nil,
     embeddingExecutor: (any PraxisProviderEmbeddingExecutor)? = nil,
     fileStore: (any PraxisProviderFileStore)? = nil,
@@ -101,7 +101,7 @@ public struct PraxisProviderRequestSurface: PraxisProviderRequestSurfaceProtocol
     mcpToolRegistry: (any PraxisProviderMCPToolRegistry)? = nil,
     mcpExecutor: (any PraxisProviderMCPExecutor)? = nil
   ) {
-    self.inferenceExecutor = inferenceExecutor
+    self.conversationExecutor = conversationExecutor
     self.webSearchExecutor = webSearchExecutor
     self.embeddingExecutor = embeddingExecutor
     self.fileStore = fileStore
@@ -112,8 +112,8 @@ public struct PraxisProviderRequestSurface: PraxisProviderRequestSurfaceProtocol
     self.mcpExecutor = mcpExecutor
   }
 
-  public var supportsInference: Bool {
-    inferenceExecutor != nil
+  public var supportsConversation: Bool {
+    conversationExecutor != nil
   }
 
   public var supportsWebSearch: Bool {
@@ -148,12 +148,12 @@ public struct PraxisProviderRequestSurface: PraxisProviderRequestSurfaceProtocol
     mcpToolRegistry != nil && mcpExecutor != nil
   }
 
-  public func infer(_ request: PraxisProviderInferenceRequest) async throws -> PraxisProviderInferenceResponse {
+  public func converse(_ request: PraxisProviderConversationRequest) async throws -> PraxisProviderConversationResponse {
     let executor = try requireDependency(
-      inferenceExecutor,
-      errorMessage: "Provider request surface requires an inference executor."
+      conversationExecutor,
+      errorMessage: "Provider request surface requires a conversation executor."
     )
-    return try await executor.infer(request)
+    return try await executor.converse(request)
   }
 
   public func search(_ request: PraxisProviderWebSearchRequest) async throws -> PraxisProviderWebSearchResponse {
