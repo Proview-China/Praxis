@@ -3,6 +3,7 @@ import PraxisCheckpoint
 import PraxisCmpTypes
 import PraxisCoreTypes
 import PraxisJournal
+import PraxisProviderContracts
 
 public struct PraxisCheckpointRecord: Sendable, Equatable, Codable {
   public let pointer: PraxisCheckpointPointer
@@ -41,6 +42,109 @@ public struct PraxisJournalAppendReceipt: Sendable, Equatable, Codable {
   public init(appendedCount: Int, lastCursor: PraxisJournalCursor?) {
     self.appendedCount = appendedCount
     self.lastCursor = lastCursor
+  }
+}
+
+public struct PraxisConversationTurnRecord: Sendable, Equatable, Codable, Identifiable {
+  public let projectID: String
+  public let sessionID: String
+  public let turnID: String
+  public let turnIndex: Int
+  public let agentID: String?
+  public let preparedManifestSummary: String
+  public let includedSectionIDs: [String]
+  public let omittedSectionIDs: [String]
+  public let providerInputMessages: [PraxisProviderMessage]
+  public let assistantMessages: [PraxisProviderMessage]
+  public let providerContinuation: [String: String]
+  public let generationSummary: String
+  public let outputText: String
+  public let backend: String
+  public let providerOperationID: String?
+  public let completedAt: String?
+  public let preferredModel: String?
+  public let createdAt: String
+
+  public var id: String { turnID }
+
+  public init(
+    projectID: String,
+    sessionID: String,
+    turnID: String,
+    turnIndex: Int,
+    agentID: String? = nil,
+    preparedManifestSummary: String,
+    includedSectionIDs: [String],
+    omittedSectionIDs: [String],
+    providerInputMessages: [PraxisProviderMessage],
+    assistantMessages: [PraxisProviderMessage],
+    providerContinuation: [String: String],
+    generationSummary: String,
+    outputText: String,
+    backend: String,
+    providerOperationID: String? = nil,
+    completedAt: String? = nil,
+    preferredModel: String? = nil,
+    createdAt: String
+  ) {
+    self.projectID = projectID
+    self.sessionID = sessionID
+    self.turnID = turnID
+    self.turnIndex = max(1, turnIndex)
+    self.agentID = agentID
+    self.preparedManifestSummary = preparedManifestSummary
+    self.includedSectionIDs = includedSectionIDs
+    self.omittedSectionIDs = omittedSectionIDs
+    self.providerInputMessages = providerInputMessages
+    self.assistantMessages = assistantMessages
+    self.providerContinuation = providerContinuation
+    self.generationSummary = generationSummary
+    self.outputText = outputText
+    self.backend = backend
+    self.providerOperationID = providerOperationID
+    self.completedAt = completedAt
+    self.preferredModel = preferredModel
+    self.createdAt = createdAt
+  }
+}
+
+public struct PraxisConversationStateWriteReceipt: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let sessionID: String
+  public let turnID: String
+  public let turnIndex: Int
+  public let storedAt: String
+
+  public init(projectID: String, sessionID: String, turnID: String, turnIndex: Int, storedAt: String) {
+    self.projectID = projectID
+    self.sessionID = sessionID
+    self.turnID = turnID
+    self.turnIndex = turnIndex
+    self.storedAt = storedAt
+  }
+}
+
+public struct PraxisConversationHistoryQuery: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let sessionID: String
+  public let limit: Int
+
+  public init(projectID: String, sessionID: String, limit: Int = 20) {
+    self.projectID = projectID
+    self.sessionID = sessionID
+    self.limit = max(1, min(limit, 200))
+  }
+}
+
+public struct PraxisConversationHistoryRecord: Sendable, Equatable, Codable {
+  public let projectID: String
+  public let sessionID: String
+  public let turns: [PraxisConversationTurnRecord]
+
+  public init(projectID: String, sessionID: String, turns: [PraxisConversationTurnRecord]) {
+    self.projectID = projectID
+    self.sessionID = sessionID
+    self.turns = turns
   }
 }
 

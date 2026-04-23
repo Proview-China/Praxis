@@ -32,6 +32,13 @@ public protocol PraxisJournalStoreContract: Sendable {
   func read(_ request: PraxisJournalSliceRequest) async throws -> PraxisJournalSlice
 }
 
+/// Stores provider conversation turns for session-scoped context replay.
+public protocol PraxisConversationStateStoreContract: Sendable {
+  func save(_ record: PraxisConversationTurnRecord) async throws -> PraxisConversationStateWriteReceipt
+  func history(_ query: PraxisConversationHistoryQuery) async throws -> PraxisConversationHistoryRecord
+  func latest(projectID: String, sessionID: String) async throws -> PraxisConversationTurnRecord?
+}
+
 /// Stores projection descriptors that HostRuntime can inspect or recover.
 public protocol PraxisProjectionStoreContract: Sendable {
   /// Persists a projection descriptor.

@@ -402,6 +402,7 @@ public struct PraxisCapabilityGenerationSnapshot: Sendable, Equatable, Codable {
   public let summary: String
   public let outputText: String
   public let structuredFields: [String: PraxisValue]
+  public let continuation: [String: String]
   public let backend: String
   public let providerOperationID: String?
   public let completedAt: String?
@@ -412,6 +413,7 @@ public struct PraxisCapabilityGenerationSnapshot: Sendable, Equatable, Codable {
     summary: String,
     outputText: String,
     structuredFields: [String: PraxisValue],
+    continuation: [String: String] = [:],
     backend: String,
     providerOperationID: String? = nil,
     completedAt: String? = nil,
@@ -421,6 +423,7 @@ public struct PraxisCapabilityGenerationSnapshot: Sendable, Equatable, Codable {
     self.summary = summary
     self.outputText = outputText
     self.structuredFields = structuredFields
+    self.continuation = continuation
     self.backend = backend
     self.providerOperationID = providerOperationID
     self.completedAt = completedAt
@@ -1332,6 +1335,7 @@ public final class PraxisCapabilityFacade: Sendable {
       summary: "Thin capability \(PraxisThinCapabilityKey.generateCreate.rawValue) returned a bounded generation response.",
       outputText: response.outputText,
       structuredFields: response.structuredFields,
+      continuation: response.continuation,
       backend: response.receipt.backend,
       providerOperationID: response.receipt.providerOperationID,
       completedAt: response.receipt.completedAt,

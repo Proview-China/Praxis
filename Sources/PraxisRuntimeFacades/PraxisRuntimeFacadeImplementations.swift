@@ -1,5 +1,6 @@
 import PraxisGoal
 import PraxisCoreTypes
+import PraxisInfraContracts
 import PraxisMpMemory
 import PraxisRuntimeComposition
 import PraxisRuntimeUseCases
@@ -108,6 +109,7 @@ public final class PraxisRuntimeFacade: Sendable {
   public let inspectionFacade: PraxisInspectionFacade
   public let capabilityFacade: PraxisCapabilityFacade
   public let mpFacade: PraxisMpFacade
+  public let conversationStateStore: (any PraxisConversationStateStoreContract)?
   public let cmpSessionFacade: PraxisCmpSessionFacade
   public let cmpProjectFacade: PraxisCmpProjectFacade
   public let cmpFlowFacade: PraxisCmpFlowFacade
@@ -121,6 +123,7 @@ public final class PraxisRuntimeFacade: Sendable {
     inspectionFacade: PraxisInspectionFacade,
     capabilityFacade: PraxisCapabilityFacade = .unsupported(),
     mpFacade: PraxisMpFacade,
+    conversationStateStore: (any PraxisConversationStateStoreContract)? = nil,
     cmpSessionFacade: PraxisCmpSessionFacade,
     cmpProjectFacade: PraxisCmpProjectFacade,
     cmpFlowFacade: PraxisCmpFlowFacade,
@@ -132,6 +135,7 @@ public final class PraxisRuntimeFacade: Sendable {
     self.inspectionFacade = inspectionFacade
     self.capabilityFacade = capabilityFacade
     self.mpFacade = mpFacade
+    self.conversationStateStore = conversationStateStore
     self.cmpSessionFacade = cmpSessionFacade
     self.cmpProjectFacade = cmpProjectFacade
     self.cmpFlowFacade = cmpFlowFacade
@@ -221,6 +225,7 @@ public final class PraxisRuntimeFacade: Sendable {
         promoteMpUseCase: promoteMpUseCase,
         archiveMpUseCase: archiveMpUseCase
       ),
+      conversationStateStore: dependencies.hostAdapters.conversationStateStore,
       cmpSessionFacade: cmpSessionFacade,
       cmpProjectFacade: cmpProjectFacade,
       cmpFlowFacade: cmpFlowFacade,

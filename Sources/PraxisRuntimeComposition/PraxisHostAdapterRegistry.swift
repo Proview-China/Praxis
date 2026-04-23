@@ -38,6 +38,7 @@ public struct PraxisHostAdapterRegistry: Sendable {
 
   public let checkpointStore: (any PraxisCheckpointStoreContract)?
   public let journalStore: (any PraxisJournalStoreContract)?
+  public let conversationStateStore: (any PraxisConversationStateStoreContract)?
   public let projectionStore: (any PraxisProjectionStoreContract)?
   public let cmpContextPackageStore: (any PraxisCmpContextPackageStoreContract)?
   public let cmpControlStore: (any PraxisCmpControlStoreContract)?
@@ -89,6 +90,7 @@ public struct PraxisHostAdapterRegistry: Sendable {
     processSupervisor: (any PraxisProcessSupervisor)? = nil,
     checkpointStore: (any PraxisCheckpointStoreContract)? = nil,
     journalStore: (any PraxisJournalStoreContract)? = nil,
+    conversationStateStore: (any PraxisConversationStateStoreContract)? = nil,
     projectionStore: (any PraxisProjectionStoreContract)? = nil,
     cmpContextPackageStore: (any PraxisCmpContextPackageStoreContract)? = nil,
     cmpControlStore: (any PraxisCmpControlStoreContract)? = nil,
@@ -138,6 +140,7 @@ public struct PraxisHostAdapterRegistry: Sendable {
     self.processSupervisor = processSupervisor
     self.checkpointStore = checkpointStore
     self.journalStore = journalStore
+    self.conversationStateStore = conversationStateStore
     self.projectionStore = projectionStore
     self.cmpContextPackageStore = cmpContextPackageStore
     self.cmpControlStore = cmpControlStore
@@ -257,6 +260,7 @@ public struct PraxisHostAdapterRegistry: Sendable {
       processSupervisor: PraxisStubProcessSupervisor(),
       checkpointStore: PraxisFakeCheckpointStore(),
       journalStore: PraxisFakeJournalStore(),
+      conversationStateStore: PraxisFakeConversationStateStore(),
       projectionStore: PraxisFakeProjectionStore(),
       cmpContextPackageStore: PraxisFakeCmpContextPackageStore(),
       cmpControlStore: PraxisFakeCmpControlStore(),

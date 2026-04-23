@@ -1,6 +1,7 @@
 import Foundation
 import PraxisContextAssembly
 import PraxisGoal
+import PraxisInfraContracts
 import PraxisRuntimeFacades
 import PraxisRuntimeGateway
 
@@ -14,13 +15,20 @@ public final class PraxisRuntimeClient: Sendable {
   private let capabilityFacade: PraxisCapabilityFacade
   private let cmpFacade: PraxisCmpFacade
   private let mpFacade: PraxisMpFacade
+  private let conversationStateStore: (any PraxisConversationStateStoreContract)?
+  private let contextCompactionDriver: (any PraxisContextCompactionDriver)?
   private let runFacade: PraxisRunFacade
 
-  init(runtimeFacade: PraxisRuntimeFacade) {
+  init(
+    runtimeFacade: PraxisRuntimeFacade,
+    contextCompactionDriver: (any PraxisContextCompactionDriver)? = nil
+  ) {
     self.inspectionFacade = runtimeFacade.inspectionFacade
     self.capabilityFacade = runtimeFacade.capabilityFacade
     self.cmpFacade = runtimeFacade.cmpFacade
     self.mpFacade = runtimeFacade.mpFacade
+    self.conversationStateStore = runtimeFacade.conversationStateStore
+    self.contextCompactionDriver = contextCompactionDriver
     self.runFacade = runtimeFacade.runFacade
   }
 
@@ -30,10 +38,12 @@ public final class PraxisRuntimeClient: Sendable {
   /// - Returns: A runtime client ready for direct Swift calls.
   /// - Throws: Any dependency graph validation error raised while assembling the runtime facade.
   public static func makeDefault(
-    rootDirectory: URL? = nil
+    rootDirectory: URL? = nil,
+    contextCompactionDriver: (any PraxisContextCompactionDriver)? = nil
   ) throws -> PraxisRuntimeClient {
     try PraxisRuntimeClient(
-      runtimeFacade: PraxisRuntimeGatewayFactory.makeRuntimeFacade(rootDirectory: rootDirectory)
+      runtimeFacade: PraxisRuntimeGatewayFactory.makeRuntimeFacade(rootDirectory: rootDirectory),
+      contextCompactionDriver: contextCompactionDriver
     )
   }
 
@@ -52,7 +62,9 @@ public final class PraxisRuntimeClient: Sendable {
     PraxisRuntimeContextClient(
       mpFacade: mpFacade,
       cmpFacade: cmpFacade,
-      capabilityFacade: capabilityFacade
+      capabilityFacade: capabilityFacade,
+      conversationStateStore: conversationStateStore,
+      compactionDriver: contextCompactionDriver
     )
   }
 

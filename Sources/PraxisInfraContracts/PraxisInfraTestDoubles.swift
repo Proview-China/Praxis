@@ -76,6 +76,49 @@ public actor PraxisFakeJournalStore: PraxisJournalStoreContract {
   }
 }
 
+/// In-memory fake conversation state store for RuntimeKit context tests.
+public actor PraxisFakeConversationStateStore: PraxisConversationStateStoreContract {
+  private var turns: [PraxisConversationTurnRecord]
+
+  public init(seedTurns: [PraxisConversationTurnRecord] = []) {
+    self.turns = seedTurns
+  }
+
+  public func save(_ record: PraxisConversationTurnRecord) async throws -> PraxisConversationStateWriteReceipt {
+    turns.removeAll {
+      $0.projectID == record.projectID && $0.sessionID == record.sessionID && $0.turnID == record.turnID
+    }
+    turns.append(record)
+    return PraxisConversationStateWriteReceipt(
+      projectID: record.projectID,
+      sessionID: record.sessionID,
+      turnID: record.turnID,
+      turnIndex: record.turnIndex,
+      storedAt: record.createdAt
+    )
+  }
+
+  public func history(_ query: PraxisConversationHistoryQuery) async throws -> PraxisConversationHistoryRecord {
+    let matching = turns
+      .filter { $0.projectID == query.projectID && $0.sessionID == query.sessionID }
+      .sorted { left, right in
+        if left.turnIndex != right.turnIndex {
+          return left.turnIndex < right.turnIndex
+        }
+        return left.turnID < right.turnID
+      }
+    return PraxisConversationHistoryRecord(
+      projectID: query.projectID,
+      sessionID: query.sessionID,
+      turns: Array(matching.suffix(query.limit))
+    )
+  }
+
+  public func latest(projectID: String, sessionID: String) async throws -> PraxisConversationTurnRecord? {
+    try await history(.init(projectID: projectID, sessionID: sessionID, limit: 1)).turns.last
+  }
+}
+
 /// In-memory fake projection descriptor store.
 public actor PraxisFakeProjectionStore: PraxisProjectionStoreContract {
   private var descriptors: [PraxisProjectionRecordDescriptor]

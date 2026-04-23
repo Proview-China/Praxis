@@ -419,6 +419,7 @@ public struct PraxisRuntimeGenerateResult: Sendable, Equatable {
   public let summary: String
   public let outputText: String
   public let structuredFields: [String: PraxisValue]
+  public let continuation: [String: String]
   public let backend: String
   public let providerOperationID: String?
   public let completedAt: String?
@@ -429,6 +430,7 @@ public struct PraxisRuntimeGenerateResult: Sendable, Equatable {
     summary = snapshot.summary
     outputText = snapshot.outputText
     structuredFields = snapshot.structuredFields
+    continuation = snapshot.continuation
     backend = snapshot.backend
     providerOperationID = snapshot.providerOperationID
     completedAt = snapshot.completedAt

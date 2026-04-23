@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import PraxisContextAssembly
 import PraxisCmpTypes
 import PraxisCoreTypes
 import PraxisMpTypes
@@ -690,6 +691,81 @@ struct PraxisRuntimeKitTests {
   }
 
   @Test
+  func contextConversationPersistsHistoryAndReplaysTranscript() async throws {
+    let rootDirectory = try makeRuntimeKitTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let client = try PraxisRuntimeClient.makeDefault(rootDirectory: rootDirectory)
+    let conversation = client.context.project("mp.local-runtime").conversation("session.context-chain")
+    let first = try await conversation.generate(
+      .init(
+        task: "Explain the checkout policy",
+        agentID: "runtime.local",
+        systemPrompt: "Follow repository conventions.",
+        memoryQuery: "checkout policy",
+        preferredModel: "local-test-model"
+      )
+    )
+    let second = try await conversation.generate(
+      .init(
+        task: "Now apply it to the next edit",
+        agentID: "runtime.local",
+        systemPrompt: "Follow repository conventions.",
+        memoryQuery: "next edit",
+        preferredModel: "local-test-model"
+      )
+    )
+    _ = try await conversation.generate(
+      .init(
+        task: "Close the loop without duplicating older turns",
+        agentID: "runtime.local",
+        systemPrompt: "Follow repository conventions.",
+        memoryQuery: "final edit",
+        preferredModel: "local-test-model"
+      )
+    )
+
+    let history = try await conversation.history(limit: 10)
+    let replay = try await conversation.replay(limit: 10)
+    let replayText = replay.messages.flatMap(\.textParts).joined(separator: "\n")
+
+    #expect(first.providerContinuation["contextManifest"] == first.preparedContext.manifestSummary)
+    #expect(first.conversationState?.turnCount == 1)
+    #expect(second.conversationState?.turnCount == 2)
+    #expect(history.turns.map(\.turnIndex) == [1, 2, 3])
+    #expect(history.turns.first?.preparedManifestSummary == first.preparedContext.manifestSummary)
+    #expect(replay.messages.contains { $0.role == .assistant && $0.textParts.joined().isEmpty == false })
+    #expect(replayText.components(separatedBy: "Explain the checkout policy").count - 1 == 1)
+    #expect(replayText.components(separatedBy: "Now apply it to the next edit").count - 1 == 1)
+  }
+
+  @Test
+  func contextPrepareUsesInjectedCompactionDriverWhenPreferred() async throws {
+    let rootDirectory = try makeRuntimeKitTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let client = try PraxisRuntimeClient.makeDefault(
+      rootDirectory: rootDirectory,
+      contextCompactionDriver: RuntimeKitStubCompactionDriver { request in
+        PraxisContextCompactionResult(
+          messages: [.developerText("RuntimeKit compacted \(request.messages.count) message(s).")],
+          summary: "RuntimeKit stub compaction succeeded."
+        )
+      }
+    )
+    let prepared = try await client.context.project("mp.local-runtime").prepare(
+      .init(
+        task: String(repeating: "Large task. ", count: 30),
+        maxCharacterBudget: 80,
+        compactionMode: .providerCompactionPreferred
+      )
+    )
+
+    #expect(prepared.compaction.status == .compacted)
+    #expect(prepared.providerMessages.first?.textParts.joined().contains("RuntimeKit compacted") == true)
+  }
+
+  @Test
   func runtimeKitConveniencesReduceRequestWrapperCeremonyWithoutChangingTypedSemantics() async throws {
     let rootDirectory = try makeRuntimeKitTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: rootDirectory) }
@@ -1189,5 +1265,13 @@ struct PraxisRuntimeKitTests {
         )
       )
     }
+  }
+}
+
+private struct RuntimeKitStubCompactionDriver: PraxisContextCompactionDriver {
+  let body: @Sendable (PraxisContextCompactionRequest) async throws -> PraxisContextCompactionResult
+
+  func compact(_ request: PraxisContextCompactionRequest) async throws -> PraxisContextCompactionResult {
+    try await body(request)
   }
 }

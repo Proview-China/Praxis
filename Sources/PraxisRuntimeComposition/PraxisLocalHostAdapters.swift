@@ -42,7 +42,7 @@ private struct PraxisLocalRuntimePaths: Sendable {
 
 private let sqliteTransientDestructor = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 private let localSQLiteSchemaLock = NSLock()
-private let localSQLiteRuntimeSchemaVersion = 1
+private let localSQLiteRuntimeSchemaVersion = 2
 
 private struct LocalSQLiteSchemaColumnSignature: Sendable, Equatable {
   let name: String
@@ -107,6 +107,17 @@ private let localSQLiteCurrentSchemaTableSpecs: [LocalSQLiteSchemaTableSpec] = [
       localSQLiteColumn("type", "TEXT", notNull: true),
       localSQLiteColumn("summary", "TEXT", notNull: true),
       localSQLiteColumn("metadata_json", "TEXT"),
+    ]
+  ),
+  .init(
+    name: "conversation_turns",
+    expectedColumnSignatures: [
+      localSQLiteColumn("project_id", "TEXT", notNull: true, primaryKeyOrdinal: 1),
+      localSQLiteColumn("session_id", "TEXT", notNull: true, primaryKeyOrdinal: 2),
+      localSQLiteColumn("turn_index", "INTEGER", notNull: true, primaryKeyOrdinal: 3),
+      localSQLiteColumn("turn_id", "TEXT", notNull: true),
+      localSQLiteColumn("created_at", "TEXT", notNull: true),
+      localSQLiteColumn("record_json", "TEXT", notNull: true),
     ]
   ),
   .init(
@@ -466,6 +477,18 @@ private func localSQLiteApplyCurrentSchemaArtifacts(database: OpaquePointer?) th
     "CREATE INDEX IF NOT EXISTS idx_journal_events_session_sequence ON journal_events(session_id, sequence);",
     "CREATE INDEX IF NOT EXISTS idx_journal_events_session_run_sequence ON journal_events(session_id, run_reference, sequence);",
     """
+    CREATE TABLE IF NOT EXISTS conversation_turns (
+      project_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      turn_index INTEGER NOT NULL,
+      turn_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      record_json TEXT NOT NULL,
+      PRIMARY KEY (project_id, session_id, turn_index)
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_conversation_turns_session ON conversation_turns(project_id, session_id, turn_index);",
+    """
     CREATE TABLE IF NOT EXISTS projections (
       project_id TEXT NOT NULL,
       projection_id TEXT NOT NULL,
@@ -626,6 +649,16 @@ private func localSQLiteResolveSchemaPolicyDecision(
       )
     }
     return .reopenCurrentSchema
+  case 1:
+    guard try localSQLiteMatchesCurrentRuntimeSchema(
+      database: database,
+      allowMissingManagedTables: true
+    ) else {
+      return .rejectIncompatibleSchema(
+        reason: "Local runtime SQLite schema version 1 does not satisfy the current migration policy."
+      )
+    }
+    return .adoptLegacyCurrentSchema
   case let version where version > localSQLiteRuntimeSchemaVersion:
     return .rejectUnsupportedFuture(foundVersion: version)
   default:
@@ -1327,6 +1360,96 @@ public actor PraxisLocalJournalStore: PraxisJournalStoreContract {
         }
       }
     }
+  }
+}
+
+public actor PraxisLocalConversationStateStore: PraxisConversationStateStoreContract {
+  private let fileURL: URL
+
+  public init(fileURL: URL) {
+    self.fileURL = fileURL
+  }
+
+  public func save(_ record: PraxisConversationTurnRecord) async throws -> PraxisConversationStateWriteReceipt {
+    let recordJSON = try localRuntimeEncodeJSON(record)
+    try withLocalSQLiteDatabase(at: fileURL) { database in
+      let statement = try localSQLitePrepareStatement(
+        """
+        INSERT INTO conversation_turns (
+          project_id,
+          session_id,
+          turn_index,
+          turn_id,
+          created_at,
+          record_json
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(project_id, session_id, turn_index) DO UPDATE SET
+          turn_id = excluded.turn_id,
+          created_at = excluded.created_at,
+          record_json = excluded.record_json;
+        """,
+        database: database
+      )
+      defer { sqlite3_finalize(statement) }
+      try localSQLiteBindText(record.projectID, at: 1, in: statement, database: database)
+      try localSQLiteBindText(record.sessionID, at: 2, in: statement, database: database)
+      try localSQLiteBindInteger(record.turnIndex, at: 3, in: statement, database: database)
+      try localSQLiteBindText(record.turnID, at: 4, in: statement, database: database)
+      try localSQLiteBindText(record.createdAt, at: 5, in: statement, database: database)
+      try localSQLiteBindText(recordJSON, at: 6, in: statement, database: database)
+      guard sqlite3_step(statement) == SQLITE_DONE else {
+        throw PraxisError.invariantViolation("Failed to persist conversation turn: \(localSQLiteErrorMessage(database)).")
+      }
+    }
+    return PraxisConversationStateWriteReceipt(
+      projectID: record.projectID,
+      sessionID: record.sessionID,
+      turnID: record.turnID,
+      turnIndex: record.turnIndex,
+      storedAt: record.createdAt
+    )
+  }
+
+  public func history(_ query: PraxisConversationHistoryQuery) async throws -> PraxisConversationHistoryRecord {
+    try withLocalSQLiteDatabase(at: fileURL) { database in
+      let statement = try localSQLitePrepareStatement(
+        """
+        SELECT record_json
+        FROM conversation_turns
+        WHERE project_id = ? AND session_id = ?
+        ORDER BY turn_index DESC
+        LIMIT ?;
+        """,
+        database: database
+      )
+      defer { sqlite3_finalize(statement) }
+      try localSQLiteBindText(query.projectID, at: 1, in: statement, database: database)
+      try localSQLiteBindText(query.sessionID, at: 2, in: statement, database: database)
+      try localSQLiteBindInteger(query.limit, at: 3, in: statement, database: database)
+
+      var turns: [PraxisConversationTurnRecord] = []
+      while true {
+        let code = sqlite3_step(statement)
+        switch code {
+        case SQLITE_ROW:
+          if let recordJSON = localSQLiteText(from: statement, at: 0) {
+            turns.append(try localRuntimeDecodeJSON(PraxisConversationTurnRecord.self, from: recordJSON))
+          }
+        case SQLITE_DONE:
+          return PraxisConversationHistoryRecord(
+            projectID: query.projectID,
+            sessionID: query.sessionID,
+            turns: turns.sorted { $0.turnIndex < $1.turnIndex }
+          )
+        default:
+          throw PraxisError.invariantViolation("Failed to read conversation turns: \(localSQLiteErrorMessage(database)).")
+        }
+      }
+    }
+  }
+
+  public func latest(projectID: String, sessionID: String) async throws -> PraxisConversationTurnRecord? {
+    try await history(.init(projectID: projectID, sessionID: sessionID, limit: 1)).turns.last
   }
 }
 
@@ -3577,6 +3700,7 @@ public extension PraxisHostAdapterRegistry {
       processSupervisor: PraxisLocalProcessSupervisor(),
       checkpointStore: PraxisLocalCheckpointStore(fileURL: paths.databaseFileURL),
       journalStore: PraxisLocalJournalStore(fileURL: paths.databaseFileURL),
+      conversationStateStore: PraxisLocalConversationStateStore(fileURL: paths.databaseFileURL),
       projectionStore: PraxisLocalProjectionStore(fileURL: paths.databaseFileURL),
       cmpContextPackageStore: PraxisLocalCmpContextPackageStore(fileURL: paths.databaseFileURL),
       cmpControlStore: PraxisLocalCmpControlStore(fileURL: paths.databaseFileURL),

@@ -102,4 +102,148 @@ struct PraxisContextAssemblyTests {
     #expect(prepared.compaction.status == .unavailable)
     #expect(prepared.issues.contains { $0.contains("Context compaction driver is unavailable") })
   }
+
+  @Test
+  func budgetReportsFinalProviderMessageSizeAndRequiredOverBudgetIssue() async throws {
+    let service = PraxisContextAssemblyService()
+    let prepared = try await service.prepare(
+      .init(
+        projectID: "project.context",
+        task: String(repeating: "Required user task. ", count: 8),
+        systemPrompt: String(repeating: "Required system. ", count: 8),
+        developerInstructions: String(repeating: "Required developer. ", count: 8),
+        policy: .init(maxCharacterBudget: 60)
+      )
+    )
+
+    let actualProviderCharacters = prepared.providerMessages
+      .flatMap(\.textParts)
+      .reduce(0) { $0 + $1.count }
+
+    #expect(prepared.includedSections.map(\.id) == ["system", "developer", "user"])
+    #expect(prepared.budget.usedCharacterCount > prepared.budget.maxCharacterBudget)
+    #expect(prepared.budget.estimatedProviderCharacterCount == actualProviderCharacters)
+    #expect(prepared.issues.contains { $0.contains("Required context exceeds the character budget") })
+  }
+
+  @Test
+  func memoryOrderingPreservesMpFinalScoreBeforeAssemblyTieBreakers() async throws {
+    let service = PraxisContextAssemblyService()
+    let prepared = try await service.prepare(
+      .init(
+        projectID: "project.context",
+        task: "Use the most relevant memory.",
+        memoryCandidates: [
+          .init(
+            memoryID: "memory.low-score",
+            summary: "Short.",
+            storageKey: "memory/low-score",
+            memoryKind: .semantic,
+            freshnessStatus: .fresh,
+            alignmentStatus: .aligned,
+            scopeLevel: .project,
+            semanticScore: 0.10,
+            finalScore: 1,
+            rankExplanation: "low score"
+          ),
+          .init(
+            memoryID: "memory.high-score",
+            summary: "Longer high scoring semantic memory selected by MP ranking.",
+            storageKey: "memory/high-score",
+            memoryKind: .semantic,
+            freshnessStatus: .fresh,
+            alignmentStatus: .aligned,
+            scopeLevel: .project,
+            semanticScore: 0.99,
+            finalScore: 99,
+            rankExplanation: "high score"
+          ),
+        ],
+        policy: .init(maxCharacterBudget: 1_000)
+      )
+    )
+
+    let memoryIDs = prepared.includedSections
+      .filter { $0.kind == .memory }
+      .map(\.id)
+    #expect(memoryIDs == ["memory.high-score", "memory.low-score"])
+  }
+
+  @Test
+  func providerCompactionPreferredUsesWiredDriverAndReportsFailure() async throws {
+    let compactingService = PraxisContextAssemblyService(
+      compactionDriver: StubCompactionDriver { request in
+        PraxisContextCompactionResult(
+          messages: [.developerText("Compacted \(request.messages.count) message(s)."), .userText("Current task preserved.")],
+          summary: "Stub compaction succeeded."
+        )
+      }
+    )
+    let compacted = try await compactingService.prepare(
+      .init(
+        projectID: "project.context",
+        task: String(repeating: "Large current task. ", count: 20),
+        policy: .init(maxCharacterBudget: 80, compactionMode: .providerCompactionPreferred)
+      )
+    )
+
+    #expect(compacted.compaction.status == .compacted)
+    #expect(compacted.providerMessages.first?.textParts.joined().contains("Compacted") == true)
+
+    let failingService = PraxisContextAssemblyService(
+      compactionDriver: StubCompactionDriver { _ in
+        throw StubCompactionError()
+      }
+    )
+    let fallback = try await failingService.prepare(
+      .init(
+        projectID: "project.context",
+        task: String(repeating: "Large current task. ", count: 20),
+        policy: .init(maxCharacterBudget: 80, compactionMode: .providerCompactionPreferred)
+      )
+    )
+
+    #expect(fallback.compaction.status == .failed)
+    #expect(fallback.issues.contains { $0.contains("Context compaction failed") })
+  }
+
+  @Test
+  func compactionRecomputesBudgetAndPreservesCurrentUserTask() async throws {
+    let originalTask = "Current user task must survive provider compaction unchanged."
+    let service = PraxisContextAssemblyService(
+      compactionDriver: StubCompactionDriver { request in
+        #expect(request.messages.allSatisfy { $0.role != .user })
+        return PraxisContextCompactionResult(
+          messages: [.developerText("Compacted historical context.")],
+          summary: "Stub compaction shortened the context."
+        )
+      }
+    )
+
+    let prepared = try await service.prepare(
+      .init(
+        projectID: "project.context",
+        task: originalTask,
+        policy: .init(maxCharacterBudget: 120, compactionMode: .providerCompactionPreferred)
+      )
+    )
+    let actualProviderCharacters = prepared.providerMessages
+      .flatMap(\.textParts)
+      .reduce(0) { $0 + $1.count }
+
+    #expect(prepared.compaction.status == .compacted)
+    #expect(prepared.providerMessages.last == .userText(originalTask))
+    #expect(prepared.budget.estimatedProviderCharacterCount == actualProviderCharacters)
+    #expect(prepared.budget.estimatedProviderCharacterCount <= prepared.budget.maxCharacterBudget)
+  }
+}
+
+private struct StubCompactionError: Error {}
+
+private struct StubCompactionDriver: PraxisContextCompactionDriver {
+  let body: @Sendable (PraxisContextCompactionRequest) async throws -> PraxisContextCompactionResult
+
+  func compact(_ request: PraxisContextCompactionRequest) async throws -> PraxisContextCompactionResult {
+    try await body(request)
+  }
 }

@@ -1483,6 +1483,41 @@ struct PraxisRuntimeFacadesTests {
   }
 
   @Test
+  func capabilityGenerateSnapshotPreservesProviderContinuation() async throws {
+    let facade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(
+      hostAdapters: PraxisHostAdapterRegistry(
+        providerConversationExecutor: PraxisStubProviderConversationExecutor { request in
+          PraxisProviderConversationResponse(
+            messages: [.assistantText("continued")],
+            receipt: .init(
+              capabilityKey: "provider.converse",
+              backend: "stub-provider",
+              status: .succeeded,
+              providerOperationID: "op-continuation",
+              summary: "Continuation preserved."
+            ),
+            continuation: ["responseID": "resp-continuation"]
+          )
+        },
+        providerConversationSurfaceProvenance: .composed
+      ),
+      blueprint: PraxisRuntimeGatewayModule.bootstrap
+    )
+
+    let generated = try await facade.capabilityFacade.generate(
+      .init(
+        messages: [.userText("Continue this conversation")],
+        continuation: ["contextManifest": "manifest-1"]
+      )
+    )
+    let encoded = try encodeFacadeTestJSON(generated)
+    let decoded = try decodeFacadeTestJSON(PraxisCapabilityGenerationSnapshot.self, from: encoded)
+
+    #expect(generated.continuation["responseID"] == "resp-continuation")
+    #expect(decoded.continuation["responseID"] == "resp-continuation")
+  }
+
+  @Test
   func mpFacadeSearchReadbackAndSmokeExposeDedicatedNeutralSnapshots() async throws {
     let memoryStore = StubSemanticMemoryStore(
       bundleResult: .init(

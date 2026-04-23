@@ -353,7 +353,7 @@ struct HostRuntimeSurfaceTests {
 
     _ = try await projectionStore.save(makeLocalProjectionDescriptor())
 
-    #expect(try hostTestSQLiteUserVersion(at: databaseFileURL) == 1)
+    #expect(try hostTestSQLiteUserVersion(at: databaseFileURL) == 2)
   }
 
   @Test
@@ -373,7 +373,7 @@ struct HostRuntimeSurfaceTests {
     let adoptedStore = PraxisLocalProjectionStore(fileURL: databaseFileURL)
     let descriptors = try await adoptedStore.describe(.init(projectID: descriptor.projectID))
 
-    #expect(try hostTestSQLiteUserVersion(at: databaseFileURL) == 1)
+    #expect(try hostTestSQLiteUserVersion(at: databaseFileURL) == 2)
     #expect(descriptors.count == 1)
     #expect(descriptors.first?.projectionID == descriptor.projectionID)
     #expect(descriptors.first?.lineageID == descriptor.lineageID)
@@ -460,7 +460,7 @@ struct HostRuntimeSurfaceTests {
     let reopenedStore = PraxisLocalProjectionStore(fileURL: databaseFileURL)
     let descriptors = try await reopenedStore.describe(.init(projectID: descriptor.projectID))
 
-    #expect(try hostTestSQLiteUserVersion(at: databaseFileURL) == 1)
+    #expect(try hostTestSQLiteUserVersion(at: databaseFileURL) == 2)
     #expect(descriptors.count == 1)
     #expect(descriptors.first?.projectionID == descriptor.projectionID)
   }
@@ -487,11 +487,11 @@ struct HostRuntimeSurfaceTests {
         database: database
       )
     }
-    try setHostTestSQLiteUserVersion(1, at: databaseFileURL)
+    try setHostTestSQLiteUserVersion(2, at: databaseFileURL)
 
     let rejectedStore = PraxisLocalProjectionStore(fileURL: databaseFileURL)
 
-    await #expect(throws: PraxisError.invariantViolation("Local runtime SQLite schema version 1 does not satisfy the current baseline policy.")) {
+    await #expect(throws: PraxisError.invariantViolation("Local runtime SQLite schema version 2 does not satisfy the current baseline policy.")) {
       _ = try await rejectedStore.describe(.init(projectID: "cmp.local-runtime"))
     }
   }
@@ -528,7 +528,7 @@ struct HostRuntimeSurfaceTests {
 
     let rejectedStore = PraxisLocalProjectionStore(fileURL: databaseFileURL)
 
-    await #expect(throws: PraxisError.invariantViolation("Local runtime SQLite schema version 1 does not satisfy the current baseline policy.")) {
+    await #expect(throws: PraxisError.invariantViolation("Local runtime SQLite schema version 2 does not satisfy the current baseline policy.")) {
       _ = try await rejectedStore.describe(.init(projectID: "cmp.local-runtime"))
     }
   }
@@ -547,11 +547,11 @@ struct HostRuntimeSurfaceTests {
     )
 
     _ = try await seededStore.save(descriptor)
-    try setHostTestSQLiteUserVersion(2, at: databaseFileURL)
+    try setHostTestSQLiteUserVersion(3, at: databaseFileURL)
 
     let rejectedStore = PraxisLocalProjectionStore(fileURL: databaseFileURL)
 
-    await #expect(throws: PraxisError.invariantViolation("Local runtime SQLite schema version 2 is newer than supported version 1. Refusing to open this runtime store.")) {
+    await #expect(throws: PraxisError.invariantViolation("Local runtime SQLite schema version 3 is newer than supported version 2. Refusing to open this runtime store.")) {
       _ = try await rejectedStore.describe(.init(projectID: descriptor.projectID))
     }
   }

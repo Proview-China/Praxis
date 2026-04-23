@@ -5,6 +5,7 @@ import Testing
 @testable import PraxisInfraContracts
 @testable import PraxisJournal
 @testable import PraxisMpTypes
+@testable import PraxisProviderContracts
 @testable import PraxisSession
 
 struct PraxisInfraContractsTests {
@@ -142,6 +143,61 @@ struct PraxisInfraContractsTests {
     #expect(loaded?.confidence == .high)
     #expect(loaded?.metadata["lane"] == .string("session"))
     #expect(sessionSearch.map(\.id) == ["memory-session"])
+  }
+
+  @Test
+  func conversationStateStorePersistsTurnsInStableSessionOrder() async throws {
+    let store = PraxisFakeConversationStateStore()
+    _ = try await store.save(
+      .init(
+        projectID: "project-1",
+        sessionID: "session-1",
+        turnID: "turn-1",
+        turnIndex: 1,
+        agentID: "agent-main",
+        preparedManifestSummary: "manifest one",
+        includedSectionIDs: ["system", "user"],
+        omittedSectionIDs: [],
+        providerInputMessages: [.userText("first")],
+        assistantMessages: [.assistantText("first response")],
+        providerContinuation: ["responseID": "resp-1"],
+        generationSummary: "first generated",
+        outputText: "first response",
+        backend: "stub-provider",
+        providerOperationID: "op-1",
+        completedAt: "2026-04-24T01:00:00Z",
+        preferredModel: "local-test-model",
+        createdAt: "2026-04-24T01:00:00Z"
+      )
+    )
+    _ = try await store.save(
+      .init(
+        projectID: "project-1",
+        sessionID: "session-1",
+        turnID: "turn-2",
+        turnIndex: 2,
+        preparedManifestSummary: "manifest two",
+        includedSectionIDs: ["system", "developer", "user"],
+        omittedSectionIDs: ["memory.low"],
+        providerInputMessages: [.userText("second")],
+        assistantMessages: [.assistantText("second response")],
+        providerContinuation: ["responseID": "resp-2"],
+        generationSummary: "second generated",
+        outputText: "second response",
+        backend: "stub-provider",
+        providerOperationID: "op-2",
+        completedAt: "2026-04-24T01:01:00Z",
+        preferredModel: "local-test-model",
+        createdAt: "2026-04-24T01:01:00Z"
+      )
+    )
+
+    let history = try await store.history(.init(projectID: "project-1", sessionID: "session-1", limit: 10))
+    let latest = try await store.latest(projectID: "project-1", sessionID: "session-1")
+
+    #expect(history.turns.map(\.turnID) == ["turn-1", "turn-2"])
+    #expect(history.turns.map(\.turnIndex) == [1, 2])
+    #expect(latest?.providerContinuation["responseID"] == "resp-2")
   }
 
   @Test

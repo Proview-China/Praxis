@@ -177,6 +177,7 @@ public struct PraxisContextSection: Sendable, Equatable, Codable, Identifiable {
 public struct PraxisContextBudgetSummary: Sendable, Equatable, Codable {
   public let maxCharacterBudget: Int
   public let usedCharacterCount: Int
+  public let estimatedProviderCharacterCount: Int
   public let omittedCharacterCount: Int
   public let includedSectionCount: Int
   public let omittedSectionCount: Int
@@ -184,12 +185,14 @@ public struct PraxisContextBudgetSummary: Sendable, Equatable, Codable {
   public init(
     maxCharacterBudget: Int,
     usedCharacterCount: Int,
+    estimatedProviderCharacterCount: Int,
     omittedCharacterCount: Int,
     includedSectionCount: Int,
     omittedSectionCount: Int
   ) {
     self.maxCharacterBudget = maxCharacterBudget
     self.usedCharacterCount = usedCharacterCount
+    self.estimatedProviderCharacterCount = estimatedProviderCharacterCount
     self.omittedCharacterCount = omittedCharacterCount
     self.includedSectionCount = includedSectionCount
     self.omittedSectionCount = omittedSectionCount
@@ -283,6 +286,10 @@ public struct PraxisContextAssemblyService: Sendable {
     var included = requiredSections
     var omitted: [PraxisContextSection] = []
     var usedCharacters = requiredSections.reduce(0) { $0 + $1.characterCount }
+    var issues: [String] = []
+    if usedCharacters > request.policy.maxCharacterBudget {
+      issues.append("Required context exceeds the character budget; required system/developer/user sections were preserved.")
+    }
 
     for section in optionalSections {
       if let omittedReason = section.omittedReason {
@@ -300,13 +307,17 @@ public struct PraxisContextAssemblyService: Sendable {
     let manifest = makeManifestSummary(projectID: request.projectID, included: included, omitted: omitted)
     var messages = makeProviderMessages(request: request, included: included, manifest: manifest)
     let omittedCharacters = omitted.reduce(0) { $0 + $1.characterCount }
-    var issues: [String] = []
+    var estimatedProviderCharacters = estimateProviderCharacterCount(messages)
     let compaction = try await compactIfNeeded(
       request: request,
       messages: &messages,
-      usedCharacters: usedCharacters,
+      estimatedProviderCharacters: estimatedProviderCharacters,
       issues: &issues
     )
+    estimatedProviderCharacters = estimateProviderCharacterCount(messages)
+    if estimatedProviderCharacters > request.policy.maxCharacterBudget {
+      issues.append("Estimated provider message context exceeds the character budget after manifest formatting.")
+    }
 
     return PraxisPreparedModelContext(
       projectID: request.projectID,
@@ -315,6 +326,7 @@ public struct PraxisContextAssemblyService: Sendable {
       budget: .init(
         maxCharacterBudget: request.policy.maxCharacterBudget,
         usedCharacterCount: usedCharacters,
+        estimatedProviderCharacterCount: estimatedProviderCharacters,
         omittedCharacterCount: omittedCharacters,
         includedSectionCount: included.count,
         omittedSectionCount: omitted.count
@@ -423,53 +435,7 @@ public struct PraxisContextAssemblyService: Sendable {
   }
 
   private func memoryPriority(_ candidate: PraxisContextMemoryCandidate) -> Int {
-    let kindWeight: Int
-    switch candidate.memoryKind {
-    case .directive:
-      kindWeight = 900
-    case .statusSnapshot:
-      kindWeight = 860
-    case .semantic:
-      kindWeight = 760
-    case .summary:
-      kindWeight = 700
-    case .episodic:
-      kindWeight = 620
-    }
-
-    let freshnessWeight: Int
-    switch candidate.freshnessStatus {
-    case .fresh:
-      freshnessWeight = 80
-    case .aging:
-      freshnessWeight = 40
-    case .stale:
-      freshnessWeight = 10
-    case .superseded:
-      freshnessWeight = -400
-    }
-
-    let alignmentWeight: Int
-    switch candidate.alignmentStatus {
-    case .aligned:
-      alignmentWeight = 60
-    case .unreviewed:
-      alignmentWeight = 20
-    case .drifted:
-      alignmentWeight = -40
-    }
-
-    let scopeWeight: Int
-    switch candidate.scopeLevel {
-    case .project:
-      scopeWeight = 30
-    case .global:
-      scopeWeight = 20
-    case .agentIsolated:
-      scopeWeight = 10
-    }
-
-    return kindWeight + freshnessWeight + alignmentWeight + scopeWeight
+    Int((candidate.finalScore * 1_000).rounded())
   }
 
   private func memoryReason(_ candidate: PraxisContextMemoryCandidate) -> String {
@@ -485,9 +451,6 @@ public struct PraxisContextAssemblyService: Sendable {
   private func shouldPlaceBefore(_ left: PraxisContextSection, _ right: PraxisContextSection) -> Bool {
     if left.priority != right.priority {
       return left.priority > right.priority
-    }
-    if left.characterCount != right.characterCount {
-      return left.characterCount < right.characterCount
     }
     return left.id < right.id
   }
@@ -538,7 +501,7 @@ public struct PraxisContextAssemblyService: Sendable {
   private func compactIfNeeded(
     request: PraxisContextAssemblyRequest,
     messages: inout [PraxisProviderMessage],
-    usedCharacters: Int,
+    estimatedProviderCharacters: Int,
     issues: inout [String]
   ) async throws -> PraxisContextCompactionDecision {
     guard request.policy.compactionMode == .providerCompactionPreferred else {
@@ -548,7 +511,7 @@ public struct PraxisContextAssemblyService: Sendable {
         summary: "Provider compaction was not requested."
       )
     }
-    guard usedCharacters > request.policy.maxCharacterBudget else {
+    guard estimatedProviderCharacters > request.policy.maxCharacterBudget else {
       return .init(
         mode: request.policy.compactionMode,
         status: .notNeeded,
@@ -565,14 +528,18 @@ public struct PraxisContextAssemblyService: Sendable {
     }
 
     do {
+      let compactableMessages = messages.dropLastUserMessage()
       let result = try await compactionDriver.compact(
         .init(
           projectID: request.projectID,
-          messages: messages,
+          messages: compactableMessages,
           maxCharacterBudget: request.policy.maxCharacterBudget
         )
       )
-      messages = result.messages
+      messages = makeProviderMessagesPreservingCurrentInputs(
+        request: request,
+        compactedMessages: result.messages
+      )
       return .init(
         mode: request.policy.compactionMode,
         status: .compacted,
@@ -586,6 +553,48 @@ public struct PraxisContextAssemblyService: Sendable {
         summary: "Provider compaction failed; deterministic context assembly was used."
       )
     }
+  }
+
+  private func estimateProviderCharacterCount(_ messages: [PraxisProviderMessage]) -> Int {
+    messages
+      .flatMap(\.textParts)
+      .reduce(0) { $0 + $1.count }
+  }
+
+  private func makeProviderMessagesPreservingCurrentInputs(
+    request: PraxisContextAssemblyRequest,
+    compactedMessages: [PraxisProviderMessage]
+  ) -> [PraxisProviderMessage] {
+    var preserved: [PraxisProviderMessage] = []
+    if let systemPrompt = request.systemPrompt {
+      preserved.append(.systemText(systemPrompt))
+    }
+
+    var developerParts: [String] = []
+    if let developerInstructions = request.developerInstructions {
+      developerParts.append(developerInstructions)
+    }
+    let compactedText = compactedMessages
+      .flatMap(\.textParts)
+      .joined(separator: "\n")
+    if !compactedText.isEmpty {
+      developerParts.append("Compacted context:\n\(compactedText)")
+    }
+    if !developerParts.isEmpty {
+      preserved.append(.developerText(developerParts.joined(separator: "\n\n")))
+    }
+
+    preserved.append(.userText(request.task))
+    return preserved
+  }
+}
+
+private extension [PraxisProviderMessage] {
+  func dropLastUserMessage() -> [PraxisProviderMessage] {
+    guard last?.role == .user else {
+      return self
+    }
+    return Array(dropLast())
   }
 }
 

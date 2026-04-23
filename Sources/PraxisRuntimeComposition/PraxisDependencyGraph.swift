@@ -98,6 +98,7 @@ public final class PraxisDependencyGraph: PraxisDependencyResolving, @unchecked 
       processSupervisor: hostAdapters.processSupervisor,
       checkpointStore: checkpointStore ?? hostAdapters.checkpointStore,
       journalStore: hostAdapters.journalStore,
+      conversationStateStore: hostAdapters.conversationStateStore,
       projectionStore: hostAdapters.projectionStore,
       cmpContextPackageStore: hostAdapters.cmpContextPackageStore,
       cmpControlStore: hostAdapters.cmpControlStore,
