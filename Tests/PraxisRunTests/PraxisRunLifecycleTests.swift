@@ -52,7 +52,7 @@ struct PraxisRunLifecycleTests {
     #expect(result.run.lastEventID == "evt-1")
     #expect(result.state.control.status == .acting)
     #expect(result.state.control.phase == .execution)
-    #expect(result.decision.nextAction?.kind == .modelInference)
+    #expect(result.decision.nextAction?.kind == .modelConversation)
   }
 
   @Test

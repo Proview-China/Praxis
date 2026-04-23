@@ -13,8 +13,8 @@ public final class PraxisDependencyGraph: PraxisDependencyResolving, @unchecked 
   public let boundaries: [PraxisBoundaryDescriptor]
   public let hostAdapters: PraxisHostAdapterRegistry
 
-  public var providerInferenceExecutor: (any PraxisProviderInferenceExecutor)? {
-    hostAdapters.providerInferenceExecutor
+  public var providerConversationExecutor: (any PraxisProviderConversationExecutor)? {
+    hostAdapters.providerConversationExecutor
   }
 
   public var providerWebSearchExecutor: (any PraxisProviderWebSearchExecutor)? {
@@ -23,7 +23,7 @@ public final class PraxisDependencyGraph: PraxisDependencyResolving, @unchecked 
 
   public var providerRequestSurface: PraxisProviderRequestSurface {
     PraxisProviderRequestSurface(
-      inferenceExecutor: hostAdapters.providerInferenceExecutor,
+      conversationExecutor: hostAdapters.providerConversationExecutor,
       webSearchExecutor: hostAdapters.providerWebSearchExecutor,
       embeddingExecutor: hostAdapters.providerEmbeddingExecutor,
       fileStore: hostAdapters.providerFileStore,
@@ -62,8 +62,8 @@ public final class PraxisDependencyGraph: PraxisDependencyResolving, @unchecked 
   public init(
     boundaries: [PraxisBoundaryDescriptor],
     hostAdapters: PraxisHostAdapterRegistry = .init(),
-    providerInferenceExecutor: (any PraxisProviderInferenceExecutor)? = nil,
-    providerInferenceSurfaceProvenance: PraxisHostAdapterSurfaceProvenance? = nil,
+    providerConversationExecutor: (any PraxisProviderConversationExecutor)? = nil,
+    providerConversationSurfaceProvenance: PraxisHostAdapterSurfaceProvenance? = nil,
     workspaceReader: (any PraxisWorkspaceReader)? = nil,
     shellExecutor: (any PraxisShellExecutor)? = nil,
     codeExecutor: (any PraxisCodeExecutor)? = nil,
@@ -76,7 +76,7 @@ public final class PraxisDependencyGraph: PraxisDependencyResolving, @unchecked 
       runtimeRootDirectory: hostAdapters.runtimeRootDirectory,
       workspaceRootDirectory: hostAdapters.workspaceRootDirectory,
       capabilityExecutor: hostAdapters.capabilityExecutor,
-      providerInferenceExecutor: providerInferenceExecutor ?? hostAdapters.providerInferenceExecutor,
+      providerConversationExecutor: providerConversationExecutor ?? hostAdapters.providerConversationExecutor,
       providerWebSearchExecutor: hostAdapters.providerWebSearchExecutor,
       providerEmbeddingExecutor: hostAdapters.providerEmbeddingExecutor,
       providerFileStore: hostAdapters.providerFileStore,
@@ -116,9 +116,9 @@ public final class PraxisDependencyGraph: PraxisDependencyResolving, @unchecked 
       audioTranscriptionDriver: hostAdapters.audioTranscriptionDriver,
       speechSynthesisDriver: hostAdapters.speechSynthesisDriver,
       imageGenerationDriver: hostAdapters.imageGenerationDriver,
-      providerInferenceSurfaceProvenance: providerInferenceExecutor == nil
-        ? hostAdapters.providerInferenceSurfaceProvenance
-        : (providerInferenceSurfaceProvenance ?? .composed),
+      providerConversationSurfaceProvenance: providerConversationExecutor == nil
+        ? hostAdapters.providerConversationSurfaceProvenance
+        : (providerConversationSurfaceProvenance ?? .composed),
       browserGroundingSurfaceProvenance: hostAdapters.browserGroundingSurfaceProvenance,
       audioTranscriptionSurfaceProvenance: hostAdapters.audioTranscriptionSurfaceProvenance,
       speechSynthesisSurfaceProvenance: hostAdapters.speechSynthesisSurfaceProvenance,

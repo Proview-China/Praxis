@@ -1,4 +1,5 @@
 import Foundation
+import PraxisContextAssembly
 import PraxisGoal
 import PraxisRuntimeFacades
 import PraxisRuntimeGateway
@@ -44,6 +45,15 @@ public final class PraxisRuntimeClient: Sendable {
   /// Thin capability baseline access grouped behind a dedicated capability client.
   public var capabilities: PraxisRuntimeCapabilityClient {
     PraxisRuntimeCapabilityClient(capabilityFacade: capabilityFacade)
+  }
+
+  /// Model-context assembly and generation access for IDE-style hosts.
+  public var context: PraxisRuntimeContextClient {
+    PraxisRuntimeContextClient(
+      mpFacade: mpFacade,
+      cmpFacade: cmpFacade,
+      capabilityFacade: capabilityFacade
+    )
   }
 
   /// High-level TAP access grouped behind a dedicated scoped client.

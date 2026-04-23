@@ -6,12 +6,12 @@ public protocol PraxisCapabilityExecutor: Sendable {
   func execute(_ request: PraxisHostCapabilityRequest) async throws -> PraxisHostCapabilityReceipt
 }
 
-public protocol PraxisProviderInferenceExecutor: Sendable {
-  /// Runs a provider inference request.
+public protocol PraxisProviderConversationExecutor: Sendable {
+  /// Runs a provider conversation request.
   ///
-  /// - Parameter request: Inference request.
-  /// - Returns: Normalized inference response.
-  func infer(_ request: PraxisProviderInferenceRequest) async throws -> PraxisProviderInferenceResponse
+  /// - Parameter request: Conversation request.
+  /// - Returns: Normalized conversation response.
+  func converse(_ request: PraxisProviderConversationRequest) async throws -> PraxisProviderConversationResponse
 }
 
 public protocol PraxisProviderEmbeddingExecutor: Sendable {

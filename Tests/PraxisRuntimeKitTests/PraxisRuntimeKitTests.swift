@@ -631,6 +631,65 @@ struct PraxisRuntimeKitTests {
   }
 
   @Test
+  func contextClientPreparesExplainableContextAndGeneratesWithIngestedMemory() async throws {
+    let rootDirectory = try makeRuntimeKitTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+    let client = try PraxisRuntimeClient.makeDefault(rootDirectory: rootDirectory)
+    let mpProject = client.mp.project("mp.local-runtime")
+    let ingest = try await mpProject.ingest(
+      .init(
+        agentID: "runtime.local",
+        sessionID: "session.context",
+        scopeLevel: .project,
+        summary: "Checkout tasks require reviewer approval before shell execution.",
+        checkedSnapshotRef: "snapshot.context.checkout",
+        branchRef: "main",
+        semanticGroupID: "checkout-policy",
+        tags: ["checkout", "approval"],
+        sourceRefs: ["memory://checkout-policy"],
+        confidence: .high
+      )
+    )
+
+    let contextProject = client.context.project("mp.local-runtime")
+    let prepared = try await contextProject.prepare(
+      .init(
+        task: "Fix checkout flow",
+        agentID: "runtime.local",
+        sessionID: "session.context",
+        systemPrompt: "Follow repository conventions.",
+        developerInstructions: "Prefer explicit review evidence.",
+        memoryQuery: "checkout",
+        scopeLevels: [.project],
+        maxCharacterBudget: 1_500,
+        compactionMode: .providerCompactionPreferred
+      )
+    )
+    let generated = try await contextProject.generate(
+      .init(
+        task: "Fix checkout flow",
+        agentID: "runtime.local",
+        sessionID: "session.context",
+        systemPrompt: "Follow repository conventions.",
+        developerInstructions: "Prefer explicit review evidence.",
+        memoryQuery: "checkout",
+        scopeLevels: [.project],
+        maxCharacterBudget: 1_500,
+        preferredModel: "local-test-model"
+      )
+    )
+
+    #expect(ingest.primaryMemoryID.isEmpty == false)
+    #expect(prepared.projectID == "mp.local-runtime")
+    #expect(prepared.includedSections.contains { $0.id == ingest.primaryMemoryID })
+    #expect(prepared.manifestSummary.contains(ingest.primaryMemoryID))
+    #expect(prepared.providerMessages.contains { $0.role == .developer && $0.textParts.joined().contains("Context manifest") })
+    #expect(generated.preparedContext.manifestSummary == prepared.manifestSummary)
+    #expect(generated.generation.outputText.isEmpty == false)
+  }
+
+  @Test
   func runtimeKitConveniencesReduceRequestWrapperCeremonyWithoutChangingTypedSemantics() async throws {
     let rootDirectory = try makeRuntimeKitTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: rootDirectory) }

@@ -26,12 +26,12 @@ private final class CompositionGuardUserInputDriver: PraxisUserInputDriver, @unc
   }
 }
 
-private final class CompositionGuardProviderInferenceExecutor: PraxisProviderInferenceExecutor, @unchecked Sendable {
-  func infer(_ request: PraxisProviderInferenceRequest) async throws -> PraxisProviderInferenceResponse {
-    PraxisProviderInferenceResponse(
+private final class CompositionGuardProviderConversationExecutor: PraxisProviderConversationExecutor, @unchecked Sendable {
+  func converse(_ request: PraxisProviderConversationRequest) async throws -> PraxisProviderConversationResponse {
+    PraxisProviderConversationResponse(
       output: .init(summary: "composition-guard override"),
       receipt: .init(
-        capabilityKey: "provider.infer",
+        capabilityKey: "provider.converse",
         backend: "composition-guard",
         status: .succeeded,
         summary: "Composition guard override."
@@ -127,31 +127,31 @@ struct HostRuntimeCompositionGuardTests {
   }
 
   @Test
-  func dependencyGraphProviderInferenceOverrideDefaultsProvenanceToCurrentOverrideSurface() {
+  func dependencyGraphProviderConversationOverrideDefaultsProvenanceToCurrentOverrideSurface() {
     let boundaries = [
       PraxisBoundaryDescriptor(name: "PraxisRuntimeComposition", responsibility: "composition"),
     ]
     let registry = PraxisHostAdapterRegistry(
-      providerInferenceExecutor: CompositionGuardProviderInferenceExecutor(),
-      providerInferenceSurfaceProvenance: .localBaseline
+      providerConversationExecutor: CompositionGuardProviderConversationExecutor(),
+      providerConversationSurfaceProvenance: .localBaseline
     )
-    let overrideProviderInferenceExecutor = CompositionGuardProviderInferenceExecutor()
+    let overrideProviderConversationExecutor = CompositionGuardProviderConversationExecutor()
 
     let graph = PraxisDependencyGraph(
       boundaries: boundaries,
       hostAdapters: registry,
-      providerInferenceExecutor: overrideProviderInferenceExecutor
+      providerConversationExecutor: overrideProviderConversationExecutor
     )
     let smoke = PraxisMpHostInspectionService().smoke(
       projectID: "mp.local-runtime",
       hostAdapters: graph.hostAdapters
     )
 
-    #expect(Self.sameInstance(graph.providerInferenceExecutor.map { $0 as AnyObject }, overrideProviderInferenceExecutor))
-    #expect(graph.hostAdapters.providerInferenceSurfaceProvenance == .composed)
+    #expect(Self.sameInstance(graph.providerConversationExecutor.map { $0 as AnyObject }, overrideProviderConversationExecutor))
+    #expect(graph.hostAdapters.providerConversationSurfaceProvenance == .composed)
     #expect(
-      smoke.checks.first { $0.gate == .providerInference }?.summary
-        == "Provider inference surface is composed for MP enrichment."
+      smoke.checks.first { $0.gate == .providerConversation }?.summary
+        == "Provider conversation surface is composed for MP enrichment."
     )
   }
 
@@ -164,7 +164,7 @@ struct HostRuntimeCompositionGuardTests {
     #expect(registry.runtimeRootDirectory == nil)
     #expect(registry.workspaceRootDirectory == nil)
     #expect(registry.capabilityExecutor != nil)
-    #expect(registry.providerInferenceExecutor != nil)
+    #expect(registry.providerConversationExecutor != nil)
     #expect(registry.workspaceReader != nil)
     #expect(registry.shellExecutor != nil)
     #expect(registry.messageBus != nil)
@@ -199,7 +199,7 @@ struct HostRuntimeCompositionGuardTests {
     #expect(registry.runtimeRootDirectory?.standardizedFileURL == rootDirectory.standardizedFileURL)
     #expect(registry.workspaceRootDirectory?.standardizedFileURL == rootDirectory.standardizedFileURL)
     #expect(registry.capabilityExecutor != nil)
-    #expect(registry.providerInferenceExecutor != nil)
+    #expect(registry.providerConversationExecutor != nil)
     #expect(registry.workspaceReader != nil)
     #expect(registry.shellExecutor != nil)
     #expect(registry.checkpointStore != nil)

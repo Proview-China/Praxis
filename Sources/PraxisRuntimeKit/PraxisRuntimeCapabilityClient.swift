@@ -33,12 +33,14 @@ public struct PraxisRuntimeCapabilityClient: Sendable {
   public func generate(_ request: PraxisRuntimeGenerateRequest) async throws -> PraxisRuntimeGenerateResult {
     let snapshot = try await capabilityFacade.generate(
       .init(
-        prompt: request.prompt,
-        systemPrompt: request.systemPrompt,
-        contextSummary: request.contextSummary,
+        messages: request.messages,
         preferredModel: request.preferredModel,
         temperature: request.temperature,
-        requiredCapabilityIDs: request.requiredCapabilities.map { .init(rawValue: $0.rawValue) }
+        requiredCapabilityIDs: request.requiredCapabilities.map { .init(rawValue: $0.rawValue) },
+        continuation: request.continuation,
+        toolDefinitions: request.toolDefinitions,
+        providerProfile: request.providerProfile,
+        stream: request.stream
       )
     )
     return PraxisRuntimeGenerateResult(snapshot: snapshot)
@@ -57,12 +59,14 @@ public struct PraxisRuntimeCapabilityClient: Sendable {
   ) async throws -> PraxisRuntimeGenerateStreamResult {
     let snapshot = try await capabilityFacade.stream(
       .init(
-        prompt: request.prompt,
-        systemPrompt: request.systemPrompt,
-        contextSummary: request.contextSummary,
+        messages: request.messages,
         preferredModel: request.preferredModel,
         temperature: request.temperature,
-        requiredCapabilityIDs: request.requiredCapabilities.map { .init(rawValue: $0.rawValue) }
+        requiredCapabilityIDs: request.requiredCapabilities.map { .init(rawValue: $0.rawValue) },
+        continuation: request.continuation,
+        toolDefinitions: request.toolDefinitions,
+        providerProfile: request.providerProfile,
+        stream: true
       ),
       chunkCharacterCount: chunkCharacterCount
     )
@@ -253,7 +257,7 @@ public struct PraxisRuntimeCapabilityClient: Sendable {
     let snapshot = try await capabilityFacade.callTool(
       .init(
         toolName: request.toolName,
-        summary: request.summary,
+        input: request.input,
         serverName: request.serverName
       )
     )

@@ -13,7 +13,7 @@ public struct PraxisHostAdapterRegistry: Sendable {
   public let runtimeRootDirectory: URL?
   public let workspaceRootDirectory: URL?
   public let capabilityExecutor: (any PraxisCapabilityExecutor)?
-  public let providerInferenceExecutor: (any PraxisProviderInferenceExecutor)?
+  public let providerConversationExecutor: (any PraxisProviderConversationExecutor)?
   public let providerWebSearchExecutor: (any PraxisProviderWebSearchExecutor)?
   public let providerEmbeddingExecutor: (any PraxisProviderEmbeddingExecutor)?
   public let providerFileStore: (any PraxisProviderFileStore)?
@@ -57,7 +57,7 @@ public struct PraxisHostAdapterRegistry: Sendable {
   public let audioTranscriptionDriver: (any PraxisAudioTranscriptionDriver)?
   public let speechSynthesisDriver: (any PraxisSpeechSynthesisDriver)?
   public let imageGenerationDriver: (any PraxisImageGenerationDriver)?
-  public let providerInferenceSurfaceProvenance: PraxisHostAdapterSurfaceProvenance
+  public let providerConversationSurfaceProvenance: PraxisHostAdapterSurfaceProvenance
   public let browserGroundingSurfaceProvenance: PraxisHostAdapterSurfaceProvenance
   public let audioTranscriptionSurfaceProvenance: PraxisHostAdapterSurfaceProvenance
   public let speechSynthesisSurfaceProvenance: PraxisHostAdapterSurfaceProvenance
@@ -67,7 +67,7 @@ public struct PraxisHostAdapterRegistry: Sendable {
     runtimeRootDirectory: URL? = nil,
     workspaceRootDirectory: URL? = nil,
     capabilityExecutor: (any PraxisCapabilityExecutor)? = nil,
-    providerInferenceExecutor: (any PraxisProviderInferenceExecutor)? = nil,
+    providerConversationExecutor: (any PraxisProviderConversationExecutor)? = nil,
     providerWebSearchExecutor: (any PraxisProviderWebSearchExecutor)? = nil,
     providerEmbeddingExecutor: (any PraxisProviderEmbeddingExecutor)? = nil,
     providerFileStore: (any PraxisProviderFileStore)? = nil,
@@ -107,7 +107,7 @@ public struct PraxisHostAdapterRegistry: Sendable {
     audioTranscriptionDriver: (any PraxisAudioTranscriptionDriver)? = nil,
     speechSynthesisDriver: (any PraxisSpeechSynthesisDriver)? = nil,
     imageGenerationDriver: (any PraxisImageGenerationDriver)? = nil,
-    providerInferenceSurfaceProvenance: PraxisHostAdapterSurfaceProvenance? = nil,
+    providerConversationSurfaceProvenance: PraxisHostAdapterSurfaceProvenance? = nil,
     browserGroundingSurfaceProvenance: PraxisHostAdapterSurfaceProvenance? = nil,
     audioTranscriptionSurfaceProvenance: PraxisHostAdapterSurfaceProvenance? = nil,
     speechSynthesisSurfaceProvenance: PraxisHostAdapterSurfaceProvenance? = nil,
@@ -116,7 +116,7 @@ public struct PraxisHostAdapterRegistry: Sendable {
     self.runtimeRootDirectory = runtimeRootDirectory
     self.workspaceRootDirectory = workspaceRootDirectory
     self.capabilityExecutor = capabilityExecutor
-    self.providerInferenceExecutor = providerInferenceExecutor
+    self.providerConversationExecutor = providerConversationExecutor
     self.providerWebSearchExecutor = providerWebSearchExecutor
     self.providerEmbeddingExecutor = providerEmbeddingExecutor
     self.providerFileStore = providerFileStore
@@ -156,8 +156,8 @@ public struct PraxisHostAdapterRegistry: Sendable {
     self.audioTranscriptionDriver = audioTranscriptionDriver
     self.speechSynthesisDriver = speechSynthesisDriver
     self.imageGenerationDriver = imageGenerationDriver
-    self.providerInferenceSurfaceProvenance =
-      providerInferenceExecutor == nil ? .unavailable : (providerInferenceSurfaceProvenance ?? .composed)
+    self.providerConversationSurfaceProvenance =
+      providerConversationExecutor == nil ? .unavailable : (providerConversationSurfaceProvenance ?? .composed)
     self.browserGroundingSurfaceProvenance =
       browserGroundingCollector == nil ? .unavailable : (browserGroundingSurfaceProvenance ?? .composed)
     self.audioTranscriptionSurfaceProvenance =
@@ -180,14 +180,18 @@ public struct PraxisHostAdapterRegistry: Sendable {
           summary: "Scaffold host capability receipt for \(request.capabilityKey)."
         )
       },
-      providerInferenceExecutor: PraxisStubProviderInferenceExecutor { request in
-        PraxisProviderInferenceResponse(
-          output: .init(summary: "Scaffold inference placeholder for prompt: \(request.prompt)"),
+      providerConversationExecutor: PraxisStubProviderConversationExecutor { request in
+        let lastText = request.messages.last?.textParts.joined(separator: " ") ?? "request"
+        return PraxisProviderConversationResponse(
+          messages: [
+            .assistantText("Scaffold conversation placeholder for \(lastText).")
+          ],
+          structuredFields: [:],
           receipt: PraxisHostCapabilityReceipt(
-            capabilityKey: "provider.infer",
+            capabilityKey: "provider.converse",
             backend: "scaffold-provider",
             status: .succeeded,
-            summary: "Scaffold inference executed for HostRuntime assembly."
+            summary: "Scaffold conversation executed for HostRuntime assembly."
           )
         )
       },
@@ -221,6 +225,7 @@ public struct PraxisHostAdapterRegistry: Sendable {
         PraxisProviderMCPToolCallReceipt(
           toolName: request.toolName,
           status: .succeeded,
+          payload: request.input,
           summary: "Scaffold MCP execution placeholder for \(request.toolName)."
         )
       },
@@ -290,7 +295,7 @@ public struct PraxisHostAdapterRegistry: Sendable {
           revisedPrompt: request.prompt
         )
       },
-      providerInferenceSurfaceProvenance: .scaffoldPlaceholder,
+      providerConversationSurfaceProvenance: .scaffoldPlaceholder,
       browserGroundingSurfaceProvenance: .scaffoldPlaceholder,
       audioTranscriptionSurfaceProvenance: .scaffoldPlaceholder,
       speechSynthesisSurfaceProvenance: .scaffoldPlaceholder,

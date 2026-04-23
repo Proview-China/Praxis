@@ -34,7 +34,7 @@ This document records the current support baseline for exported Praxis surfaces.
 | `PraxisRuntimeClient.makeDefault(...)` | ready | compile-safe placeholder baseline | Both sides can assemble RuntimeKit; Linux remains a placeholder host profile. |
 | `runs.run(...)` / `runs.resume(...)` | ready | ready | Run / resume currently surface durable checkpoint references and fresh-client recovery; provisioning / replay evidence remains readback on TAP project surfaces. |
 | `capabilities.catalog()` | ready | ready | Thin capability baseline includes search chain, `code.sandbox`, provider `skill.list` / `skill.activate`, and bounded `code.run` / `code.patch` / `shell.approve` / `shell.run`. |
-| `capabilities.generate(...)` / `stream(...)` | ready | ready | Uses the local provider inference lane; `stream` is projected bounded output, not raw token transport. |
+| `capabilities.generate(...)` / `stream(...)` | ready | ready | Uses the local provider conversation lane; `stream` is projected bounded output, not raw token transport. |
 | `capabilities.embed(...)` | ready | ready | Uses the local embedding baseline. |
 | `capabilities.describeCodeSandbox(...)` | declared-only contract | placeholder contract | This is the caller-visible declared execution contract. macOS reports readable/writable roots and enforcement mode for boundary inspection, but it does not claim OS-level isolation; Linux currently returns placeholder contract truth. |
 | `capabilities.patchCode(...)` | ready | unavailable | This is a risky but controlled workspace patch surface. macOS applies bounded single-file patches through the workspace writer lane; Linux does not expose the capability today. |

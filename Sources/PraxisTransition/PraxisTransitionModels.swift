@@ -11,7 +11,7 @@ public enum PraxisTransitionPath: String, Sendable, Equatable, Codable {
 public enum PraxisStepActionKind: String, Sendable, Equatable, Codable {
   case none
   case internalStep = "internal_step"
-  case modelInference = "model_inference"
+  case modelConversation = "model_conversation"
   case capabilityCall = "capability_call"
   case cmpAction = "cmp_action"
   case wait
@@ -25,7 +25,7 @@ public enum PraxisStepActionKind: String, Sendable, Equatable, Codable {
 /// Intent category used when the runtime needs to enqueue follow-up work.
 public enum PraxisTransitionIntentKind: String, Sendable, Equatable, Codable {
   case internalStep = "internal_step"
-  case modelInference = "model_inference"
+  case modelConversation = "model_conversation"
   case capabilityCall = "capability_call"
   case cmpAction = "cmp_action"
 }

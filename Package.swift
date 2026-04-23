@@ -107,6 +107,11 @@ hostRuntimeArchitectureTestsTarget = .testTarget(
     "PraxisFFI",
     "PraxisRuntimeKit",
     "PraxisMpTypes",
+    .product(name: "OpenAIResponsesAPI", package: "swift-ai-sdk"),
+    .product(name: "OpenAIAgentRuntime", package: "swift-ai-sdk"),
+    .product(name: "AnthropicMessagesAPI", package: "swift-ai-sdk"),
+    .product(name: "AnthropicAgentRuntime", package: "swift-ai-sdk"),
+    .product(name: "OpenAIAuthentication", package: "swift-ai-sdk"),
   ],
   path: "Tests/PraxisHostRuntimeArchitectureTests",
 )
@@ -128,6 +133,7 @@ let package = Package(
     .library(name: "PraxisMpDomain", targets: mpTargets),
     .library(name: "PraxisHostContracts", targets: hostContractTargets),
     .library(name: "PraxisHostRuntime", targets: hostRuntimeTargets),
+    .library(name: "PraxisContextAssembly", targets: ["PraxisContextAssembly"]),
     .library(name: "PraxisRuntimeKit", targets: ["PraxisRuntimeKit"]),
     .library(name: "PraxisArchitectureTests", targets: architectureTestTargets),
     .executable(name: "PraxisRuntimeKitSmoke", targets: ["PraxisRuntimeKitSmoke"]),
@@ -142,6 +148,12 @@ let package = Package(
     .executable(name: "PraxisAppleHostEmbeddingExample", targets: ["PraxisAppleHostEmbeddingExample"]),
     .executable(name: "PraxisDemoHostApp", targets: ["PraxisDemoHostApp"]),
     .executable(name: "PraxisExportBaselineExample", targets: ["PraxisExportBaselineExample"]),
+  ],
+  dependencies: [
+    .package(
+      url: "https://github.com/yuemingruoan/swift-ai-sdk.git",
+      from: "0.3.0",
+    ),
   ],
   targets: sqliteSystemLibraryTargets + [
     .target(
@@ -490,6 +502,11 @@ let package = Package(
         "PraxisToolingContracts",
         "PraxisInfraContracts",
         "PraxisUserIOContracts",
+        .product(name: "OpenAIResponsesAPI", package: "swift-ai-sdk"),
+        .product(name: "OpenAIAgentRuntime", package: "swift-ai-sdk"),
+        .product(name: "AnthropicMessagesAPI", package: "swift-ai-sdk"),
+        .product(name: "AnthropicAgentRuntime", package: "swift-ai-sdk"),
+        .product(name: "OpenAIAuthentication", package: "swift-ai-sdk"),
       ],
       path: "Sources/PraxisRuntimeComposition",
     ),
@@ -603,10 +620,19 @@ let package = Package(
       path: "Sources/PraxisFFI",
     ),
     .target(
+      name: "PraxisContextAssembly",
+      dependencies: [
+        "PraxisMpTypes",
+        "PraxisProviderContracts",
+      ],
+      path: "Sources/PraxisContextAssembly",
+    ),
+    .target(
       name: "PraxisRuntimeKit",
       dependencies: [
         "PraxisCapabilityCatalog",
         "PraxisCapabilityContracts",
+        "PraxisContextAssembly",
         "PraxisCmpTypes",
         "PraxisCoreTypes",
         "PraxisGoal",
@@ -1053,6 +1079,13 @@ let package = Package(
       path: "Tests/PraxisHostContractsArchitectureTests",
     ),
     hostRuntimeArchitectureTestsTarget,
+    .testTarget(
+      name: "PraxisContextAssemblyTests",
+      dependencies: [
+        "PraxisContextAssembly",
+      ],
+      path: "Tests/PraxisContextAssemblyTests",
+    ),
     .testTarget(
       name: "PraxisRuntimeKitTests",
       dependencies: [

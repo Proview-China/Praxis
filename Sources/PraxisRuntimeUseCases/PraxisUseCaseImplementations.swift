@@ -684,8 +684,8 @@ private func hostCapabilityIDs(from dependencies: PraxisDependencyGraph) -> [Pra
   if adapters.browserExecutor != nil {
     capabilityIDs.append(.init(rawValue: "tool.browser"))
   }
-  if adapters.providerInferenceExecutor != nil {
-    capabilityIDs.append(.init(rawValue: "provider.infer"))
+  if adapters.providerConversationExecutor != nil {
+    capabilityIDs.append(.init(rawValue: "provider.converse"))
   }
   if adapters.providerSkillRegistry != nil {
     capabilityIDs.append(.init(rawValue: "skill.list"))

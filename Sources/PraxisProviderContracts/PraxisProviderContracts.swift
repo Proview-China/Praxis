@@ -6,7 +6,7 @@ import PraxisCoreTypes
 // - Implement protocol models for provider request/receipt, inference, embedding, skill, and MCP surfaces.
 // - Refine the layering between capability executors and provider executors to avoid semantic overlap.
 // - Standardize the mapping boundary from raw provider capabilities to Core request/result semantics.
-// - This file can later be split into ProviderRequests.swift, ProviderReceipts.swift, InferenceProtocols.swift, and SkillAndMCPProtocols.swift.
+// - This file can later be split into ProviderRequests.swift, ProviderReceipts.swift, ConversationProtocols.swift, and SkillAndMCPProtocols.swift.
 
 public enum PraxisProviderContractsModule {
   public static let boundary = PraxisBoundaryDescriptor(

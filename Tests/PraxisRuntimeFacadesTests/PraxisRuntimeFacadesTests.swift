@@ -1447,11 +1447,11 @@ struct PraxisRuntimeFacadesTests {
 
     let facade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(
       hostAdapters: PraxisHostAdapterRegistry(
-        providerInferenceExecutor: PraxisStubProviderInferenceExecutor { _ in
-          PraxisProviderInferenceResponse(
+        providerConversationExecutor: PraxisStubProviderConversationExecutor { _ in
+          PraxisProviderConversationResponse(
             output: .init(summary: "stubbed inference"),
             receipt: .init(
-              capabilityKey: "provider.infer",
+              capabilityKey: "provider.converse",
               backend: "stub-provider",
               status: .succeeded,
               summary: "Inference is stubbed for MP facade tests."
@@ -1466,7 +1466,7 @@ struct PraxisRuntimeFacadesTests {
           ]
         ),
         semanticMemoryStore: memoryStore,
-        providerInferenceSurfaceProvenance: .composed
+        providerConversationSurfaceProvenance: .composed
       ),
       blueprint: PraxisRuntimeGatewayModule.bootstrap
     )
@@ -1475,7 +1475,7 @@ struct PraxisRuntimeFacadesTests {
     let compatibilityInspection = try await facade.inspectionFacade.inspectMp()
 
     #expect(inspection.summary == "MP workflow surface is reading HostRuntime memory and current adapter provenance.")
-    #expect(inspection.workflowSummary == "ICMA / Iterator / Checker / DbAgent / Dispatcher lanes have a composed provider inference surface available.")
+    #expect(inspection.workflowSummary == "ICMA / Iterator / Checker / DbAgent / Dispatcher lanes have a composed provider conversation surface available.")
     #expect(inspection.memoryStoreSummary.contains("1 primary records and omits 0 superseded records"))
     #expect(inspection.memoryStoreSummary.contains("Semantic search matches for inspection query: 1."))
     #expect(inspection.multimodalSummary == "No multimodal host chips are currently registered.")
@@ -1520,11 +1520,11 @@ struct PraxisRuntimeFacadesTests {
 
     let facade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(
       hostAdapters: PraxisHostAdapterRegistry(
-        providerInferenceExecutor: PraxisStubProviderInferenceExecutor { _ in
-          PraxisProviderInferenceResponse(
+        providerConversationExecutor: PraxisStubProviderConversationExecutor { _ in
+          PraxisProviderConversationResponse(
             output: .init(summary: "stubbed inference"),
             receipt: .init(
-              capabilityKey: "provider.infer",
+              capabilityKey: "provider.converse",
               backend: "stub-provider",
               status: .succeeded,
               summary: "Inference is stubbed for MP facade tests."
@@ -1550,7 +1550,7 @@ struct PraxisRuntimeFacadesTests {
           ]
         ),
         semanticMemoryStore: memoryStore,
-        providerInferenceSurfaceProvenance: .composed,
+        providerConversationSurfaceProvenance: .composed,
         browserGroundingSurfaceProvenance: .composed
       ),
       blueprint: PraxisRuntimeGatewayModule.bootstrap
@@ -1634,11 +1634,11 @@ struct PraxisRuntimeFacadesTests {
 
     let facade = try PraxisRuntimeGatewayFactory.makeRuntimeFacade(
       hostAdapters: PraxisHostAdapterRegistry(
-        providerInferenceExecutor: PraxisStubProviderInferenceExecutor { _ in
-          PraxisProviderInferenceResponse(
+        providerConversationExecutor: PraxisStubProviderConversationExecutor { _ in
+          PraxisProviderConversationResponse(
             output: .init(summary: "stubbed inference"),
             receipt: .init(
-              capabilityKey: "provider.infer",
+              capabilityKey: "provider.converse",
               backend: "stub-provider",
               status: .succeeded,
               summary: "Inference is stubbed for MP facade boundary tests."

@@ -147,11 +147,11 @@ struct PraxisRuntimeUseCasesTests {
   func mpHostInspectionServiceBuildsSmokeChecksFromAdapterReadiness() {
     let inspectionService = PraxisMpHostInspectionService()
     let hostAdapters = PraxisHostAdapterRegistry(
-      providerInferenceExecutor: PraxisStubProviderInferenceExecutor { _ in
-        PraxisProviderInferenceResponse(
+      providerConversationExecutor: PraxisStubProviderConversationExecutor { _ in
+        PraxisProviderConversationResponse(
           output: .init(summary: "stubbed inference"),
           receipt: .init(
-            capabilityKey: "provider.infer",
+            capabilityKey: "provider.converse",
             backend: "stub-provider",
             status: .succeeded,
             summary: "Inference is stubbed for MP inspection tests."
@@ -171,7 +171,7 @@ struct PraxisRuntimeUseCasesTests {
           omittedSupersededMemoryIDs: []
         )
       ),
-      providerInferenceSurfaceProvenance: .composed,
+      providerConversationSurfaceProvenance: .composed,
       browserGroundingSurfaceProvenance: .composed
     )
 
@@ -181,10 +181,10 @@ struct PraxisRuntimeUseCasesTests {
     )
 
     #expect(smoke.summary == "MP smoke reports 3/4 runtime gates ready for project mp.local-runtime.")
-    #expect(smoke.checks.map(\.gate) == [.memoryStore, .semanticSearch, .providerInference, .browserGrounding])
+    #expect(smoke.checks.map(\.gate) == [.memoryStore, .semanticSearch, .providerConversation, .browserGrounding])
     #expect(smoke.checks.first { $0.gate == .memoryStore }?.status == .ready)
     #expect(smoke.checks.first { $0.gate == .semanticSearch }?.status == .missing)
-    #expect(smoke.checks.first { $0.gate == .providerInference }?.status == .ready)
+    #expect(smoke.checks.first { $0.gate == .providerConversation }?.status == .ready)
     #expect(smoke.checks.first { $0.gate == .browserGrounding }?.status == .ready)
   }
 
@@ -289,11 +289,11 @@ struct PraxisRuntimeUseCasesTests {
   func mpHostInspectionServiceBuildsInspectionProjectionFromHostTruth() async throws {
     let inspectionService = PraxisMpHostInspectionService()
     let hostAdapters = PraxisHostAdapterRegistry(
-      providerInferenceExecutor: PraxisStubProviderInferenceExecutor { _ in
-        PraxisProviderInferenceResponse(
+      providerConversationExecutor: PraxisStubProviderConversationExecutor { _ in
+        PraxisProviderConversationResponse(
           output: .init(summary: "stubbed inference"),
           receipt: .init(
-            capabilityKey: "provider.infer",
+            capabilityKey: "provider.converse",
             backend: "stub-provider",
             status: .succeeded,
             summary: "Inference is stubbed for MP inspection tests."
@@ -329,7 +329,7 @@ struct PraxisRuntimeUseCasesTests {
       imageGenerationDriver: PraxisStubImageGenerationDriver { _ in
         .init(assetRef: "image://stub.png", mimeType: "image/png")
       },
-      providerInferenceSurfaceProvenance: .composed,
+      providerConversationSurfaceProvenance: .composed,
       browserGroundingSurfaceProvenance: .composed,
       audioTranscriptionSurfaceProvenance: .composed,
       speechSynthesisSurfaceProvenance: .composed,
@@ -342,7 +342,7 @@ struct PraxisRuntimeUseCasesTests {
     )
 
     #expect(inspection.summary == "MP workflow surface is reading HostRuntime memory and current adapter provenance.")
-    #expect(inspection.workflowSummary == "ICMA / Iterator / Checker / DbAgent / Dispatcher lanes have a composed provider inference surface available.")
+    #expect(inspection.workflowSummary == "ICMA / Iterator / Checker / DbAgent / Dispatcher lanes have a composed provider conversation surface available.")
     #expect(inspection.memoryStoreSummary.contains("1 primary records and omits 1 superseded records"))
     #expect(inspection.memoryStoreSummary.contains("Semantic search matches for inspection query: 1."))
     #expect(inspection.multimodalSummary == "Multimodal host chips: audio.transcribe, speech.synthesize, image.generate, browser.ground")
@@ -3923,11 +3923,11 @@ struct PraxisRuntimeUseCasesTests {
         ]
       ]
     )
-    let inferenceExecutor = PraxisStubProviderInferenceExecutor { _ in
-      PraxisProviderInferenceResponse(
+    let inferenceExecutor = PraxisStubProviderConversationExecutor { _ in
+      PraxisProviderConversationResponse(
         output: .init(summary: "stubbed inference"),
         receipt: .init(
-          capabilityKey: "provider.infer",
+          capabilityKey: "provider.converse",
           backend: "stub-provider",
           status: .succeeded,
           summary: "Inference is stubbed for MP tests."
@@ -3936,10 +3936,10 @@ struct PraxisRuntimeUseCasesTests {
     }
     let dependencies = try makeDependencies(
       hostAdapters: PraxisHostAdapterRegistry(
-        providerInferenceExecutor: inferenceExecutor,
+        providerConversationExecutor: inferenceExecutor,
         semanticSearchIndex: searchIndex,
         semanticMemoryStore: memoryStore,
-        providerInferenceSurfaceProvenance: .composed
+        providerConversationSurfaceProvenance: .composed
       )
     )
     let inspectMpUseCase = PraxisInspectMpUseCase(dependencies: dependencies)
@@ -3947,7 +3947,7 @@ struct PraxisRuntimeUseCasesTests {
     let inspection = try await inspectMpUseCase.execute()
 
     #expect(inspection.summary == "MP workflow surface is reading HostRuntime memory and current adapter provenance.")
-    #expect(inspection.workflowSummary == "ICMA / Iterator / Checker / DbAgent / Dispatcher lanes have a composed provider inference surface available.")
+    #expect(inspection.workflowSummary == "ICMA / Iterator / Checker / DbAgent / Dispatcher lanes have a composed provider conversation surface available.")
     #expect(inspection.memoryStoreSummary.contains("1 primary records and omits 1 superseded records"))
     #expect(inspection.memoryStoreSummary.contains("Semantic search matches for inspection query: 2."))
     #expect(inspection.multimodalSummary == "No multimodal host chips are currently registered.")
@@ -3979,7 +3979,7 @@ struct PraxisRuntimeUseCasesTests {
     #expect(inspection.multimodalSummary.contains("browser.ground (local-baseline)") == true)
     #expect(inspection.issues.contains { $0.contains("local baselines") })
 
-    let providerCheck = try #require(smoke.checks.first { $0.gate == .providerInference })
+    let providerCheck = try #require(smoke.checks.first { $0.gate == .providerConversation })
     let browserCheck = try #require(smoke.checks.first { $0.gate == .browserGrounding })
 
     #expect(providerCheck.status == .ready)
@@ -4032,7 +4032,7 @@ struct PraxisRuntimeUseCasesTests {
 
     #expect(
       inspection.workflowSummary
-        == "Five-agent lanes remain Core-side protocols because no provider inference surface is currently registered."
+        == "Five-agent lanes remain Core-side protocols because no provider conversation surface is currently registered."
     )
     #expect(inspection.workflowSummary.contains("local-baseline only") == false)
     #expect(inspection.workflowSummary.contains("host-backed") == false)
@@ -4087,14 +4087,14 @@ struct PraxisRuntimeUseCasesTests {
         hostAdapters: hostAdapters
       )
 
-      let providerCheck = try #require(smoke.checks.first { $0.gate == .providerInference })
+      let providerCheck = try #require(smoke.checks.first { $0.gate == .providerConversation })
       let browserCheck = try #require(smoke.checks.first { $0.gate == .browserGrounding })
 
       #expect(smoke.summary == "MP smoke reports 3/4 runtime gates ready for project mp.local-runtime.")
       #expect(providerCheck.status == .degraded)
       #expect(
         providerCheck.summary
-          == "Provider inference is absent; MP does not currently expose a provider inference lane."
+          == "Provider conversation is absent; MP does not currently expose a provider conversation lane."
       )
       #expect(providerCheck.summary.contains("local-baseline only") == false)
       #expect(providerCheck.summary.contains("host-backed") == false)
@@ -4143,11 +4143,11 @@ struct PraxisRuntimeUseCasesTests {
     )
     let dependencies = try makeDependencies(
       hostAdapters: PraxisHostAdapterRegistry(
-        providerInferenceExecutor: PraxisStubProviderInferenceExecutor { _ in
-          PraxisProviderInferenceResponse(
+        providerConversationExecutor: PraxisStubProviderConversationExecutor { _ in
+          PraxisProviderConversationResponse(
             output: .init(summary: "stubbed inference"),
             receipt: .init(
-              capabilityKey: "provider.infer",
+              capabilityKey: "provider.converse",
               backend: "stub-provider",
               status: .succeeded,
               summary: "Inference is stubbed for MP use case tests."
@@ -4174,7 +4174,7 @@ struct PraxisRuntimeUseCasesTests {
           ]
         ),
         semanticMemoryStore: memoryStore,
-        providerInferenceSurfaceProvenance: .composed,
+        providerConversationSurfaceProvenance: .composed,
         browserGroundingSurfaceProvenance: .composed
       )
     )
@@ -4251,11 +4251,11 @@ struct PraxisRuntimeUseCasesTests {
     )
     let dependencies = try makeDependencies(
       hostAdapters: PraxisHostAdapterRegistry(
-        providerInferenceExecutor: PraxisStubProviderInferenceExecutor { _ in
-          PraxisProviderInferenceResponse(
+        providerConversationExecutor: PraxisStubProviderConversationExecutor { _ in
+          PraxisProviderConversationResponse(
             output: .init(summary: "stubbed inference"),
             receipt: .init(
-              capabilityKey: "provider.infer",
+              capabilityKey: "provider.converse",
               backend: "stub-provider",
               status: .succeeded,
               summary: "Inference is stubbed for MP boundary tests."
@@ -4856,7 +4856,7 @@ struct PraxisRuntimeUseCasesTests {
       runtimeRootDirectory: registry.runtimeRootDirectory,
       workspaceRootDirectory: registry.workspaceRootDirectory,
       capabilityExecutor: registry.capabilityExecutor,
-      providerInferenceExecutor: registry.providerInferenceExecutor,
+      providerConversationExecutor: registry.providerConversationExecutor,
       providerEmbeddingExecutor: registry.providerEmbeddingExecutor,
       providerFileStore: registry.providerFileStore,
       providerBatchExecutor: registry.providerBatchExecutor,
@@ -4893,7 +4893,7 @@ struct PraxisRuntimeUseCasesTests {
       audioTranscriptionDriver: registry.audioTranscriptionDriver,
       speechSynthesisDriver: registry.speechSynthesisDriver,
       imageGenerationDriver: registry.imageGenerationDriver,
-      providerInferenceSurfaceProvenance: registry.providerInferenceSurfaceProvenance,
+      providerConversationSurfaceProvenance: registry.providerConversationSurfaceProvenance,
       browserGroundingSurfaceProvenance: registry.browserGroundingSurfaceProvenance,
       audioTranscriptionSurfaceProvenance: registry.audioTranscriptionSurfaceProvenance,
       speechSynthesisSurfaceProvenance: registry.speechSynthesisSurfaceProvenance,
@@ -4908,7 +4908,7 @@ struct PraxisRuntimeUseCasesTests {
       runtimeRootDirectory: registry.runtimeRootDirectory,
       workspaceRootDirectory: registry.workspaceRootDirectory,
       capabilityExecutor: registry.capabilityExecutor,
-      providerInferenceExecutor: registry.providerInferenceExecutor,
+      providerConversationExecutor: registry.providerConversationExecutor,
       providerEmbeddingExecutor: registry.providerEmbeddingExecutor,
       providerFileStore: registry.providerFileStore,
       providerBatchExecutor: registry.providerBatchExecutor,
@@ -4945,7 +4945,7 @@ struct PraxisRuntimeUseCasesTests {
       audioTranscriptionDriver: registry.audioTranscriptionDriver,
       speechSynthesisDriver: registry.speechSynthesisDriver,
       imageGenerationDriver: registry.imageGenerationDriver,
-      providerInferenceSurfaceProvenance: registry.providerInferenceSurfaceProvenance,
+      providerConversationSurfaceProvenance: registry.providerConversationSurfaceProvenance,
       browserGroundingSurfaceProvenance: registry.browserGroundingSurfaceProvenance,
       imageGenerationSurfaceProvenance: registry.imageGenerationSurfaceProvenance
     )
@@ -4958,7 +4958,7 @@ struct PraxisRuntimeUseCasesTests {
       runtimeRootDirectory: registry.runtimeRootDirectory,
       workspaceRootDirectory: registry.workspaceRootDirectory,
       capabilityExecutor: registry.capabilityExecutor,
-      providerInferenceExecutor: registry.providerInferenceExecutor,
+      providerConversationExecutor: registry.providerConversationExecutor,
       providerEmbeddingExecutor: registry.providerEmbeddingExecutor,
       providerFileStore: registry.providerFileStore,
       providerBatchExecutor: registry.providerBatchExecutor,
@@ -4995,7 +4995,7 @@ struct PraxisRuntimeUseCasesTests {
       audioTranscriptionDriver: registry.audioTranscriptionDriver,
       speechSynthesisDriver: registry.speechSynthesisDriver,
       imageGenerationDriver: registry.imageGenerationDriver,
-      providerInferenceSurfaceProvenance: registry.providerInferenceSurfaceProvenance,
+      providerConversationSurfaceProvenance: registry.providerConversationSurfaceProvenance,
       browserGroundingSurfaceProvenance: registry.browserGroundingSurfaceProvenance,
       audioTranscriptionSurfaceProvenance: registry.audioTranscriptionSurfaceProvenance,
       speechSynthesisSurfaceProvenance: registry.speechSynthesisSurfaceProvenance,
@@ -5024,7 +5024,7 @@ struct PraxisRuntimeUseCasesTests {
       runtimeRootDirectory: registry.runtimeRootDirectory,
       workspaceRootDirectory: registry.workspaceRootDirectory,
       capabilityExecutor: registry.capabilityExecutor,
-      providerInferenceExecutor: registry.providerInferenceExecutor,
+      providerConversationExecutor: registry.providerConversationExecutor,
       providerEmbeddingExecutor: registry.providerEmbeddingExecutor,
       providerFileStore: registry.providerFileStore,
       providerBatchExecutor: registry.providerBatchExecutor,
@@ -5061,7 +5061,7 @@ struct PraxisRuntimeUseCasesTests {
       audioTranscriptionDriver: registry.audioTranscriptionDriver,
       speechSynthesisDriver: registry.speechSynthesisDriver,
       imageGenerationDriver: registry.imageGenerationDriver,
-      providerInferenceSurfaceProvenance: registry.providerInferenceSurfaceProvenance,
+      providerConversationSurfaceProvenance: registry.providerConversationSurfaceProvenance,
       browserGroundingSurfaceProvenance: registry.browserGroundingSurfaceProvenance,
       audioTranscriptionSurfaceProvenance: registry.audioTranscriptionSurfaceProvenance,
       speechSynthesisSurfaceProvenance: registry.speechSynthesisSurfaceProvenance,

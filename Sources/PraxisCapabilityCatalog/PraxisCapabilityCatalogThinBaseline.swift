@@ -55,12 +55,12 @@ public extension PraxisCapabilityCatalogBuilder {
       .init(
         id: PraxisThinCapabilityKey.generateCreate.capabilityID,
         name: "Generate Create",
-        summary: "Run one bounded generation request through the current provider inference lane.",
+        summary: "Run one bounded generation request through the current provider conversation lane.",
         kind: .model,
         supportsPrepare: false,
         hotPath: true,
         routeHints: [
-          .init(key: "backend", value: "provider.inference")
+          .init(key: "backend", value: "provider.conversation")
         ],
         tags: ["phase3", "thin-baseline", "generation"]
       ),
@@ -73,7 +73,7 @@ public extension PraxisCapabilityCatalogBuilder {
         supportsPrepare: false,
         hotPath: true,
         routeHints: [
-          .init(key: "backend", value: "provider.inference")
+          .init(key: "backend", value: "provider.conversation")
         ],
         tags: ["phase3", "thin-baseline", "generation", "streaming"]
       ),
